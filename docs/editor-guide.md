@@ -126,6 +126,14 @@ skipped: those sections stay open to fill in later in `/art`. So does a bible
 drafted from the starting point's preset alone. Changing its content
 invalidates approval; use `/art` to review and approve the current version
 again. An agent cannot approve its own direction or file changes (ADR 0033).
+
+`/art` opens the art direction as a sidebar page, in place of the chat like
+Settings: whether this version is approved, what to fix first (each with
+**Ask**), the rules you decide (Feel, Look, Palette, Sound, Never) in one card
+with the ones not written yet on one **Still open** line, the reference board,
+and the technical rules folded away. **Approve these rules** stays at the
+bottom; only your click on it approves. The back arrow or Esc returns to the
+chat. Without the sidebar the same rules open in a window.
 Use `/tools` for actual MCP connection/probe status; diagnostics stay in Output.
 
 ### Reviewing a change
@@ -414,8 +422,8 @@ coins`. The playtester is your provider in the read-only `playtester` role (ADR
 
 `/match` checks the whole project against the approved art bible's checked
 rules and fixes what drifts, as reviewed changes (ADR 0045). **Make it match**
-in Settings, on the Review tab's art bible row and at the foot of the art
-direction does the same. No model is needed to check.
+in Settings, on the Review tab's art bible row and **Make the project match**
+at the foot of the approved art direction do the same. No model is needed to check.
 
 - A **Match** card shows above the message box with the other agents at work:
   one headline (**9 things drift from the art bible**), one row per area with a
@@ -727,7 +735,7 @@ again.
   or Rebuild), the same report as the app rail and project setup. When an app
   needs something, the sidebar header says so in one line.
 - When a request needs art and the art direction is not approved yet, the
-  request's card stops at the art gate: **Review art direction** opens `/art`,
+  request's card stops at the art gate: **Review the look** opens `/art`,
   and after approval the held request goes out again.
 - Changes are accepted or **Discarded** in the Review panel. **Compact** in
   history asks for confirmation inline before it frees space.

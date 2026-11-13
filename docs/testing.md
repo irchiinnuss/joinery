@@ -137,13 +137,14 @@ Screens:
 - `sidebar-*`, at 480 and 1000 px: connecting, no assistant, empty, chips,
   command menu, a request sending, working (steps and timer), waiting for review
   (thumbnail and footer), accepted (with Revert), conversation, not sent (Retry),
-  lost connection banner and settings. At 480 px also each Appearance accent
+  lost connection banner, settings and the art direction page (its rules, board,
+  open sections and loading). At 480 px also each Appearance accent
   (Brass, Blue, Green, Violet) and settings with Reduce motion on.
 - `editor-*`: layout, disconnected/busy/commands/settings sidebar, the Review
   panel with a model, its details, applying and a failed decision, Focus mode
   with a review open, image and audio reviews on After and on Before, the Tools
   workspace (all, Blender, SuperCollider), every tool readiness state on the rail,
-  the bottom panel, Focus mode, Project apps and the art direction dialog.
+  the bottom panel, Focus mode, Project apps and the art direction page.
 - `classic-view-*`: the editor, the Layout setting, its restart note and the
   switch dialog, in Joinery's layout and in Godot's classic one
   (`run_classic_view_test.py`).
