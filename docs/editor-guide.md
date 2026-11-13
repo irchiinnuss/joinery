@@ -40,9 +40,9 @@ Ctrl+N or Cmd+N). Godot's own 2D, 3D, Script and Game buttons sit at the
 right end of the title bar (the row with the project name and Play), as icons: the open screen's
 icon is raised, and hovering one names it. Godot's Asset Store has no button
 there, since Joinery never fetches assets, and Assets opens from the rail. The
-3D viewport's mode tools and Use Snap show by default. Type `/toolbar` in
-Journeyman, or choose **Joinery > Show or Hide Viewport Toolbar**, to hide or
-show them. The preference is saved. **⤢** at the end of the row is Focus: it
+3D viewport's mode tools and Use Snap are hidden by default. Type `/toolbar` in
+Journeyman, or choose **Joinery > Show or Hide Viewport Toolbar**, to show or
+hide them. The preference is saved. **⤢** at the end of the row is Focus: it
 hides every side and bottom panel, and turns back on the ones you had open
 (also `/focus` and **Joinery > Focus**).
 

@@ -1,7 +1,8 @@
 @tool
 extends RefCounted
 ## Viewport controls have their own preference, independent of Focus mode, in Joinery's layout
-## (Godot's classic layout always shows them); they show unless the user hid them with /toolbar.
+## (Godot's classic layout always shows them); they stay hidden until the user shows them with
+## /toolbar or Joinery › Show or Hide Viewport Toolbar.
 ## The 3D view's "Perspective" menus wear the Joinery theme. Scene tabs always show. Also keeps the
 ## FileSystem tree scrolled to its first row when the Files panel opens, and explains the
 ## Output tab's status mark (the engine's error or warning icon) in the tab's tooltip.
@@ -40,7 +41,7 @@ func apply(base: Control, settings: EditorSettings, joinery_layout := true) -> v
 	_shown = (
 		bool(settings.get_setting(TOOLBAR_SETTING))
 		if settings.has_setting(TOOLBAR_SETTING)
-		else true
+		else false
 	)
 	if not joinery_layout:
 		_shown = true

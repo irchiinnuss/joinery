@@ -122,7 +122,7 @@ func _run() -> void:
 	await _rail_states(plugin)
 	_check(
 		plugin._rail.find_child("ViewportToolbarToggle", true, false) == null,
-		"The viewport toolbar has no rail toggle; /toolbar hides it"
+		"The viewport toolbar has no rail toggle; /toolbar shows it"
 	)
 	for id: String in plugin._rail._buttons:
 		var app_button: Button = plugin._rail._buttons[id]

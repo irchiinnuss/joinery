@@ -211,7 +211,9 @@ func _check_chrome(base: Control, classic: bool) -> void:
 			# Joinery's: Godot's icons alone at the right end, no Asset Library, no Assets.
 			_check(texts.all(func(text: String) -> bool: return text.is_empty()), "Icon-only")
 			_check(
-				names.all(func(name: String) -> bool: return name in ["2D", "3D", "Script", "Game"]),
+				names.all(
+					func(name: String) -> bool: return name in ["2D", "3D", "Script", "Game"]
+				),
 				"Only Godot's own screens, no Asset Store or Assets: " + ", ".join(names)
 			)
 			var bar := buttons.get_parent() as Control
@@ -245,6 +247,8 @@ func _check_chrome(base: Control, classic: bool) -> void:
 	_check(toolbars > 0, "The 3D viewport toolbar exists")
 	if classic:
 		_check(shown == toolbars, "The 3D viewport toolbar shows in the classic view")
+	else:
+		_check(shown == 0, "The 3D viewport toolbar starts hidden in Joinery's layout")
 	var menu := _menu_with(
 		base, "Switch to Joinery view" if classic else "Switch to classic Godot view"
 	)
