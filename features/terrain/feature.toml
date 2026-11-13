@@ -16,6 +16,7 @@
 id = "terrain"
 name = "Terrain"
 summary = "Heightmap ground for 3D games: chunked meshes with LODs and collision, up to four painted layers, and seeded scatter of your own models."
+caption = "Heightmap ground with painted layers"
 version = 1
 requires = []
 conflicts = []

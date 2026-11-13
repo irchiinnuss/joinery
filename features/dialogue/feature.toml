@@ -14,6 +14,7 @@
 id = "dialogue"
 name = "Dialogue"
 summary = "Conversations in plain-text files: speakers, choices, conditions and variables, in a dialogue box that follows the accessibility settings."
+caption = "Conversations with choices"
 version = 1
 requires = []
 conflicts = []

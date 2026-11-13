@@ -13,6 +13,7 @@
 id = "vr"
 name = "VR"
 summary = "Play in a VR headset through OpenXR: hands, smooth move, snap turn, teleport and comfort settings, with a desktop fallback."
+caption = "Play in a VR headset"
 version = 1
 requires = []
 conflicts = []

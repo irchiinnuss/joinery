@@ -62,6 +62,7 @@ def test_blueprints_json_carries_capture_and_features(
         "id",
         "name",
         "summary",
+        "caption",
         "default",
         "available",
         "reason",

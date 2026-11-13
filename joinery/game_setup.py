@@ -97,6 +97,7 @@ def _feature_entry(
         "id": feature["id"],
         "name": feature["name"],
         "summary": feature["summary"],
+        "caption": feature.get("caption", ""),
         "default": feature["id"] in blueprint.get("default_features", []),
         "available": available,
         "reason": "" if available else resolution.problems[0],

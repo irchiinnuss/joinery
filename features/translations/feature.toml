@@ -18,6 +18,7 @@
 id = "translations"
 name = "Translations"
 summary = "Play in more than one language: a Language page, translation files and a check for text that runs long."
+caption = "More than one language"
 version = 1
 requires = []
 conflicts = []

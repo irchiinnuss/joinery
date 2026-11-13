@@ -15,6 +15,7 @@
 id = "behaviour"
 name = "Enemy behaviour"
 summary = "Behaviour trees for enemies in 2D and 3D: patrol, chase, flee, attack and wander, written as short text the agent edits."
+caption = "Enemy behaviour trees in plain text"
 version = 1
 requires = []
 conflicts = []

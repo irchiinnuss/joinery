@@ -1,6 +1,7 @@
 id = "steam"
 name = "Steam"
 summary = "Achievements, stats and friend lobbies on Steam, through GodotSteam."
+caption = "Achievements, stats, lobbies"
 version = 1
 requires = []
 conflicts = []

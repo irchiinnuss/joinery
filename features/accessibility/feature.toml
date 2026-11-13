@@ -8,6 +8,7 @@
 id = "accessibility"
 name = "Accessibility"
 summary = "Text size, high contrast, colour-blind filter, subtitles, reduced motion and flashes, hold or toggle, game speed."
+caption = "Text size, contrast, subtitles, motion"
 version = 1
 requires = []
 conflicts = []

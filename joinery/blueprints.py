@@ -300,6 +300,9 @@ class Feature(_Strict):
     id: str
     name: str
     summary: str
+    #: One short line for the new-project wizard's feature row; the summary
+    #: is its tooltip.
+    caption: str = ""
     version: int = Field(ge=1)
     requires: list[str] = []
     conflicts: list[str] = []
@@ -596,6 +599,7 @@ def _feature_json(feature: Feature) -> dict[str, Any]:
         "id": feature.id,
         "name": feature.name,
         "summary": feature.summary,
+        "caption": feature.caption,
         "version": feature.version,
         "requires": list(feature.requires),
         "conflicts": list(feature.conflicts),

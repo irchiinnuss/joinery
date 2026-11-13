@@ -13,6 +13,7 @@
 id = "camera"
 name = "Camera rig"
 summary = "Cameras that follow with a dead zone and smoothing, look ahead, frame groups and shake within the player's screen shake setting, in 2D and 3D."
+caption = "Follow, look ahead, shake"
 version = 1
 requires = []
 conflicts = []

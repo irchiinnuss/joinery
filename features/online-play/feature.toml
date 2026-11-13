@@ -1,6 +1,7 @@
 id = "online-play"
 name = "Online play"
 summary = "Host or join a game over LAN or the internet."
+caption = "Host or join over LAN or the internet"
 version = 1
 requires = []
 conflicts = []
