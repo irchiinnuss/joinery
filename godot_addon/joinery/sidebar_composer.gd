@@ -53,6 +53,10 @@ const ATTACHMENTS := preload("chat_attachments.gd")
 const ATTACHMENT_ROW := preload("sidebar_attachments.gd")
 const EDITOR_VIEW := preload("editor_view.gd")
 const RECALL := preload("composer_recall.gd")
+## The eye's label: what "Share my view" sends.
+const VIEW_LABEL := "Scene"
+## The message box at rest, saying how to reach the commands (the old "Type /" hint).
+const ASK := "Ask Journeyman, or / for commands"
 
 var chips: HFlowContainer
 ## Holds [member chips] without passing their width up: a long name ends in an ellipsis inside
@@ -83,7 +87,7 @@ var _connection := "connected"
 var _restyling := false
 ## What the next message is about, as the chips show it.
 var _targets: Array[Dictionary] = []
-## The dock's placeholder for the current state ("Queue a message…"), "" for the default.
+## The dock's placeholder for the current state ("Next message…"), "" for the default.
 var _waiting := ""
 var _dialog: FileDialog
 ## The editor's own handlers of the window's file drops, while the composer takes them first.
@@ -92,12 +96,14 @@ var _editor_drops: Array[Callable] = []
 var _controls: HBoxContainer
 ## Menus shown over the composer that take the arrow keys while open ([method add_menu]).
 var _menus: Array[Control] = []
+var _body: VBoxContainer
 
 
 func _init() -> void:
 	var body := VBoxContainer.new()
 	body.theme_type_variation = "JoineryTight"
 	add_child(body)
+	_body = body
 	attachments = ATTACHMENT_ROW.new()
 	attachments.changed.connect(_sync_send)
 	body.add_child(attachments)
@@ -120,6 +126,7 @@ func _init() -> void:
 	prompt.text_set.connect(_sync_send)
 	prompt.image_pasted.connect(func(image: Image) -> void: attach_image(image, "Pasted image"))
 	prompt.files_pasted.connect(attach_files)
+	prompt.resized.connect(_apply_placeholder)
 	body.add_child(prompt)
 	var controls := HBoxContainer.new()
 	controls.theme_type_variation = "JoineryRowTight"
@@ -134,7 +141,10 @@ func _init() -> void:
 	UI_MOTION.press_feedback(attach)
 	attach.pressed.connect(open_file_dialog)
 	controls.add_child(attach)
-	view = UI.icon_button("view", "Share my view: Journeyman sees this viewport with your message")
+	# Labelled, so the eye says what it sends: the scene view you are looking at.
+	view = UI.quiet(VIEW_LABEL)
+	UI.bind_icon(view, "view")
+	view.tooltip_text = "Share my view: Journeyman sees this viewport with your message"
 	view.accessibility_name = "Share my view"
 	view.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	UI_MOTION.press_feedback(view)
@@ -232,19 +242,38 @@ func set_connection(state: String) -> void:
 
 
 ## Placeholder for the current state; [param waiting] overrides it until it is set again (for
-## example "Queue a message…" while Journeyman works).
+## example "Next message…" while Journeyman works).
 func set_placeholder(waiting := "") -> void:
 	_waiting = waiting
 	_apply_placeholder()
 
 
 func _apply_placeholder() -> void:
+	# No agent yet: the whole composer rests at half strength; the sidebar's Connect is the way on.
+	var resting := _connection == "none"
+	modulate.a = 0.5 if resting else 1.0
+	prompt.editable = not _locked and not resting
+	attach.disabled = resting
+	view.disabled = resting
 	if not _waiting.is_empty():
 		prompt.placeholder_text = _waiting
-	elif not _locked and _connection == "none":
-		prompt.placeholder_text = "Connect Journeyman to start"
-	elif not _locked:
+	elif resting:
 		prompt.placeholder_text = "Ask Journeyman…"
+	elif not _locked:
+		# The / hint only where it fits on one line; a narrow sidebar keeps the short form.
+		var font := prompt.get_theme_font("font")
+		var wide := font.get_string_size(ASK, 0, -1, prompt.get_theme_font_size("font_size")).x
+		var room := prompt.size.x - prompt.get_theme_stylebox("normal").get_minimum_size().x
+		# The field keeps room for its scroll bar and caret: leave a SPACE.5 margin.
+		room -= UI_THEME.space(prompt, 5)
+		prompt.placeholder_text = ASK if room <= 0.0 or wide <= room else "Ask Journeyman…"
+
+
+## The status line (sidebar_footer.gd: "Stopping…", "Waiting for your review") sits in the
+## composer's top-left, above the chips and the field, so it never floats between messages.
+func set_status(line: Control) -> void:
+	_body.add_child(line)
+	_body.move_child(line, 0)
 
 
 ## Mark Stop as pressed and waiting for the reply to end.
@@ -402,24 +431,35 @@ func _sync_send() -> void:
 
 ## In a narrow sidebar Run alongside takes the model picker's place while it is offered; the
 ## picker is disabled while Journeyman works, and it comes back with the room or the offer's
-## end. Strictly less than the row's width: a row that pushed the composer wider measures
-## exactly its own width, so it gives the picker up rather than keeping the overflow.
+## end. Then the eye keeps its "Scene" label only while the row has room for it; without, it is
+## the icon alone (its tooltip still says what it does). Strictly less than the row's width: a
+## row that pushed the composer wider measures exactly its own width, so it gives up rather
+## than keeping the overflow.
 func _fit_controls() -> void:
-	if _controls == null:
+	if _controls == null or _controls.size.x <= 0.0:
 		return
-	var keep := true
-	if alongside_button.visible and _controls.size.x > 0.0:
-		var need := 0.0
-		var count := 0
-		for child: Node in _controls.get_children():
-			var part := child as Control
-			if part != null and (part.visible or part == options):
-				need += part.get_combined_minimum_size().x
-				count += 1
-		need += float(_controls.get_theme_constant("separation")) * maxf(0.0, count - 1.0)
-		keep = need + 0.5 < _controls.size.x
+	var room := _controls.size.x
+	var gap := float(_controls.get_theme_constant("separation"))
+	var need := 0.0
+	var count := 0
+	for child: Node in _controls.get_children():
+		var part := child as Control
+		if part != null and (part.visible or part == options):
+			need += part.get_combined_minimum_size().x
+			count += 1
+	need += gap * maxf(0.0, count - 1.0)
+	if view.text.is_empty():
+		var font := view.get_theme_font("font")
+		var wide := font.get_string_size(VIEW_LABEL, 0, -1, view.get_theme_font_size("font_size"))
+		need += wide.x + view.get_theme_constant("h_separation")
+	var keep := not alongside_button.visible or need + 0.5 < room
+	if not keep:
+		need -= options.get_combined_minimum_size().x + gap
 	if options.visible != keep:
 		options.visible = keep
+	var text := VIEW_LABEL if need + 0.5 < room else ""
+	if view.text != text:
+		view.text = text
 
 
 func _set_focus(on: bool) -> void:
@@ -460,7 +500,7 @@ func _match_heights() -> void:
 	var square := send.get_combined_minimum_size()
 	options.custom_minimum_size.y = square.y
 	stop.custom_minimum_size = square
-	view.custom_minimum_size = square
+	view.custom_minimum_size.y = square.y
 	attach.custom_minimum_size = square
 
 

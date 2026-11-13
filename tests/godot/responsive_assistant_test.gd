@@ -178,7 +178,9 @@ func _run() -> void:
 			chat._settings.set_open(true)
 			_check(chat._settings.visible, "Settings open from the sidebar")
 			_check(not chat._transcript.visible, "Settings take the place of the chat")
-			_check(not chat._composer.visible, "The composer is hidden while in settings")
+			_check(
+				not chat._composer.is_visible_in_tree(), "The composer is hidden while in settings"
+			)
 			chat._settings.set_open(false)
 			_check(chat._transcript.visible and chat._composer.visible, "Back restores the chat")
 			chat._transcript.set_text_scale(1.15)
@@ -244,8 +246,7 @@ func _run() -> void:
 		)
 		_check(chat._prompt.editable, "The composer stays open to queue a message")
 		_check(
-			chat._prompt.placeholder_text == "Queue for after the review…",
-			"Say how to continue during review"
+			chat._prompt.placeholder_text == "Next message…", "Say how to continue during review"
 		)
 		chat._on_accept()
 		_check(change.state == "accepted", "Accept updates the card at once")

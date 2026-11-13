@@ -115,14 +115,15 @@ static func build(
 	var resource := str(target.get("resource", "")).split("#")[0]
 	var path := resource if not resource.is_empty() else str(target.get("source", ""))
 	var tool := str(target.get("tool", ""))
+	if not is_part:
+		# A long file name keeps its start and its extension: "door_with_lo…name.glb".
+		chip.middle_text = text
+	# The full path, then where a click opens it.
+	var opens := "Open in " + tool if not tool.is_empty() else "Open source file"
 	chip.tooltip_text = (
 		str(target.get("tooltip", part_tooltip(target)))
 		if is_part
-		else (
-			("Open in " + tool if not tool.is_empty() else "Open source file")
-			if not path.is_empty()
-			else full
-		)
+		else (path.trim_prefix("res://") + "\n" + opens if not path.is_empty() else full)
 	)
 	if not is_part and full != text and path.is_empty():
 		chip.tooltip_text = full

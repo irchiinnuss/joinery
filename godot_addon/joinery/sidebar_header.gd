@@ -3,8 +3,8 @@ extends VBoxContainer
 ## The sidebar's top. When all is well it holds only the settings menu on the right: no name,
 ## no dot. It says "Connecting…" with the activity dots while Journeyman connects, and a red
 ## dot with "Not connected" after a failure. When Journeyman is not reachable a banner offers
-## the one action that fixes it: a danger-tinted error for a lost connection, and a calm
-## accent-tinted card for first-run setup (no account yet), which is a step, not a failure.
+## the one action that fixes it, in a danger-tinted banner. First-run setup (no agent yet) is a
+## step, not a failure: the empty chat's blankslate offers Connect then, and the header is quiet.
 ## The banner keeps SPACE.5 above and below, like other sections.
 ##
 ## Below the banner, one notice can say what Joinery or the project's apps need, with a button
@@ -158,8 +158,9 @@ func show_state(state: String, agent: String, detail := "", with_banner := true)
 		with_banner = false
 	_indicator.set("running", state == "connecting")
 	# Healthy is quiet: nothing but the menu. While the banner says the connection is lost, the
-	# header doesn't say it again.
-	var banner := state == "none" or (state == "error" and with_banner)
+	# header doesn't say it again. With no agent at all the empty chat's blankslate offers
+	# Connect (sidebar_empty.gd), so the header stays quiet then too.
+	var banner := state == "error" and with_banner
 	_dot.visible = state == "error" and not banner
 	_dot.set("state", "attention" if state == "error" else "off")
 	_dot.tooltip_text = detail if state == "error" and not detail.is_empty() else "Not connected"
@@ -168,9 +169,7 @@ func show_state(state: String, agent: String, detail := "", with_banner := true)
 	_name.tooltip_text = _name.text
 	if state == "connected":
 		_show_count()
-	if state == "none":
-		_show_banner("none", "Connect Journeyman to your account to start.", "Connect")
-	elif state == "error" and with_banner:
+	if state == "error" and with_banner:
 		var text := detail if not detail.is_empty() else "Lost connection to %s." % named
 		var fix: String = FIXES.get(str(_problem.get("reason", "")), "Reconnect")
 		_show_banner("error", text, fix.replace("%s", str(_problem.get("name", named))))

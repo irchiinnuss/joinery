@@ -551,12 +551,10 @@ func _on_toggle_focus() -> void:
 	var editor := get_editor_interface()
 	if _focus.is_active():
 		_focus.restore()
-		# The panels coming back say it themselves; an empty note clears "Panels hidden", and a
-		# pending review gets its own footer line again.
-		_status("" if _review_open else "Panels shown")
 	elif _focus.apply(editor.get_base_control(), _review_tab):
-		# A pending review keeps its footer line: review status wins over this note.
-		_status("" if _review_open else "Panels hidden. ⤢ shows them again")
+		# The pressed ⤢ says it; the first time a popover from ⤢ offers Undo. Nothing in the chat.
+		if not _shell.hint_focus(_on_toggle_focus) and not _shell.has_focus_toggle():
+			_status("Panels hidden. /focus shows them again")
 	else:
 		_status("This editor version can't hide the panels")
 	_shell.set_focus_shown(_focus.is_active())

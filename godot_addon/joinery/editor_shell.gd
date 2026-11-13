@@ -9,6 +9,7 @@ extends RefCounted
 const TOOLBAR_SETTING := "joinery/show_viewport_toolbar"
 const UI_THEME := preload("ui_theme.gd")
 const SWITCH_SCRIPT := preload("screen_switch.gd")
+const FOCUS_HINT := preload("focus_hint.gd")
 ## Godot's main screens by the class of the editor each shows.
 const SCREEN_CLASSES := {
 	"CanvasItemEditor": "2D",
@@ -181,6 +182,17 @@ func add_command(base: Control, label: String, action: Callable) -> bool:
 func _run_command(id: int) -> void:
 	if id >= 0 and id < _commands.size() and _commands[id].is_valid():
 		_commands[id].call()
+
+
+## The first time Focus mode hides the panels, a popover from ⤢ says so with Undo
+## (focus_hint.gd), running [param undo]. False when it was seen before or there is no ⤢.
+func hint_focus(undo: Callable) -> bool:
+	return has_focus_toggle() and FOCUS_HINT.show_once(_focus_button, undo)
+
+
+## True when the scene tab row has Joinery's ⤢ Focus toggle.
+func has_focus_toggle() -> bool:
+	return is_instance_valid(_focus_button) and _focus_button.is_visible_in_tree()
 
 
 ## Show Focus mode as on or off on the ⤢ button.

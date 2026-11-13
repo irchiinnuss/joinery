@@ -1,10 +1,10 @@
 # gdlint: disable=max-public-methods
 @tool
 extends PanelContainer
-## Journeyman, the sidebar chat. Top to bottom: the header (quiet when all is well; the
-## connection banner and one setup notice when needed, and the settings menu), the
-## transcript of change cards and replies, the status footer, and the composer. The Review
-## panel is built here but lives in the editor's bottom panel ([method take_review_panel]);
+## Journeyman, the sidebar chat. Top to bottom: the header (the connection banner and one setup
+## notice when needed, and the settings menu), the transcript, and the composer with the status
+## line in its top-left; transcript and composer share one centred column (MAX_W.column). The
+## Review panel is built here but lives in the bottom panel ([method take_review_panel]);
 ## decisions are made only there. The persona is always "Journeyman"; the provider (Codex,
 ## Claude…) is named only in the lost-connection banner and in Settings.
 ##
@@ -14,7 +14,7 @@ extends PanelContainer
 ## chat bridge added as a child is attached automatically ([method attach_bridge]).
 ## While a request runs or a change waits for review, Send queues the message (sidebar_queue.gd);
 ## queued messages go out one at a time once nothing is in the way ([method _drain]). Agents
-## working alongside (parallel tasks) have their own cards above the footer (sidebar_tasks.gd).
+## working alongside (parallel tasks) have their own cards above the composer (sidebar_tasks.gd).
 ## "/feature add|remove <id>" shows a plan card; the feature is applied only on Apply. "/brief"
 ## opens design/brief.md read-only. Brief suggestions arrive one line at a time, never acted on.
 
@@ -40,6 +40,7 @@ signal change_reverted(transaction_id: String)
 signal files_changed(transaction_id: String, paths: PackedStringArray)
 
 const UI_THEME := preload("res://addons/joinery/ui_theme.gd")
+const STYLE := preload("res://addons/joinery/sidebar_style.gd")
 const HISTORY_SCRIPT := preload("res://addons/joinery/chat_history.gd")
 const SETTINGS_SCRIPT := preload("res://addons/joinery/journeyman_settings.gd")
 const CHIP_SCRIPT := preload("res://addons/joinery/target_chip.gd")
@@ -52,8 +53,7 @@ const CHATS_SCRIPT := preload("res://addons/joinery/chat_sessions.gd")
 const TASKS_SCRIPT := preload("res://addons/joinery/sidebar_tasks.gd")
 const REVIEW_PATH := "res://addons/joinery/review_panel.gd"
 const ART_DIALOG := preload("res://addons/joinery/art_review_dialog.gd")
-const REVIEW_WAIT := "Queue for after the review…"
-const QUEUE_WAIT := "Queue a message…"
+const REVIEW_WAIT := "Next message…"
 const PERSONA := "Journeyman"
 const DISCARDED := "Discarded. Your files were not touched."
 const BRIEF_PATH := "res://design/brief.md"
@@ -121,7 +121,7 @@ func _init() -> void:
 func _ready() -> void:
 	UI_THEME.watch(self)
 	theme_type_variation = "JoineryDock"
-	preload("res://addons/joinery/sidebar_style.gd").own_slot(self)
+	STYLE.own_slot(self)
 	custom_minimum_size.x = get_theme_default_font_size() * min_em
 	_content = VBoxContainer.new()
 	_content.theme_type_variation = "JoineryRow"
@@ -136,6 +136,7 @@ func _ready() -> void:
 	_transcript.accessibility_name = "Conversation"
 	_transcript.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_transcript.example_chosen.connect(_fill_prompt)
+	_transcript.connect_requested.connect(func() -> void: connect_requested.emit())
 	_transcript.retry_requested.connect(_retry)
 	_transcript.revert_requested.connect(func(id: String) -> void: _slash.revert(id))
 	_content.add_child(_transcript)
@@ -143,13 +144,14 @@ func _ready() -> void:
 	_transcript.queue.send_requested.connect(_drain)
 	_footer = FOOTER_SCRIPT.new()
 	_footer.review_requested.connect(func() -> void: review_requested.emit())
-	_content.add_child(_footer)
 	_composer = COMPOSER_SCRIPT.new()
+	_composer.set_status(_footer)
 	_composer.submitted.connect(_on_submit)
 	_composer.stop_pressed.connect(_request_cancel)
 	_composer.target_opened.connect(func(path: String) -> void: target_opened.emit(path))
 	_composer.notice.connect(func(text: String) -> void: show_status(text, 4.0))
 	_content.add_child(_composer)
+	STYLE.centered_column(_composer)
 	_prompt = _composer.prompt
 	_chips = _composer.chips
 	_options = _composer.options
@@ -179,7 +181,7 @@ func _ready() -> void:
 	add_child(_slash)
 	_review = _make_review()
 	_chats = CHATS_SCRIPT.attach(self, _header.row, _content)
-	_tasks = TASKS_SCRIPT.attach(self, _content, _footer)
+	_tasks = TASKS_SCRIPT.attach(self, _content, _composer.get_parent())
 	_settings = SETTINGS_SCRIPT.attach(self, _header.row, _content)
 	_show_connection()
 	_settings.apply_all()
@@ -503,7 +505,7 @@ func _on_card_failed(reason: String) -> void:
 		connection_state = "error"
 		_header.show_state("error", _agent_name, reason, false)
 		_composer.set_connection(connection_state)
-		_transcript.set_examples_enabled(false)
+		_transcript.set_connection("error")
 
 
 ## Stop takes Send's slot while Journeyman works or a request is on its way to it.
@@ -667,7 +669,7 @@ func _sync() -> void:
 func _waiting_placeholder() -> String:
 	if _review_pending:
 		return REVIEW_WAIT
-	return QUEUE_WAIT if _occupied() and connection_state == "connected" else ""
+	return REVIEW_WAIT if _occupied() and connection_state == "connected" else ""
 
 
 func _request_cancel() -> void:
@@ -685,9 +687,8 @@ func _request_cancel() -> void:
 	_tasks.offer_stop_all()
 
 
-## A transient caption ("Focus mode on · /focus to undo") over the bottom of the transcript
-## that clears after [param seconds]. [param action] adds a link that runs [param callback].
-## It takes no layout height. "" clears it.
+## A transient caption over the transcript's bottom for [param seconds]; [param action] adds a
+## link that runs [param callback]. It takes no layout height. "" clears it.
 func show_status(text: String, seconds := 3.0, action := "", callback := Callable()) -> void:
 	_transcript.show_caption(text, seconds, action, callback)
 
@@ -752,9 +753,7 @@ func _set_targets(targets: Array[Dictionary]) -> void:
 func set_chat_agent(agent: String) -> void:
 	_agent_name = preload("chat_bridge.gd").agent_name(agent)
 	if _composer != null:
-		_composer.set_placeholder(_waiting_placeholder())
-		_header.show_state(connection_state, _agent_name)
-		_transcript.set_examples_enabled(connection_state == "connected")
+		_show_connection()
 
 
 func set_chat_state(state: String, detail: String) -> void:
@@ -775,7 +774,7 @@ func _show_connection(detail := "") -> void:
 	_header.show_state(connection_state, _agent_name, detail)
 	_composer.set_connection(connection_state)
 	_composer.set_placeholder(_waiting_placeholder())
-	_transcript.set_examples_enabled(connection_state == "connected")
+	_transcript.set_connection(connection_state)
 	_transcript.set_retry_allowed(not connection_state in ["error", "none"])
 	if connection_state == "connected":
 		_drain.call_deferred()

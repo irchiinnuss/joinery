@@ -299,11 +299,8 @@ func _states(light: bool, width: int) -> void:
 		chat
 		. call(
 			"_on_notice",
-			(
-				"The conversation was getting long, so Journeyman continues in a fresh "
-				+ "session from a short summary."
-			),
-			"info",
+			"New session · summary carried over",
+			"divider",
 		)
 	)
 	await _shot("compacted", light, width, chat)
@@ -312,9 +309,9 @@ func _states(light: bool, width: int) -> void:
 		. call(
 			"_on_notice",
 			(
-				"Journeyman's change didn't pass Joinery's checks: scenes/room.tscn uses "
-				+ "art/models/lamp.glb, which isn't in the project or in this change. "
-				+ "Nothing was changed."
+				"Change not applied · scenes/room.tscn uses art/models/lamp.glb, which isn't "
+				+ "in the project or in this change\nScenes/room.tscn uses art/models/lamp.glb, "
+				+ "which isn't in the project or in this change. Nothing was changed."
 			),
 			"error",
 		)
@@ -355,6 +352,8 @@ func _states(light: bool, width: int) -> void:
 	settings.call("set_open", true)
 	await _shot("settings", light, width, chat)
 	settings.call("_ask_compact", true)
+	await _frames()
+	(settings as ScrollContainer).ensure_control_visible(settings.get("_compact_confirm"))
 	await _shot("settings-compact", light, width, chat)
 	settings.call("_ask_compact", false)
 	# Older versions: a smaller choice says what it removes; Custom asks for two numbers.
@@ -372,14 +371,16 @@ func _states(light: bool, width: int) -> void:
 	(settings as ScrollContainer).scroll_vertical = 100000
 	await _shot("settings-policy-custom", light, width, chat)
 	settings.call("_close_policy")
-	# The Project section's last switches: the Reviewer agent and Complex models in Blender.
+	# Under Advanced: the Reviewer agent and Complex models in Blender.
+	settings.find_child("Advanced", true, false).call("set_open", true)
 	var models: Node = settings.find_child("ComplexModelsSetting", true, false)
 	_check(models != null, "Settings shows Complex models in Blender")
 	if models != null:
 		models.call("apply_status", {"complex_models": "blender", "blender": true})
 	await _frames()
-	(settings as ScrollContainer).scroll_vertical = 100000
+	(settings as ScrollContainer).ensure_control_visible(models as Control)
 	await _shot("settings-models", light, width, chat)
+	settings.find_child("Advanced", true, false).call("set_open", false)
 	(settings as ScrollContainer).scroll_vertical = 0
 	if width == NARROW:
 		_theme.set_pref("reduce_motion", "on")
@@ -764,7 +765,6 @@ func _changes(light: bool, width: int) -> void:
 	chat.set_chat_state("working", "Opening door.blend in Blender")
 	chat.call("_on_art_gate", {"needs_art_approval": true})
 	chat.set_chat_busy(false)
-	chat.show_status("Focus mode on", 30.0, "Undo", func() -> void: pass)
 	await _shot("art-gate", light, width, chat)
 	chat.show_status("")
 	await _documents(light, width, chat)

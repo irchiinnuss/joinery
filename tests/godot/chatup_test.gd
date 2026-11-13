@@ -283,7 +283,7 @@ func _run_queue() -> void:
 	chat._on_submit("Widen the door")
 	chat.set_chat_busy(true)
 	chat._on_sent()
-	_check(chat._prompt.placeholder_text == "Queue a message…", "While busy, Send queues")
+	_check(chat._prompt.placeholder_text == "Next message…", "While busy, Send queues")
 	chat.set_resource_target("res://audio/sfx/door_creak.wav", "AudioStreamWAV")
 	chat._prompt.text = "Darken the floor"
 	chat._composer._on_enter(chat._prompt.text)
@@ -415,7 +415,7 @@ func _run() -> void:
 	_check(
 		(
 			chat._composer.is_ancestor_of(chat._chips)
-			and chat._composer.get_index() > chat._transcript.get_index()
+			and chat._composer.get_parent().get_index() > chat._transcript.get_index()
 		),
 		"Selection context must sit near the input, below the conversation"
 	)
@@ -512,7 +512,10 @@ func _run() -> void:
 		chat._header._name.text.is_empty() and not chat._header._dot.visible,
 		"A healthy header shows no name and no dot"
 	)
-	_check(chat._prompt.placeholder_text == "Ask Journeyman…", "The persona is Journeyman")
+	_check(
+		chat._prompt.placeholder_text == "Ask Journeyman, or / for commands",
+		"The persona is Journeyman, and / opens the commands"
+	)
 	chat._on_submit("Say hello")
 	chat.set_chat_busy(true)
 	_check(chat._stop.visible, "A streaming reply can be stopped")
@@ -534,22 +537,41 @@ func _run() -> void:
 	chat.set_chat_agent("")
 	chat.set_chat_state("error", "No assistant connected.")
 	_check(chat.connection_state == "none", "No assistant chosen is its own state")
-	_check(chat._header._banner_action.text == "Connect", "Offer to connect an account")
-	_check(not _visible_text(chat).to_lower().contains("assistant"), "No copy says assistant")
+	var empty: Control = chat._transcript._empty
+	_check(
+		empty.blank.visible and not empty.start.visible and not chat._header._banner.visible,
+		"Without an agent the empty chat is the Connect blankslate, and the header is quiet"
+	)
+	_check(
+		chat._transcript.caption_text() == "No agent connected",
+		"Over a conversation, a quiet line offers Connect"
+	)
 	var connects := [0]
 	chat.connect_requested.connect(func() -> void: connects[0] += 1)
-	chat._header._banner_action.pressed.emit()
-	_check(connects[0] == 1, "Connect asks the editor to connect")
+	chat._transcript._caption_action.pressed.emit()
+	_check(connects[0] == 1, "The line's Connect asks the editor to connect")
+	_check(chat._prompt.placeholder_text == "Ask Journeyman…", "The composer rests")
+	_check(not _visible_text(chat).to_lower().contains("assistant"), "No copy says assistant")
+	var connect: Button = null
+	for button: Node in empty.blank.find_children("*", "Button", true, false):
+		if (button as Button).text == "Connect":
+			connect = button
+	_check(connect != null and connect.theme_type_variation == "JoineryPrimaryButton", "Connect")
+	if connect != null:
+		connect.pressed.emit()
+	_check(connects[0] == 2, "Connect asks the editor to connect")
+	chat.set_chat_state("connecting", "")
+	_check(empty.blank.visible and empty._connecting.visible, "Connecting… takes the buttons")
 	var undone := [0]
-	chat.show_status("Focus mode on", 0.1, "Undo", func() -> void: undone[0] += 1)
+	chat.show_status("Rewound", 0.1, "Undo", func() -> void: undone[0] += 1)
 	_check(
-		chat._transcript.caption_text() == "Focus mode on" and not chat._footer.visible,
+		chat._transcript.caption_text() == "Rewound" and not chat._footer.visible,
 		"A transient note is a caption over the transcript, not a footer line"
 	)
 	_check(chat._transcript._caption.top_level, "The caption takes no layout height")
 	chat._transcript._caption_action.pressed.emit()
 	_check(undone[0] == 1, "The caption's link runs its action")
-	chat.show_status("Panels hidden", 0.1)
+	chat.show_status("Branched", 0.1)
 	await create_timer(0.3).timeout
 	_check(chat._transcript.caption_text().is_empty(), "The transient caption clears")
 	chat.queue_free()

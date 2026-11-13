@@ -13,7 +13,7 @@ extends ScrollContainer
 ## without a bar. The bottom edge fades instead of cutting messages. Bold text is the body
 ## family at a semibold weight and the same size, never a separate display font.
 ##
-## Short notes ("Focus mode on") are a transient caption over the bottom inset
+## Short notes ("Rewound") are a transient caption over the bottom inset
 ## ([method show_caption]). They take no layout height: the dock's rows stay put, and while a
 ## caption shows the conversation gets that much room at its end, so the newest line scrolls
 ## clear of it instead of hiding under it.
@@ -27,6 +27,8 @@ signal example_chosen(text: String)
 signal retry_requested(card: Control)
 signal revert_requested(transaction_id: String)
 signal remember_requested(text: String)
+## Connect (or "Which one?") on the empty chat's blankslate, shown while no agent is connected.
+signal connect_requested
 
 const UI_THEME := preload("ui_theme.gd")
 const UI_MOTION := preload("ui_motion.gd")
@@ -36,9 +38,9 @@ const CARD := preload("sidebar_change_card.gd")
 const QUEUE := preload("sidebar_queue.gd")
 const INDICATOR := preload("activity_indicator.gd")
 const REMEMBER := preload("chat_remember.gd")
-const EXAMPLES := [
-	"Make the selected model taller", "Add a footstep sound", "Repaint this texture warmer"
-]
+const EMPTY := preload("sidebar_empty.gd")
+const NOTICES := preload("chat_notices.gd")
+const NO_AGENT := "No agent connected"
 ## Notice kind -> [icon ("" for none), tint role].
 const NOTICE_ICONS := {
 	"success": ["success", "success"],
@@ -51,9 +53,7 @@ const NOTICE_ICONS := {
 ## Queued messages, after every turn and before the caption's room.
 var queue: QUEUE
 var _body: VBoxContainer
-var _empty: Control
-var _examples: Array[Button] = []
-var _examples_enabled := true
+var _empty: EMPTY
 var _turn: VBoxContainer
 var _messages: Array[Dictionary] = []
 var _cards: Array[Control] = []
@@ -92,6 +92,8 @@ func _ready() -> void:
 	UI_MOTION.rubber_band(self)
 	STYLE.on_theme_overrides(self, _apply_fade)
 	STYLE.scroll_in_gutter(self)
+	# Messages and cards share one centred column with the composer (MAX_W.column).
+	STYLE.centered_column(self)
 	resized.connect(_on_resized)
 	_build_caption()
 
@@ -127,61 +129,29 @@ func _apply_fade() -> void:
 
 ## When the view gets shorter (a banner opened above it), keep the newest message in sight.
 func _on_resized() -> void:
+	_empty.fit(size.y)
 	if _follow:
 		_scroll_end.call_deferred()
 
 
 func _build_empty() -> void:
-	var inset := MarginContainer.new()
-	_body.add_child(inset)
-	# Two groups: what this is (title and hint, SPACE.1 apart) and the prompts you can click
-	# (SPACE.1 apart), with a SPACE.4 group gap between them.
-	var groups := VBoxContainer.new()
-	STYLE.on_theme_overrides(
-		groups,
-		func() -> void: groups.add_theme_constant_override("separation", UI_THEME.space(groups, 4))
-	)
-	inset.add_child(groups)
-	var column := VBoxContainer.new()
-	column.theme_type_variation = "JoineryTight"
-	groups.add_child(column)
-	var title := UI.label("What should we change?", "JoineryTitle", true)
-	column.add_child(title)
-	_scale(title, "title")
-	var hint := UI.label(
-		"Select something in your scene, then describe the change. Type\u00a0/\u00a0for commands.",
-		"JoineryCaption",
-		true
-	)
-	column.add_child(hint)
-	_scale(hint, "caption")
-	var examples := VBoxContainer.new()
-	examples.theme_type_variation = "JoineryTight"
-	groups.add_child(examples)
-	for example: String in EXAMPLES:
-		var button := UI.quiet(example)
-		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		button.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-		button.tooltip_text = "Write this in the message box"
-		button.pressed.connect(func() -> void: example_chosen.emit(example))
-		UI.bind_height(button, "sm")
-		STYLE.filled(button)
-		examples.add_child(button)
-		_scale(button, "body")
-		_examples.append(button)
-	_empty = inset
-	set_examples_enabled(_examples_enabled)
+	_empty = EMPTY.new()
+	_empty.example_chosen.connect(func(text: String) -> void: example_chosen.emit(text))
+	_empty.connect_requested.connect(func() -> void: connect_requested.emit())
+	_body.add_child(_empty)
+	for pair: Array in _empty.scalables():
+		_scale(pair[0], pair[1])
 
 
-## The example prompts act only while an assistant can take them; otherwise they rest muted.
-func set_examples_enabled(on: bool) -> void:
-	_examples_enabled = on
-	for button: Button in _examples:
-		button.disabled = not on
-		button.focus_mode = Control.FOCUS_ALL if on else Control.FOCUS_NONE
-		button.tooltip_text = (
-			"Write this in the message box" if on else "Connect Journeyman to use this"
-		)
+## The empty view follows the connection: the examples act only while connected, and without
+## an agent it becomes the Connect blankslate (sidebar_empty.gd).
+func set_connection(state: String) -> void:
+	_empty.set_connection(state)
+	# A conversation on screen keeps it: a quiet line over its end offers Connect instead.
+	if state == "none" and not _empty.visible:
+		show_caption(NO_AGENT, 3600.0, "Connect", func() -> void: connect_requested.emit())
+	elif state != "none" and caption_text() == NO_AGENT:
+		show_caption("")
 
 
 func _on_scroll(value: float) -> void:
@@ -308,6 +278,11 @@ func add_notice(text: String, kind := "info") -> void:
 	var row := HBoxContainer.new()
 	row.theme_type_variation = "JoineryRow"
 	row.accessibility_name = "Status: " + text
+	if kind == "divider":
+		_inset(_current_turn()).add_child(NOTICES.divider(text))
+		_follow = true
+		_dirty = true
+		return
 	var spec: Array = NOTICE_ICONS.get(kind, NOTICE_ICONS["info"])
 	# A plain note has no icon, and no empty slot where one would be.
 	if not str(spec[0]).is_empty():
@@ -317,6 +292,10 @@ func add_notice(text: String, kind := "info") -> void:
 	var label := UI.label(text, "JoineryCaption", true)
 	row.add_child(label)
 	_scale(label, "caption")
+	var lines := text.split("\n", true, 1)
+	if lines.size() > 1:
+		# One line, and the whole story behind its ›: "Change not applied · … ›".
+		NOTICES.expandable(row, label, lines[0], lines[1])
 	_inset(_current_turn()).add_child(row)
 	UI_MOTION.fade_in(row)
 	_follow = true
@@ -596,7 +575,7 @@ func _scroll_end() -> void:
 # --- Transient caption ---------------------------------------------------------------------------
 
 
-## A short note over the bottom inset ("Focus mode on · /focus to undo") that clears after
+## A short note over the bottom inset ("Rewound") that clears after
 ## [param seconds]. [param action] adds a link that runs [param callback]. It takes no layout
 ## height: it floats over the transcript's faded bottom edge.
 func show_caption(text: String, seconds := 3.0, action := "", callback := Callable()) -> void:
