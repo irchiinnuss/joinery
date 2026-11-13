@@ -1,0 +1,109 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ninjacornix <milanvrankic@gmail.com>
+Date: Fri, 13 Nov 2026 19:03:50 +0100
+Subject: [PATCH] feat(editor): Godot's screen buttons as icons in the title
+ bar
+
+Joinery-only, not for upstream. In Joinery's layout the 2D, 3D, Script and Game buttons sit at the right end of the title bar, icon-only with their names as tooltips, shaped like the viewport toolbar's toggles. The Asset Store gets no button there, since Joinery fetches no assets; the 3D button keeps Godot's own 3D icon.
+---
+ editor/editor_main_screen.cpp | 20 +++++++++++---------
+ editor/editor_node.cpp        | 19 ++++++++++++-------
+ 2 files changed, 23 insertions(+), 16 deletions(-)
+
+diff --git a/editor/editor_main_screen.cpp b/editor/editor_main_screen.cpp
+index 1e19800..c696a71 100644
+--- a/editor/editor_main_screen.cpp
++++ b/editor/editor_main_screen.cpp
+@@ -67,9 +67,6 @@ void EditorMainScreen::_notification(int p_what) {
+ 				Button *tb = buttons[i];
+ 				EditorPlugin *p_editor = editor_table[i];
+ 				Ref<Texture2D> icon = p_editor->get_plugin_icon();
+-				if (EditorSettings::is_joinery_layout() && p_editor->get_plugin_name() == "3D") {
+-					icon = get_editor_theme_icon("Godot");
+-				}
+ 
+ 				if (icon.is_valid()) {
+ 					tb->set_button_icon(icon);
+@@ -109,6 +106,9 @@ void EditorMainScreen::load_layout_from_config(Ref<ConfigFile> p_config_file, co
+ 
+ void EditorMainScreen::set_button_enabled(int p_index, bool p_enabled) {
+ 	ERR_FAIL_INDEX(p_index, buttons.size());
++	if (EditorSettings::is_joinery_layout() && editor_table[p_index]->is_class("AssetLibraryEditorPlugin")) {
++		p_enabled = false; // Joinery: see add_main_plugin().
++	}
+ 	buttons[p_index]->set_visible(p_enabled);
+ 	if (!p_enabled && buttons[p_index]->is_pressed()) {
+ 		select(EDITOR_2D);
+@@ -268,11 +268,16 @@ void EditorMainScreen::add_main_plugin(EditorPlugin *p_editor) {
+ 	tb->set_theme_type_variation("MainScreenButton");
+ 	tb->set_name(p_editor->get_plugin_name());
+ 	if (EditorSettings::is_joinery_layout()) {
++		// Joinery: icon-only in the title bar, shaped like the viewport
++		// toolbar's toggles (muted ink, a raised fill while current).
++		tb->set_theme_type_variation(SceneStringName(FlatButton));
++		tb->set_focus_mode(Control::FOCUS_ACCESSIBILITY);
+ 		tb->set_tooltip_text(p_editor->get_plugin_name());
+ 		tb->set_accessibility_name(p_editor->get_plugin_name());
+-		tb->set_custom_minimum_size(Size2(44, 44) * EDSCALE);
+-		// Joinery: workspace buttons live in a vertical navigation column.
+-		tb->set_text_alignment(HORIZONTAL_ALIGNMENT_LEFT);
++		// Joinery fetches no assets: the Asset Library has no button there.
++		if (p_editor->is_class("AssetLibraryEditorPlugin")) {
++			tb->hide();
++		}
+ 	} else {
+ 		tb->set_text(p_editor->get_plugin_name());
+ 	}
+@@ -283,9 +288,6 @@ void EditorMainScreen::add_main_plugin(EditorPlugin *p_editor) {
+ 	}
+ 
+ 	Ref<Texture2D> icon = p_editor->get_plugin_icon();
+-	if (EditorSettings::is_joinery_layout() && p_editor->get_plugin_name() == "3D") {
+-		icon = get_editor_theme_icon("Godot");
+-	}
+ 	if (icon.is_null() && has_theme_icon(p_editor->get_plugin_name(), EditorStringName(EditorIcons))) {
+ 		icon = get_editor_theme_icon(p_editor->get_plugin_name());
+ 	}
+diff --git a/editor/editor_node.cpp b/editor/editor_node.cpp
+index b3716a9..44b9853 100644
+--- a/editor/editor_node.cpp
++++ b/editor/editor_node.cpp
+@@ -9269,19 +9269,19 @@ EditorNode::EditorNode() {
+ 	// actual buttons and their shortcuts so plugins register here unchanged.
+ 	// In Godot's classic layout the buttons stay centered in the title bar.
+ 	const bool joinery_layout = EditorSettings::is_joinery_layout();
++	// Joinery: Godot's 2D / 3D / Script / Game buttons, icon-only, at the right
++	// end of the title bar (added after the right menu below).
++	HBoxContainer *joinery_screen_buttons = nullptr;
+ 	if (joinery_layout) {
+ 		VBoxContainer *navigation = memnew(VBoxContainer);
+ 		navigation->set_name("JoineryNavigation");
+ 		navigation->set_custom_minimum_size(Size2(48, 0) * EDSCALE);
+ 		workspace_shell->add_child(navigation);
+ 		workspace_shell->move_child(navigation, 0);
+-		VBoxContainer *main_editor_button_hb = memnew(VBoxContainer);
+-		main_editor_button_hb->set_mouse_filter(Control::MOUSE_FILTER_STOP);
+-		main_editor_button_hb->set_name("EditorMainScreenButtons");
+-		// Native editors remain routable through Godot; the visible rail contains apps only.
+-		main_editor_button_hb->hide();
+-		editor_main_screen->set_button_container(main_editor_button_hb);
+-		navigation->add_child(main_editor_button_hb);
++		joinery_screen_buttons = memnew(HBoxContainer);
++		joinery_screen_buttons->set_mouse_filter(Control::MOUSE_FILTER_STOP);
++		joinery_screen_buttons->set_name("EditorMainScreenButtons");
++		editor_main_screen->set_button_container(joinery_screen_buttons);
+ 	} else {
+ 		HBoxContainer *main_editor_button_hb = memnew(HBoxContainer);
+ 		main_editor_button_hb->set_mouse_filter(Control::MOUSE_FILTER_STOP);
+@@ -9311,6 +9311,11 @@ EditorNode::EditorNode() {
+ 	right_menu_hb = memnew(HBoxContainer);
+ 	right_menu_hb->set_mouse_filter(Control::MOUSE_FILTER_STOP);
+ 	title_bar->add_child(right_menu_hb);
++	if (joinery_screen_buttons) {
++		// Right-aligned with the content edge; the spacer after it keeps clear
++		// of the window buttons where they sit on the right.
++		title_bar->add_child(joinery_screen_buttons);
++	}
+ 
+ 	renderer = memnew(OptionButton);
+ 	renderer->set_flat(true);
