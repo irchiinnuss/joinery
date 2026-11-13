@@ -647,7 +647,7 @@ func _build_gate() -> void:
 	review.accessibility_name = "Review the art direction"
 	review.pressed.connect(func() -> void: gate_review_requested.emit())
 	actions.add_child(review)
-	var own := UI.link("Describe my own")
+	var own := UI.quiet_link("Describe my own")
 	own.accessibility_name = "Describe how your game should look"
 	own.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	own.pressed.connect(func() -> void: gate_describe_requested.emit())
