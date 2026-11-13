@@ -244,6 +244,7 @@ class ChatRow:
 		_field.accessibility_name = "Chat name"
 		_field.max_length = 80
 		_field.select_all_on_focus = true
+		_field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		_field.hide()
 		_field.text_submitted.connect(func(_text: String) -> void: _commit())
 		_field.focus_exited.connect(_commit)
