@@ -8,12 +8,12 @@ Content-Transfer-Encoding: 8bit
 
 Joinery-only, not for upstream. Every step: a three-dot stepper beside the title replaces "Step N of 3", and the footer's summary shows only on the step that creates, collapsed to "73 files · MIT · downloads GodotSteam ›" (pressed, it reads in full). Step 1: the starting points come first, as 16:9 pictures with their names (the pitch is the tooltip); the folder is one line, shortened in the middle, with a Change… link; the pitch's reason is its tooltip. Step 2: each feature is its name, a one-line caption from the CLI and its switch, with the summary and what it adds in the tooltip; Steam asks only for its app ID ("Add later") and, with online play, a Steam/Direct segmented control. Step 3 is "The look", marked Optional: one drop zone that becomes a three-column grid of pictures with what to take from each typed under it, five palette swatches (chosen, or picked from the pictures) that answer the palette question as hex values, and a refusal that names the file and fades after four seconds. The reference and document files, notes and answers written to the project keep their format.
 ---
- editor/project_manager/project_dialog.cpp | 803 ++++++++++++++++------
+ editor/project_manager/project_dialog.cpp | 805 ++++++++++++++++------
  editor/project_manager/project_dialog.h   |  40 +-
- 2 files changed, 641 insertions(+), 202 deletions(-)
+ 2 files changed, 643 insertions(+), 202 deletions(-)
 
 diff --git a/editor/project_manager/project_dialog.cpp b/editor/project_manager/project_dialog.cpp
-index b3d8245..1f2c6a5 100644
+index b3d8245..4ea822a 100644
 --- a/editor/project_manager/project_dialog.cpp
 +++ b/editor/project_manager/project_dialog.cpp
 @@ -55,14 +55,17 @@
@@ -391,7 +391,7 @@ index b3d8245..1f2c6a5 100644
  
  	joinery_ref_dialog = memnew(EditorFileDialog);
  	joinery_ref_dialog->set_access(EditorFileDialog::ACCESS_FILESYSTEM);
-@@ -2009,6 +2060,213 @@ void ProjectDialog::_joinery_build_imports(VBoxContainer *p_brief_section) {
+@@ -2009,6 +2060,215 @@ void ProjectDialog::_joinery_build_imports(VBoxContainer *p_brief_section) {
  	joinery_doc_dialog->add_filter("*.md,*.markdown,*.txt,*.pdf", TTR("Markdown, text or PDF"));
  	joinery_doc_dialog->connect("files_selected", callable_mp(this, &ProjectDialog::_joinery_add_documents));
  	add_child(joinery_doc_dialog);
@@ -434,8 +434,9 @@ index b3d8245..1f2c6a5 100644
 +	joinery_palette_box->add_theme_constant_override(SNAME("separation"), _joinery_space(1));
 +	joinery_palette_box->hide();
 +	joinery_references_box->add_child(joinery_palette_box);
++	// A section heading like "Look and sound" beside it.
 +	Label *label = memnew(Label);
-+	label->set_theme_type_variation(SNAME("JoineryLabel"));
++	label->set_theme_type_variation(SNAME("JoinerySection"));
 +	label->set_text(TTR("Palette"));
 +	joinery_palette_box->add_child(label);
 +	HBoxContainer *row = memnew(HBoxContainer);
@@ -455,7 +456,8 @@ index b3d8245..1f2c6a5 100644
 +		joinery_swatches[i] = swatch;
 +	}
 +	joinery_palette_pick = memnew(Button);
-+	joinery_palette_pick->set_theme_type_variation(SNAME("JoineryLinkButton"));
++	// Quiet: Create project is the page's one accent.
++	joinery_palette_pick->set_theme_type_variation(SNAME("JoineryTextButton"));
 +	joinery_palette_pick->set_text(TTR("Pick from references"));
 +	joinery_palette_pick->set_v_size_flags(Control::SIZE_SHRINK_CENTER);
 +	joinery_palette_pick->set_disabled(true);
@@ -605,7 +607,7 @@ index b3d8245..1f2c6a5 100644
  }
  
  void ProjectDialog::_joinery_browse_references() {
-@@ -2032,6 +2290,20 @@ static Button *_joinery_remove_button(const String &p_name, int p_side) {
+@@ -2032,6 +2292,20 @@ static Button *_joinery_remove_button(const String &p_name, int p_side) {
  	return remove;
  }
  
@@ -626,7 +628,7 @@ index b3d8245..1f2c6a5 100644
  static Label *_joinery_file_name(const String &p_name) {
  	Label *name = memnew(Label);
  	name->set_theme_type_variation(SNAME("JoineryLabel"));
-@@ -2046,76 +2318,123 @@ static Label *_joinery_file_name(const String &p_name) {
+@@ -2046,76 +2320,123 @@ static Label *_joinery_file_name(const String &p_name) {
  
  void ProjectDialog::_joinery_add_references(const PackedStringArray &p_paths) {
  	String problem;
@@ -781,7 +783,7 @@ index b3d8245..1f2c6a5 100644
  void ProjectDialog::_joinery_add_documents(const PackedStringArray &p_paths) {
  	String problem;
  	for (const String &raw : p_paths) {
-@@ -2166,7 +2485,8 @@ void ProjectDialog::_joinery_remove_reference(const String &p_path) {
+@@ -2166,7 +2487,8 @@ void ProjectDialog::_joinery_remove_reference(const String &p_path) {
  	joinery_ref_paths.remove_at(index);
  	joinery_ref_notes.remove_at(index);
  	joinery_ref_row_nodes.remove_at(index);
@@ -791,7 +793,7 @@ index b3d8245..1f2c6a5 100644
  	_joinery_update_import_buttons();
  	joinery_ref_add->grab_focus();
  }
-@@ -2187,10 +2507,21 @@ void ProjectDialog::_joinery_remove_document(const String &p_path) {
+@@ -2187,10 +2509,21 @@ void ProjectDialog::_joinery_remove_document(const String &p_path) {
  void ProjectDialog::_joinery_update_import_buttons() {
  	joinery_ref_add->set_disabled(joinery_ref_paths.size() >= JOINERY_MAX_REFERENCES);
  	joinery_doc_add->set_disabled(joinery_doc_paths.size() >= JOINERY_MAX_DOCUMENTS);
@@ -816,7 +818,7 @@ index b3d8245..1f2c6a5 100644
  }
  
  void ProjectDialog::_joinery_clear_imports() {
-@@ -2203,10 +2534,15 @@ void ProjectDialog::_joinery_clear_imports() {
+@@ -2203,10 +2536,15 @@ void ProjectDialog::_joinery_clear_imports() {
  	joinery_ref_paths.clear();
  	joinery_ref_notes.clear();
  	joinery_ref_row_nodes.clear();
@@ -832,7 +834,7 @@ index b3d8245..1f2c6a5 100644
  	_joinery_update_import_buttons();
  }
  
-@@ -2233,8 +2569,7 @@ bool ProjectDialog::joinery_take_dropped_files(const PackedStringArray &p_files)
+@@ -2233,8 +2571,7 @@ bool ProjectDialog::joinery_take_dropped_files(const PackedStringArray &p_files)
  		_joinery_add_documents(documents);
  	}
  	if (!other.is_empty()) {
@@ -842,7 +844,7 @@ index b3d8245..1f2c6a5 100644
  	}
  	return true;
  }
-@@ -2309,9 +2644,14 @@ void ProjectDialog::_joinery_build_cards() {
+@@ -2309,9 +2646,14 @@ void ProjectDialog::_joinery_build_cards() {
  		VBoxContainer *content = memnew(VBoxContainer);
  		content->add_theme_constant_override("separation", _joinery_space(2));
  		pad->add_child(content);
@@ -859,7 +861,7 @@ index b3d8245..1f2c6a5 100644
  		VBoxContainer *words = memnew(VBoxContainer);
  		words->add_theme_constant_override("separation", _joinery_space(1) / 2);
  		content->add_child(words);
-@@ -2325,11 +2665,6 @@ void ProjectDialog::_joinery_build_cards() {
+@@ -2325,11 +2667,6 @@ void ProjectDialog::_joinery_build_cards() {
  		title->set_text_overrun_behavior(TextServer::OVERRUN_TRIM_ELLIPSIS);
  		title->set_clip_text(true);
  		words->add_child(title);
@@ -871,7 +873,7 @@ index b3d8245..1f2c6a5 100644
  		_joinery_ignore_mouse(pad);
  		joinery_cards.push_back(hit);
  	}
-@@ -2630,6 +2965,7 @@ void ProjectDialog::_joinery_build_features() {
+@@ -2630,6 +2967,7 @@ void ProjectDialog::_joinery_build_features() {
  	joinery_connect_box = nullptr;
  	joinery_connect_steam = nullptr;
  	joinery_connect_direct = nullptr;
@@ -879,7 +881,7 @@ index b3d8245..1f2c6a5 100644
  
  	const int control_height = _joinery_control_h(2.5);
  	const Array features = _joinery_blueprint_features();
-@@ -2654,18 +2990,26 @@ void ProjectDialog::_joinery_build_features() {
+@@ -2654,18 +2992,26 @@ void ProjectDialog::_joinery_build_features() {
  		toggle->set_disabled(!available);
  		row->add_child(toggle);
  
@@ -913,7 +915,7 @@ index b3d8245..1f2c6a5 100644
  		// Why a switch can't be used, or why Joinery just changed it.
  		Label *note = _joinery_caption(available ? String() : reason);
  		note->set_auto_translate_mode(AUTO_TRANSLATE_MODE_DISABLED);
-@@ -2682,14 +3026,15 @@ void ProjectDialog::_joinery_build_features() {
+@@ -2682,14 +3028,15 @@ void ProjectDialog::_joinery_build_features() {
  			steam_frame->add_child(joinery_steam_box);
  			Label *id_label = memnew(Label);
  			id_label->set_theme_type_variation(SNAME("JoineryLabel"));
@@ -931,7 +933,7 @@ index b3d8245..1f2c6a5 100644
  			joinery_steam_app_id->set_accessibility_name(TTR("Steam app ID"));
  			joinery_steam_app_id->set_virtual_keyboard_type(LineEdit::KEYBOARD_TYPE_NUMBER);
  			joinery_steam_app_id->connect(SceneStringName(text_changed), callable_mp(this, &ProjectDialog::_joinery_steam_id_changed));
-@@ -2703,8 +3048,6 @@ void ProjectDialog::_joinery_build_features() {
+@@ -2703,8 +3050,6 @@ void ProjectDialog::_joinery_build_features() {
  			joinery_steam_error->set_accessibility_live(AccessibilityServerEnums::LIVE_POLITE);
  			joinery_steam_error->hide();
  			joinery_steam_box->add_child(joinery_steam_error);
@@ -940,7 +942,7 @@ index b3d8245..1f2c6a5 100644
  
  			joinery_connect_box = memnew(VBoxContainer);
  			joinery_connect_box->add_theme_constant_override("separation", _joinery_space(1));
-@@ -2714,23 +3057,31 @@ void ProjectDialog::_joinery_build_features() {
+@@ -2714,23 +3059,31 @@ void ProjectDialog::_joinery_build_features() {
  			joinery_steam_box->add_child(connect_frame);
  			Label *connect_label = memnew(Label);
  			connect_label->set_theme_type_variation(SNAME("JoineryLabel"));
@@ -984,7 +986,7 @@ index b3d8245..1f2c6a5 100644
  		}
  
  		joinery_feature_switches.push_back(toggle);
-@@ -2825,6 +3176,36 @@ void ProjectDialog::_joinery_feature_toggled(bool p_on, int p_row) {
+@@ -2825,6 +3178,36 @@ void ProjectDialog::_joinery_feature_toggled(bool p_on, int p_row) {
  	_update_ok_button();
  }
  
@@ -1021,7 +1023,7 @@ index b3d8245..1f2c6a5 100644
  void ProjectDialog::_joinery_update_steam() {
  	if (!joinery_steam_box) {
  		return;
-@@ -2977,9 +3358,20 @@ void ProjectDialog::_joinery_update_summary() {
+@@ -2977,9 +3360,20 @@ void ProjectDialog::_joinery_update_summary() {
  		what = vformat(TTR("Starts from %s"), String(blueprint.get("name", "")));
  	}
  	const String licence_text = vformat(licences.size() == 1 ? TTR("Licence: %s") : TTR("Licences: %s"), String(", ").join(licences));
@@ -1045,7 +1047,7 @@ index b3d8245..1f2c6a5 100644
  }
  
  // Brief and art direction.
-@@ -4420,6 +4812,30 @@ ProjectDialog::ProjectDialog() {
+@@ -4420,6 +4814,30 @@ ProjectDialog::ProjectDialog() {
  	joinery_title->set_theme_type_variation(SNAME("JoineryTitle"));
  	joinery_title->set_auto_translate_mode(AUTO_TRANSLATE_MODE_DISABLED);
  	titles->add_child(joinery_title);
@@ -1076,7 +1078,7 @@ index b3d8245..1f2c6a5 100644
  	joinery_intro = memnew(Label);
  	joinery_intro->set_theme_type_variation(SNAME("JoineryMuted"));
  	// One line that never asks the window to grow: a wrapping label outside
-@@ -4607,7 +5023,7 @@ ProjectDialog::ProjectDialog() {
+@@ -4607,7 +5025,7 @@ ProjectDialog::ProjectDialog() {
  	joinery_folder_row->hide();
  	project_path_container->add_child(joinery_folder_row);
  	joinery_folder_label = memnew(Label);
@@ -1085,7 +1087,7 @@ index b3d8245..1f2c6a5 100644
  	joinery_folder_label->set_h_size_flags(Control::SIZE_EXPAND_FILL);
  	joinery_folder_label->set_v_size_flags(Control::SIZE_SHRINK_CENTER);
  	// Shortened by hand from the start, so it must not force a width.
-@@ -4619,7 +5035,7 @@ ProjectDialog::ProjectDialog() {
+@@ -4619,7 +5037,7 @@ ProjectDialog::ProjectDialog() {
  	joinery_folder_row->add_child(joinery_folder_label);
  	joinery_folder_change = memnew(Button);
  	joinery_folder_change->set_text(String::utf8("Change…"));
@@ -1094,7 +1096,7 @@ index b3d8245..1f2c6a5 100644
  	joinery_folder_change->set_accessibility_name(TTRC("Change the folder"));
  	joinery_folder_change->connect(SceneStringName(pressed), callable_mp(this, &ProjectDialog::_browse_project_path));
  	joinery_folder_row->add_child(joinery_folder_change);
-@@ -4675,25 +5091,22 @@ ProjectDialog::ProjectDialog() {
+@@ -4675,25 +5093,22 @@ ProjectDialog::ProjectDialog() {
  	vb->add_child(joinery_pitch_box);
  	{
  		Label *pitch_label = memnew(Label);
@@ -1127,7 +1129,7 @@ index b3d8245..1f2c6a5 100644
  
  	// Renderer selection.
  	renderer_container = memnew(VBoxContainer);
-@@ -4983,13 +5396,7 @@ ProjectDialog::ProjectDialog() {
+@@ -4983,13 +5398,7 @@ ProjectDialog::ProjectDialog() {
  	}
  	joinery_history_picker->select(0);
  	joinery_history_box->add_child(joinery_history_picker);
@@ -1142,7 +1144,7 @@ index b3d8245..1f2c6a5 100644
  
  	// Joinery: step 3, the optional brief and art direction on one page, in
  	// sections: Game brief, Look and sound, References, Starting rules.
-@@ -5012,10 +5419,13 @@ ProjectDialog::ProjectDialog() {
+@@ -5012,10 +5421,13 @@ ProjectDialog::ProjectDialog() {
  	joinery_look_fields = memnew(VBoxContainer);
  	joinery_look_fields->add_theme_constant_override(SNAME("separation"), _joinery_space(5));
  	section(TTRC("Look and sound"))->add_child(joinery_look_fields);
@@ -1158,7 +1160,7 @@ index b3d8245..1f2c6a5 100644
  	_joinery_build_imports(brief_section);
  	joinery_preset_box = section(TTRC("Starting rules"));
  	joinery_preset_picker = memnew(OptionButton);
-@@ -5023,13 +5433,7 @@ ProjectDialog::ProjectDialog() {
+@@ -5023,13 +5435,7 @@ ProjectDialog::ProjectDialog() {
  	joinery_preset_picker->set_h_size_flags(Control::SIZE_EXPAND_FILL);
  	joinery_preset_picker->set_accessibility_name(TTRC("Starting rules"));
  	joinery_preset_box->add_child(joinery_preset_picker);
@@ -1173,7 +1175,7 @@ index b3d8245..1f2c6a5 100644
  
  	// Joinery: "Setting up your project…", one row per step with its state.
  	joinery_creating = memnew(VBoxContainer);
-@@ -5164,15 +5568,18 @@ ProjectDialog::ProjectDialog() {
+@@ -5164,15 +5570,18 @@ ProjectDialog::ProjectDialog() {
  	// What Create will do, on the steps that decide it: in the footer row,
  	// ending beside Back and the primary action it describes, so it never
  	// reads as a caption of the page's last field.
