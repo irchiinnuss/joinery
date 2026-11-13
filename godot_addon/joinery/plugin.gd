@@ -39,6 +39,7 @@ const ACCEPTED := "Change accepted"
 const REJECTED := "Discarded. Your files were not touched."
 
 const ART_DIALOG := preload("res://addons/joinery/art_review_dialog.gd")
+const ART_PAGE := preload("res://addons/joinery/art_page.gd")
 const PICK_SCRIPT := preload("res://addons/joinery/part_pick.gd")
 const CHIP_SCRIPT := preload("res://addons/joinery/target_chip.gd")
 ## Shown in the Review panel when a combined file and scene review went stale.
@@ -243,6 +244,7 @@ func _connect_chat(settings: EditorSettings) -> void:
 	_dock.reject_edit_requested.connect(_reject_scene_edit)
 	_dock.reconnect_requested.connect(_chat.reconnect)
 	_dock.art_review_requested.connect(_chat.review_art)
+	ART_PAGE.attach(_dock)
 	_dock.models_refresh_requested.connect(_chat.refresh_models)
 	_chat.start(agent, profile, _engine_dir(), ProjectSettings.globalize_path("res://"))
 
@@ -863,15 +865,13 @@ func _apply_changes() -> void:
 		)
 
 
+## The art direction opens as a sidebar page; a window only when there is no sidebar page.
 func _on_art_review(event: Dictionary) -> void:
-	ART_DIALOG.open(
-		_dock,
-		event,
-		UI_THEME.dialog_size(_dock, "doc"),
-		func() -> void:
-			_chat.approve_art(str(event.get("sha256", "")))
-			get_tree().create_timer(1.0).timeout.connect(_review_tab.refresh)
-	)
+	var approve := func() -> void:
+		_chat.approve_art(str(event.get("sha256", "")))
+		get_tree().create_timer(1.0).timeout.connect(_review_tab.refresh)
+	if not ART_PAGE.present(_dock, event, approve):
+		ART_DIALOG.open(_dock, event, UI_THEME.dialog_size(_dock, "doc"), approve)
 
 
 func _on_file_decision(event: Dictionary) -> void:

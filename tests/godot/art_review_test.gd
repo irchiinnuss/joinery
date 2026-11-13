@@ -1,10 +1,12 @@
 extends SceneTree
 ## The art direction dialog: the five decided sections, the references board with its images,
 ## bible-check offers that fill the composer, the upgrade offer for a first-format bible, and
-## "Approve these rules".
+## "Approve these rules"; and the same rules as a sidebar page, where only a click on Approve
+## approves.
 
 const DOCK_PATH := "res://addons/joinery/journeyman_dock.gd"
 const DIALOG_PATH := "res://addons/joinery/art_review_dialog.gd"
+const PAGE_PATH := "res://addons/joinery/art_page.gd"
 const MOTION_PATH := "res://addons/joinery/ui_motion.gd"
 const PHOTO := "art/reference/quarry.png"
 const BIBLE := """# Art Bible — Quarry
@@ -222,8 +224,117 @@ func _run() -> void:
 	_check(dialog.get_ok_button().disabled, "An approved bible can't be approved again")
 	dialog.hide()
 	dialog.queue_free()
+	await process_frame
+	await _page(chat)
 
 	chat.queue_free()
 	await process_frame
 	print("art review: ", "FAILED" if _failed else "ok")
 	quit(1 if _failed else 0)
+
+
+## The sidebar page: opened by the sidebar's art request, it waits for the bridge, shows the
+## rules, and approves only from a click on Approve.
+func _page(chat: Control) -> void:
+	var pages: Script = load(PAGE_PATH)
+	var bare := Control.new()
+	_check(not pages.present(bare, _event(2), func() -> void: pass), "No sidebar, no page")
+	bare.free()
+	var page: Control = pages.attach(chat)
+	_check(page != null and pages.attach(chat) == page, "The sidebar has one art direction page")
+	var transcript: Control = chat._transcript
+	var approved := [0]
+	var approve := func() -> void: approved[0] += 1
+	chat.art_review_requested.emit()
+	await process_frame
+	_check(page.visible and not transcript.visible, "/art opens the page in place of the chat")
+	_check(page.find_child("Waiting", true, false).visible, "The page says it is reading")
+	_check(not page.find_child("Foot", true, false).visible, "Nothing to approve while reading")
+	pages.present(chat, _event(1), approve)
+	await process_frame
+	_check(not page.find_child("Waiting", true, false).visible, "The rules replace the wait")
+	_check(
+		chat.find_children("*", "ConfirmationDialog", true, false).is_empty(),
+		"No window opens over the sidebar"
+	)
+	var titles := page.find_children("*", "Label", true, false).filter(
+		func(label: Node) -> bool: return (label as Label).text == "Art direction"
+	)
+	_check(titles.size() == 1, "The title shows once")
+	var state := page.find_child("State", true, false) as Label
+	_check(state.text == "Draft, not approved yet", "The page says the rules are a draft")
+	var rules := page.find_child("Rules", true, false)
+	_check(
+		(rules.find_child("Feel", true, false) as RichTextLabel).text.contains("Calm"),
+		"Feel shows the vision"
+	)
+	_check(rules.find_child("StillOpen", true, false) == null, "Nothing is open in a full bible")
+	_check(
+		page.find_child("Upgrade", true, false) != null, "A first-format bible offers the update"
+	)
+	var offers := page.find_child("Offers", true, false)
+	var asks := offers.find_children("Ask", "Button", true, false)
+	_check(asks.size() == 2, "Each check is one line with its own Ask")
+	_check(
+		asks.all(func(ask: Node) -> bool: return ask.theme_type_variation == "JoineryQuietLink"),
+		"Ask is a quiet link, so Approve is the one accent action"
+	)
+	var accents := page.find_children("*", "Button", true, false).filter(
+		func(button: Node) -> bool:
+			return (
+				(button as Button).is_visible_in_tree()
+				and button.theme_type_variation in ["JoineryPrimaryButton", "JoineryLinkButton"]
+			)
+	)
+	_check(accents.size() == 1, "One accent action on the page")
+	var approve_button := page.find_child("Approve", true, false) as Button
+	_check(
+		approve_button.text == "Approve these rules" and not approve_button.disabled,
+		"Approve these rules is ready"
+	)
+	var technical: Node = page.find_child("Technical", true, false)
+	_check(not technical.get("body").visible, "Technical rules start folded")
+	_check(approved[0] == 0, "Opening the page approves nothing")
+	(asks[0] as Button).pressed.emit()
+	await process_frame
+	_check(not page.visible and transcript.visible, "Asking goes back to the chat")
+	_check(chat._prompt.text.contains("palette section"), "Asking fills the message box")
+	_check(approved[0] == 0, "Asking approves nothing")
+	chat._prompt.clear()
+
+	# A bible mostly not written yet: one "Still open" line with one Ask.
+	var open := {"text": "# Bible\n\n## Vision\nCalm.\n", "version": 2, "sha256": "x"}
+	pages.present(chat, open, approve)
+	await process_frame
+	var line := page.find_child("OpenLine", true, false) as Label
+	_check(
+		line != null and line.text == "Still open: Look, Palette, Sound, Never",
+		"The open sections share one line"
+	)
+	_check(page.find_children("AskOpen", "Button", true, false).size() == 1, "One Ask for them")
+	_check(page.find_child("Upgrade", true, false) == null, "A current bible offers no update")
+
+	# Approve: once, from the click, then back to the chat.
+	approve_button.pressed.emit()
+	await process_frame
+	_check(approved[0] == 1, "Approve these rules approves")
+	_check(not page.visible and transcript.visible, "Approving goes back to the chat")
+	approve_button.pressed.emit()
+	_check(approved[0] == 1, "A closed page can't approve again")
+	chat.art_review_requested.emit()
+	await process_frame
+	approve_button.pressed.emit()
+	_check(approved[0] == 1, "Nothing is approved while the page is reading")
+
+	# Approved rules: no Approve, and the way to make the project match.
+	var done := _event(2)
+	done["approved"] = true
+	pages.present(chat, done, approve)
+	await process_frame
+	_check(state.text == "Approved", "The page says the rules are approved")
+	_check(not approve_button.visible, "Approved rules can't be approved again")
+	_check(page.find_child("Match", true, false).visible, "Approved rules offer Make it match")
+	(page.find_child("Back", true, false) as Button).pressed.emit()
+	await process_frame
+	_check(not page.visible and transcript.visible, "Back returns to the chat")
+	_check(approved[0] == 1, "Closing approves nothing")

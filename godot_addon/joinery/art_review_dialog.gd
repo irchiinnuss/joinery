@@ -1,11 +1,12 @@
 @tool
 extends RefCounted
-## The art direction, read as a document before it is approved. Top to bottom: what to fix
-## first (one-line offers from the bible checks, each filling the message box), an "Update to
-## the new layout" offer for a first-format bible, the five sections people decide (Feel,
-## Look, Palette, Sound, Never), the references board (images from art/reference with their
-## captions), and the technical rules folded under "Technical rules (preset for you)". The
-## footer says what approving does, with Close and "Approve these rules" on its trailing edge.
+## The art direction in a window, for when there is no sidebar to show art_page.gd in, and
+## the bible's parsing both share. Top to bottom: what to fix first (one-line offers from
+## the bible checks, each filling the message box), an "Update to the new layout" offer for
+## a first-format bible, the five sections people decide (Feel, Look, Palette, Sound,
+## Never), the references board (images from art/reference with their captions), and the
+## technical rules folded under "Technical rules (preset for you)". The footer says
+## what approving does, with Close and "Approve these rules" on its trailing edge.
 ##
 ## [method open_document] shows any other project document (the game brief) the same way,
 ## read-only, with "Ask Journeyman to change it": edits are reviewed changes like any other.
@@ -420,11 +421,11 @@ static func _board(references: Array) -> Control:
 	group.add_child(board)
 	for reference: Variant in references:
 		if reference is Dictionary:
-			board.add_child(_reference(reference))
+			board.add_child(reference_tile(reference))
 	return group
 
 
-static func _reference(reference: Dictionary) -> Control:
+static func reference_tile(reference: Dictionary) -> Control:
 	var item := VBoxContainer.new()
 	item.theme_type_variation = "JoineryTight"
 	var id := str(reference.get("id", ""))
@@ -493,7 +494,7 @@ static func _technical(parts: Array) -> Control:
 	var text := PackedStringArray()
 	for part: Array in parts:
 		var heading := str(part[0])
-		if _is_decided(heading) or heading.to_lower() == "references":
+		if is_decided(heading) or heading.to_lower() == "references":
 			continue
 		var body := clean(str(part[1]))
 		if body.is_empty():
@@ -597,7 +598,7 @@ static func _belongs(heading: String, keys: Array) -> bool:
 	return false
 
 
-static func _is_decided(heading: String) -> bool:
+static func is_decided(heading: String) -> bool:
 	for spec: Array in SECTIONS:
 		if _belongs(heading, spec[1]):
 			return true
