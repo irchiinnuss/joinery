@@ -213,11 +213,15 @@ panel up.
 **Settings → Replies → Accept changes automatically** (off by default) keeps a
 change without asking when nothing about it needs you: every check passed with
 nothing to say, the reviewer agent raised no warning, any done-when items
-passed, and the change has no live scene edits and leaves the art bible, the
-game brief and the art references alone. No review opens for it. The
+passed, and the change leaves the art bible, the game brief and the art
+references alone. No review opens for it. Edits to the scene on screen ("put
+the mug on the table") are kept by the editor's own Accept, as if you had
+clicked it, unless that scene had unsaved edits of yours when you sent the
+request: your own work is never saved for you, so that change waits. The
 request's card says **Accepted automatically** with **Undo**, which puts the
-whole change back like Revert does; the Timeline and the Review tab's Decided
-list show it like any accepted change.
+whole change back: the scene edits through the scene's undo history, the files
+like Revert does. The Timeline and the Review tab's Decided list show it like
+any accepted change.
 
 Everything else still waits for you as before, with the same Accept and
 Discard. A change to the art direction always waits: approving it stays your

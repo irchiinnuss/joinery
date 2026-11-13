@@ -32,13 +32,27 @@ by `TurnController` after the review opens):
 - the reviewer agent, when on, finished and raised no `warn` or `block` note
   (a review the router skipped counts as finished);
 - every done-when item of the request's to-do passed (inconclusive waits);
-- it has no live scene edits (the editor keeps those itself) and no scene it
-  changes has unsaved edits in the editor;
+- no scene it changes, through its files or live, had unsaved edits in the
+  editor when the request was sent (the user's own work is never written
+  over or saved for them), and no live edit is in a scene never saved;
+- a parallel task's change has no live scene edits;
 - it is not Joinery's own submit of a change the agent left unsubmitted;
 - it is not one of several ways (Try other ways): the user picks among them.
 
 Failed, final and needs-user submits never reach review, so they are not
 candidates at all.
+
+Live scene edits are kept by the editor alone: only it holds them. When the
+chat's own change would be kept but has live edits, the core accepts nothing
+itself. It sends the review with an `auto_accept: true` hint (and an empty
+`auto_accept_held` list) on the `file_preview` and the `in_review` turn state,
+and the editor's review flow runs its own Accept, the code the Accept button
+runs, without opening the Review panel: the files first (a `decision` marked
+`auto`, which the host records as `auto_accepted`), then the live edits into
+the scene's undo history. A preview that went stale is refused as on a click:
+the files are rolled back and the review opens. Undo takes the live edits back
+through that undo step (while nothing was done after it), then reverts the
+files.
 
 The accept itself is the host's own Accept path (`auto_decide`): the chat's
 change goes through `TurnController.decide` and the stdio host's follow-ups
