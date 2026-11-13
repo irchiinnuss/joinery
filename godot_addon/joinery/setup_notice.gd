@@ -111,7 +111,9 @@ func _init() -> void:
 	_text = UI.label("", "", true)
 	_text.name = "Text"
 	column.add_child(_text)
-	_action = UI.primary("")
+	# Secondary: the toolbar's Play or the review's Accept is the view's one accent.
+	_action = UI.secondary("")
+	STYLE.filled(_action)
 	_action.name = "Action"
 	_action.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	_action.pressed.connect(_on_action)

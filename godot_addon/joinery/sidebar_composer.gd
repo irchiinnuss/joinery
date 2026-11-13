@@ -89,6 +89,8 @@ var _restyling := false
 var _targets: Array[Dictionary] = []
 ## The dock's placeholder for the current state ("Next message…"), "" for the default.
 var _waiting := ""
+## The status line in the field (set_status), or null.
+var _status_line: Control
 var _dialog: FileDialog
 ## The editor's own handlers of the window's file drops, while the composer takes them first.
 var _editor_drops: Array[Callable] = []
@@ -255,7 +257,11 @@ func _apply_placeholder() -> void:
 	prompt.editable = not _locked and not resting
 	attach.disabled = resting
 	view.disabled = resting
-	if not _waiting.is_empty():
+	if _status_line != null and _status_line.visible:
+		# The status reads where the placeholder would.
+		prompt.placeholder_text = ""
+		_status_line.modulate.a = 1.0 if prompt.text.is_empty() else 0.0
+	elif not _waiting.is_empty():
 		prompt.placeholder_text = _waiting
 	elif resting:
 		prompt.placeholder_text = "Ask Journeyman…"
@@ -270,10 +276,35 @@ func _apply_placeholder() -> void:
 
 
 ## The status line (sidebar_footer.gd: "Stopping…", "Waiting for your review") sits in the
-## composer's top-left, above the chips and the field, so it never floats between messages.
+## field's top-left where the placeholder would be, and takes its place while it shows, so it
+## never floats between messages. Typing goes through it to the field.
 func set_status(line: Control) -> void:
-	_body.add_child(line)
-	_body.move_child(line, 0)
+	_status_line = line
+	line.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	for child: Node in line.find_children("*", "Control", true, false):
+		(child as Control).mouse_filter = Control.MOUSE_FILTER_IGNORE
+	prompt.add_child(line)
+	line.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	prompt.theme_changed.connect(_place_status)
+	prompt.resized.connect(_place_status)
+	line.minimum_size_changed.connect(_place_status)
+	line.visibility_changed.connect(_place_status)
+	line.visibility_changed.connect(_apply_placeholder)
+	prompt.text_changed.connect(_apply_placeholder)
+	_place_status()
+
+
+## The status line on the field's first line, inside its padding.
+func _place_status() -> void:
+	if _status_line == null or not prompt.is_inside_tree():
+		return
+	var box := prompt.get_theme_stylebox("normal")
+	var line_h := float(prompt.get_line_height())
+	var tall := maxf(_status_line.get_combined_minimum_size().y, line_h)
+	_status_line.offset_left = box.get_margin(SIDE_LEFT)
+	_status_line.offset_right = -box.get_margin(SIDE_RIGHT)
+	_status_line.offset_top = box.get_margin(SIDE_TOP) + roundf((line_h - tall) / 2.0)
+	_status_line.offset_bottom = _status_line.offset_top + tall
 
 
 ## Mark Stop as pressed and waiting for the reply to end.

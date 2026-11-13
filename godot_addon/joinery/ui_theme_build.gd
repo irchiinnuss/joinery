@@ -502,7 +502,9 @@ static func _switch(t: Theme, c: Dictionary, m: Dictionary) -> void:
 	var size: int = m["size"]
 	var width := roundi(2.0 * size)
 	var height := roundi(1.1 * size)
-	var on := [c["accent"], c["on_accent"]]
+	# On is the text colour, not the accent: a view's one accent is its decision (Accept,
+	# Approve), and a switch beside it never competes.
+	var on := [c["text"], c["surface"]]
 	var off := [c["border_strong"], c["surface"]]
 	var icons := {}
 	for k: int in UI_THEME.SWITCH_FRAMES + 1:
