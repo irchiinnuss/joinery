@@ -576,8 +576,7 @@ static func _panels(t: Theme, c: Dictionary, m: Dictionary) -> void:
 		# A card that explains something beside its trigger (the rail's readiness card).
 		"JoineryHoverCard":
 		[c["surface_raised"], c["border_subtle"], hairline, "lg", _sp(m, 3), _sp(m, 3)],
-		# The message box: a hairline at rest that firms up while typing; neutral either way,
-		# so the view's one accent stays its decision (Accept, Send).
+		# The message box: neutral hairlines, so the accent stays the decision (Accept, Send).
 		"JoineryComposer":
 		[c["surface_sunken"], c["border_subtle"], hairline, "xl", _sp(m, 2), _sp(m, 2)],
 		"JoineryComposerFocused":

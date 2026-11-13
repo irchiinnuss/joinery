@@ -9,7 +9,8 @@ extends PanelContainer
 ## accent action). The reply-mode picker rests with Send: it is live only while connected and
 ## idle. The dock also shows Stop while a request is on its way, before Journeyman takes
 ## it. The draft stays in the field.
-## Its border tweens to the accent while the field has focus.
+## Its hairline firms up (border_subtle to border_strong) while the field has focus: neutral,
+## so the accent stays the view's decision.
 ##
 ## While Journeyman works, "Run alongside" sits beside Stop when the field has text and the
 ## project allows parallel tasks ([method set_alongside]): it starts the message as its own task
@@ -507,7 +508,7 @@ func _set_focus(on: bool) -> void:
 	_focused = on
 	if _style == null:
 		return
-	var ink := get_theme_color("accent" if on else "border_strong", "Joinery")
+	var ink := get_theme_color("border_strong" if on else "border_subtle", "Joinery")
 	if _focus_tween != null and _focus_tween.is_valid():
 		_focus_tween.kill()
 	if not UI_MOTION.is_enabled() or not is_inside_tree():
@@ -524,7 +525,7 @@ func _restyle() -> void:
 	var source := get_theme_stylebox("panel", "JoineryComposer")
 	if source is StyleBoxFlat:
 		_style = source.duplicate() as StyleBoxFlat
-		var role := "accent" if _focused else "border_strong"
+		var role := "border_strong" if _focused else "border_subtle"
 		_style.border_color = get_theme_color(role, "Joinery")
 		add_theme_stylebox_override("panel", _style)
 	var gap := UI_THEME.space(self, 1)
