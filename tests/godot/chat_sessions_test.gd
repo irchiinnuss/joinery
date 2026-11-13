@@ -157,8 +157,20 @@ func _run() -> void:
 	var latest_row: Node = page.call("row_for", LATEST)
 	var older_row: Node = page.call("row_for", OLDER)
 	_check(latest_row != null and older_row != null, "Both chats are listed")
-	_check(latest_row.get("caption").text == "Codex · Open", latest_row.get("caption").text)
-	_check(older_row.get("caption").text == "Claude · 3 days ago", older_row.get("caption").text)
+	_check(
+		(
+			(latest_row.get("dot") as Control).visible
+			and not (older_row.get("dot") as Control).visible
+		),
+		"The open chat has the accent dot, no 'Open' word"
+	)
+	_check(older_row.get("caption").text == "3d", older_row.get("caption").text)
+	var tip: String = older_row.get("_open").tooltip_text
+	_check(tip.contains("Claude · 3 days ago"), "Who answered is in the tooltip: " + tip)
+	var filled := 0
+	for button: Node in page.find_children("*", "Button", true, false):
+		filled += int((button as Button).theme_type_variation == "JoineryPrimaryButton")
+	_check(filled == 0, "New chat is an icon, not a filled button")
 	_check(calls.size() == 1 and calls[0].begins_with("transactions list"), "%s" % [calls])
 	var renamed: Array[String] = []
 	page.connect(
