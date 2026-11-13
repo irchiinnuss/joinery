@@ -88,13 +88,12 @@ func _check_switch_dialog() -> void:
 	_check(emitted.is_empty(), "The switch dialog waits for a choice: %s" % [emitted])
 	var cards: Dictionary = view.get("_buttons")
 	_check((cards["codex"] as Button).button_pressed, "The agent in use is highlighted")
-	var go: Button = view.get("_continue")
-	_check(go.visible and not go.disabled, "Continue is offered for the agent in use")
-	# Continue on the highlighted agent: it continues with that agent (the editor then
+	_check(view.get("_continue") == null, "Each row is its own action; there is no Continue")
+	# The highlighted agent's row, pressed: it continues with that agent (the editor then
 	# closes the dialog without a restart, see _check_same_agent).
-	go.pressed.emit()
+	(cards["codex"] as Button).pressed.emit()
 	await _frames()
-	_check(emitted == ["codex"], "Continue picks the agent in use: %s" % [emitted])
+	_check(emitted == ["codex"], "The row picks the agent in use: %s" % [emitted])
 	# Another agent, chosen by the user: it continues with that one.
 	emitted.clear()
 	(cards["claude"] as Button).pressed.emit()

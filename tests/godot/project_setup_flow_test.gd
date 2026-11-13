@@ -174,7 +174,10 @@ func _run() -> void:
 		connect._detail.text == "Fixture connection is unavailable here.",
 		"Explain the platform restriction instead of asking for another sign-in"
 	)
-	_check(not connect._login.visible, "Do not offer sign-in for an unavailable connection")
+	_check(
+		connect._buttons["codex"].status.text != "Sign in ›",
+		"Do not offer sign-in for an unavailable connection"
+	)
 	connect._agents["codex"].erase("supported")
 	connect._agents["codex"].erase("reason")
 	connect._agents["codex"]["method"] = "Test account"
@@ -237,7 +240,10 @@ func _run() -> void:
 	await process_frame
 	create = _create_action()
 	_check(create.is_visible_in_tree(), "Authenticated selection must redirect automatically")
-	_check(not connect._login.visible, "Do not offer sign-in again for a connected account")
+	_check(
+		connect._buttons["codex"].status.text != "Sign in ›",
+		"Do not offer sign-in again for a connected account"
+	)
 	if _failed:
 		print("project setup flow: FAILED")
 		quit(1)

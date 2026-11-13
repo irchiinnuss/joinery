@@ -1,10 +1,11 @@
 @tool
 extends CenterContainer
-## "Connect Journeyman to your account": the Project Manager's first screen, also usable
-## inside an editor AcceptDialog. Choosing a signed-in account continues; a fresh sign-in
-## shows "Connected" on its card, fades out, then emits [signal connected]. In the Project
-## Manager the fork switches to the project list on that signal; elsewhere this screen only
-## emits it.
+## "Connect an agent": the Project Manager's first screen, also usable inside an editor
+## AcceptDialog. Each row is its own action: a signed-in agent continues, an installed one
+## signs in, a missing one (under "Not installed") links to where to get it. A fresh
+## sign-in shows "Connected" on its row, fades out, then emits [signal connected]. In the
+## Project Manager the fork switches to the project list on that signal; elsewhere this
+## screen only emits it.
 
 ## [param agent_id] is the assistant (or API driver); [param method] how it signed in.
 signal connected(agent_id: String, method: String)
@@ -23,8 +24,8 @@ const AGENT_NAMES := {
 	"gemini": "Gemini",
 	"opencode": "opencode",
 }
-## Width of the content column, in multiples of the body font size.
-const COLUMN_EM := 32
+## Width of the content column in logical pixels (times the UI unit).
+const COLUMN_W := 480
 const HELPER_MISSING := "Joinery's helper isn't set up. Run the Joinery installer again."
 const PROFILE_MISSING := "That saved API connection isn't available. Check its key in API settings."
 const UNAVAILABLE := "This connection is unavailable on this platform."
@@ -34,16 +35,16 @@ const SIGN_IN_WAIT := 180.0
 ## available). The name keeps the normal text colour; the row's flat style and its status
 ## text say it is unavailable.
 const UNAVAILABLE_ALPHA := 0.6
-## Under the list while no assistant is chosen: why Continue is not available yet.
-const CHOOSE_HINT := "Choose an account to continue."
+## A row's trailing word for an installed agent that is not signed in yet: the row signs in.
+const SIGN_IN := "Sign in ›"
 
 var engine_home := ""
 var initial_agent := ""
 ## In the editor's switch dialog: [member initial_agent] is only highlighted, and nothing
-## continues until the user chooses (a row or Continue). The Project Manager leaves it off,
+## continues until the user chooses a row. The Project Manager leaves it off,
 ## so a signed-in agent there continues on its own.
 var confirm_choice := false
-## In the editor, after Continue, test the chosen agent in the background ([method _verify]).
+## In the editor, after a row continues, test the chosen agent in the background ([method _verify]).
 var verify_after_continue := true
 var initial_profile := ""
 var selected_profile := ""
@@ -54,13 +55,14 @@ var _buttons: Dictionary = {}
 var _detail: Label
 ## Under the selected card: what the helper said about the last action.
 var _message: Label
-var _continue: Button
-var _login: Button
-var _install: Button
 var _api: Button
 var _content: MarginContainer
 var _choices: VBoxContainer
+## Agents that can be used here (and rows not checked yet), then API connections.
 var _list: VBoxContainer
+## "Not installed": agents to get first, each with its own "Get ›".
+var _missing_box: VBoxContainer
+var _missing: VBoxContainer
 var _inline: VBoxContainer
 var _api_form: VBoxContainer
 var _page := "choices"
@@ -83,8 +85,11 @@ var _group := ButtonGroup.new()
 ## One provider row: a JoineryCardButton holding the icon tile, the name and a status line.
 class Card:
 	extends Button
+	var id := ""
 	var row: HBoxContainer
 	var title: Label
+	## "Recommended" beside the name of the first agent that can be used.
+	var badge: Label
 	var status: Label
 	var dot: Control
 	var done: TextureRect
@@ -106,19 +111,18 @@ func _ready() -> void:
 	var header := VBoxContainer.new()
 	header.theme_type_variation = "JoineryTight"
 	_choices.add_child(header)
-	header.add_child(
-		UI_COMPONENTS.label("Connect Journeyman to your account", "JoineryDisplay", true)
-	)
-	header.add_child(
-		UI_COMPONENTS.label(
-			"Sign in with Claude Code, Codex, Gemini or opencode, or use an API key.",
-			"JoineryCaption",
-			true
-		)
-	)
+	header.add_child(UI_COMPONENTS.label("Connect an agent", "JoineryDisplay", true))
 	_list = VBoxContainer.new()
 	_list.theme_type_variation = "JoineryRow"
 	_choices.add_child(_list)
+	_missing_box = VBoxContainer.new()
+	_missing_box.theme_type_variation = "JoineryTight"
+	_missing_box.hide()
+	_choices.add_child(_missing_box)
+	_missing_box.add_child(UI_COMPONENTS.label("Not installed", "JoineryCaption"))
+	_missing = VBoxContainer.new()
+	_missing.theme_type_variation = "JoineryRow"
+	_missing_box.add_child(_missing)
 	for id: String in AGENT_NAMES:
 		_add_provider(id, AGENT_NAMES[id], id)
 	_inline = VBoxContainer.new()
@@ -128,16 +132,10 @@ func _ready() -> void:
 	_inline.add_child(_detail)
 	_message = UI_COMPONENTS.label("", "JoineryError", true)
 	_inline.add_child(_message)
-	var actions := VBoxContainer.new()
-	actions.theme_type_variation = "JoineryTight"
-	_choices.add_child(actions)
-	_continue = _primary(actions, "Continue", _finish.bind(true))
-	_login = _primary(actions, "Sign in", _start.bind("login"))
-	_install = _primary(actions, "Get it", _open_install)
-	_api = UI_COMPONENTS.link("Use an API key instead")
+	_api = UI_COMPONENTS.link("Use an API key")
 	_api.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	_api.pressed.connect(_show_api)
-	actions.add_child(_api)
+	_choices.add_child(_api)
 	_api_form = API_SCRIPT.new()
 	_api_form.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	_content.add_child(_api_form)
@@ -164,60 +162,12 @@ func _on_theme_rebuilt() -> void:
 
 
 func _fit_column() -> void:
-	_content.custom_minimum_size.x = UI_THEME.font_size(self, "body") * COLUMN_EM
-
-
-func _primary(parent: Control, text: String, action: Callable) -> Button:
-	var button := UI_COMPONENTS.primary(text)
-	# The same height as the assistant rows above it.
-	UI_COMPONENTS.bind_height(button, "lg", false)
-	button.theme_changed.connect(_style_waiting.bind(button))
-	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	button.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	button.pressed.connect(action)
-	var indicator := INDICATOR.new()
-	indicator.name = "Indicator"
-	indicator.anchor_left = 1.0
-	indicator.anchor_right = 1.0
-	indicator.anchor_top = 0.5
-	indicator.anchor_bottom = 0.5
-	indicator.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	indicator.grow_vertical = Control.GROW_DIRECTION_BOTH
-	button.add_child(indicator)
-	button.theme_changed.connect(
-		func() -> void:
-			indicator.offset_right = -UI_THEME.space(button, 3)
-			indicator.offset_left = indicator.offset_right
-	)
-	parent.add_child(button)
-	return button
-
-
-## A disabled primary reads as not available: the neutral raised fill with a hairline
-## border and muted text (above 4.5:1 on that fill in both themes). The brass fill appears
-## only once a row is chosen. Each override re-sends theme_changed; the meta keeps this
-## from re-entering.
-func _style_waiting(button: Button) -> void:
-	if button.has_meta("_joinery_styling") or not button.is_inside_tree():
-		return
-	button.set_meta("_joinery_styling", true)
-	var normal := button.get_theme_stylebox("normal", "JoineryPrimaryButton")
-	if normal is StyleBoxFlat:
-		var waiting := (normal as StyleBoxFlat).duplicate() as StyleBoxFlat
-		var fill: Color = UI_THEME.color(button, "surface_raised")
-		var edge: Color = UI_THEME.color(button, "border_subtle")
-		waiting.bg_color = fill
-		waiting.border_color = edge
-		waiting.set_border_width_all(maxi(1, roundi(waiting.get_border_width(SIDE_LEFT))))
-		button.add_theme_stylebox_override("disabled", waiting)
-	var muted: Color = UI_THEME.color(button, "text_muted")
-	button.add_theme_color_override("font_disabled_color", muted)
-	button.add_theme_color_override("icon_disabled_color", muted)
-	button.remove_meta("_joinery_styling")
+	_content.custom_minimum_size.x = roundi(COLUMN_W * UI_THEME.unit(self))
 
 
 func _add_provider(id: String, label: String, icon: String) -> void:
 	var card := Card.new()
+	card.id = id
 	card.theme_type_variation = "JoineryCardButton"
 	card.toggle_mode = true
 	card.button_group = _group
@@ -240,10 +190,17 @@ func _add_provider(id: String, label: String, icon: String) -> void:
 	card.theme_changed.connect(_style_unavailable.bind(card))
 	card.tile = ICON_SCRIPT.tile(icon, label)
 	card.row.add_child(card.tile)
+	var names := HBoxContainer.new()
+	names.theme_type_variation = "JoineryRow"
+	names.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	card.row.add_child(names)
 	card.title = UI_COMPONENTS.label(label)
-	card.title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	card.title.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	card.row.add_child(card.title)
+	names.add_child(card.title)
+	card.badge = UI_COMPONENTS.label("Recommended", "JoineryCaption")
+	card.badge.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	card.badge.hide()
+	names.add_child(card.badge)
 	card.indicator = INDICATOR.new()
 	card.row.add_child(card.indicator)
 	card.dot = UI_COMPONENTS.status_dot("ready")
@@ -260,14 +217,15 @@ func _add_provider(id: String, label: String, icon: String) -> void:
 	card.status.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
 	card.status.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	card.row.add_child(card.status)
-	card.link = UI_COMPONENTS.link("Get it")
+	card.link = UI_COMPONENTS.link("Get ›")
+	card.link.accessibility_name = "Get " + label
 	UI_COMPONENTS.bind_height(card.link, "xs")
 	card.link.pressed.connect(_open_install_for.bind(id))
 	card.row.add_child(card.link)
-	for child: Node in card.row.get_children():
-		if child is Control and child != card.link:
+	for child: Node in card.row.find_children("*", "Control", true, false):
+		if child != card.link:
 			(child as Control).mouse_filter = Control.MOUSE_FILTER_IGNORE
-	card.pressed.connect(_select.bind(id))
+	card.pressed.connect(_choose.bind(id))
 	_list.add_child(card)
 	if _inline != null:
 		_list.move_child(_inline, -1)
@@ -279,11 +237,12 @@ func _add_provider(id: String, label: String, icon: String) -> void:
 func _card_state(id: String, data: Dictionary) -> Dictionary:
 	var confirmed: bool = not data.get("requires_key_confirmation", false) or _accepted_keys.has(id)
 	var signed_in := bool(data.get("connected", false))
-	var state := {"text": "Sign in with your account"}
+	var state := {"text": SIGN_IN}
 	if _celebrating == id:
 		state = {"text": "Connected", "done": true}
 	elif data.is_empty():
-		state = {"text": "Checking…", "checking": true}
+		# Not known yet: the indicator alone, no words.
+		state = {"text": "", "checking": true}
 	elif not data.get("supported", true):
 		state = {"text": "Not available here", "dot": "off", "blocked": true}
 	elif data.get("profile", false):
@@ -291,9 +250,12 @@ func _card_state(id: String, data: Dictionary) -> Dictionary:
 			{"text": "Key saved", "dot": "ready"} if signed_in else {"text": "Check API settings"}
 		)
 	elif not data.get("installed", false):
-		state = {"text": "Not installed", "link": data.has("install_url"), "blocked": true}
+		# Its group's caption says "Not installed"; the row keeps only its link.
+		state = {"text": "", "link": data.has("install_url"), "blocked": true}
 	elif signed_in and confirmed:
 		state = {"text": "Signed in", "dot": "ready"}
+	elif _waiting_for == id:
+		state = {"text": "Waiting for sign-in…", "checking": true}
 	return state
 
 
@@ -303,6 +265,8 @@ func _refresh_card(id: String) -> void:
 		return
 	var state := _card_state(id, _agents.get(id, {}))
 	card.status.text = str(state["text"])
+	card.status.visible = not card.status.text.is_empty()
+	card.badge.visible = id == _recommended()
 	card.indicator.set("running", state.get("checking", false))
 	var dot := str(state.get("dot", ""))
 	card.dot.visible = not dot.is_empty()
@@ -316,7 +280,12 @@ func _refresh_card(id: String) -> void:
 	card.disabled = blocked
 	card.focus_mode = Control.FOCUS_NONE if blocked else Control.FOCUS_ALL
 	card.tile.modulate.a = UNAVAILABLE_ALPHA if state.get("blocked", false) else 1.0
-	card.accessibility_name = "%s, %s" % [card.title.text, card.status.text]
+	var spoken := "Sign in" if card.status.text == SIGN_IN else card.status.text
+	if state.get("link", false):
+		spoken = "Not installed"
+	card.accessibility_name = (
+		card.title.text if spoken.is_empty() else "%s, %s" % [card.title.text, spoken]
+	)
 	card.tooltip_text = str(_agents.get(id, {}).get("reason", ""))
 
 
@@ -334,6 +303,40 @@ func _style_unavailable(card: Card) -> void:
 		flat.set_border_width_all(0)
 		card.add_theme_stylebox_override("disabled", flat)
 	card.remove_meta("_joinery_styling")
+
+
+## The first row in the list that is an agent ready to use or to sign in to.
+func _recommended() -> String:
+	if _list == null:
+		return ""
+	for child: Node in _list.get_children():
+		var card := child as Card
+		if card == null or not AGENT_NAMES.has(card.id):
+			continue
+		var data: Dictionary = _agents.get(card.id, {})
+		if data.get("installed", false) and data.get("supported", true):
+			return card.id
+	return ""
+
+
+## A row pressed: choose it, and for an installed agent that is not signed in yet, start
+## its sign-in at once. A background status check in flight gives way to it.
+func _choose(id: String) -> void:
+	_select(id)
+	var data: Dictionary = _agents.get(id, {})
+	var needs_sign_in: bool = (
+		AGENT_NAMES.has(id)
+		and data.get("supported", true)
+		and data.get("installed", false)
+		and not data.get("connected", false)
+		and _waiting_for != id
+	)
+	if not needs_sign_in or _page != "choices":
+		return
+	if _job != null and _action == "status":
+		_job.cancel()
+		_job = null
+	_start("login")
 
 
 func _select(id: String, user_choice: bool = true) -> void:
@@ -357,13 +360,12 @@ func _display_name(id: String) -> String:
 
 func _update() -> void:
 	var data: Dictionary = _agents.get(_selected, {})
-	var installed := bool(data.get("installed", false))
 	var supported := bool(data.get("supported", true))
 	var ready := _can_continue(data)
 	_detail.text = ""
 	_detail.theme_type_variation = "JoineryCaption"
 	if _selected.is_empty():
-		_detail.text = CHOOSE_HINT if _page == "choices" else ""
+		_detail.text = ""
 	elif not supported:
 		_detail.text = str(data.get("reason", UNAVAILABLE))
 		_detail.theme_type_variation = "JoineryError"
@@ -374,9 +376,9 @@ func _update() -> void:
 	_detail.visible = not _detail.text.is_empty()
 	_message.visible = not _message.text.is_empty()
 	_place_inline()
+	_update_actions()
 	for id: String in _buttons:
 		_refresh_card(id)
-	_update_actions(data, supported, installed, ready)
 	if ready and _job == null and _auto_redirect and _page == "choices" and not _redirecting:
 		_message.text = ""
 		_message.hide()
@@ -384,46 +386,24 @@ func _update() -> void:
 		_finish.call_deferred()
 
 
-func _update_actions(data: Dictionary, supported: bool, installed: bool, ready: bool) -> void:
-	var name_text := _display_name(_selected)
-	var busy := _job != null and _action != "status"
-	if _waiting_for == _selected and Time.get_ticks_msec() / 1000.0 - _waiting_since > SIGN_IN_WAIT:
+func _update_actions() -> void:
+	# A sign-in that never came back stops waiting, so its row can be pressed again.
+	if _waiting_for != "" and Time.get_ticks_msec() / 1000.0 - _waiting_since > SIGN_IN_WAIT:
 		_waiting_for = ""
-	var waiting := not ready and not _selected.is_empty() and _waiting_for == _selected
-	_login.visible = supported and installed and not ready and AGENT_NAMES.has(_selected)
-	_login.text = "Waiting for sign-in…" if waiting else "Sign in to " + name_text
-	_login.disabled = busy or waiting
-	_login.get_node("Indicator").set("running", waiting)
-	_install.visible = (
-		supported and not installed and not data.is_empty() and data.has("install_url")
-	)
-	_install.text = "Get " + name_text
-	_continue.visible = not _login.visible and not _install.visible
-	_continue.text = "Continue with " + name_text if ready else "Continue"
-	_continue.disabled = not ready or busy or not _celebrating.is_empty()
-	_continue.tooltip_text = _continue_reason(data, ready)
-	_api.disabled = busy
-
-
-func _continue_reason(data: Dictionary, ready: bool) -> String:
-	if ready:
-		return ""
-	if _selected.is_empty():
-		return "Choose an account first."
-	if data.is_empty():
-		return "Checking this account…"
-	if not data.get("supported", true):
-		return str(data.get("reason", UNAVAILABLE))
-	return "Check this connection in API settings."
+	_api.disabled = _job != null and _action != "status"
 
 
 ## Keep the detail and message lines directly under the selected card.
 func _place_inline() -> void:
 	var card: Control = _buttons.get(_selected)
-	var index := _list.get_child_count() - 1 if card == null else card.get_index() + 1
+	var parent: Node = _list if card == null else card.get_parent()
+	if _inline.get_parent() != parent:
+		_inline.get_parent().remove_child(_inline)
+		parent.add_child(_inline)
+	var index := parent.get_child_count() - 1 if card == null else card.get_index() + 1
 	if card != null and _inline.get_index() < card.get_index():
 		index -= 1
-	_list.move_child(_inline, clampi(index, 0, _list.get_child_count() - 1))
+	parent.move_child(_inline, clampi(index, 0, parent.get_child_count() - 1))
 	_inline.visible = _detail.visible or _message.visible
 
 
@@ -572,6 +552,7 @@ func _apply_status(payload: Dictionary) -> void:
 				_selected = ""
 	if _waiting_for != "" and _can_continue(_agents.get(_waiting_for, {})):
 		_waiting_for = ""
+	_place_cards()
 	if not _restored:
 		_restored = true
 		_sort_cards()
@@ -603,8 +584,40 @@ func _sort_cards() -> void:
 			var rb: int = rank.call(b)
 			return ra < rb or (ra == rb and ids.find(a) < ids.find(b))
 	)
-	for index: int in order.size():
-		_list.move_child(_buttons[order[index]], index)
+	var at := {_list: 0, _missing: 0}
+	for id: String in order:
+		var card: Card = _buttons[id]
+		var parent := card.get_parent()
+		parent.move_child(card, at[parent])
+		at[parent] += 1
+
+
+## An agent that isn't installed sits under "Not installed"; once it is, it joins the list.
+## A row moves only when that changes, never on an ordinary refresh.
+func _place_cards() -> void:
+	for id: String in AGENT_NAMES:
+		var card: Card = _buttons.get(id)
+		var data: Dictionary = _agents.get(id, {})
+		if card == null or data.is_empty():
+			continue
+		var missing: bool = not data.get("installed", false) and data.get("supported", true)
+		var target := _missing if missing else _list
+		if card.get_parent() == target:
+			continue
+		if _inline.get_parent() == card.get_parent():
+			_inline.get_parent().remove_child(_inline)
+			_list.add_child(_inline)
+		card.get_parent().remove_child(card)
+		target.add_child(card)
+		if target == _list:
+			# Agents come before the API connections that follow them.
+			var last_agent := -1
+			for child: Node in _list.get_children():
+				if child is Card and child != card and AGENT_NAMES.has((child as Card).id):
+					last_agent = child.get_index()
+			_list.move_child(card, last_agent + 1)
+	_missing_box.visible = _missing.get_child_count() > 0
+	_place_inline()
 
 
 func _add_profile(profile: Dictionary) -> void:
@@ -653,10 +666,6 @@ func open_settings() -> void:
 	show()
 
 
-func _open_install() -> void:
-	_open_install_for(_selected)
-
-
 func _open_install_for(id: String) -> void:
 	var data: Dictionary = _agents.get(id, {})
 	var agent_id := str(data.get("driver", id))
@@ -689,7 +698,7 @@ func _finish(user_choice := false) -> void:
 	_celebrating = _selected
 	selected_profile = profile
 	_refresh_card(_selected)
-	_update_actions(data, true, true, true)
+	_update_actions()
 	UI_MOTION.pulse(_buttons[_selected])
 	await get_tree().create_timer(UI_MOTION.duration("confirm")).timeout
 	UI_MOTION.exit(_content, null, _emit.bind(agent, method, profile))
