@@ -1,0 +1,186 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ninjacornix <milanvrankic@gmail.com>
+Date: Fri, 13 Nov 2026 17:26:54 +0100
+Subject: [PATCH] feat(editor): lighter headings, name first in the new-project
+ step
+
+Joinery-only, not for upstream. Joinery's headings (JoineryTitle, JoineryDisplay, JoinerySection, the
+wordmark and the starting points' names) use a semibold made from the
+regular Inter instead of Bold, with titles at 1.15 and display at 1.6 of
+the body size, as in the addon. The new-project step puts the name and
+folder first, so the one required field is in view, then the starting
+points on cards with the page's fill and a softer hairline. The empty
+project list sits a little above the middle in a 640 px column, its
+heading at display size and its pictures larger and sharp on HiDPI.
+---
+ editor/project_manager/project_dialog.cpp  |  9 ++++---
+ editor/project_manager/project_manager.cpp | 20 ++++++++++++---
+ editor/themes/editor_theme_manager.cpp     | 29 ++++++++++++++--------
+ 3 files changed, 41 insertions(+), 17 deletions(-)
+
+diff --git a/editor/project_manager/project_dialog.cpp b/editor/project_manager/project_dialog.cpp
+index 4ea822a..a58b1ce 100644
+--- a/editor/project_manager/project_dialog.cpp
++++ b/editor/project_manager/project_dialog.cpp
+@@ -2615,7 +2615,8 @@ void ProjectDialog::_joinery_build_cards() {
+ 		memdelete(child);
+ 	}
+ 	joinery_cards.clear();
+-	const Ref<Font> bold = get_theme_font(SNAME("bold"), EditorStringName(EditorFonts));
++	// The names in the theme's semibold: they label a picture, they don't shout.
++	const Ref<Font> bold = get_theme_font(SNAME("joinery_semibold"), EditorStringName(EditorFonts));
+ 	for (int i = 0; i < joinery_blueprints.size(); i++) {
+ 		const Dictionary blueprint = joinery_blueprints[i];
+ 		const String name = blueprint.get("name", "");
+@@ -5107,8 +5108,10 @@ ProjectDialog::ProjectDialog() {
+ 		joinery_pitch->connect(SceneStringName(text_submitted), callable_mp(this, &ProjectDialog::_joinery_next_pressed).unbind(1));
+ 		joinery_pitch_box->add_child(joinery_pitch);
+ 	}
+-	// The starting points are the step's main choice, so they stay first,
+-	// right under the banner; the name, folder and pitch follow.
++	// The name (the one field the step needs) and the folder lead, so they are
++	// in view without scrolling; the starting points follow as a compact grid,
++	// then the pitch.
++	vb->move_child(joinery_start_box, msg->get_index());
+ 
+ 	// Renderer selection.
+ 	renderer_container = memnew(VBoxContainer);
+diff --git a/editor/project_manager/project_manager.cpp b/editor/project_manager/project_manager.cpp
+index 7080272..e8b1c46 100644
+--- a/editor/project_manager/project_manager.cpp
++++ b/editor/project_manager/project_manager.cpp
+@@ -1711,7 +1711,7 @@ ProjectManager::ProjectManager() {
+ 				// Joinery: a blankslate in one 480 px column. Three starting
+ 				// points as pictures, one heading, then New project and Open….
+ 				empty_list_placeholder->set_h_size_flags(SIZE_SHRINK_CENTER);
+-				empty_list_placeholder->set_custom_minimum_size(Size2(480, 0) * EDSCALE);
++				empty_list_placeholder->set_custom_minimum_size(Size2(640, 0) * EDSCALE);
+ 				joinery_blank_shots = memnew(HBoxContainer);
+ 				joinery_blank_shots->set_alignment(BoxContainer::ALIGNMENT_CENTER);
+ 				joinery_blank_shots->add_theme_constant_override("separation", 8 * EDSCALE);
+@@ -1720,7 +1720,7 @@ ProjectManager::ProjectManager() {
+ 				empty_list_placeholder->add_child(joinery_blank_shots);
+ 				joinery_blank_title = memnew(Label);
+ 				joinery_blank_title->set_text(TTRC("Make your first game"));
+-				joinery_blank_title->set_theme_type_variation(SNAME("JoineryTitle"));
++				joinery_blank_title->set_theme_type_variation(SNAME("JoineryDisplay"));
+ 				joinery_blank_title->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_CENTER);
+ 				empty_list_placeholder->add_child(joinery_blank_title);
+ 
+@@ -1758,6 +1758,12 @@ ProjectManager::ProjectManager() {
+ 				empty_list_online_warning->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+ 				empty_list_online_warning->set_text(TTRC("Note: The Asset Store requires an online connection and involves sending data over the internet."));
+ 				empty_list_placeholder->add_child(empty_list_online_warning);
++				// Optical centre: a little above the middle of the page, so the
++				// block doesn't read as sagging under the header.
++				Control *lift = memnew(Control);
++				lift->set_custom_minimum_size(Size2(0, 96) * EDSCALE);
++				lift->set_mouse_filter(MOUSE_FILTER_IGNORE);
++				empty_list_placeholder->add_child(lift);
+ 			}
+ 
+ 			// The side bar with the edit, run, rename, etc. buttons.
+@@ -2234,7 +2240,7 @@ void ProjectManager::_joinery_build_blankslate() {
+ 	if (!joinery_blank_shots || joinery_blank_shots->get_child_count() > 0 || joinery_home.is_empty()) {
+ 		return;
+ 	}
+-	const int width = 152 * EDSCALE;
++	const int width = 200 * EDSCALE;
+ 	for (const char *id : { "first-person-3d", "platformer-2d", "top-down" }) {
+ 		const String path = joinery_home.path_join("blueprints").path_join(id).path_join("capture.png");
+ 		if (!FileAccess::exists(path)) {
+@@ -2246,8 +2252,14 @@ void ProjectManager::_joinery_build_blankslate() {
+ 		}
+ 		Ref<Image> shot = image->duplicate();
+ 		const int height = width * 9 / 16;
+-		shot->resize(width, height, Image::INTERPOLATE_LANCZOS);
++		// Keep the capture's own pixels where it has them (sharp on a HiDPI
++		// screen) and let mipmaps take it down smoothly; never upscale.
++		if (shot->get_width() < width) {
++			shot->resize(width, height, Image::INTERPOLATE_LANCZOS);
++		}
++		shot->generate_mipmaps();
+ 		TextureRect *picture = memnew(TextureRect);
++		picture->set_texture_filter(TEXTURE_FILTER_LINEAR_WITH_MIPMAPS);
+ 		picture->set_texture(ImageTexture::create_from_image(shot));
+ 		picture->set_expand_mode(TextureRect::EXPAND_IGNORE_SIZE);
+ 		picture->set_stretch_mode(TextureRect::STRETCH_KEEP_ASPECT_COVERED);
+diff --git a/editor/themes/editor_theme_manager.cpp b/editor/themes/editor_theme_manager.cpp
+index 242be25..ff41f5a 100644
+--- a/editor/themes/editor_theme_manager.cpp
++++ b/editor/themes/editor_theme_manager.cpp
+@@ -341,9 +341,16 @@ static void _joinery_populate_styles(const Ref<EditorTheme> &p_theme, const Edit
+ 	}
+ 
+ 	// Type steps, as multiples of the editor font size (which already
+-	// includes the editor scale): caption 0.85, title 1.3, display 1.7.
++	// includes the editor scale): caption 0.85, title 1.15, display 1.6, as in
++	// the addon's ui_theme.gd. Headings are semibold, never bold: Godot ships
++	// Inter only as Regular and Bold, so semibold is the regular face lightly
++	// emboldened, the same weight the sidebar uses.
+ 	const int body = p_theme->get_font_size("main_size", EditorStringName(EditorFonts));
+-	const Ref<Font> bold = p_theme->get_font("bold", EditorStringName(EditorFonts));
++	Ref<FontVariation> bold;
++	bold.instantiate();
++	bold->set_base_font(p_theme->get_font("main", EditorStringName(EditorFonts)));
++	bold->set_variation_embolden(0.35);
++	p_theme->set_font("joinery_semibold", EditorStringName(EditorFonts), bold);
+ 
+ 	p_theme->set_type_variation("JoineryCaption", "Label");
+ 	p_theme->set_font_size(SceneStringName(font_size), "JoineryCaption", (int)Math::round(body * 0.85));
+@@ -353,11 +360,11 @@ static void _joinery_populate_styles(const Ref<EditorTheme> &p_theme, const Edit
+ 	p_theme->set_color(SceneStringName(font_color), "JoineryMuted", text_muted);
+ 
+ 	p_theme->set_type_variation("JoineryTitle", "Label");
+-	p_theme->set_font_size(SceneStringName(font_size), "JoineryTitle", (int)Math::round(body * 1.3));
++	p_theme->set_font_size(SceneStringName(font_size), "JoineryTitle", (int)Math::round(body * 1.15));
+ 	p_theme->set_font(SceneStringName(font), "JoineryTitle", bold);
+ 
+ 	p_theme->set_type_variation("JoineryDisplay", "Label");
+-	p_theme->set_font_size(SceneStringName(font_size), "JoineryDisplay", (int)Math::round(body * 1.7));
++	p_theme->set_font_size(SceneStringName(font_size), "JoineryDisplay", (int)Math::round(body * 1.6));
+ 	p_theme->set_font(SceneStringName(font), "JoineryDisplay", bold);
+ 
+ 	p_theme->set_type_variation("JoinerySection", "Label");
+@@ -480,21 +487,23 @@ static void _joinery_populate_styles(const Ref<EditorTheme> &p_theme, const Edit
+ 	// accent edge, so the one accent fill on the page stays the primary action.
+ 	p_theme->set_type_variation("JoineryCard", "Button");
+ 	{
++		// The page's own fill and a softened hairline: the pictures lead, not
++		// the boxes around them.
+ 		Ref<StyleBoxFlat> card;
+ 		card.instantiate();
+-		card->set_bg_color(raised);
++		card->set_bg_color(p_config.base_color);
+ 		card->set_border_width_all(hairline);
+-		card->set_border_color(border_subtle);
++		card->set_border_color(p_config.base_color.lerp(border_subtle, 0.7));
+ 		card->set_corner_radius_all(radius);
+ 		card->set_content_margin_all(0);
+ 		Ref<StyleBoxFlat> card_hover = card->duplicate();
+-		card_hover->set_bg_color(raised.lerp(text, 0.05));
++		card_hover->set_bg_color(p_config.base_color.lerp(text, 0.04));
+ 		card_hover->set_border_color(border_strong);
+ 		Ref<StyleBoxFlat> card_chosen = card->duplicate();
+ 		card_chosen->set_border_width_all(2 * hairline);
+ 		card_chosen->set_border_color(accent);
+ 		Ref<StyleBoxFlat> card_chosen_hover = card_chosen->duplicate();
+-		card_chosen_hover->set_bg_color(raised.lerp(text, 0.05));
++		card_chosen_hover->set_bg_color(p_config.base_color.lerp(text, 0.04));
+ 		Ref<StyleBoxFlat> card_disabled = card->duplicate();
+ 		card_disabled->set_bg_color(Color(raised, 0.0));
+ 		p_theme->set_stylebox(CoreStringName(normal), "JoineryCard", card);
+@@ -599,11 +608,11 @@ static void _joinery_populate_styles(const Ref<EditorTheme> &p_theme, const Edit
+ 		p_theme->set_stylebox("fill", "JoineryProgress", fill);
+ 	}
+ 
+-	// The wordmark in the Project Manager: display size, bold, in the plain
++	// The wordmark in the Project Manager: title size, semibold, in the plain
+ 	// font colour, drawn as a flat button so it opens About. Flush left, so it
+ 	// shares the page's left edge with the line and the bar under it.
+ 	p_theme->set_type_variation("JoineryWordmark", "JoineryTextButton");
+-	p_theme->set_font_size(SceneStringName(font_size), "JoineryWordmark", (int)Math::round(body * 1.7));
++	p_theme->set_font_size(SceneStringName(font_size), "JoineryWordmark", (int)Math::round(body * 1.3));
+ 	p_theme->set_font(SceneStringName(font), "JoineryWordmark", bold);
+ }
+ 
