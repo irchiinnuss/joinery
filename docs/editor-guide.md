@@ -127,13 +127,19 @@ drafted from the starting point's preset alone. Changing its content
 invalidates approval; use `/art` to review and approve the current version
 again. An agent cannot approve its own direction or file changes (ADR 0033).
 
-`/art` opens the art direction as a sidebar page, in place of the chat like
-Settings: whether this version is approved, what to fix first (each with
-**Ask**), the rules you decide (Feel, Look, Palette, Sound, Never) in one card
-with the ones not written yet on one **Still open** line, the reference board,
-and the technical rules folded away. **Approve these rules** stays at the
-bottom; only your click on it approves. The back arrow or Esc returns to the
-chat. Without the sidebar the same rules open in a window.
+`/art` opens **The look** as a sidebar page, in place of the chat like
+Settings. The palette leads as colour (hover a swatch for its role and hex,
+click it to change it with Journeyman), then the reference pictures (click one
+to see it full size with what to take and what to leave), the feel as one
+sentence and tags, **Never** as chips, and **Sound**. A section not decided yet
+reads **Not decided yet** with **Decide with me**; the checked rules are folded
+away. The footer says **Draft** or **Approved · 12 Nov**, with **Approve look**;
+only your click on it approves. A required section still open (the palette)
+holds Approve until it is chosen. A draft in the first layout is updated to the
+new one without asking; an approved one keeps its layout. When asset work
+waits for the look, the chat shows it in small with **Review the look**. The
+back arrow or Esc returns to the chat. Without the sidebar the same look opens
+in a window.
 Use `/tools` for actual MCP connection/probe status; diagnostics stay in Output.
 
 ### Reviewing a change
@@ -202,11 +208,13 @@ never takes it either. After you click an animation, **Space** plays or pauses
 and **Left** / **Right** step a frame. Moving to another change crossfades;
 Reduce motion makes every transition instant.
 
-In the chat, the request's card shows the waiting change as a tiny picture,
-the same line of facts and **Discard** / **Accept**, so a small change is
-decided without opening the panel. A bigger one (several assets, many changed
-lines, or a reviewer's warning) offers **Review** instead, which brings the
-panel up.
+In the chat, the finished steps fold into one line ("Blender · 5 steps ·
+0:14"), and the waiting change shows large across its card, named by its file
+("door.blend · +1 sound"), with **Try other ways** on the left and **Discard** /
+**Accept** on the right, so a small change is decided without opening the panel.
+Cmd+Enter accepts and Cmd+Backspace discards while you are not typing a message.
+A bigger one (several assets, many changed lines, or a reviewer's warning)
+offers **Review 2 changes** instead, which brings the panel up.
 
 ### Accepting changes automatically
 
