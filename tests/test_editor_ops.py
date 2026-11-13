@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from joinery.editor_ops import (
     NodeOperation,
+    SceneEdit,
     node_name_problem,
     suggest_node_name,
     validate_edit,
@@ -195,6 +196,53 @@ def test_on_a_plain_node_keeps_its_placement(game: Path) -> None:
 def test_an_explicit_parent_is_kept_on_an_instance(game: Path) -> None:
     op = place_on(game, f"{KITCHEN}::Room/Table", parent=f"{KITCHEN}::Shelf")
     assert op.parent == f"{KITCHEN}::Shelf"
+
+
+def kitchen_edit(game: Path, operation: dict) -> SceneEdit:
+    context = kitchen()
+    known = tuple(row["id"] for row in json.loads(context["nodes"]))
+    return validate_edit(
+        game, {"summary": "Edit", "operations": [operation]}, known, context
+    )
+
+
+def test_placing_beside_an_instance_is_said(game: Path) -> None:
+    edit = kitchen_edit(game, {**MUG, "on": f"{KITCHEN}::Room/Table/Top"})
+    assert edit.notes == ["placed beside 'Table' (an instanced scene)"]
+    # Never part of what the editor is sent.
+    assert "notes" not in edit.model_dump() and "_notes" not in edit.model_dump()
+    assert kitchen_edit(game, {**MUG, "on": f"{KITCHEN}::Shelf"}).notes == []
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        {"operation": "create_node"},
+        {**MUG},
+        {**MUG, "on": f"{KITCHEN}::Shelf"},
+        {"operation": "duplicate_node", "target": f"{KITCHEN}::Shelf"},
+        {"operation": "reparent_node", "target": f"{KITCHEN}::Shelf"},
+    ],
+)
+@pytest.mark.parametrize(
+    ("parent", "named"), [("Room/Table/Top", "Top"), ("Room/Table", "Table")]
+)
+def test_a_parent_inside_an_instance_is_refused(
+    game: Path, operation: dict, parent: str, named: str
+) -> None:
+    message = (
+        f"'{named}' is inside the instanced scene 'Table'; its children come from "
+        f"table.tscn. Use parent '{KITCHEN}::Room' or open table.tscn."
+    )
+    with pytest.raises(ValueError, match=re.escape(message)):
+        kitchen_edit(game, {**operation, "parent": f"{KITCHEN}::{parent}"})
+
+
+def test_a_parent_beside_an_instance_is_fine(game: Path) -> None:
+    edit = kitchen_edit(
+        game, {"operation": "create_node", "parent": f"{KITCHEN}::Room"}
+    )
+    assert edit.operations[0].model_dump()["parent"] == f"{KITCHEN}::Room"
 
 
 @pytest.mark.parametrize(

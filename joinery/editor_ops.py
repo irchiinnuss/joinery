@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Mapping
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Annotated, Literal
 
 from pydantic import (
@@ -15,6 +15,7 @@ from pydantic import (
     Field,
     FiniteFloat,
     JsonValue,
+    PrivateAttr,
     model_validator,
 )
 
@@ -230,6 +231,48 @@ class SceneEdit(BaseModel):
     model_config = ConfigDict(extra="forbid")
     summary: str = Field(min_length=1, max_length=160)
     operations: list[Operation] = Field(min_length=1, max_length=32)
+    #: What validation did that the agent should tell the user ("placed beside
+    #: 'Table' (an instanced scene)"); never sent to the editor.
+    _notes: list[str] = PrivateAttr(default_factory=list)
+
+    @property
+    def notes(self) -> list[str]:
+        return self._notes
+
+
+#: Operations that put a node under ``parent``.
+_PARENTED = frozenset(
+    {"create_node", "instantiate_scene", "duplicate_node", "reparent_node"}
+)
+
+
+def _name_of(identity: str) -> str:
+    path = identity.partition("::")[2]
+    return path.rpartition("/")[2] or path
+
+
+def _no_parent_in_instances(edit: SceneEdit, editor_context: Mapping[str, str]) -> None:
+    """Refuse an explicit parent that is an instanced scene or inside one.
+
+    Children added there are saved as overrides of the instance and break when
+    it changes or the scene is reopened; the agent is told where to put it.
+    """
+    for operation in edit.operations:
+        if not isinstance(operation, NodeOperation) or not operation.parent:
+            continue
+        if operation.operation not in _PARENTED:
+            continue
+        root = placement.instance_root(operation.parent, editor_context)
+        if not root:
+            continue
+        source = PurePosixPath(
+            placement.instance_source(root, editor_context).removeprefix("res://")
+        ).name
+        raise ValueError(
+            f"'{_name_of(operation.parent)}' is inside the instanced scene "
+            f"'{_name_of(root)}'; its children come from {source}. Use parent "
+            f"'{placement.beside_instance(root, editor_context)}' or open {source}."
+        )
 
 
 def _beside_instances(edit: SceneEdit, editor_context: Mapping[str, str]) -> None:
@@ -251,6 +294,8 @@ def _beside_instances(edit: SceneEdit, editor_context: Mapping[str, str]) -> Non
         if parent:
             operation.parent = parent
             operation.as_child = False
+            root = placement.instance_root(operation.on, editor_context)
+            edit.notes.append(f"placed beside '{_name_of(root)}' (an instanced scene)")
 
 
 def validate_edit(
@@ -270,6 +315,7 @@ def validate_edit(
     if verdict:
         raise ValueError(verdict.reason)
     if editor_context:
+        _no_parent_in_instances(edit, editor_context)
         _beside_instances(edit, editor_context)
     for operation in edit.operations:
         if (
@@ -309,7 +355,8 @@ SCENE_TOOL = {
         "To put it on something (a mug on a table), pass on with that node's identity: it rests on the node's top, "
         "centred, beside it under the same parent; at [x, z] moves it that many metres from the centre and as_child "
         "true puts it under the node. On an instanced scene (a placed model or .tscn, or a node inside one) "
-        "it always goes beside the instance under the instance's parent, as_child or not, so the scene saves cleanly. "
+        "it always goes beside the instance under the instance's parent, as_child or not, so the scene saves cleanly; the result's notes say so, tell the user. "
+        "Never pass a parent that is an instanced scene or inside one. "
         "Node names use letters, digits and underscores; never '#', '.', ':', '@', '/', '\"' or '%'. "
         "Use this tool for requested live scene changes instead of manual steps. The user then accepts "
         "or rejects the preview in the Review panel below the viewport. Do not claim a preview is accepted or saved."

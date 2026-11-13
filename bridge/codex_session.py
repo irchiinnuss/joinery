@@ -626,6 +626,9 @@ class CodexSession:
                 }
             )
             result = await asyncio.wait_for(future, timeout=30)
+            if result.get("success") and edit.notes:
+                # What the edit did that the user should hear ("placed beside ...").
+                result = {**result, "notes": [*result.get("notes", []), *edit.notes]}
         except (
             OSError,
             ValueError,

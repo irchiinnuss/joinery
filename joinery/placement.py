@@ -208,6 +208,11 @@ def instance_root(identity: str, editor_context: Mapping[str, str]) -> str:
     return ""
 
 
+def instance_source(identity: str, editor_context: Mapping[str, str]) -> str:
+    """The scene file ``identity``'s node comes from ("res://art/table.tscn")."""
+    return str(_rows(editor_context).get(identity, {}).get("source", "") or "")
+
+
 def beside_instance(identity: str, editor_context: Mapping[str, str]) -> str:
     """Where a node put on ``identity`` goes when that is an instanced scene: the
     instance's parent, so the new node is its sibling and never a child inside it.

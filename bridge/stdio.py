@@ -321,6 +321,9 @@ async def _serve(
             )
             result = await asyncio.wait_for(future, 30)
             ok = bool(result.get("success"))
+            if ok and edit.notes:
+                # What the edit did that the user should hear ("placed beside ...").
+                result = {**result, "notes": [*result.get("notes", []), *edit.notes]}
             return result
         finally:
             turn.record_live_edit(scene, ok, edit.model_dump(mode="json"))
