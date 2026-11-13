@@ -43,7 +43,9 @@ func _init() -> void:
 	STYLE.on_theme_overrides(
 		self,
 		func() -> void:
-			label.add_theme_color_override("font_color", UI_THEME.color(self, "text_faint"))
+			# The editor's theme carries no Joinery roles: read the role for the current theme.
+			var faint := UI_THEME.color(self, "text_faint")
+			label.add_theme_color_override("font_color", faint)
 			label.add_theme_font_size_override("font_size", UI_THEME.font_size(self, "caption"))
 			var parent := get_parent() as MarginContainer
 			var pad := UI_THEME.space(self, 2)
