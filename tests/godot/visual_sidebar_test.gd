@@ -132,13 +132,14 @@ func _shot(state: String, light: bool, width: int, chat: Control) -> void:
 	_check(_checks.snapshot(screen, root, [chat]), "Capture " + screen)
 
 
-func _thumbnail() -> String:
+func _thumbnail(before := false) -> String:
 	DirAccess.make_dir_recursive_absolute(OS.get_cache_dir())
-	var path := OS.get_cache_dir().path_join("joinery-visual-door.png")
+	var path := OS.get_cache_dir().path_join("joinery-visual-door%s.png" % int(before))
 	var image := Image.create(320, 240, false, Image.FORMAT_RGBA8)
 	image.fill(Color("3a3d42"))
-	image.fill_rect(Rect2i(110, 30, 100, 190), Color("6b4423"))
-	image.fill_rect(Rect2i(186, 120, 12, 12), Color("c9a14a"))
+	var wide := 80 if before else 100
+	image.fill_rect(Rect2i(160 - wide / 2, 30, wide, 190), Color("8a5a33" if before else "6b4423"))
+	image.fill_rect(Rect2i(160 + wide / 2 - 24, 120, 12, 12), Color("c9a14a"))
 	_check(image.save_png(path) == OK, "Save the review thumbnail fixture")
 	return path
 
@@ -193,12 +194,7 @@ func _states(light: bool, width: int) -> void:
 	_check(not str(footer.call("text")).contains("Ready"), "The sidebar never says Ready")
 	await _shot("empty", light, width, chat)
 	# Something selected: the start names it and offers requests for its kind.
-	var door := {
-		"label": "Door",
-		"kind": "Object",
-		"node_type": "MeshInstance3D",
-		"scene_file": "visual.tscn",
-	}
+	var door := {"label": "Door", "kind": "Object", "node_type": "MeshInstance3D"}
 	chat.get("_transcript").call("set_start_context", [door], "visual.tscn")
 	await _shot("empty-selected", light, width, chat)
 	chat.get("_transcript").call("set_start_context", [], "visual.tscn")
@@ -292,7 +288,14 @@ func _states(light: bool, width: int) -> void:
 		. show_file_review(
 			"Widen the door",
 			"~ art/props/door.blend\n~ art/props/door.glb",
-			[{"path": "art/props/door.glb", "media": "image", "after": still}],
+			[
+				{
+					"path": "art/props/door.glb",
+					"media": "image",
+					"before": _thumbnail(true),
+					"after": still,
+				}
+			],
 		)
 	)
 	_check(

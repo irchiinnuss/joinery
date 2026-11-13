@@ -254,8 +254,25 @@ func glance() -> Dictionary:
 		"count": _media.asset_count(),
 		"simple": _summary.simple(_media.asset_count()),
 		"thumbnail": _media.thumbnail(),
+		"before": _before_picture(),
 		"title": _title.text,
 	}
+
+
+## The first picture's "before" side, when a change has both sides as images (an edited
+## texture, a model rendered before and after); null for a new asset or none.
+func _before_picture() -> Texture2D:
+	for item: Variant in _media.get("_items"):
+		var entry := item as Dictionary
+		if entry == null or str(entry.get("media", "")) != "image":
+			continue
+		var old := str(entry.get("before", ""))
+		if old.is_empty() or not entry.has("after") or not FileAccess.file_exists(old):
+			continue
+		var image := Image.load_from_file(old)
+		if image != null and not image.is_empty():
+			return ImageTexture.create_from_image(image)
+	return null
 
 
 ## Bring the panel into view (the chat card's Review link).

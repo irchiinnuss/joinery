@@ -1,7 +1,8 @@
 @tool
 extends PanelContainer
 ## The change waiting for a decision, inside its chat card: the change large (its turntable or
-## picture at 16:9 across the card, at most 360 px tall), one caption line naming it
+## picture at 16:9 across the card, at most 360 px tall; before and after side by side, each
+## labelled, when the change has a before picture), one caption line naming it
 ## ("door.blend · +1 sound ›", the chevron opens the Review panel), and the decision row:
 ## "Try other ways" quiet on the leading edge, Discard and Accept (the view's one accent) on the
 ## trailing edge. In a narrow sidebar "Try other ways" takes its own line above the buttons. A
@@ -31,6 +32,11 @@ var waiting := false
 var _review: Object
 var _frame: PanelContainer
 var _thumb: TextureRect
+## The before picture, left of the after one, shown only when the change has one.
+var _before: Control
+var _before_thumb: TextureRect
+## "After" on the after picture, shown only beside a before one.
+var _after_tag: Control
 var _line: Label
 var _details: Button
 var _decision: HBoxContainer
@@ -55,11 +61,26 @@ func _init() -> void:
 	_frame.clip_children = CanvasItem.CLIP_CHILDREN_AND_DRAW
 	_frame.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	column.add_child(_frame)
-	_thumb = TextureRect.new()
-	_thumb.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	_thumb.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	_thumb.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_frame.add_child(_thumb)
+	var sides := HBoxContainer.new()
+	sides.name = "Sides"
+	sides.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	STYLE.on_theme_overrides(
+		sides,
+		func() -> void:
+			sides.add_theme_constant_override("separation", maxi(1, roundi(UI_THEME.unit(sides))))
+	)
+	_frame.add_child(sides)
+	var before := _side("Before")
+	_before = before[0]
+	_before_thumb = before[1]
+	_before.name = "Before"
+	_before.hide()
+	sides.add_child(_before)
+	var after := _side("After")
+	_thumb = after[1]
+	_after_tag = after[2]
+	_after_tag.hide()
+	sides.add_child(after[0])
 	STYLE.on_theme_overrides(
 		_frame,
 		func() -> void:
@@ -187,6 +208,10 @@ func refresh(media: Array = []) -> void:
 	if _thumb.texture != picture:
 		_thumb.texture = picture
 		_frame.theme_changed.emit()
+	var old: Texture2D = glance.get("before") as Texture2D
+	_before_thumb.texture = old
+	_before.visible = old != null and picture != null
+	_after_tag.visible = _before.visible
 	_frame.visible = picture != null
 	_line.text = str(glance.get("line", ""))
 	_line.tooltip_text = str(glance.get("title", _line.text))
@@ -221,6 +246,45 @@ func thumbnail() -> Texture2D:
 ## True when Accept and Discard are offered here.
 func decidable() -> bool:
 	return visible and _accept.visible
+
+
+## One side of the preview: the picture filling its half, and a small tag ("Before",
+## "After") on its lower-left corner. Returns [side, picture, tag].
+func _side(words: String) -> Array:
+	var side := Control.new()
+	side.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	side.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var picture := TextureRect.new()
+	picture.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	picture.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	picture.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	picture.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	side.add_child(picture)
+	var tag := PanelContainer.new()
+	tag.name = words
+	tag.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	tag.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
+	tag.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	side.add_child(tag)
+	var text := UI.label(words, "JoineryCaption")
+	text.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	tag.add_child(text)
+	STYLE.on_theme_overrides(
+		tag,
+		func() -> void:
+			# A dark chip over the picture, whatever the theme: it sits on the render.
+			var box := StyleBoxFlat.new()
+			box.bg_color = Color(0.08, 0.08, 0.09, 0.72)
+			box.set_corner_radius_all(UI_THEME.radius(tag, "full"))
+			box.content_margin_left = UI_THEME.space(tag, 2)
+			box.content_margin_right = UI_THEME.space(tag, 2)
+			tag.add_theme_stylebox_override("panel", box)
+			var inset := float(UI_THEME.space(tag, 2))
+			tag.offset_left = inset
+			tag.offset_bottom = -inset
+			text.add_theme_color_override("font_color", Color("eeede8"))
+	)
+	return [side, picture, tag]
 
 
 ## The first "after" image of [param media] whose file exists, as a texture.
