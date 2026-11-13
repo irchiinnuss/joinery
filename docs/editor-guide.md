@@ -36,9 +36,11 @@ docking tab bar.
 
 Scene tabs sit above the viewport: click a tab to switch between open scenes,
 or **+** at the end of the tabs to make a new scene (also **Scene > New Scene**,
-Ctrl+N or Cmd+N). Right of the tabs, **2D | 3D | Script** (and **Game** while
-the game runs) shows which Godot screen is open and switches it. The 3D
-viewport's mode tools and Use Snap show by default. Type `/toolbar` in
+Ctrl+N or Cmd+N). Godot's own 2D, 3D, Script and Game buttons sit at the
+right end of the title bar (the row with the project name and Play), as icons: the open screen's
+icon is raised, and hovering one names it. Godot's Asset Store has no button
+there, since Joinery never fetches assets, and Assets opens from the rail. The
+3D viewport's mode tools and Use Snap show by default. Type `/toolbar` in
 Journeyman, or choose **Joinery > Show or Hide Viewport Toolbar**, to hide or
 show them. The preference is saved. **⤢** at the end of the row is Focus: it
 hides every side and bottom panel, and turns back on the ones you had open
@@ -52,8 +54,8 @@ turns on Movie Maker.
 If you prefer Godot's own layout, switch to it from **Editor > Switch to
 classic Godot view**, from the command palette, or in Journeyman settings under
 **Appearance > Layout** (Joinery or Classic Godot). In Classic Godot the
-docks go back to their stock places, the 2D, 3D and Script buttons return to
-the title bar, the run bar is Godot's own and Journeyman is an ordinary
+docks go back to their stock places, the 2D, 3D, Script and Asset Store buttons
+return to the middle of the title bar with their names, the run bar is Godot's own and Journeyman is an ordinary
 dock under the Inspector. **Switch to Joinery view** goes back. The switch
 applies after a restart; the dialog offers Restart or On next start. Each
 layout remembers its own docks, and the theme stays as you set it. The setting
