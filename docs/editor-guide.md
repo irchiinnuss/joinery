@@ -1106,10 +1106,11 @@ what was and was not tested on real hardware.
 ### References and design documents
 
 Your own pictures and design documents can come with a new game, or be added
-later. In the wizard's last step (**Brief and art direction**) drop files on the
-window or use **Add images…** under **Reference images** and **Add documents…**
-under **Design documents**. Each picture shows a thumbnail and a field for what
-to take from it; each document its name and kind; × takes a file off the list.
+later. In the wizard's last step (**The look**) drop files on the window or
+click the **Drop images** zone, and use **Add documents…** under **Design
+documents**. Pictures become a grid, each with what to take from it typed under
+it; each document shows its name and kind; × takes a file off the list.
+**Pick from references** fills the five palette swatches from the pictures.
 For an existing game, **Project apps** (`/setup`) has **References and design
 documents** with **Add references…** and **Add design documents…**: Joinery
 first says what the change would do, and **Add to project** adds them as one
@@ -1232,28 +1233,35 @@ stop, restart, five-second skips, looping, volume, mute and playback speed.
 Speed changes pitch. These controls affect the preview only.
 
 The Project Manager first connects a local Claude Code, Codex, Gemini or opencode
-account. Choose an agent and use its provider-owned sign-in; successful sign-in
-advances automatically. Selection and configuration are required to advance.
-Provider marks are imported from locally installed apps/extensions.
-After connection, create or open a project; Change agent returns to connection.
+account (**Connect an agent**). Each row is the action: a signed-in agent
+continues, an installed one starts its provider-owned sign-in (**Sign in ›**),
+and one that is missing sits under **Not installed** with **Get ›**. Successful
+sign-in advances automatically. Provider marks are imported from locally
+installed apps/extensions. After connection, create or open a project; the
+agent chip at the top right (**Change agent…**, **Check for updates**) returns
+to connection.
 The selected agent sidebar connects after the editor opens.
 
-The **Use an API key instead** page accepts a base endpoint, model ID and
+The **Use an API key** page accepts a base endpoint, model ID and
 masked API key. It can also activate an environment key. Custom profiles use
 Codex (Responses API) or opencode (OpenAI-compatible API) and are saved outside
 projects in a private local file. Keys never enter subprocess arguments or logs.
 
-The new-project wizard has three steps in one fixed window. **What are you
-making?** shows the starting points as cards with a screenshot, then the name,
-folder and the game in one sentence (the renderer is under Advanced).
+The new-project wizard has three steps in one fixed window, with three dots
+beside each title for where you are. **What are you making?** shows the
+starting points first, as pictures with their names, then the name, the folder
+as one line with **Change…**, and a one-sentence pitch (the renderer is under
+Advanced).
 **Features and apps** has a switch per feature: Steam asks for the Steam app ID
 inline (optional: digits only, or empty to add it later with `joinery steam`) and, with Online play on, how players
 connect (Steam or Direct IP). The apps sit behind one line with **Change…**;
 preferred MCPs are on by default, and other candidates can be set up as custom
 tools with a command and arguments. The step ends with **Keep older
 versions**: the last 50 changes up to 2 GB (the default), the last 10 up to
-1 GB, or only the newest. **Brief and art direction** asks the brief and art
-questions, pre-filled from the starting point.
+1 GB, or only the newest. **The look** (optional) starts with your reference
+pictures and a five-swatch palette, then asks the look, sound and brief
+questions, pre-filled from the starting point. What Create will do sits in the
+footer as one short line (for example "73 files · MIT · downloads GodotSteam ›").
 
 The editor's **Tools** workspace previews project assets and opens their native
 sources in Blender, Krita, GIMP, Inkscape, SuperCollider, Material Maker,
