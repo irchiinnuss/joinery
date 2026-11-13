@@ -20,7 +20,7 @@ const REVIEW_TAB := preload("review_tab.gd")
 ## Final state -> [status icon kind, words].
 const OUTCOMES := {
 	"accepted": ["done", "Change accepted"],
-	"discarded": ["stopped", "Discarded. Your files were not touched."],
+	"discarded": ["stopped", "Discarded"],
 	"done": ["done", "Done"],
 	"failed": ["failed", "Didn't finish"],
 	"stopped": ["stopped", "Stopped"],

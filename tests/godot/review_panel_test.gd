@@ -8,7 +8,7 @@ const PANEL := preload("res://addons/joinery/review_panel.gd")
 const DETAILS := preload("res://addons/joinery/review_details.gd")
 const UI_MOTION := preload("res://addons/joinery/ui_motion.gd")
 const SETTINGS := preload("res://addons/joinery/journeyman_settings.gd")
-const DISCARDED := "Discarded. Your files were not touched."
+const DISCARDED := "Discarded"
 
 var _failed := false
 var _host: Control
@@ -154,9 +154,7 @@ func _check_image_pair(panel: PANEL) -> void:
 	_check(panel.pending, "A shown review is pending")
 	_check(panel._title.text == "Darken the door wood", "The title is just the summary")
 	var facts: String = panel._summary.facts_text()
-	_check(
-		facts == "Door wood darker, 64×48 → 80×40 px · 1 image · 2 files", "Facts line: " + facts
-	)
+	_check(facts == "Door wood darker, 64×48 → 80×40 px · door_wood.kra", "Facts line: " + facts)
 	_check(
 		_tag(panel, "before").is_visible_in_tree() and _tag(panel, "after").is_visible_in_tree(),
 		"Before and After tags show on the media when a pair exists"
@@ -229,7 +227,7 @@ func _check_new_asset(panel: PANEL) -> void:
 		"One file keeps the whole stage"
 	)
 	var facts: String = panel._summary.facts_text()
-	_check(facts == "1 model", "Counts without changes: " + facts)
+	_check(facts == "hammer.glb", "Counts without changes: " + facts)
 
 
 func _check_audio(panel: PANEL) -> void:
@@ -467,7 +465,7 @@ func _check_details(panel: PANEL) -> void:
 	_check(not shown.contains("@@"), "No hunk headers in the preview")
 	_check(not panel._media.sides().is_visible_in_tree(), "Text has no Before/After tags")
 	_check(
-		panel._summary.facts_text() == "+2 −1 lines · 1 model · 1 script",
+		panel._summary.facts_text() == "+2 −1 lines · door.glb · +1 script",
 		"Text facts: " + panel._summary.facts_text()
 	)
 	_check(not panel.details_open(), "Details stay closed with a preview")
@@ -695,7 +693,9 @@ func _check_motion(panel: PANEL) -> void:
 	panel._details_button.button_pressed = false
 	panel._details_button.button_pressed = true
 	await create_timer(0.6).timeout
-	_check(panel._summary.facts_text() == "3 images", "Facts: " + panel._summary.facts_text())
+	_check(
+		panel._summary.facts_text() == "a.png · +2 images", "Facts: " + panel._summary.facts_text()
+	)
 	_check(is_equal_approx(panel._header.modulate.a, 1.0), "The header lands from the card")
 	_check(is_equal_approx(panel.modulate.a, 1.0), "The panel finishes fading in")
 	panel._accept.pressed.emit()

@@ -100,7 +100,10 @@ func _check_words() -> void:
 		"changes": [{"path": "a.gd", "change": "modified"}, {"path": "b.gd", "change": "created"}],
 	}
 	_check(
-		GLANCE.facts_line(review) == "Door 20% wider · wood darker · hinge moved · 2 scripts",
+		(
+			GLANCE.facts_line(review)
+			== "Door 20% wider · wood darker · hinge moved · a.gd · +1 script"
+		),
 		"Agent facts first, three at most: " + GLANCE.facts_line(review)
 	)
 	var checks := {"checks": {"ran": ["references", "art bible", "tests"], "skipped": []}}
@@ -152,7 +155,7 @@ func _check_facts_and_notes(panel: PANEL) -> void:
 	)
 	await _frames()
 	var facts: String = panel._summary.facts_text()
-	_check(facts == "Door wood darker · 1 image · 2 files", "Measured facts: " + facts)
+	_check(facts == "Door wood darker · door_wood.kra", "Measured facts: " + facts)
 	_check(panel._summary.status_text() == "Checks passed", "The checks are one quiet status")
 	_check(panel._summary.notes_text().is_empty(), "No notes line without notes")
 	_check(panel._summary.note_chips().is_empty(), "No note chips without notes")
@@ -168,7 +171,7 @@ func _check_facts_and_notes(panel: PANEL) -> void:
 	)
 	await _frames()
 	facts = panel._summary.facts_text()
-	_check(facts == "Wood darker · 1 image · 2 files", "Agent facts replace measured: " + facts)
+	_check(facts == "Wood darker · door_wood.kra", "Agent facts replace measured: " + facts)
 	_check(
 		panel._summary.status_text() == "Checks passed · Reviewer checking…",
 		"A running reviewer joins the status: " + panel._summary.status_text()
@@ -636,7 +639,7 @@ func _check_card(panel: PANEL) -> void:
 	var row: Control = card.review_row()
 	_check(row.visible and row.call("thumbnail") != null, "The card shows a tiny picture")
 	_check(bool(row.call("decidable")), "A small change is decided from the card")
-	_check(row._line.text == "Crate darker · 1 image", "The card's one line: " + row._line.text)
+	_check(row._line.text == "Crate darker · crate.png", "The card's one line: " + row._line.text)
 	# The request's parts, ticked: quiet lines above the change's row, blanks dropped.
 	card.set_done(["Made the mug in Blender", " ", "Put it on Table in kitchen.tscn"])
 	await _frames()
@@ -655,8 +658,22 @@ func _check_card(panel: PANEL) -> void:
 	_check(not done_list.visible, "An empty list hides it")
 	var accepted: Array[int] = [0]
 	panel.accept_pressed.connect(func() -> void: accepted[0] += 1)
-	row._accept.pressed.emit()
+	# ⌘↩ accepts from the card while nothing is being typed.
+	var typing := LineEdit.new()
+	_host.add_child(typing)
+	typing.text = "half a message"
+	typing.grab_focus()
+	var key := InputEventKey.new()
+	key.pressed = true
+	key.keycode = KEY_ENTER
+	key.meta_pressed = true
+	key.ctrl_pressed = true
+	row._input(key)
+	_check(accepted[0] == 0, "⌘↩ leaves a message being typed alone")
+	typing.text = ""
+	row._input(key)
 	_check(accepted[0] == 1 and not panel.pending or panel._state == "deciding", "Card accepts")
+	typing.queue_free()
 	panel.show_error("Try again")
 	panel.show_glance({"review_notes": [{"severity": "block", "text": "Clips the wall"}]})
 	await _frames()

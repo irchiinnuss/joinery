@@ -61,7 +61,7 @@ const RAIL := preload("review_rail.gd")
 const DRAWER := preload("review_drawer.gd")
 const LAYOUT := preload("review_layout.gd")
 const ACCEPTED := "Change accepted"
-const REJECTED := "Discarded. Your files were not touched."
+const REJECTED := "Discarded"
 const SCENE_NOTE := "The change is shown in the viewport."
 ## Least width of Discard, in em.
 const BUTTON_EM := 6.0
@@ -244,13 +244,14 @@ func update_media(media: Array) -> void:
 	glance_changed.emit()
 
 
-## The review as the chat card shows it: {line, simple, thumbnail}. "simple" changes can be
-## decided from the card; others open this panel.
+## The review as the chat card shows it: {line, count, simple, thumbnail, title}. "simple"
+## changes can be decided from the card; others open this panel.
 func glance() -> Dictionary:
 	if not pending:
 		return {}
 	return {
 		"line": _summary.facts_text(),
+		"count": _media.asset_count(),
 		"simple": _summary.simple(_media.asset_count()),
 		"thumbnail": _media.thumbnail(),
 		"title": _title.text,

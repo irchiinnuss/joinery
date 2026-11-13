@@ -34,12 +34,15 @@ const SUBJECT_TOLERANCE := 0.08
 const SUBJECT_MARGIN := 0.08
 ## How far apart (0..1 per channel) a picture's edge colours may be and still be one ground.
 const GROUND_TOLERANCE := 0.03
+## A tool's own source file: it names an asset over its exports.
+const SOURCES := ["blend", "kra", "mmg", "ptex", "scd", "sfz", "fxp", "mid", "aseprite", "psd"]
 ## Severity order of reviewer notes, worst last.
 const SEVERITIES := ["info", "warn", "block"]
 
 
 ## The one line of facts for [param review] ({facts?, changes, diff, scene_count?}) with
-## [param measured] facts from the media. Empty parts are left out; the first word is capital.
+## [param measured] facts from the media. Empty parts are left out; the first word is capital,
+## unless it is a file's name.
 static func facts_line(review: Dictionary, measured: Array = []) -> String:
 	var parts := PackedStringArray()
 	for fact: Variant in review.get("facts", []):
@@ -58,12 +61,46 @@ static func facts_line(review: Dictionary, measured: Array = []) -> String:
 	var count := int(review.get("scene_count", -1))
 	if count >= 0:
 		parts.append(DETAILS.scene_text(count))
-	else:
+	# A sentence starts with a capital; a file name keeps its own spelling.
+	if not parts.is_empty():
+		parts[0] = parts[0].substr(0, 1).to_upper() + parts[0].substr(1)
+	if count < 0:
 		var changes: Array = review.get("changes", [])
 		if not changes.is_empty():
-			parts.append(DETAILS.counts_text(changes))
-	var line := " · ".join(parts)
-	return line.substr(0, 1).to_upper() + line.substr(1)
+			parts.append(named_text(changes))
+	return " · ".join(parts)
+
+
+## The changed files by name: the lead asset's own file (its source when there is one, so
+## door.blend over door.glb), then the other assets counted by kind: "door.blend · +1 sound".
+## Without assets, the plain counts ("3 files").
+static func named_text(changes: Array) -> String:
+	# One entry per asset ([path, kind]), in KINDS order; a source names its asset.
+	var assets: Array = []
+	for kind: String in DETAILS.KINDS:
+		for change: Variant in changes:
+			var path := str((change as Dictionary).get("path", "")) if change is Dictionary else ""
+			if DETAILS.kind_of(path) != kind:
+				continue
+			var stem := path.get_file().get_basename()
+			var same := assets.filter(
+				func(entry: Array) -> bool:
+					return entry[1] == kind and str(entry[0]).get_file().get_basename() == stem
+			)
+			if same.is_empty():
+				assets.append([path, kind])
+			elif path.get_extension().to_lower() in SOURCES:
+				same[0][0] = path
+	if assets.is_empty():
+		return DETAILS.counts_text(changes)
+	var parts := PackedStringArray([str(assets[0][0]).get_file()])
+	for kind: String in DETAILS.KINDS:
+		var count := (
+			assets.slice(1).filter(func(entry: Array) -> bool: return entry[1] == kind).size()
+		)
+		if count > 0:
+			parts.append("+" + DETAILS.plural(count, kind))
+	return " · ".join(parts)
 
 
 ## "+12 −3 lines" for the text changes in a unified [param diff] ("" without any).

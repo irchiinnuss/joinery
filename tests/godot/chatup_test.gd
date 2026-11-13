@@ -227,9 +227,14 @@ func _run_revert_and_gate() -> void:
 	chat._on_art_gate({"needs_art_approval": true, "resume": "Make the door look older"})
 	chat.set_chat_busy(false)
 	_check(held.gated(), "The art gate holds the request")
+	_check(held.gate_text() == "Agree the look first", "The gate card says what to agree first")
+	var waiting: Control = held.find_child("GateStep", true, false)
 	_check(
-		held.gate_text() == "Before Blender makes anything, agree how your game should look.",
-		"The gate card says what to agree first"
+		waiting != null and (waiting.get_child(1) as Label).text == "Waiting for the look",
+		"The current step waits for the look"
+	)
+	_check(
+		held._gate.find_child("Palette", true, false) != null, "The gate shows the look in small"
 	)
 	var review: Button = held._gate.find_children("*", "Button", true, false)[0]
 	_check(review.text == "Review the look", "Review the look is the primary action")
@@ -242,7 +247,11 @@ func _run_revert_and_gate() -> void:
 		"After approval the held request goes out again as it was"
 	)
 	_check(held.state == "sending" and not held._gate.visible, "The card resumes in place")
-	_check(chat._transcript.caption_text() == "Art direction approved", "Approval is confirmed")
+	_check(
+		(waiting.get_child(1) as Label).text == "Look approved",
+		"The step says the look is approved"
+	)
+	_check(chat._transcript.caption_text() == "Look approved", "Approval is confirmed")
 	# Discard: the panel and the card both say the files were not touched.
 	chat._on_submit("Add a creak")
 	chat.set_chat_busy(true)
@@ -253,7 +262,7 @@ func _run_revert_and_gate() -> void:
 	chat.hide_edit_review("Change rejected. Original restored.", "rejected")
 	_check(
 		creak.state == "rejected" and creak._outcome_text.text == chat.DISCARDED,
-		"A discard reads Discarded. Your files were not touched."
+		"A discard reads Discarded"
 	)
 	_check(
 		chat._review._outcome_text.text == chat.DISCARDED,
@@ -283,7 +292,14 @@ func _run_queue() -> void:
 	chat._on_submit("Widen the door")
 	chat.set_chat_busy(true)
 	chat._on_sent()
-	_check(chat._prompt.placeholder_text == "Next message…", "While busy, Send queues")
+	# The status line ("Thinking…") stands where the placeholder would; the hint waits under it.
+	_check(
+		(
+			chat._composer._waiting == "Next message…"
+			and (chat._prompt.placeholder_text in ["Next message…", ""])
+		),
+		"While busy, Send queues"
+	)
 	chat.set_resource_target("res://audio/sfx/door_creak.wav", "AudioStreamWAV")
 	chat._prompt.text = "Darken the floor"
 	chat._composer._on_enter(chat._prompt.text)

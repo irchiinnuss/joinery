@@ -16,10 +16,11 @@ extends VBoxContainer
 ## data is gone says "Too old to revert" instead of offering the button
 ## ([method set_revertible]).
 ##
-## When asset work needs the art direction approved first, the card holds the request (the
-## art gate): "Before Blender makes anything, agree how your game should look." with
-## "Review the look" and "Describe my own". After approval the dock sends the same request
-## again, so nothing is retyped.
+## When asset work needs the look approved first, the card holds the request (the art gate,
+## sidebar_art_gate.gd): the current step reads "Waiting for the look", over a card with a
+## miniature of the look, "Agree the look first", "Review the look" and "Describe my own".
+## After approval the card leaves, the step reads "Look approved", and the dock sends the same
+## request again, so nothing is retyped.
 ##
 ## The status line is the turn's one header in every state: the app glyph and name, then
 ## "· 0:14" while it runs and "· Completed in 1:12" with its disclosure chevron when done. Steps
@@ -59,6 +60,7 @@ const STYLE := preload("sidebar_style.gd")
 const INDICATOR := preload("activity_indicator.gd")
 const ATTACHMENT_ROW := preload("sidebar_attachments.gd")
 const REVIEW_ROW := preload("sidebar_review_row.gd")
+const ART_GATE := preload("sidebar_art_gate.gd")
 ## Apps recognised in step text; the card shows each one it sees once.
 const APPS := ["Blender", "Krita", "GIMP", "Material Maker", "Surge XT", "SuperCollider", "Godot"]
 ## Shown instead of Revert once the change's restore data is gone.
@@ -142,10 +144,17 @@ var _reverting: HBoxContainer
 var _too_old: Label
 ## False once `joinery transactions list` says the restore data is gone.
 var _revertible := true
-var _gate: VBoxContainer
-var _gate_text: Label
+var _gate: ART_GATE
+## The "Waiting for the look" step while the gate holds the request.
+var _gate_step: HBoxContainer
 var _error: Label
 var _summary: Button
+## "✓" leading the status line once the work is done.
+var _done_mark: TextureRect
+## "5 steps · 0:14 ›": the finished steps folded while the change waits (until the reply's
+## timing line takes over).
+var _fold: Button
+var _seconds := 0
 var _details: Label
 var _seen_apps: Array[String] = []
 var _last_step := ""
@@ -208,6 +217,10 @@ func _init(text := "", context: Array = []) -> void:
 	_sending.set("running", true)
 	_sending.tooltip_text = "Sending"
 	_status.add_child(_sending)
+	_done_mark = _icon("success", "success")
+	_done_mark.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_done_mark.hide()
+	_status.add_child(_done_mark)
 	_apps = HBoxContainer.new()
 	_apps.theme_type_variation = "JoineryRowTight"
 	_apps.size_flags_vertical = Control.SIZE_SHRINK_CENTER
@@ -224,6 +237,21 @@ func _init(text := "", context: Array = []) -> void:
 	_timer.accessibility_name = "Time spent on this request"
 	_timer.hide()
 	_status.add_child(_timer)
+	_fold = UI.quiet_link("")
+	_fold.name = "Fold"
+	_fold.toggle_mode = true
+	_fold.accessibility_name = "Show the steps"
+	_fold.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	UI.bind_height(_fold, "xs")
+	_fold.toggled.connect(
+		func(open: bool) -> void:
+			_steps.visible = open and _steps.get_child_count() > 0
+			if _steps.visible:
+				UI_MOTION.fade_in(_steps)
+			_sync_activity()
+	)
+	_fold.hide()
+	_status.add_child(_fold)
 	_failure = _row(_progress)
 	_failure.add_child(_icon("error", "danger"))
 	_failure_text = UI.label("Not sent", "JoineryCaption", true)
@@ -335,10 +363,10 @@ func _sync_failure() -> void:
 
 ## Back to sending after Retry, or when the art gate lets a held request go.
 func set_sending() -> void:
+	if state == "gated":
+		_look_approved()
 	state = "sending"
 	_failure.hide()
-	if _gate != null:
-		_gate.hide()
 	_set_sending_look(true)
 
 
@@ -389,6 +417,7 @@ func adopt_timing(summary: Button, details: Label) -> void:
 		return
 	_summary = summary
 	_details = details
+	_fold.hide()
 	summary.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	summary.reparent(_status, false)
 	_status.move_child(summary, _joiner.get_index() + 1)
@@ -416,6 +445,8 @@ func refresh_layout() -> void:
 ## Seconds spent so far; the timer appears after three seconds. Each second only its text
 ## changes: a ticking clock that moves every second pulls the eye from the work.
 func set_elapsed(seconds: int) -> void:
+	if state == "working":
+		_seconds = seconds
 	if seconds < 3 or state != "working":
 		return
 	_timer.text = UI_MOTION.format_clock(seconds)
@@ -452,12 +483,28 @@ func set_ready(media: Array = [], review: Object = null) -> void:
 	_timer.hide()
 	_tick_current("success")
 	state = "ready"
+	_fold_steps()
 	_error.hide()
 	_outcome.hide()
 	_place_review()
 	_ready_row.waiting = true
 	_ready_row.show_for(media, review)
 	_sync_activity()
+
+
+## The run is done: its steps fold into "5 steps · 0:14 ›" on the status line.
+func _fold_steps() -> void:
+	var count := _steps.get_child_count()
+	if count == 0 or _summary != null:
+		return
+	var words := "%d step%s" % [count, "" if count == 1 else "s"]
+	if _seconds >= 3:
+		words += " · " + UI_MOTION.format_clock(_seconds)
+	_fold.text = words + "  ›"
+	_fold.tooltip_text = "Show the steps"
+	_fold.set_pressed_no_signal(false)
+	_steps.hide()
+	_fold.show()
 
 
 ## The agent's list of what it did for each part of the request ("Made the mug in Blender",
@@ -619,18 +666,40 @@ func reverting() -> bool:
 	return _reverting.visible
 
 
-## Hold the request until the art direction is approved. [param app] names the app that was
-## about to make something ("Blender"), or "" for the one the card saw at work.
-func show_art_gate(app := "") -> void:
+## Hold the request until the look is approved. [param app] names the app that was about to
+## make something ("Blender"), or "" for the one the card saw at work; [param look] is the
+## miniature's data ({palette, references}).
+func show_art_gate(_app := "", look: Dictionary = {}) -> void:
 	set_sent()
 	state = "gated"
 	_timer.hide()
 	_tick_current("success")
 	if _gate == null:
-		_build_gate()
-	var who := app if not app.is_empty() else _gate_app()
-	_gate_text.text = "Before %s makes anything, agree how your game should look." % who
+		_gate = ART_GATE.new()
+		_gate.review_requested.connect(func() -> void: gate_review_requested.emit())
+		_gate.describe_requested.connect(func() -> void: gate_describe_requested.emit())
+		_column.add_child(_gate)
+	_gate.show_look(look)
+	if _gate_step == null:
+		_gate_step = _row(_steps)
+		_gate_step.name = "GateStep"
+		_gate_step.set_meta("gate_step", true)
+		var cell := CenterContainer.new()
+		STYLE.on_theme(
+			cell,
+			func() -> void:
+				var side := float(UI_THEME.space(cell, 4))
+				cell.custom_minimum_size = Vector2(side, side)
+		)
+		cell.add_child(UI.status_dot("working"))
+		_gate_step.add_child(cell)
+		var label := UI.label("Waiting for the look", "JoineryCaption")
+		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_gate_step.add_child(label)
+		_steps.show()
+		UI_MOTION.breathe(_gate_step)
 	_column.move_child(_gate, _column.get_child_count() - 1)
+	_gate.show()
 	UI_MOTION.fade_in(_gate)
 	_sync_activity()
 
@@ -640,41 +709,26 @@ func gated() -> bool:
 	return state == "gated"
 
 
-## The art gate's sentence ("" when there is no gate).
+## The art gate's heading ("" when there is no gate).
 func gate_text() -> String:
-	return _gate_text.text if _gate != null and _gate.visible else ""
+	return _gate.heading() if _gate != null and _gate.visible else ""
 
 
-func _build_gate() -> void:
-	_gate = VBoxContainer.new()
-	_gate.theme_type_variation = "JoineryRow"
-	_gate.accessibility_name = "Art direction needed"
-	_gate.hide()
-	_column.add_child(_gate)
-	_gate_text = UI.label("", "", true)
-	_gate.add_child(_gate_text)
-	var actions := HBoxContainer.new()
-	actions.theme_type_variation = "JoineryRow"
-	_gate.add_child(actions)
-	var review := UI.primary("Review the look")
-	review.accessibility_name = "Review the art direction"
-	review.pressed.connect(func() -> void: gate_review_requested.emit())
-	actions.add_child(review)
-	var own := UI.quiet_link("Describe my own")
-	own.accessibility_name = "Describe how your game should look"
-	own.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	own.pressed.connect(func() -> void: gate_describe_requested.emit())
-	actions.add_child(own)
-	var note := UI.label("Your request will continue after you approve.", "JoineryCaption", true)
-	_gate.add_child(note)
-
-
-## The app this request was using, else Journeyman itself.
-func _gate_app() -> String:
-	for app: String in _seen_apps:
-		if app != "Godot":
-			return app
-	return "Journeyman"
+## The look was approved: the gate's card leaves and its step reads "Look approved".
+func _look_approved() -> void:
+	if _gate != null and _gate.visible:
+		UI_MOTION.exit(_gate, null, Callable(), false)
+	if _gate_step != null:
+		UI_MOTION.stop(_gate_step)
+		_gate_step.modulate.a = 1.0
+		_gate_step.remove_meta("gate_step")
+		var cell := _gate_step.get_child(0)
+		for dot: Node in cell.get_children():
+			cell.remove_child(dot)
+			dot.queue_free()
+		cell.add_child(_icon("success", "success"))
+		(_gate_step.get_child(1) as Label).text = "Look approved"
+		_gate_step = null
 
 
 ## Revert, "Reverting…" or "Too old to revert" on the accepted line.
@@ -746,8 +800,9 @@ func _place_outcome() -> void:
 ## The assistant's side shows only when something in it does; the status line likewise.
 func _sync_activity() -> void:
 	var timed := _summary != null and _summary.visible
-	_joiner.visible = _apps.visible and (timed or _timer.visible)
-	_status.visible = _sending.visible or _apps.visible or _timer.visible or timed
+	_done_mark.visible = _fold.visible or (timed and state in ["accepted", "done"])
+	_joiner.visible = _apps.visible and (timed or _timer.visible or _fold.visible)
+	_status.visible = _sending.visible or _apps.visible or _timer.visible or timed or _fold.visible
 	_progress.visible = _any_visible(_progress)
 	_activity.visible = _any_visible(_column)
 
@@ -763,6 +818,8 @@ func _tick_current(kind: String) -> void:
 	if _steps.get_child_count() == 0:
 		return
 	var row := _steps.get_child(-1)
+	if row.has_meta("gate_step"):
+		return
 	var cell := row.get_child(0) as CenterContainer
 	if cell == null or cell.get_child_count() == 0 or not cell.get_child(0) is UI.StatusDot:
 		return

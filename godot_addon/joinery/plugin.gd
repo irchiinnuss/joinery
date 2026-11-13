@@ -36,7 +36,7 @@ const SETUP_PENDING := "joinery/setup_pending"
 
 ## One wording per outcome, shared with the sidebar notices.
 const ACCEPTED := "Change accepted"
-const REJECTED := "Discarded. Your files were not touched."
+const REJECTED := "Discarded"
 
 const ART_DIALOG := preload("res://addons/joinery/art_review_dialog.gd")
 const ART_PAGE := preload("res://addons/joinery/art_page.gd")

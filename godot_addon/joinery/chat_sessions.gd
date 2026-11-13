@@ -27,7 +27,7 @@ const SLASH := preload("slash_commands.gd")
 const ATTACHMENTS := preload("chat_attachments.gd")
 const REWIND := preload("chat_rewind.gd")
 const PERSONA := "Journeyman"
-const DISCARDED := "Discarded. Your files were not touched."
+const DISCARDED := "Discarded"
 const BUSY := "Wait for Journeyman to finish, or stop it first."
 ## Decision line for each state `joinery transactions list` reports: [kind, text].
 const STATES := {
