@@ -1,9 +1,15 @@
+import re
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
-from joinery.editor_ops import NodeOperation, validate_edit
+from joinery.editor_ops import (
+    NodeOperation,
+    node_name_problem,
+    suggest_node_name,
+    validate_edit,
+)
 
 
 @pytest.fixture
@@ -107,3 +113,50 @@ def test_on_stands_a_new_instance_on_a_node(game: Path) -> None:
 def test_on_is_only_for_placing_an_instance(game: Path, op: dict) -> None:
     with pytest.raises(ValidationError):
         validate_edit(game, {"summary": "Bad", "operations": [op]}, ("@Table",))
+
+
+@pytest.mark.parametrize(
+    ("operation", "name", "message"),
+    [
+        ({**MUG}, "Mug#2", "Node names can't contain '#'; try 'Mug2'."),
+        ({"operation": "create_node"}, "Mug.v2", "can't contain '.'; try 'Mugv2'"),
+        ({"operation": "create_box"}, "a:b@c", "can't contain ':', '@'; try 'abc'"),
+        ({"operation": "create_node"}, 'Say"Hi"', "can't contain '\"'; try 'SayHi'"),
+        ({"operation": "create_node"}, "50%", "can't contain '%'; try '_50'"),
+        ({"operation": "create_node"}, "Shelf/Mug", "can't contain '/'"),
+        ({"operation": "create_node"}, "Mug 2", "letters, digits and underscores"),
+        ({"operation": "create_box"}, "", "Give the node a name"),
+    ],
+)
+def test_node_names_godot_forbids_are_refused_with_a_name_to_try(
+    game: Path, operation: dict, name: str, message: str
+) -> None:
+    with pytest.raises(ValidationError, match=re.escape(message)):
+        validate_edit(
+            game,
+            {"summary": "Name", "operations": [{**operation, "name": name}]},
+            (),
+        )
+
+
+def test_rename_refuses_a_forbidden_name_and_keeps_good_ones(game: Path) -> None:
+    rename = {"operation": "rename_node", "target": "@Mug"}
+    with pytest.raises(ValidationError, match="can't contain '#'; try 'Mug2'"):
+        validate_edit(
+            game,
+            {"summary": "R", "operations": [{**rename, "name": "Mug#2"}]},
+            ("@Mug",),
+        )
+    edit = validate_edit(
+        game, {"summary": "R", "operations": [{**rename, "name": "Mug_2"}]}, ("@Mug",)
+    )
+    op = edit.operations[0]
+    assert isinstance(op, NodeOperation) and op.name == "Mug_2"
+    # No name lets Godot name the new node after its scene.
+    assert validate_edit(game, {"summary": "M", "operations": [MUG]}, ()).operations
+
+
+def test_suggested_names_always_pass() -> None:
+    for name in ["#", "9lives", "Mug#2", "x" * 80 + "#", "ÄÖ"]:
+        suggestion = suggest_node_name(name)
+        assert node_name_problem(suggestion) == "", (name, suggestion)

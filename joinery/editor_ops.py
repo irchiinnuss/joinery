@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import math
+import re
 from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import (
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
     FiniteFloat,
@@ -19,11 +21,67 @@ from joinery.hook import mcp_violation
 
 Vector = tuple[FiniteFloat, FiniteFloat, FiniteFloat]
 
+#: Characters Godot refuses in a node name (it swaps them for ``_`` or drops the
+#: name), and ``#``, which node paths and scene identities can't round-trip.
+GODOT_FORBIDDEN = ("#", ".", ":", "@", "/", '"', "%")
+_NAME = r"^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+_NAME_OK = re.compile(_NAME)
+
+
+def suggest_node_name(name: str) -> str:
+    """A name like ``name`` that passes: its letters, digits and underscores."""
+    kept = re.sub(r"[^A-Za-z0-9_]", "", name)[:64]
+    if not kept:
+        return "Node"
+    return ("_" + kept)[:64] if kept[0].isdigit() else kept
+
+
+def node_name_problem(name: str) -> str:
+    """Why ``name`` can't be a node's name, with a name that can; "" when it can.
+
+    The one check every scene op's node name goes through. A bad name is refused
+    with this message for the agent to act on, never renamed behind its back.
+    """
+    if _NAME_OK.match(name):
+        return ""
+    suggestion = suggest_node_name(name)
+    bad = [c for c in GODOT_FORBIDDEN if c in name]
+    if bad:
+        listed = ", ".join(f"'{c}'" for c in bad)
+        return f"Node names can't contain {listed}; try '{suggestion}'."
+    if not name:
+        return f"Give the node a name; try '{suggestion}'."
+    if len(name) > 64:
+        return f"Node names are at most 64 characters; try '{suggestion}'."
+    return (
+        "Node names use only letters, digits and underscores and don't start "
+        f"with a digit; try '{suggestion}'."
+    )
+
+
+def _checked_name(value: object) -> object:
+    if isinstance(value, str):
+        problem = node_name_problem(value)
+        if problem:
+            raise ValueError(problem)
+    return value
+
+
+def _optional_name(value: object) -> object:
+    return value if value == "" else _checked_name(value)
+
+
+#: A node's name, checked by :func:`node_name_problem` before the schema pattern,
+#: which stays so agents see the rule up front.
+NodeName = Annotated[str, BeforeValidator(_checked_name)]
+#: The same, where "" means "let Godot pick the name".
+OptionalNodeName = Annotated[str, BeforeValidator(_optional_name)]
+
 
 class Box(BaseModel):
     model_config = ConfigDict(extra="forbid")
     operation: Literal["create_box"]
-    name: str = Field(default="Box", pattern=r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
+    name: NodeName = Field(default="Box", pattern=_NAME)
     size: Vector = (1, 1, 1)
     position: Vector | None = None
 
@@ -78,7 +136,7 @@ class NodeOperation(BaseModel):
     target: str = ""
     parent: str = ""
     node_type: str = Field(default="Node3D", pattern=r"^[A-Za-z][A-Za-z0-9_]*$")
-    name: str = Field(default="", pattern=r"^$|^[A-Za-z_][A-Za-z0-9_]{0,63}$")
+    name: OptionalNodeName = Field(default="", pattern=r"^$|" + _NAME)
     properties: dict[str, JsonValue] = {}
     script_path: str = ""
     resource_path: str = ""
