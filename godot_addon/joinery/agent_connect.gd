@@ -220,7 +220,8 @@ func _add_provider(id: String, label: String, icon: String) -> void:
 	card.status.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
 	card.status.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	card.row.add_child(card.status)
-	card.link = UI_COMPONENTS.link("Get ›")
+	# Quiet: "Use an API key" is the screen's one accent-coloured link.
+	card.link = UI_COMPONENTS.quiet_link("Get ›")
 	card.link.accessibility_name = "Get " + label
 	UI_COMPONENTS.bind_height(card.link, "xs")
 	card.link.pressed.connect(_open_install_for.bind(id))
