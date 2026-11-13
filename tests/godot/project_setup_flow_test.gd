@@ -7,7 +7,7 @@ extends SceneTree
 ##   readiness rows, Check again as a job that never blocks, and features planned before
 ##   they apply.
 
-const STEP_TITLES := ["What are you making?", "Features and apps", "Brief and art direction"]
+const STEP_TITLES := ["What are you making?", "Features and apps", "The look"]
 const EXISTING_PROJECT := (
 	"This folder already has a Godot project. Open it from the project list, or pick an "
 	+ "empty folder."
@@ -55,12 +55,12 @@ func _shown_button(parent: Node, text: String) -> Button:
 
 
 ## The project list's create action. The fork hides the bar's Create while the list is
-## empty; then the empty state's "Create project" is the one to press.
+## empty; then the empty state's "New project" is the one to press.
 func _create_action() -> Button:
 	var fallback: Button = null
 	for node: Node in root.find_children("*", "Button", true, false):
 		var button := node as Button
-		if button.get_window() != root or not button.text in ["Create", "Create project"]:
+		if button.get_window() != root or not button.text in ["Create", "New project"]:
 			continue
 		if button.is_visible_in_tree():
 			return button
@@ -223,16 +223,14 @@ func _run() -> void:
 	_check(create.is_visible_in_tree(), "Saving an API profile redirects to projects")
 	_check(connect._api_form._key.text.is_empty(), "Successful save clears the key field")
 	_check(not connect._message.text.contains("TEST_ONLY"), "Never echo the API key")
-	# The agent chip at the end of the project list's top bar reopens the connect screen.
-	var chip: Button = null
-	for node: Node in root.find_children("*", "Button", true, false):
-		if (node as Button).text == "Change" and (node as Button).is_visible_in_tree():
-			chip = node as Button
-	_check(chip != null, "The project list shows the agent in use with a Change link")
-	await _check_updates_link()
+	# The agent chip at the header's trailing edge: its menu reopens the connect screen.
+	var chip := root.find_child("JoineryAgentChip", true, false) as MenuButton
+	_check(chip != null and chip.is_visible_in_tree(), "The project list shows the agent in use")
+	await _check_updates_link(chip)
 	if chip != null:
-		chip.pressed.emit()
+		chip.get_popup().id_pressed.emit(0)
 		_check(connect.is_visible_in_tree(), "The agent chip reopens the connect screen")
+		_check(not chip.is_visible_in_tree(), "The chip hides over the connect screen")
 	connect._select("codex")
 	connect._accepted_keys.append("codex")
 	connect._auto_redirect = true
@@ -253,22 +251,22 @@ func _run() -> void:
 	quit(1 if _failed else 0)
 
 
-## "Check for updates" in the project list's top bar: the addon's update dialog, loaded from
-## JOINERY_HOME (ADR 0083). From a checkout the daily check opens nothing; the link's text
+## "Check for updates" in the agent chip's menu: the addon's update dialog, loaded from
+## JOINERY_HOME (ADR 0083). From a checkout the daily check opens nothing; the item's text
 ## follows the dialog.
-func _check_updates_link() -> void:
+func _check_updates_link(chip: MenuButton) -> void:
 	var updates := root.find_child("JoineryUpdates", true, false) as AcceptDialog
 	_check(updates != null, "The Project Manager loads the update dialog")
-	var link: Button = null
-	for node: Node in root.find_children("*", "Button", true, false):
-		if (node as Button).text == "Check for updates" and (node as Button).is_visible_in_tree():
-			link = node as Button
-	_check(link != null, "The project list offers Check for updates")
-	if updates == null or link == null:
+	var menu: PopupMenu = chip.get_popup() if chip != null else null
+	_check(
+		menu != null and menu.get_item_text(1) == "Check for updates",
+		"The agent chip's menu offers Check for updates"
+	)
+	if updates == null or menu == null:
 		return
 	_check(not updates.visible, "The daily check from a checkout opens nothing")
 	updates.emit_signal("label_changed", "Joinery 0.6.0 is available")
-	_check(link.text == "Joinery 0.6.0 is available", "The link follows the dialog")
+	_check(menu.get_item_text(1) == "Joinery 0.6.0 is available", "The item follows the dialog")
 	await _capture(root, "startup-project-list.png")
 	updates.emit_signal("label_changed", "Check for updates")
 
@@ -285,7 +283,11 @@ func _wizard(create: Button) -> void:
 	if dialog == null:
 		return
 	_check(dialog.title == "New project", "The wizard window is titled in sentence case")
-	_check(_label_text(dialog, "Step 1 of 3") != null, "Step 1 says where it is")
+	var stepper := dialog.find_child("JoineryStepper", true, false) as Control
+	_check(
+		stepper != null and stepper.accessibility_name == "Step 1 of 3",
+		"Step 1 says where it is, in its stepper"
+	)
 	_check(_label_text(dialog, STEP_TITLES[0]) != null, "Step 1 asks what you are making")
 	_check(not dialog.get_ok_button().is_visible_in_tree(), "The wizard brings its own footer")
 	var initial_rect := Rect2i(dialog.position, dialog.size)
@@ -420,7 +422,7 @@ func _wizard(create: Button) -> void:
 	await _check_history_choice(dialog)
 	next.pressed.emit()
 	await create_timer(0.2).timeout
-	_check(_label_text(dialog, STEP_TITLES[2]) != null, "Step 3 is Brief and art direction")
+	_check(_label_text(dialog, STEP_TITLES[2]) != null, "Step 3 is The look")
 	_check(
 		Rect2i(dialog.position, dialog.size) == initial_rect,
 		"Step 3 must keep the window rectangle"
@@ -518,9 +520,8 @@ func _drop_material(dialog: ConfirmationDialog) -> String:
 		files[index] = folder.path_join(files[index])
 	dialog.files_dropped.emit(files)
 	await process_frame
-	_check(_label_text(dialog, "dusk.png") != null, "A dropped picture is listed")
 	_check(_label_text(dialog, "gdd.md") != null, "A dropped design document is listed")
-	var refused := "notes.docx isn't a picture or a design document."
+	var refused := "notes.docx isn't an image"
 	var said := false
 	for node: Node in dialog.find_children("*", "Label", true, false):
 		said = said or ((node as Label).text.begins_with(refused) and node.is_visible_in_tree())
@@ -535,12 +536,16 @@ func _drop_material(dialog: ConfirmationDialog) -> String:
 	# The same picture again is listed once, and every file has a ×.
 	dialog.files_dropped.emit(PackedStringArray([files[0]]))
 	await process_frame
-	var listed := dialog.find_children("*", "Label", true, false).filter(
-		func(node: Node) -> bool: return (node as Label).text == "dusk.png"
+	var listed := dialog.find_children("*", "LineEdit", true, false).filter(
+		func(node: Node) -> bool:
+			return node.get_accessibility_name() == "What to take from dusk.png"
 	)
 	_check(listed.size() == 1, "A picture dropped twice is listed once")
-	var remove := _shown_button(dialog, "×")
-	_check(remove != null and remove.tooltip_text == "Remove gdd.md", "Each file has a ×")
+	var removes: Array[String] = []
+	for node: Node in dialog.find_children("*", "Button", true, false):
+		if (node as Button).text == "×" and node.is_visible_in_tree():
+			removes.append((node as Button).tooltip_text)
+	_check(removes.has("Remove gdd.md") and removes.has("Remove dusk.png"), "Each file has a ×")
 	return folder
 
 

@@ -198,6 +198,7 @@ STARTUP_SCREENS = (
     "projects",
     "setup-catalog-failed",
     "setup-1-details",
+    "setup-1-fields",
     "setup-2-tools",
     "setup-2-steam-error",
     "setup-2-steam-too-big",

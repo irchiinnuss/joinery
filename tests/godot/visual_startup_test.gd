@@ -33,12 +33,12 @@ func _button(parent: Node, text: String) -> Button:
 
 
 ## The project list's create action. The fork hides the bar's Create while the list is
-## empty; then the empty state's "Create project" is the one to press.
+## empty; then the empty state's "New project" is the one to press.
 func _create_action() -> Button:
 	var fallback: Button = null
 	for node: Node in root.find_children("*", "Button", true, false):
 		var button := node as Button
-		if button.get_window() != root or not button.text in ["Create", "Create project"]:
+		if button.get_window() != root or not button.text in ["Create", "New project"]:
 			continue
 		if button.is_visible_in_tree():
 			return button
@@ -177,6 +177,15 @@ func _wizard(create: Button) -> void:
 	if not await _starting_points(dialog):
 		return
 	await _shot("setup-1-details", dialog)
+	# Below the starting points: the name, the folder as one row, and the pitch.
+	var name_field := _field(dialog, "Project Name:")
+	if name_field != null:
+		await _scroll_to(dialog, name_field)
+		await _shot("setup-1-fields", dialog)
+		var scroll := (
+			dialog.find_children("*", "ScrollContainer", true, false)[0] as ScrollContainer
+		)
+		scroll.scroll_vertical = 0
 	var next := _primary(dialog)
 	_check(next != null and next.text == "Next", "Step 1 offers Next")
 	if next == null:
@@ -187,9 +196,11 @@ func _wizard(create: Button) -> void:
 		return
 	next.pressed.emit()
 	await create_timer(0.25).timeout
-	_check(_label_visible(dialog, "Brief and art direction"), "Step 3 is Brief and art direction")
-	var references := _field(dialog, "References")
-	_check(references != null, "References is its own field")
+	_check(_label_visible(dialog, "The look"), "Step 3 is The look")
+	_check(_label_visible(dialog, "Optional"), "The look says it is optional beside its title")
+	var drop := _drop_zone(dialog)
+	_check(drop != null and drop.text == "Drop images", "References start as one drop zone")
+	_check(_field(dialog, "References") == null, "No typed References field")
 	_check(_label_visible(dialog, "Game brief"), "The brief has its own section")
 	var pitch := _field(dialog, "Pitch") as LineEdit
 	_check(
@@ -201,9 +212,6 @@ func _wizard(create: Button) -> void:
 		preset != null and preset.get_item_metadata(preset.selected) == "stylised-pbr-3d",
 		"The starting point's preset is chosen"
 	)
-	if references != null:
-		(references as TextEdit).text = "art/reference/harbour_dusk.kra: the warm low light."
-		await _scroll_to(dialog, references.get_parent().get_child(0) as Control)
 	_check(next.text == "Create project", "The last step offers Create project")
 	await _shot("setup-3-art", dialog)
 	await _references(dialog, folder + "-material")
@@ -269,11 +277,14 @@ func _starting_points(dialog: Window) -> bool:
 	_check(neighbour == null or cards.has(neighbour), "Arrow keys move between cards")
 	target.button_pressed = true
 	target.pressed.emit()
-	var sentence := _field(dialog, "Your game in one sentence") as LineEdit
-	_check(sentence != null, "Step 1 asks for the game in one sentence")
+	var sentence := _field(dialog, "One-sentence pitch") as LineEdit
+	_check(sentence != null, "Step 1 asks for a one-sentence pitch")
 	if sentence != null:
 		sentence.text = "A lighthouse keeper fixes the harbour before a storm."
-	_check(_label_visible(dialog, "Journeyman reads this before every request."), "Say why")
+		_check(
+			sentence.tooltip_text == "Journeyman reads this before every request.",
+			"Why it is asked is the tooltip, not a caption"
+		)
 	var scroll := dialog.find_children("*", "ScrollContainer", true, false)[0] as ScrollContainer
 	scroll.scroll_vertical = 0
 	return true
@@ -301,13 +312,13 @@ func _features(dialog: Window, next: Button) -> bool:
 	_check(app_id != null, "Steam asks for its app ID inline")
 	if app_id == null:
 		return false
-	_check(
-		_label_visible(dialog, "Connect players through:"), "Online and Steam ask how to connect"
-	)
-	var through: CheckBox = null
-	for node: Node in dialog.find_children("*", "CheckBox", true, false):
-		if (node as CheckBox).text == "Steam" and (node as CheckBox).is_visible_in_tree():
-			through = node as CheckBox
+	_check(_label_visible(dialog, "Players connect through"), "Online and Steam ask how to connect")
+	var through: Button = null
+	for node: Node in dialog.find_children("*", "Button", true, false):
+		var part := node as Button
+		if part.text == "Steam" and part.toggle_mode and part.is_visible_in_tree():
+			if not part is CheckButton:
+				through = part
 	_check(through != null and through.button_pressed, "Players connect through Steam by default")
 	# The app list loads on the worker after the starting points; Next waits for it.
 	deadline = Time.get_ticks_msec() + 60000
@@ -387,6 +398,15 @@ func _picker(dialog: Window, accessible: String) -> OptionButton:
 	return null
 
 
+## Step 3's drop zone for reference pictures (its tile once there are some).
+func _drop_zone(dialog: Window) -> Button:
+	for node: Node in dialog.find_children("*", "Button", true, false):
+		var button := node as Button
+		if button.accessibility_name == "Add reference images" and button.is_visible_in_tree():
+			return button
+	return null
+
+
 ## Scrolls the page so [param control] sits near its top, so the capture shows what follows.
 func _scroll_to(dialog: Window, control: Control) -> void:
 	await _frames(1)
@@ -438,28 +458,24 @@ func _references(dialog: Window, folder: String) -> void:
 		files.append(folder.path_join(name))
 	dialog.files_dropped.emit(files)
 	await _frames()
-	_check(_label_visible(dialog, "harbour dusk.png"), "A dropped picture is listed")
 	_check(_label_visible(dialog, "gdd.md"), "A dropped document is listed")
 	_check(
-		_label_visible(
-			dialog,
-			(
-				"notes.docx isn't a picture or a design document. Drop PNG, JPEG or WebP "
-				+ "pictures, or Markdown, text or PDF documents."
-			)
-		),
-		"A file of neither kind is refused in plain words"
+		_label_visible(dialog, "notes.docx isn't an image"),
+		"A file of neither kind is refused in a few words"
 	)
 	var note := _field(dialog, "What to take from harbour dusk.png") as LineEdit
-	_check(note != null, "Each picture has a note")
+	_check(note != null, "A dropped picture is a tile with what to take from it")
 	if note != null:
 		note.text = "the warm low light"
-	var heading: Label = null
-	for node: Node in dialog.find_children("*", "Label", true, false):
-		if (node as Label).text == "Reference images":
-			heading = node
-	if heading != null:
-		await _scroll_to(dialog, heading)
+	var drop := _drop_zone(dialog)
+	_check(drop != null and drop.text == "+ Add", "The drop zone stays as the grid's last tile")
+	var pick := _button_visible(dialog, "Pick from references")
+	_check(pick != null and not pick.disabled, "The palette can be picked from the pictures")
+	if pick != null:
+		pick.pressed.emit()
+	var scroll := dialog.find_children("*", "ScrollContainer", true, false)[0] as ScrollContainer
+	scroll.scroll_vertical = 0
+	await _frames(2)
 	await _shot("setup-3-references", dialog)
 	var documents: Label = null
 	for node: Node in dialog.find_children("*", "Label", true, false):

@@ -99,6 +99,15 @@ DELETION_ALLOWANCE = {
     # 0012 in one setting. Every line it removes is one of those Joinery lines,
     # put back inside `if (EditorSettings::is_joinery_layout())`.
     "0019": 70,
+    # The projects blankslate and agent chip replace the empty-state message,
+    # tagline, agent row and update link that 0001, 0009, 0014 and 0028
+    # added. Checked against 4.7.2-stable: the one upstream line it changes is
+    # the empty message's set_text, now an empty string.
+    "0036": 45,
+    # The wizard's drop zone, reference grid and palette replace the reference
+    # rows, typed References question and import blocks of 0017, 0026 and
+    # 0035. Checked against 4.7.2-stable: no upstream line is removed.
+    "0037": 205,
 }
 
 
@@ -180,7 +189,15 @@ def test_patches_target_only_expected_areas() -> None:
 
 def test_the_new_project_wizard_patch_is_in_the_series() -> None:
     """The starting-point wizard ships as one patch that reads the CLI's data."""
-    wizard = [p for p in patches() if "What are you making?" in p.read_text()]
+    # A later patch may show the line as diff context; only one adds it.
+    wizard = [
+        p
+        for p in patches()
+        if any(
+            line.startswith("+") and "What are you making?" in line
+            for line in p.read_text().splitlines()
+        )
+    ]
     assert len(wizard) == 1, "exactly one patch adds the starting-point wizard"
     text = wizard[0].read_text()
     # Its data comes from the Joinery CLI, never from tables restated in C++.

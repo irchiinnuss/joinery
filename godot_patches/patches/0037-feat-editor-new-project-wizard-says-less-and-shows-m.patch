@@ -1,0 +1,1289 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ninjacornix <milanvrankic@gmail.com>
+Date: Fri, 13 Nov 2026 14:36:46 +0100
+Subject: [PATCH] feat(editor): new-project wizard says less and shows more
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Joinery-only, not for upstream. Every step: a three-dot stepper beside the title replaces "Step N of 3", and the footer's summary shows only on the step that creates, collapsed to "73 files · MIT · downloads GodotSteam ›" (pressed, it reads in full). Step 1: the starting points come first, as 16:9 pictures with their names (the pitch is the tooltip); the folder is one line, shortened in the middle, with a Change… link; the pitch's reason is its tooltip. Step 2: each feature is its name, a one-line caption from the CLI and its switch, with the summary and what it adds in the tooltip; Steam asks only for its app ID ("Add later") and, with online play, a Steam/Direct segmented control. Step 3 is "The look", marked Optional: one drop zone that becomes a three-column grid of pictures with what to take from each typed under it, five palette swatches (chosen, or picked from the pictures) that answer the palette question as hex values, and a refusal that names the file and fades after four seconds. The reference and document files, notes and answers written to the project keep their format.
+---
+ editor/project_manager/project_dialog.cpp | 803 ++++++++++++++++------
+ editor/project_manager/project_dialog.h   |  40 +-
+ 2 files changed, 641 insertions(+), 202 deletions(-)
+
+diff --git a/editor/project_manager/project_dialog.cpp b/editor/project_manager/project_dialog.cpp
+index b3d8245..1f2c6a5 100644
+--- a/editor/project_manager/project_dialog.cpp
++++ b/editor/project_manager/project_dialog.cpp
+@@ -55,14 +55,17 @@
+ #include "editor/themes/editor_scale.h"
+ #include "editor/themes/editor_theme_manager.h"
+ #include "editor/version_control/editor_vcs_interface.h"
++#include "scene/gui/aspect_ratio_container.h"
+ #include "scene/gui/check_box.h"
+ #include "scene/gui/check_button.h"
++#include "scene/gui/color_picker.h"
+ #include "scene/gui/grid_container.h"
+ #include "scene/gui/line_edit.h"
+ #include "scene/gui/link_button.h"
+ #include "scene/gui/margin_container.h"
+ #include "scene/gui/option_button.h"
+ #include "scene/gui/panel_container.h"
++#include "scene/gui/popup.h"
+ #include "scene/gui/progress_bar.h"
+ #include "scene/gui/scroll_container.h"
+ #include "scene/gui/separator.h"
+@@ -804,7 +807,7 @@ void ProjectDialog::_joinery_apply_sizes() {
+ 	// Add images… and Add documents… are filled like the sidebar's quiet
+ 	// buttons: the raised fill with no edge at rest, the hairline only on hover,
+ 	// so they read as part of the page rather than as footer actions.
+-	for (Button *b : { joinery_ref_add, joinery_doc_add }) {
++	for (Button *b : { joinery_doc_add }) {
+ 		if (!b) {
+ 			continue;
+ 		}
+@@ -819,6 +822,24 @@ void ProjectDialog::_joinery_apply_sizes() {
+ 			}
+ 		}
+ 	}
++	// The drop zone's height depends on the font, known only now.
++	if (joinery_ref_add) {
++		_joinery_update_import_buttons();
++	}
++	// Palette swatches are square, one control tall.
++	for (Button *swatch : joinery_swatches) {
++		if (swatch) {
++			swatch->set_custom_minimum_size(Size2(control.y, control.y));
++		}
++	}
++	// The footer's summary reads as a caption, quieter than Back beside it.
++	if (joinery_summary) {
++		joinery_summary->add_theme_font_size_override(SceneStringName(font_size), get_theme_font_size(SceneStringName(font_size), SNAME("JoineryCaption")));
++		const Color muted = get_theme_color(SceneStringName(font_color), SNAME("JoineryCaption"));
++		for (const StringName &state : { SceneStringName(font_color), SNAME("font_pressed_color"), SNAME("font_focus_color") }) {
++			joinery_summary->add_theme_color_override(state, muted);
++		}
++	}
+ 	_joinery_fit_scroll();
+ 	_joinery_align_names();
+ }
+@@ -1062,7 +1083,9 @@ void ProjectDialog::_joinery_show_step(int p_step) {
+ 	joinery_look_page->set_visible(p_step == JOINERY_PAGE_LOOK);
+ 	joinery_creating->set_visible(creating);
+ 	Object::cast_to<Control>(joinery_apps_names->get_parent())->set_visible(joinery_available);
+-	joinery_summary->set_visible((p_step == JOINERY_PAGE_APPS || p_step == JOINERY_PAGE_LOOK) && joinery_blueprints_ready && joinery_blueprint >= 0);
++	// What Create will do shows on the step that creates, not before.
++	joinery_summary->set_visible(p_step != JOINERY_PAGE_CREATING && p_step >= _joinery_total_steps() - 1 && joinery_blueprints_ready && joinery_blueprint >= 0);
++	joinery_summary->set_pressed(false);
+ 	_joinery_update_summary();
+ 	// The stretch spacer only pushes stock controls down; the wizard ends
+ 	// where its content does. The version-control row is always git here, so
+@@ -1072,6 +1095,8 @@ void ProjectDialog::_joinery_show_step(int p_step) {
+ 
+ 	const int total = _joinery_total_steps();
+ 	const bool last = p_step >= total - 1;
++	joinery_stepper->set_visible(!creating);
++	joinery_stepper->queue_redraw();
+ 	if (creating) {
+ 		const bool stopped = joinery_create_failed >= 0 && !joinery_create_running;
+ 		// The header keeps its shape on every page: the caption line names
+@@ -1079,22 +1104,22 @@ void ProjectDialog::_joinery_show_step(int p_step) {
+ 		joinery_step_label->show();
+ 		joinery_step_label->set_text(project_name->get_text().strip_edges());
+ 		joinery_intro->hide();
++		joinery_title_note->hide();
+ 		joinery_title->set_text(stopped ? TTR("Project setup stopped") : (joinery_create_warned ? TTR("Your project is ready") : TTR(String::utf8("Setting up your project…"))));
+ 		// A failure keeps the bar's place and turns it to the error colour.
+ 		joinery_create_bar->show();
+ 		_joinery_style_create_bar(stopped);
+ 	} else {
+ 		static const char *titles[] = { TTRC("What are you making?"), TTRC("Features and apps"), TTRC("Brief and art direction") };
+-		joinery_step_label->show();
+-		joinery_step_label->set_text(vformat(TTR("Step %d of %d"), p_step + 1, total));
+-		joinery_title->set_text(TTR(titles[CLAMP(p_step, 0, 2)]));
++		// Where you are is the stepper's dots; its words are for screen readers.
++		joinery_step_label->hide();
++		joinery_stepper->set_accessibility_name(vformat(TTR("Step %d of %d"), p_step + 1, total));
++		joinery_stepper->set_tooltip_text(joinery_stepper->get_accessibility_name());
++		joinery_title->set_text(p_step == JOINERY_PAGE_LOOK ? TTR("The look") : TTR(titles[CLAMP(p_step, 0, 2)]));
++		joinery_title_note->set_visible(p_step == JOINERY_PAGE_LOOK);
+ 		String intro;
+-		if (first) {
+-			intro = TTR("Each starting point is a small game that already plays.");
+-		} else if (p_step == JOINERY_PAGE_APPS) {
+-			intro = joinery_blueprint >= 0 ? vformat(TTR("Picked for %s. You can change these later."), _joinery_blueprint_name()) : String();
+-		} else {
+-			intro = TTR("Optional. Journeyman will ask before it matters.");
++		if (p_step == JOINERY_PAGE_APPS) {
++			intro = joinery_blueprint >= 0 ? vformat(TTR("Picked for %s."), _joinery_blueprint_name()) : String();
+ 		}
+ 		joinery_intro->set_text(intro);
+ 		joinery_intro->set_tooltip_text(intro);
+@@ -1123,6 +1148,32 @@ void ProjectDialog::_joinery_show_step(int p_step) {
+ 	joinery_scroll->set_v_scroll(0);
+ }
+ 
++// Three dots, one per step: the current one in the text colour and wider,
++// the others faint. No accent, so the step's Next stays the one accent.
++void ProjectDialog::_joinery_draw_stepper() {
++	const int total = _joinery_total_steps();
++	const float dot = 6 * EDSCALE;
++	const float wide = 16 * EDSCALE;
++	const float gap = 6 * EDSCALE;
++	const Size2 size(wide + (total - 1) * (dot + gap), dot);
++	if (joinery_stepper->get_custom_minimum_size() != size) {
++		joinery_stepper->set_custom_minimum_size(size);
++	}
++	const Color ink = get_theme_color(SceneStringName(font_color), SNAME("Label"));
++	const Color faint = get_theme_color(SceneStringName(font_color), SNAME("JoineryCaption"));
++	Ref<StyleBoxFlat> pill;
++	pill.instantiate();
++	pill->set_corner_radius_all(dot / 2);
++	float x = 0;
++	for (int i = 0; i < total; i++) {
++		const bool current = i == joinery_page;
++		const float w = current ? wide : dot;
++		pill->set_bg_color(current ? ink : Color(faint, 0.45));
++		joinery_stepper->draw_style_box(pill, Rect2(x, 0, w, dot));
++		x += w + gap;
++	}
++}
++
+ void ProjectDialog::_joinery_next_pressed() {
+ 	if (joinery_page == JOINERY_PAGE_CREATING) {
+ 		if (joinery_create_warned) {
+@@ -1166,7 +1217,7 @@ void ProjectDialog::_joinery_update_folder_label() {
+ 		path = "~" + path.substr(home.length());
+ 	}
+ #endif
+-	const String prefix = TTR("Saved in") + " ";
++	// Shortened in the middle: the start says where, the end names the folder.
+ 	const String ellipsis = String::utf8("…");
+ 	String shown = path;
+ 	float width = joinery_folder_label->get_size().x;
+@@ -1177,15 +1228,15 @@ void ProjectDialog::_joinery_update_folder_label() {
+ 	const Ref<Font> font = joinery_folder_label->get_theme_font(SceneStringName(font));
+ 	const int font_size = joinery_folder_label->get_theme_font_size(SceneStringName(font_size));
+ 	if (width > 0 && font.is_valid()) {
+-		int start = 0;
+-		while (start < path.length() - 1 && font->get_string_size(prefix + (start > 0 ? ellipsis : String()) + path.substr(start), HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x > width) {
+-			start++;
+-		}
+-		if (start > 0) {
+-			shown = ellipsis + path.substr(start);
++		const int tail = path.get_file().length() + 1;
++		int cut = 0;
++		while (cut < path.length() - tail && font->get_string_size(shown, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x > width) {
++			cut++;
++			const int keep = path.length() - tail - cut;
++			shown = path.substr(0, keep / 2) + ellipsis + path.substr(path.length() - tail - (keep - keep / 2));
+ 		}
+ 	}
+-	joinery_folder_label->set_text(prefix + shown);
++	joinery_folder_label->set_text(shown);
+ 	joinery_folder_label->set_tooltip_text(full);
+ }
+ 
+@@ -1785,7 +1836,7 @@ void ProjectDialog::_joinery_build_catalog(const Array &p_tools) {
+ }
+ 
+ void ProjectDialog::_joinery_clear_questions() {
+-	for (VBoxContainer *list : { joinery_look_fields, joinery_brief_fields, joinery_references_box }) {
++	for (VBoxContainer *list : { joinery_look_fields, joinery_brief_fields }) {
+ 		while (list->get_child_count() > 0) {
+ 			Node *child = list->get_child(0);
+ 			list->remove_child(child);
+@@ -1794,6 +1845,7 @@ void ProjectDialog::_joinery_clear_questions() {
+ 	}
+ 	joinery_bible_inputs.clear();
+ 	joinery_bible_keys.clear();
++	joinery_palette_field = nullptr;
+ 	joinery_brief_inputs.clear();
+ 	joinery_brief_keys.clear();
+ 	joinery_brief_filled.clear();
+@@ -1846,20 +1898,18 @@ Control *ProjectDialog::_joinery_add_question(VBoxContainer *p_parent, const Dic
+ }
+ 
+ // The art direction questions from `joinery bible --questions`. References
+-// get their own section, because they are the user's own material rather
+-// than an answer: the bible's reference board starts from what is typed here.
++// are the user's own pictures (the drop zone above them), so the typed
++// References question is not asked; the palette is answered by swatches.
+ void ProjectDialog::_joinery_build_questions(const Array &p_pages) {
+-	for (VBoxContainer *list : { joinery_look_fields, joinery_references_box }) {
+-		while (list->get_child_count() > 0) {
+-			Node *child = list->get_child(0);
+-			list->remove_child(child);
+-			memdelete(child);
+-		}
++	while (joinery_look_fields->get_child_count() > 0) {
++		Node *child = joinery_look_fields->get_child(0);
++		joinery_look_fields->remove_child(child);
++		memdelete(child);
+ 	}
+ 	joinery_bible_inputs.clear();
+ 	joinery_bible_keys.clear();
++	joinery_palette_field = nullptr;
+ 
+-	Dictionary references;
+ 	for (int p = 0; p < p_pages.size(); p++) {
+ 		const Dictionary page = p_pages[p];
+ 		const Array questions = page.get("questions", Array());
+@@ -1867,7 +1917,6 @@ void ProjectDialog::_joinery_build_questions(const Array &p_pages) {
+ 			const Dictionary question = questions[i];
+ 			const String key = question.get("key", "");
+ 			if (key == "references") {
+-				references = question;
+ 				continue;
+ 			}
+ 			String label_text = question.get("label", "");
+@@ -1875,32 +1924,19 @@ void ProjectDialog::_joinery_build_questions(const Array &p_pages) {
+ 			if (key == "vision" && label_text.ends_with("?")) {
+ 				label_text = TTR("Feel");
+ 			}
+-			joinery_bible_inputs.push_back(_joinery_add_question(joinery_look_fields, question, label_text));
++			Control *input = _joinery_add_question(joinery_look_fields, question, label_text);
++			joinery_bible_inputs.push_back(input);
+ 			joinery_bible_keys.push_back(key);
++			// The swatches write the palette answer, as hex values; its field
++			// stays in the page's data but out of sight.
++			if (key == "palette" && Object::cast_to<LineEdit>(input)) {
++				joinery_palette_field = Object::cast_to<LineEdit>(input);
++				Object::cast_to<Control>(input->get_parent())->hide();
++			}
+ 		}
+ 	}
+-	if (joinery_bible_keys.is_empty()) {
+-		return;
+-	}
+-	// A CLI from before References were asked still renders the answer into
+-	// the bible's {{references}} token, so the field is offered either way.
+-	if (references.is_empty()) {
+-		references["key"] = "references";
+-		references["multiline"] = true;
+-		references["placeholder"] = TTR("e.g. art/reference/dusk_board.kra: the warm low light, not its colours");
+-	}
+-	if (String(references.get("caption", "")).is_empty()) {
+-		references["caption"] = TTR("Games, films, places or your own sketches, and what to take from each. Keep your files in art/reference/.");
+-	}
+-	joinery_bible_inputs.push_back(_joinery_add_question(joinery_references_box, references, TTR("References")));
+-	joinery_bible_keys.push_back("references");
+-	// Its label is the section's heading.
+-	Label *heading = Object::cast_to<Label>(joinery_references_box->get_child(0)->get_child(0));
+-	if (heading) {
+-		heading->set_theme_type_variation(SNAME("JoinerySection"));
+-	}
+-	// Spaced like every other section: heading, field and caption SPACE.3 apart.
+-	Object::cast_to<Control>(joinery_references_box->get_child(0))->add_theme_constant_override(SNAME("separation"), _joinery_space(3));
++	joinery_palette_box->set_visible(joinery_palette_field != nullptr);
++	_joinery_palette_changed();
+ }
+ 
+ // The game brief's questions from `joinery brief --questions`: the pitch and
+@@ -1949,51 +1985,66 @@ static bool _joinery_is_document(const String &p_path) {
+ }
+ 
+ void ProjectDialog::_joinery_build_imports(VBoxContainer *p_brief_section) {
+-	// A block inside a section reads as one of its fields; a block of its own
+-	// on the page is a section, headed and spaced like every other one.
+-	const auto block = [this](VBoxContainer *p_parent, const String &p_label, const String &p_caption) {
+-		const bool own_section = p_parent == joinery_look_page;
+-		VBoxContainer *box = memnew(VBoxContainer);
+-		box->add_theme_constant_override(SNAME("separation"), _joinery_space(own_section ? 3 : 2));
+-		p_parent->add_child(box);
+-		Label *label = memnew(Label);
+-		label->set_theme_type_variation(own_section ? SNAME("JoinerySection") : SNAME("JoineryLabel"));
+-		label->set_text(p_label);
+-		box->add_child(label);
+-		box->add_child(_joinery_caption(p_caption));
+-		return box;
+-	};
+-	const auto add_button = [](VBoxContainer *p_box, const String &p_text, Label **r_error) {
+-		VBoxContainer *rows = memnew(VBoxContainer);
+-		rows->add_theme_constant_override(SNAME("separation"), _joinery_space(2));
+-		p_box->add_child(rows);
+-		rows->hide();
+-		Button *button = memnew(Button);
+-		button->set_theme_type_variation(SNAME("JoinerySecondaryButton"));
+-		button->set_text(p_text);
+-		button->set_h_size_flags(Control::SIZE_SHRINK_BEGIN);
+-		p_box->add_child(button);
+-		*r_error = memnew(Label);
+-		(*r_error)->set_theme_type_variation(SNAME("JoineryError"));
+-		(*r_error)->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
+-		(*r_error)->set_auto_translate_mode(AUTO_TRANSLATE_MODE_DISABLED);
+-		(*r_error)->set_accessibility_live(AccessibilityServerEnums::LIVE_POLITE);
+-		(*r_error)->hide();
+-		p_box->add_child(*r_error);
+-		return Pair<VBoxContainer *, Button *>(rows, button);
+-	};
+-
+-	VBoxContainer *docs = block(p_brief_section, TTR("Design documents"), TTR("Your design document or notes: Markdown, text or PDF, up to 10. Open parts of the brief are copied from their matching headings."));
+-	Pair<VBoxContainer *, Button *> doc_parts = add_button(docs, TTR(String::utf8("Add documents…")), &joinery_doc_error);
+-	joinery_doc_rows = doc_parts.first;
+-	joinery_doc_add = doc_parts.second;
++	// Design documents: a field of the brief, its rules in the tooltip.
++	VBoxContainer *docs = memnew(VBoxContainer);
++	docs->add_theme_constant_override(SNAME("separation"), _joinery_space(2));
++	p_brief_section->add_child(docs);
++	Label *docs_label = memnew(Label);
++	docs_label->set_theme_type_variation(SNAME("JoineryLabel"));
++	docs_label->set_text(TTR("Design documents"));
++	docs_label->set_tooltip_text(TTR("Markdown, text or PDF, up to 10. Open parts of the brief are copied from their matching headings."));
++	docs_label->set_mouse_filter(Control::MOUSE_FILTER_PASS);
++	docs->add_child(docs_label);
++	joinery_doc_rows = memnew(VBoxContainer);
++	joinery_doc_rows->add_theme_constant_override(SNAME("separation"), _joinery_space(2));
++	joinery_doc_rows->hide();
++	docs->add_child(joinery_doc_rows);
++	joinery_doc_add = memnew(Button);
++	joinery_doc_add->set_theme_type_variation(SNAME("JoinerySecondaryButton"));
++	joinery_doc_add->set_text(TTR(String::utf8("Add documents…")));
++	joinery_doc_add->set_tooltip_text(docs_label->get_tooltip_text());
++	joinery_doc_add->set_h_size_flags(Control::SIZE_SHRINK_BEGIN);
+ 	joinery_doc_add->connect(SceneStringName(pressed), callable_mp(this, &ProjectDialog::_joinery_browse_documents));
+-
+-	VBoxContainer *refs = block(joinery_look_page, TTR("Reference images"), TTR("Your own pictures: PNG, JPEG or WebP, up to 20. Drop them on this window or add them, and say what to take from each."));
+-	Pair<VBoxContainer *, Button *> ref_parts = add_button(refs, TTR(String::utf8("Add images…")), &joinery_ref_error);
+-	joinery_ref_rows = ref_parts.first;
+-	joinery_ref_add = ref_parts.second;
++	docs->add_child(joinery_doc_add);
++	joinery_doc_error = memnew(Label);
++	joinery_doc_error->set_theme_type_variation(SNAME("JoineryError"));
++	joinery_doc_error->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
++	joinery_doc_error->set_auto_translate_mode(AUTO_TRANSLATE_MODE_DISABLED);
++	joinery_doc_error->set_accessibility_live(AccessibilityServerEnums::LIVE_POLITE);
++	joinery_doc_error->hide();
++	docs->add_child(joinery_doc_error);
++
++	// References: one drop zone that becomes a grid of pictures, each with
++	// what to take from it typed under it. The zone stays as the grid's
++	// last tile, so adding more is in the same place.
++	joinery_ref_rows = memnew(GridContainer);
++	joinery_ref_rows->add_theme_constant_override(SNAME("h_separation"), _joinery_space(2));
++	joinery_ref_rows->add_theme_constant_override(SNAME("v_separation"), _joinery_space(3));
++	joinery_references_box->add_child(joinery_ref_rows);
++	joinery_ref_add = memnew(Button);
++	joinery_ref_add->set_h_size_flags(Control::SIZE_EXPAND_FILL);
++	joinery_ref_add->set_text(TTR("Drop images"));
++	joinery_ref_add->set_tooltip_text(vformat(TTR("PNG, JPEG or WebP, up to %d. Drop them here or click to choose."), JOINERY_MAX_REFERENCES));
++	joinery_ref_add->set_accessibility_name(TTR("Add reference images"));
++	for (const StringName &state : { CoreStringName(normal), SceneStringName(hover), SceneStringName(pressed), SNAME("hover_pressed"), SNAME("disabled") }) {
++		joinery_ref_add->add_theme_style_override(state, memnew(StyleBoxEmpty));
++	}
+ 	joinery_ref_add->connect(SceneStringName(pressed), callable_mp(this, &ProjectDialog::_joinery_browse_references));
++	joinery_ref_add->connect(SceneStringName(draw), callable_mp(this, &ProjectDialog::_joinery_draw_drop_zone));
++	joinery_ref_rows->add_child(joinery_ref_add);
++	joinery_ref_error = memnew(Label);
++	joinery_ref_error->set_theme_type_variation(SNAME("JoineryError"));
++	joinery_ref_error->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
++	joinery_ref_error->set_auto_translate_mode(AUTO_TRANSLATE_MODE_DISABLED);
++	joinery_ref_error->set_accessibility_live(AccessibilityServerEnums::LIVE_POLITE);
++	joinery_ref_error->hide();
++	joinery_references_box->add_child(joinery_ref_error);
++	// A refusal says its piece and goes: it is about the drop, not the page.
++	joinery_ref_error_timer = memnew(Timer);
++	joinery_ref_error_timer->set_one_shot(true);
++	joinery_ref_error_timer->set_wait_time(4.0);
++	joinery_ref_error_timer->connect(SNAME("timeout"), callable_mp((CanvasItem *)joinery_ref_error, &CanvasItem::hide));
++	add_child(joinery_ref_error_timer);
+ 
+ 	joinery_ref_dialog = memnew(EditorFileDialog);
+ 	joinery_ref_dialog->set_access(EditorFileDialog::ACCESS_FILESYSTEM);
+@@ -2009,6 +2060,213 @@ void ProjectDialog::_joinery_build_imports(VBoxContainer *p_brief_section) {
+ 	joinery_doc_dialog->add_filter("*.md,*.markdown,*.txt,*.pdf", TTR("Markdown, text or PDF"));
+ 	joinery_doc_dialog->connect("files_selected", callable_mp(this, &ProjectDialog::_joinery_add_documents));
+ 	add_child(joinery_doc_dialog);
++	_joinery_build_palette();
++}
++
++// The drop zone: a dashed outline, its words centred, a faint fill on hover.
++// Empty, it spans the page; with pictures it is the grid's last 4:3 tile.
++void ProjectDialog::_joinery_draw_drop_zone() {
++	const Rect2 rect(Point2(), joinery_ref_add->get_size());
++	const Color edge = get_theme_color(SceneStringName(font_color), SNAME("JoineryCaption"));
++	const float line = MAX(1.0f, (float)EDSCALE);
++	if (joinery_ref_add->is_hovered() && !joinery_ref_add->is_disabled()) {
++		Ref<StyleBoxFlat> fill;
++		fill.instantiate();
++		fill->set_bg_color(Color(edge, 0.08));
++		fill->set_corner_radius_all(8 * EDSCALE);
++		joinery_ref_add->draw_style_box(fill, rect);
++	}
++	const float dash = 6 * EDSCALE;
++	const Color stroke = Color(edge, joinery_ref_add->is_disabled() ? 0.3 : 0.7);
++	const Point2 corners[4] = { rect.position, Point2(rect.get_end().x, rect.position.y), rect.get_end(), Point2(rect.position.x, rect.get_end().y) };
++	for (int i = 0; i < 4; i++) {
++		const Vector2 inset = Vector2(line / 2, line / 2) * Vector2(i == 1 || i == 2 ? -1 : 1, i >= 2 ? -1 : 1);
++		const Vector2 next_inset = Vector2(line / 2, line / 2) * Vector2((i + 1) % 4 == 1 || (i + 1) % 4 == 2 ? -1 : 1, (i + 1) % 4 >= 2 ? -1 : 1);
++		joinery_ref_add->draw_dashed_line(corners[i] + inset, corners[(i + 1) % 4] + next_inset, stroke, line, dash);
++	}
++}
++
++struct _JoineryLuminanceLess {
++	bool operator()(const Color &p_a, const Color &p_b) const {
++		return p_a.get_luminance() < p_b.get_luminance();
++	}
++};
++
++// The palette: five swatches, empty until a colour is chosen for them, and
++// "Pick from references", which samples the dropped pictures.
++void ProjectDialog::_joinery_build_palette() {
++	joinery_palette_box = memnew(VBoxContainer);
++	joinery_palette_box->add_theme_constant_override(SNAME("separation"), _joinery_space(1));
++	joinery_palette_box->hide();
++	joinery_references_box->add_child(joinery_palette_box);
++	Label *label = memnew(Label);
++	label->set_theme_type_variation(SNAME("JoineryLabel"));
++	label->set_text(TTR("Palette"));
++	joinery_palette_box->add_child(label);
++	HBoxContainer *row = memnew(HBoxContainer);
++	row->add_theme_constant_override(SNAME("separation"), _joinery_space(2));
++	joinery_palette_box->add_child(row);
++	for (int i = 0; i < JOINERY_SWATCHES; i++) {
++		Button *swatch = memnew(Button);
++		swatch->set_v_size_flags(Control::SIZE_SHRINK_CENTER);
++		swatch->set_accessibility_name(vformat(TTR("Colour %d"), i + 1));
++		swatch->set_tooltip_text(TTR("Choose a colour"));
++		for (const StringName &state : { CoreStringName(normal), SceneStringName(hover), SceneStringName(pressed), SNAME("hover_pressed") }) {
++			swatch->add_theme_style_override(state, memnew(StyleBoxEmpty));
++		}
++		swatch->connect(SceneStringName(draw), callable_mp(this, &ProjectDialog::_joinery_draw_swatch).bind(i));
++		swatch->connect(SceneStringName(pressed), callable_mp(this, &ProjectDialog::_joinery_edit_swatch).bind(i));
++		row->add_child(swatch);
++		joinery_swatches[i] = swatch;
++	}
++	joinery_palette_pick = memnew(Button);
++	joinery_palette_pick->set_theme_type_variation(SNAME("JoineryLinkButton"));
++	joinery_palette_pick->set_text(TTR("Pick from references"));
++	joinery_palette_pick->set_v_size_flags(Control::SIZE_SHRINK_CENTER);
++	joinery_palette_pick->set_disabled(true);
++	joinery_palette_pick->connect(SceneStringName(pressed), callable_mp(this, &ProjectDialog::_joinery_pick_palette));
++	row->add_child(joinery_palette_pick);
++
++	joinery_palette_popup = memnew(PopupPanel);
++	add_child(joinery_palette_popup);
++	VBoxContainer *popup_box = memnew(VBoxContainer);
++	joinery_palette_popup->add_child(popup_box);
++	joinery_palette_picker = memnew(ColorPicker);
++	joinery_palette_picker->set_edit_alpha(false);
++	joinery_palette_picker->set_presets_visible(false);
++	joinery_palette_picker->connect(SNAME("color_changed"), callable_mp(this, &ProjectDialog::_joinery_swatch_picked));
++	popup_box->add_child(joinery_palette_picker);
++	Button *clear = memnew(Button);
++	clear->set_theme_type_variation(SNAME("JoineryTextButton"));
++	clear->set_text(TTR("Clear"));
++	clear->set_h_size_flags(Control::SIZE_SHRINK_BEGIN);
++	clear->connect(SceneStringName(pressed), callable_mp(this, &ProjectDialog::_joinery_clear_swatch));
++	popup_box->add_child(clear);
++}
++
++// A chosen colour fills its swatch; an empty one is a dashed outline.
++void ProjectDialog::_joinery_draw_swatch(int p_index) {
++	Button *swatch = joinery_swatches[p_index];
++	const Rect2 rect(Point2(), swatch->get_size());
++	const int radius = 6 * EDSCALE;
++	if (joinery_palette_set[p_index]) {
++		Ref<StyleBoxFlat> fill;
++		fill.instantiate();
++		fill->set_bg_color(joinery_palette[p_index]);
++		fill->set_corner_radius_all(radius);
++		fill->set_border_width_all(MAX(1, (int)EDSCALE));
++		fill->set_border_color(Color(get_theme_color(SceneStringName(font_color), SNAME("JoineryCaption")), 0.25));
++		swatch->draw_style_box(fill, rect);
++	} else {
++		const Color edge = Color(get_theme_color(SceneStringName(font_color), SNAME("JoineryCaption")), swatch->is_hovered() ? 0.9 : 0.6);
++		const float line = MAX(1.0f, (float)EDSCALE);
++		const Rect2 r = rect.grow(-line / 2);
++		const Point2 c[4] = { r.position, Point2(r.get_end().x, r.position.y), r.get_end(), Point2(r.position.x, r.get_end().y) };
++		for (int i = 0; i < 4; i++) {
++			swatch->draw_dashed_line(c[i], c[(i + 1) % 4], edge, line, 4 * EDSCALE);
++		}
++	}
++}
++
++void ProjectDialog::_joinery_edit_swatch(int p_index) {
++	joinery_palette_editing = p_index;
++	joinery_palette_picker->set_pick_color(joinery_palette_set[p_index] ? joinery_palette[p_index] : Color(0.5, 0.5, 0.5));
++	Button *swatch = joinery_swatches[p_index];
++	const Rect2 at = swatch->get_screen_rect();
++	joinery_palette_popup->reset_size();
++	joinery_palette_popup->popup(Rect2i(at.position + Vector2(0, at.size.y + _joinery_space(1)), Size2i()));
++}
++
++void ProjectDialog::_joinery_swatch_picked(const Color &p_color) {
++	if (joinery_palette_editing < 0) {
++		return;
++	}
++	joinery_palette[joinery_palette_editing] = p_color;
++	joinery_palette_set[joinery_palette_editing] = true;
++	_joinery_palette_changed();
++}
++
++void ProjectDialog::_joinery_clear_swatch() {
++	if (joinery_palette_editing >= 0) {
++		joinery_palette_set[joinery_palette_editing] = false;
++	}
++	joinery_palette_popup->hide();
++	_joinery_palette_changed();
++}
++
++// Five colours from the pictures: k-means over a sample of their pixels,
++// ordered dark to light. The swatches are then the user's to change.
++void ProjectDialog::_joinery_pick_palette() {
++	Vector<Color> pixels;
++	for (const Ref<Image> &image : joinery_ref_images) {
++		if (image.is_null()) {
++			continue;
++		}
++		Ref<Image> small = image->duplicate();
++		small->resize(32, 24, Image::INTERPOLATE_BILINEAR);
++		small->convert(Image::FORMAT_RGB8);
++		for (int y = 0; y < small->get_height(); y++) {
++			for (int x = 0; x < small->get_width(); x++) {
++				pixels.push_back(small->get_pixel(x, y));
++			}
++		}
++	}
++	if (pixels.is_empty()) {
++		return;
++	}
++	Color centres[JOINERY_SWATCHES];
++	for (int k = 0; k < JOINERY_SWATCHES; k++) {
++		centres[k] = pixels[(int)((int64_t)k * (pixels.size() - 1) / MAX(1, JOINERY_SWATCHES - 1))];
++	}
++	for (int round = 0; round < 10; round++) {
++		Color sums[JOINERY_SWATCHES];
++		int counts[JOINERY_SWATCHES] = {};
++		for (const Color &c : pixels) {
++			int best = 0;
++			float best_d = 1e9;
++			for (int k = 0; k < JOINERY_SWATCHES; k++) {
++				const float d = Vector3(c.r - centres[k].r, c.g - centres[k].g, c.b - centres[k].b).length_squared();
++				if (d < best_d) {
++					best_d = d;
++					best = k;
++				}
++			}
++			sums[best] = Color(sums[best].r + c.r, sums[best].g + c.g, sums[best].b + c.b);
++			counts[best]++;
++		}
++		for (int k = 0; k < JOINERY_SWATCHES; k++) {
++			if (counts[k] > 0) {
++				centres[k] = Color(sums[k].r / counts[k], sums[k].g / counts[k], sums[k].b / counts[k]);
++			}
++		}
++	}
++	Vector<Color> ordered;
++	for (const Color &c : centres) {
++		ordered.push_back(c);
++	}
++	ordered.sort_custom<_JoineryLuminanceLess>();
++	for (int k = 0; k < JOINERY_SWATCHES; k++) {
++		joinery_palette[k] = ordered[k];
++		joinery_palette_set[k] = true;
++	}
++	_joinery_palette_changed();
++}
++
++// The chosen colours, as the palette answer: "#2b3a4f, #c98a4b".
++void ProjectDialog::_joinery_palette_changed() {
++	Vector<String> hexes;
++	for (int i = 0; i < JOINERY_SWATCHES; i++) {
++		if (joinery_palette_set[i]) {
++			hexes.push_back("#" + joinery_palette[i].to_html(false));
++		}
++		if (joinery_swatches[i]) {
++			joinery_swatches[i]->set_tooltip_text(joinery_palette_set[i] ? "#" + joinery_palette[i].to_html(false) : TTR("Choose a colour"));
++			joinery_swatches[i]->queue_redraw();
++		}
++	}
++	if (joinery_palette_field) {
++		joinery_palette_field->set_text(String(", ").join(hexes));
++	}
+ }
+ 
+ void ProjectDialog::_joinery_browse_references() {
+@@ -2032,6 +2290,20 @@ static Button *_joinery_remove_button(const String &p_name, int p_side) {
+ 	return remove;
+ }
+ 
++// An AspectRatioContainer fits its child but asks its parent for no height,
++// so a box would stack the next row over the picture. Its minimum height
++// follows its width instead.
++static void _joinery_fit_ratio(AspectRatioContainer *p_box) {
++	const float height = Math::round(p_box->get_size().x / MAX(0.01f, p_box->get_ratio()));
++	if (!Math::is_equal_approx(p_box->get_custom_minimum_size().y, height)) {
++		p_box->set_custom_minimum_size(Size2(0, height));
++	}
++}
++
++static void _joinery_hold_ratio(AspectRatioContainer *p_box) {
++	p_box->connect(SceneStringName(resized), callable_mp_static(&_joinery_fit_ratio).bind(p_box));
++}
++
+ static Label *_joinery_file_name(const String &p_name) {
+ 	Label *name = memnew(Label);
+ 	name->set_theme_type_variation(SNAME("JoineryLabel"));
+@@ -2046,76 +2318,123 @@ static Label *_joinery_file_name(const String &p_name) {
+ 
+ void ProjectDialog::_joinery_add_references(const PackedStringArray &p_paths) {
+ 	String problem;
+-	const int thumb = _joinery_control_h(2.5) * 2;
++	const int thumb = 320 * EDSCALE;
++	const String formats = TTR("References can be PNG, JPEG or WebP images.");
+ 	for (const String &raw : p_paths) {
+ 		const String path = raw.simplify_path();
+ 		const String name = path.get_file();
+ 		if (DirAccess::dir_exists_absolute(path)) {
+-			problem = vformat(TTR("%s is a folder. Pick the files inside it instead."), name);
++			problem = vformat(TTR("%s is a folder"), name);
+ 			continue;
+ 		}
+ 		if (!_joinery_is_image(path)) {
+-			problem = vformat(TTR("%s isn't a picture. References can be PNG, JPEG or WebP images."), name);
+-			if (_joinery_is_document(path)) {
+-				problem += " " + TTR("If it describes the game, add it under Design documents.");
+-			}
++			problem = vformat(TTR("%s isn't an image"), name);
+ 			continue;
+ 		}
+ 		if (joinery_ref_paths.has(path)) {
+ 			continue;
+ 		}
+ 		if (joinery_ref_paths.size() >= JOINERY_MAX_REFERENCES) {
+-			problem = vformat(TTR("Add up to %d references."), JOINERY_MAX_REFERENCES);
++			problem = vformat(TTR("Up to %d images"), JOINERY_MAX_REFERENCES);
+ 			break;
+ 		}
+ 		Ref<Image> image = Image::load_from_file(path);
+ 		if (image.is_null() || image->is_empty()) {
+-			problem = vformat(TTR("%s doesn't hold a picture Joinery can read."), name);
++			problem = vformat(TTR("%s can't be read"), name);
+ 			continue;
+ 		}
+-		// A small copy for the thumbnail; the file itself is copied unchanged.
++		// A small copy for the tile; the file itself is copied unchanged.
+ 		const float scale = MIN(1.0f, (float)thumb / MAX(1, MAX(image->get_width(), image->get_height())));
+ 		if (scale < 1.0f) {
+ 			image->resize(MAX(1, (int)(image->get_width() * scale)), MAX(1, (int)(image->get_height() * scale)), Image::INTERPOLATE_BILINEAR);
+ 		}
+ 
+-		HBoxContainer *row = memnew(HBoxContainer);
+-		row->add_theme_constant_override(SNAME("separation"), _joinery_space(3));
++		// The tile: the picture at 4:3 with its × in the corner, and what to
++		// take from it typed straight under it.
++		VBoxContainer *tile = memnew(VBoxContainer);
++		tile->add_theme_constant_override(SNAME("separation"), _joinery_space(1));
++		tile->set_h_size_flags(Control::SIZE_EXPAND_FILL);
++		AspectRatioContainer *ratio = memnew(AspectRatioContainer);
++		ratio->set_ratio(4.0 / 3.0);
++		ratio->set_stretch_mode(AspectRatioContainer::STRETCH_WIDTH_CONTROLS_HEIGHT);
++		_joinery_hold_ratio(ratio);
++		tile->add_child(ratio);
++		PanelContainer *frame = memnew(PanelContainer);
++		Ref<StyleBoxFlat> shape;
++		shape.instantiate();
++		shape->set_corner_radius_all(8 * EDSCALE);
++		shape->set_content_margin_all(0);
++		frame->add_theme_style_override(SceneStringName(panel), shape);
++		frame->set_clip_children_mode(CanvasItem::CLIP_CHILDREN_ONLY);
++		frame->set_tooltip_text(name);
++		ratio->add_child(frame);
+ 		TextureRect *picture = memnew(TextureRect);
+ 		picture->set_texture(ImageTexture::create_from_image(image));
+ 		picture->set_expand_mode(TextureRect::EXPAND_IGNORE_SIZE);
+ 		picture->set_stretch_mode(TextureRect::STRETCH_KEEP_ASPECT_COVERED);
+-		picture->set_clip_contents(true);
+-		picture->set_custom_minimum_size(Size2(thumb, thumb));
+-		picture->set_v_size_flags(Control::SIZE_SHRINK_CENTER);
+-		row->add_child(picture);
+-		VBoxContainer *words = memnew(VBoxContainer);
+-		words->add_theme_constant_override(SNAME("separation"), _joinery_space(1));
+-		words->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+-		words->set_v_size_flags(Control::SIZE_SHRINK_CENTER);
+-		row->add_child(words);
+-		words->add_child(_joinery_file_name(name));
++		picture->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
++		frame->add_child(picture);
++		MarginContainer *corner = memnew(MarginContainer);
++		corner->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
++		for (const StringName &side : { SNAME("margin_top"), SNAME("margin_right") }) {
++			corner->add_theme_constant_override(side, _joinery_space(1));
++		}
++		frame->add_child(corner);
++		Button *remove = _joinery_remove_button(name, _joinery_control_h(2.0));
++		remove->set_h_size_flags(Control::SIZE_SHRINK_END);
++		remove->set_v_size_flags(Control::SIZE_SHRINK_BEGIN);
++		Ref<StyleBoxFlat> chip;
++		chip.instantiate();
++		chip->set_content_margin_all(0);
++		chip->set_bg_color(Color(0, 0, 0, 0.55));
++		chip->set_corner_radius_all(_joinery_control_h(2.0));
++		Ref<StyleBoxFlat> chip_hover = chip->duplicate();
++		chip_hover->set_bg_color(Color(0, 0, 0, 0.75));
++		remove->add_theme_style_override(CoreStringName(normal), chip);
++		remove->add_theme_style_override(SceneStringName(hover), chip_hover);
++		remove->add_theme_style_override(SceneStringName(pressed), chip_hover);
++		for (const StringName &color : { SceneStringName(font_color), SNAME("font_hover_color"), SNAME("font_pressed_color"), SNAME("font_focus_color") }) {
++			remove->add_theme_color_override(color, Color(1, 1, 1));
++		}
++		// A round chip: the × at caption size, so the circle stays one size.
++		remove->add_theme_font_size_override(SceneStringName(font_size), get_theme_font_size(SceneStringName(font_size), SNAME("JoineryCaption")));
++		remove->connect(SceneStringName(pressed), callable_mp(this, &ProjectDialog::_joinery_remove_reference).bind(path));
++		corner->add_child(remove);
+ 		LineEdit *note = memnew(LineEdit);
+ 		note->set_theme_type_variation(SNAME("JoineryField"));
+-		note->set_placeholder(TTR("What to take from it (optional)"));
++		note->set_placeholder(TTR("What to take"));
++		note->set_tooltip_text(vformat(TTR("What to take from %s"), name));
+ 		note->set_accessibility_name(vformat(TTR("What to take from %s"), name));
+ 		note->set_max_length(200);
+ 		note->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+-		note->set_custom_minimum_size(Size2(0, _joinery_control_h(2.5)));
+-		words->add_child(note);
+-		Button *remove = _joinery_remove_button(name, _joinery_control_h(2.5));
+-		remove->connect(SceneStringName(pressed), callable_mp(this, &ProjectDialog::_joinery_remove_reference).bind(path));
+-		row->add_child(remove);
+-		joinery_ref_rows->add_child(row);
++		note->set_custom_minimum_size(Size2(0, _joinery_control_h(2.0)));
++		note->add_theme_font_size_override(SceneStringName(font_size), get_theme_font_size(SceneStringName(font_size), SNAME("JoineryCaption")));
++		tile->add_child(note);
++		joinery_ref_rows->add_child(tile);
++		joinery_ref_rows->move_child(joinery_ref_add, -1);
+ 		joinery_ref_paths.push_back(path);
+ 		joinery_ref_notes.push_back(note);
+-		joinery_ref_row_nodes.push_back(row);
++		joinery_ref_row_nodes.push_back(tile);
++		joinery_ref_images.push_back(image);
+ 	}
+-	joinery_ref_error->set_text(problem);
+-	joinery_ref_error->set_visible(!problem.is_empty());
++	_joinery_show_ref_problem(problem, formats);
+ 	_joinery_update_import_buttons();
+ }
+ 
++// A refusal in a few words on the zone's edge, the rest in its tooltip, gone
++// after four seconds.
++void ProjectDialog::_joinery_show_ref_problem(const String &p_problem, const String &p_detail) {
++	joinery_ref_error->set_text(p_problem);
++	joinery_ref_error->set_tooltip_text(p_detail);
++	joinery_ref_error->set_mouse_filter(Control::MOUSE_FILTER_PASS);
++	joinery_ref_error->set_visible(!p_problem.is_empty());
++	if (p_problem.is_empty()) {
++		joinery_ref_error_timer->stop();
++	} else {
++		joinery_ref_error_timer->start();
++	}
++}
++
+ void ProjectDialog::_joinery_add_documents(const PackedStringArray &p_paths) {
+ 	String problem;
+ 	for (const String &raw : p_paths) {
+@@ -2166,7 +2485,8 @@ void ProjectDialog::_joinery_remove_reference(const String &p_path) {
+ 	joinery_ref_paths.remove_at(index);
+ 	joinery_ref_notes.remove_at(index);
+ 	joinery_ref_row_nodes.remove_at(index);
+-	joinery_ref_error->hide();
++	joinery_ref_images.remove_at(index);
++	_joinery_show_ref_problem(String(), String());
+ 	_joinery_update_import_buttons();
+ 	joinery_ref_add->grab_focus();
+ }
+@@ -2187,10 +2507,21 @@ void ProjectDialog::_joinery_remove_document(const String &p_path) {
+ void ProjectDialog::_joinery_update_import_buttons() {
+ 	joinery_ref_add->set_disabled(joinery_ref_paths.size() >= JOINERY_MAX_REFERENCES);
+ 	joinery_doc_add->set_disabled(joinery_doc_paths.size() >= JOINERY_MAX_DOCUMENTS);
+-	// An empty file list takes no room, so the caption and its Add button keep
+-	// the block's one gap instead of two.
+-	joinery_ref_rows->set_visible(!joinery_ref_paths.is_empty());
+ 	joinery_doc_rows->set_visible(!joinery_doc_paths.is_empty());
++	// Empty, the zone spans the page and asks for pictures; with some, it is
++	// one more 4:3 tile beside them.
++	const bool empty = joinery_ref_paths.is_empty();
++	joinery_ref_rows->set_columns(empty ? 1 : 3);
++	joinery_ref_add->set_text(empty ? TTR("Drop images") : TTR("+ Add"));
++	if (is_inside_tree()) {
++		joinery_ref_add->set_custom_minimum_size(Size2(0, empty ? _joinery_control_h(5.0) : 0));
++	}
++	// Beside pictures, the tile fills its row: as tall as a picture and its
++	// caption together.
++	joinery_ref_add->set_v_size_flags(empty ? Control::SIZE_SHRINK_BEGIN : Control::SIZE_FILL);
++	if (joinery_palette_pick) {
++		joinery_palette_pick->set_disabled(empty);
++	}
+ }
+ 
+ void ProjectDialog::_joinery_clear_imports() {
+@@ -2203,10 +2534,15 @@ void ProjectDialog::_joinery_clear_imports() {
+ 	joinery_ref_paths.clear();
+ 	joinery_ref_notes.clear();
+ 	joinery_ref_row_nodes.clear();
++	joinery_ref_images.clear();
+ 	joinery_doc_paths.clear();
+ 	joinery_doc_row_nodes.clear();
+ 	joinery_ref_error->hide();
+ 	joinery_doc_error->hide();
++	for (int i = 0; i < JOINERY_SWATCHES; i++) {
++		joinery_palette_set[i] = false;
++	}
++	_joinery_palette_changed();
+ 	_joinery_update_import_buttons();
+ }
+ 
+@@ -2233,8 +2569,7 @@ bool ProjectDialog::joinery_take_dropped_files(const PackedStringArray &p_files)
+ 		_joinery_add_documents(documents);
+ 	}
+ 	if (!other.is_empty()) {
+-		joinery_ref_error->set_text(vformat(TTR("%s isn't a picture or a design document. Drop PNG, JPEG or WebP pictures, or Markdown, text or PDF documents."), other));
+-		joinery_ref_error->show();
++		_joinery_show_ref_problem(vformat(TTR("%s isn't an image"), other), TTR("Drop PNG, JPEG or WebP pictures, or Markdown, text or PDF documents."));
+ 	}
+ 	return true;
+ }
+@@ -2309,9 +2644,14 @@ void ProjectDialog::_joinery_build_cards() {
+ 		VBoxContainer *content = memnew(VBoxContainer);
+ 		content->add_theme_constant_override("separation", _joinery_space(2));
+ 		pad->add_child(content);
++		// The picture at 16:9 and the name under it; the pitch is the tooltip.
++		AspectRatioContainer *frame = memnew(AspectRatioContainer);
++		frame->set_ratio(16.0 / 9.0);
++		frame->set_stretch_mode(AspectRatioContainer::STRETCH_WIDTH_CONTROLS_HEIGHT);
++		_joinery_hold_ratio(frame);
++		content->add_child(frame);
+ 		Control *preview = _joinery_make_preview(blueprint);
+-		preview->set_custom_minimum_size(Size2(0, _joinery_control_h(6.0)));
+-		content->add_child(preview);
++		frame->add_child(preview);
+ 		VBoxContainer *words = memnew(VBoxContainer);
+ 		words->add_theme_constant_override("separation", _joinery_space(1) / 2);
+ 		content->add_child(words);
+@@ -2325,11 +2665,6 @@ void ProjectDialog::_joinery_build_cards() {
+ 		title->set_text_overrun_behavior(TextServer::OVERRUN_TRIM_ELLIPSIS);
+ 		title->set_clip_text(true);
+ 		words->add_child(title);
+-		Label *line = _joinery_caption(pitch);
+-		line->set_auto_translate_mode(AUTO_TRANSLATE_MODE_DISABLED);
+-		line->set_max_lines_visible(2);
+-		line->set_text_overrun_behavior(TextServer::OVERRUN_TRIM_ELLIPSIS);
+-		words->add_child(line);
+ 		_joinery_ignore_mouse(pad);
+ 		joinery_cards.push_back(hit);
+ 	}
+@@ -2630,6 +2965,7 @@ void ProjectDialog::_joinery_build_features() {
+ 	joinery_connect_box = nullptr;
+ 	joinery_connect_steam = nullptr;
+ 	joinery_connect_direct = nullptr;
++	joinery_connect_track = nullptr;
+ 
+ 	const int control_height = _joinery_control_h(2.5);
+ 	const Array features = _joinery_blueprint_features();
+@@ -2654,18 +2990,26 @@ void ProjectDialog::_joinery_build_features() {
+ 		toggle->set_disabled(!available);
+ 		row->add_child(toggle);
+ 
++		// One line under the name; the whole summary and what the feature adds
++		// to the project are the row's tooltip.
+ 		const String summary = feature.get("summary", "");
++		const String caption = feature.get("caption", "");
++		const String adds_text = _joinery_adds_text(feature.get("adds", Variant()));
++		String tip = summary;
++		if (!adds_text.is_empty()) {
++			tip += (tip.is_empty() ? String() : String("\n")) + vformat(TTR("Adds: %s"), adds_text);
++		}
++		toggle->set_tooltip_text(tip);
+ 		if (!summary.is_empty()) {
+-			Label *blurb = _joinery_caption(summary);
++			Label *blurb = _joinery_caption(caption.is_empty() ? summary : caption);
+ 			blurb->set_auto_translate_mode(AUTO_TRANSLATE_MODE_DISABLED);
++			blurb->set_autowrap_mode(TextServer::AUTOWRAP_OFF);
++			blurb->set_text_overrun_behavior(TextServer::OVERRUN_TRIM_ELLIPSIS);
++			blurb->set_clip_text(true);
++			blurb->set_tooltip_text(tip);
++			blurb->set_mouse_filter(Control::MOUSE_FILTER_PASS);
+ 			row->add_child(blurb);
+ 		}
+-		const String adds_text = _joinery_adds_text(feature.get("adds", Variant()));
+-		if (!adds_text.is_empty()) {
+-			Label *adds_line = _joinery_caption(vformat(TTR("Adds: %s"), adds_text));
+-			adds_line->set_auto_translate_mode(AUTO_TRANSLATE_MODE_DISABLED);
+-			row->add_child(adds_line);
+-		}
+ 		// Why a switch can't be used, or why Joinery just changed it.
+ 		Label *note = _joinery_caption(available ? String() : reason);
+ 		note->set_auto_translate_mode(AUTO_TRANSLATE_MODE_DISABLED);
+@@ -2682,14 +3026,15 @@ void ProjectDialog::_joinery_build_features() {
+ 			steam_frame->add_child(joinery_steam_box);
+ 			Label *id_label = memnew(Label);
+ 			id_label->set_theme_type_variation(SNAME("JoineryLabel"));
+-			id_label->set_text(TTR("Steam app ID (optional)"));
++			id_label->set_text(TTR("Steam app ID"));
+ 			id_label->set_auto_translate_mode(AUTO_TRANSLATE_MODE_DISABLED);
+ 			joinery_steam_box->add_child(id_label);
+ 			joinery_steam_app_id = memnew(LineEdit);
+ 			joinery_steam_app_id->set_theme_type_variation(SNAME("JoineryField"));
+ 			joinery_steam_app_id->set_custom_minimum_size(Size2(0, control_height));
+ 			joinery_steam_app_id->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+-			joinery_steam_app_id->set_placeholder(TTR("e.g. 480"));
++			joinery_steam_app_id->set_placeholder(TTR("Add later"));
++			joinery_steam_app_id->set_tooltip_text(TTR("From your Steamworks account. Without one, Steam stays off until you add it."));
+ 			joinery_steam_app_id->set_accessibility_name(TTR("Steam app ID"));
+ 			joinery_steam_app_id->set_virtual_keyboard_type(LineEdit::KEYBOARD_TYPE_NUMBER);
+ 			joinery_steam_app_id->connect(SceneStringName(text_changed), callable_mp(this, &ProjectDialog::_joinery_steam_id_changed));
+@@ -2703,8 +3048,6 @@ void ProjectDialog::_joinery_build_features() {
+ 			joinery_steam_error->set_accessibility_live(AccessibilityServerEnums::LIVE_POLITE);
+ 			joinery_steam_error->hide();
+ 			joinery_steam_box->add_child(joinery_steam_error);
+-			joinery_steam_box->add_child(_joinery_caption(TTR("From your Steamworks account. Leave it empty if you do not have one yet: Steam stays off until you add it later.")));
+-			joinery_steam_box->add_child(_joinery_caption(TTR("When you create the project, Joinery downloads a checked copy of GodotSteam, the add-on that connects your game to Steam.")));
+ 
+ 			joinery_connect_box = memnew(VBoxContainer);
+ 			joinery_connect_box->add_theme_constant_override("separation", _joinery_space(1));
+@@ -2714,23 +3057,31 @@ void ProjectDialog::_joinery_build_features() {
+ 			joinery_steam_box->add_child(connect_frame);
+ 			Label *connect_label = memnew(Label);
+ 			connect_label->set_theme_type_variation(SNAME("JoineryLabel"));
+-			connect_label->set_text(TTR("Connect players through:"));
++			connect_label->set_text(TTR("Players connect through"));
+ 			connect_label->set_auto_translate_mode(AUTO_TRANSLATE_MODE_DISABLED);
+ 			joinery_connect_box->add_child(connect_label);
++			// A two-part segmented control: a field-like track with the
++			// chosen part raised on it.
++			PanelContainer *track = memnew(PanelContainer);
++			track->set_h_size_flags(Control::SIZE_SHRINK_BEGIN);
++			joinery_connect_box->add_child(track);
++			joinery_connect_track = track;
+ 			HBoxContainer *choices = memnew(HBoxContainer);
+-			choices->add_theme_constant_override("separation", _joinery_space(5));
+-			joinery_connect_box->add_child(choices);
+-			joinery_connect_steam = memnew(CheckBox);
+-			joinery_connect_steam->set_theme_type_variation(SNAME("JoineryCheckBox"));
++			choices->add_theme_constant_override("separation", 0);
++			track->add_child(choices);
++			joinery_connect_steam = memnew(Button);
+ 			joinery_connect_steam->set_text(TTR("Steam"));
+-			joinery_connect_steam->set_button_group(joinery_connect_group);
+-			joinery_connect_steam->set_pressed(true);
+-			choices->add_child(joinery_connect_steam);
+-			joinery_connect_direct = memnew(CheckBox);
+-			joinery_connect_direct->set_theme_type_variation(SNAME("JoineryCheckBox"));
++			joinery_connect_direct = memnew(Button);
+ 			joinery_connect_direct->set_text(TTR("Direct (IP)"));
+-			joinery_connect_direct->set_button_group(joinery_connect_group);
+-			choices->add_child(joinery_connect_direct);
++			for (Button *part : { joinery_connect_steam, joinery_connect_direct }) {
++				part->set_theme_type_variation(SNAME("JoinerySecondaryButton"));
++				part->set_toggle_mode(true);
++				part->set_button_group(joinery_connect_group);
++				part->set_custom_minimum_size(Size2(0, control_height - 2 * _joinery_space(1)));
++				choices->add_child(part);
++			}
++			joinery_connect_steam->set_pressed(true);
++			_joinery_style_segments();
+ 		}
+ 
+ 		joinery_feature_switches.push_back(toggle);
+@@ -2825,6 +3176,36 @@ void ProjectDialog::_joinery_feature_toggled(bool p_on, int p_row) {
+ 	_update_ok_button();
+ }
+ 
++// The segmented control's look, from the theme's own field and secondary
++// button: the track is the field, a part at rest is bare text on it, and the
++// chosen part is the raised secondary fill, inset one step.
++void ProjectDialog::_joinery_style_segments() {
++	if (!joinery_connect_track || !joinery_connect_steam || !is_inside_tree()) {
++		return;
++	}
++	const Ref<StyleBoxFlat> field = get_theme_stylebox(CoreStringName(normal), SNAME("JoineryField"));
++	if (field.is_valid()) {
++		Ref<StyleBoxFlat> track = field->duplicate();
++		track->set_content_margin_all(_joinery_space(1));
++		joinery_connect_track->add_theme_style_override(SceneStringName(panel), track);
++	}
++	const Ref<StyleBoxFlat> raised = get_theme_stylebox(CoreStringName(normal), SNAME("JoinerySecondaryButton"));
++	if (raised.is_null()) {
++		return;
++	}
++	Ref<StyleBoxFlat> rest = raised->duplicate();
++	rest->set_draw_center(false);
++	rest->set_border_width_all(0);
++	Ref<StyleBoxFlat> chosen = raised->duplicate();
++	chosen->set_corner_radius_all(MAX(4 * EDSCALE, raised->get_corner_radius(CORNER_TOP_LEFT) - _joinery_space(1)));
++	for (Button *part : { joinery_connect_steam, joinery_connect_direct }) {
++		part->add_theme_style_override(CoreStringName(normal), rest);
++		part->add_theme_style_override(SceneStringName(pressed), chosen);
++		part->add_theme_style_override(SNAME("hover_pressed"), chosen);
++		part->add_theme_color_override(SceneStringName(font_color), get_theme_color(SceneStringName(font_color), SNAME("JoineryCaption")));
++	}
++}
++
+ void ProjectDialog::_joinery_update_steam() {
+ 	if (!joinery_steam_box) {
+ 		return;
+@@ -2977,9 +3358,20 @@ void ProjectDialog::_joinery_update_summary() {
+ 		what = vformat(TTR("Starts from %s"), String(blueprint.get("name", "")));
+ 	}
+ 	const String licence_text = vformat(licences.size() == 1 ? TTR("Licence: %s") : TTR("Licences: %s"), String(", ").join(licences));
+-	const String network = _joinery_feature_on("steam") ? TTR("Network: downloads GodotSteam") : TTR("Network: none");
+-	joinery_summary->set_text(what + String::utf8(" · ") + licence_text + String::utf8(" · ") + network);
+-	joinery_summary->set_tooltip_text(joinery_summary->get_text());
++	const bool steam = _joinery_feature_on("steam");
++	const String network = steam ? TTR("Network: downloads GodotSteam") : TTR("Network: none");
++	const String full = what + String::utf8(" · ") + licence_text + String::utf8(" · ") + network;
++	// The short form: the count, the licences, and a download only when there is one.
++	Vector<String> parts;
++	parts.push_back(own_files > 0 ? vformat(TTR("%d files"), own_files + feature_files) : String(blueprint.get("name", "")));
++	parts.push_back(String(", ").join(licences));
++	if (steam) {
++		parts.push_back(TTR("downloads GodotSteam"));
++	}
++	const String brief = String::utf8(" · ").join(parts) + String::utf8(" ›");
++	joinery_summary->set_text(joinery_summary->is_pressed() ? full : brief);
++	joinery_summary->set_tooltip_text(full);
++	joinery_summary->set_accessibility_name(full);
+ }
+ 
+ // Brief and art direction.
+@@ -4420,6 +4812,30 @@ ProjectDialog::ProjectDialog() {
+ 	joinery_title->set_theme_type_variation(SNAME("JoineryTitle"));
+ 	joinery_title->set_auto_translate_mode(AUTO_TRANSLATE_MODE_DISABLED);
+ 	titles->add_child(joinery_title);
++	// Joinery: the title shares its row with a three-dot stepper (where you
++	// are, without words) and, on the optional step, the caption "Optional".
++	{
++		HBoxContainer *title_row = memnew(HBoxContainer);
++		title_row->add_theme_constant_override(SNAME("separation"), _joinery_space(3));
++		titles->add_child(title_row);
++		joinery_title->reparent(title_row);
++		joinery_title_note = _joinery_caption(TTR("Optional"));
++		joinery_title_note->set_autowrap_mode(TextServer::AUTOWRAP_OFF);
++		joinery_title_note->set_h_size_flags(Control::SIZE_SHRINK_BEGIN);
++		joinery_title_note->set_v_size_flags(Control::SIZE_SHRINK_CENTER);
++		joinery_title_note->hide();
++		title_row->add_child(joinery_title_note);
++		Control *title_spacer = memnew(Control);
++		title_spacer->set_h_size_flags(Control::SIZE_EXPAND_FILL);
++		title_row->add_child(title_spacer);
++		joinery_stepper = memnew(Control);
++		joinery_stepper->set_name("JoineryStepper");
++		joinery_stepper->set_v_size_flags(Control::SIZE_SHRINK_CENTER);
++		joinery_stepper->set_focus_mode(Control::FOCUS_ACCESSIBILITY);
++		joinery_stepper->set_mouse_filter(Control::MOUSE_FILTER_PASS);
++		joinery_stepper->connect(SceneStringName(draw), callable_mp(this, &ProjectDialog::_joinery_draw_stepper));
++		title_row->add_child(joinery_stepper);
++	}
+ 	joinery_intro = memnew(Label);
+ 	joinery_intro->set_theme_type_variation(SNAME("JoineryMuted"));
+ 	// One line that never asks the window to grow: a wrapping label outside
+@@ -4607,7 +5023,7 @@ ProjectDialog::ProjectDialog() {
+ 	joinery_folder_row->hide();
+ 	project_path_container->add_child(joinery_folder_row);
+ 	joinery_folder_label = memnew(Label);
+-	joinery_folder_label->set_theme_type_variation(SNAME("JoineryMuted"));
++	joinery_folder_label->set_theme_type_variation(SNAME("JoineryLabel"));
+ 	joinery_folder_label->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+ 	joinery_folder_label->set_v_size_flags(Control::SIZE_SHRINK_CENTER);
+ 	// Shortened by hand from the start, so it must not force a width.
+@@ -4619,7 +5035,7 @@ ProjectDialog::ProjectDialog() {
+ 	joinery_folder_row->add_child(joinery_folder_label);
+ 	joinery_folder_change = memnew(Button);
+ 	joinery_folder_change->set_text(String::utf8("Change…"));
+-	joinery_folder_change->set_theme_type_variation(SNAME("JoinerySecondaryButton"));
++	joinery_folder_change->set_theme_type_variation(SNAME("JoineryLinkButton"));
+ 	joinery_folder_change->set_accessibility_name(TTRC("Change the folder"));
+ 	joinery_folder_change->connect(SceneStringName(pressed), callable_mp(this, &ProjectDialog::_browse_project_path));
+ 	joinery_folder_row->add_child(joinery_folder_change);
+@@ -4675,25 +5091,22 @@ ProjectDialog::ProjectDialog() {
+ 	vb->add_child(joinery_pitch_box);
+ 	{
+ 		Label *pitch_label = memnew(Label);
+-		pitch_label->set_text(TTRC("Your game in one sentence (optional)"));
++		pitch_label->set_text(TTRC("One-sentence pitch (optional)"));
++		pitch_label->set_tooltip_text(TTRC("Journeyman reads this before every request."));
++		pitch_label->set_mouse_filter(Control::MOUSE_FILTER_PASS);
+ 		pitch_label->set_theme_type_variation(SNAME("JoineryLabel"));
+ 		joinery_pitch_box->add_child(pitch_label);
+ 		joinery_pitch = memnew(LineEdit);
+ 		joinery_pitch->set_theme_type_variation(SNAME("JoineryField"));
+ 		joinery_pitch->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+ 		joinery_pitch->set_placeholder(TTRC("e.g. A lighthouse keeper fixes the harbour before a storm."));
+-		joinery_pitch->set_accessibility_name(TTRC("Your game in one sentence"));
++		joinery_pitch->set_accessibility_name(TTRC("One-sentence pitch"));
++		joinery_pitch->set_tooltip_text(TTRC("Journeyman reads this before every request."));
+ 		joinery_pitch->connect(SceneStringName(text_submitted), callable_mp(this, &ProjectDialog::_joinery_next_pressed).unbind(1));
+ 		joinery_pitch_box->add_child(joinery_pitch);
+-		Label *pitch_caption = memnew(Label);
+-		pitch_caption->set_text(TTRC("Journeyman reads this before every request."));
+-		pitch_caption->set_theme_type_variation(SNAME("JoineryCaption"));
+-		pitch_caption->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
+-		joinery_pitch_box->add_child(pitch_caption);
+ 	}
+-	// The fields come before the starting points, so the name and folder are
+-	// in view at the dialog's default size and the cards scroll beneath them.
+-	vb->move_child(joinery_start_box, joinery_pitch_box->get_index() + 1);
++	// The starting points are the step's main choice, so they stay first,
++	// right under the banner; the name, folder and pitch follow.
+ 
+ 	// Renderer selection.
+ 	renderer_container = memnew(VBoxContainer);
+@@ -4983,13 +5396,7 @@ ProjectDialog::ProjectDialog() {
+ 	}
+ 	joinery_history_picker->select(0);
+ 	joinery_history_box->add_child(joinery_history_picker);
+-	{
+-		Label *history_caption = memnew(Label);
+-		history_caption->set_text(TTRC("Older versions of models, textures and sounds, so a change can be reverted. Fewer takes less space. Change it any time in Settings."));
+-		history_caption->set_theme_type_variation(SNAME("JoineryCaption"));
+-		history_caption->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
+-		joinery_history_box->add_child(history_caption);
+-	}
++	joinery_history_picker->set_tooltip_text(TTRC("Older versions of models, textures and sounds, so a change can be reverted. Fewer takes less space. Change it any time in Settings."));
+ 
+ 	// Joinery: step 3, the optional brief and art direction on one page, in
+ 	// sections: Game brief, Look and sound, References, Starting rules.
+@@ -5012,10 +5419,13 @@ ProjectDialog::ProjectDialog() {
+ 	joinery_look_fields = memnew(VBoxContainer);
+ 	joinery_look_fields->add_theme_constant_override(SNAME("separation"), _joinery_space(5));
+ 	section(TTRC("Look and sound"))->add_child(joinery_look_fields);
+-	// The field's own label heads this section, so it isn't said twice.
++	// The user's pictures and the palette lead the page: what it should
++	// look like, shown before it is described.
+ 	joinery_references_box = memnew(VBoxContainer);
+-	joinery_references_box->add_theme_constant_override(SNAME("separation"), _joinery_space(5));
++	joinery_references_box->add_theme_constant_override(SNAME("separation"), _joinery_space(4));
+ 	joinery_look_page->add_child(joinery_references_box);
++	joinery_look_page->move_child(joinery_references_box, 0);
++	joinery_look_page->move_child(Object::cast_to<Node>(joinery_look_fields->get_parent()), 1);
+ 	_joinery_build_imports(brief_section);
+ 	joinery_preset_box = section(TTRC("Starting rules"));
+ 	joinery_preset_picker = memnew(OptionButton);
+@@ -5023,13 +5433,7 @@ ProjectDialog::ProjectDialog() {
+ 	joinery_preset_picker->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+ 	joinery_preset_picker->set_accessibility_name(TTRC("Starting rules"));
+ 	joinery_preset_box->add_child(joinery_preset_picker);
+-	{
+-		Label *preset_caption = memnew(Label);
+-		preset_caption->set_text(TTRC("Camera, model and animation rules to start from. Change them any time in the art bible."));
+-		preset_caption->set_theme_type_variation(SNAME("JoineryCaption"));
+-		preset_caption->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
+-		joinery_preset_box->add_child(preset_caption);
+-	}
++	joinery_preset_picker->set_tooltip_text(TTRC("Camera, model and animation rules to start from. Change them any time in the look."));
+ 
+ 	// Joinery: "Setting up your project…", one row per step with its state.
+ 	joinery_creating = memnew(VBoxContainer);
+@@ -5164,15 +5568,18 @@ ProjectDialog::ProjectDialog() {
+ 	// What Create will do, on the steps that decide it: in the footer row,
+ 	// ending beside Back and the primary action it describes, so it never
+ 	// reads as a caption of the page's last field.
+-	joinery_summary = memnew(Label);
+-	joinery_summary->set_theme_type_variation(SNAME("JoineryCaption"));
++	// Collapsed to "73 files · MIT · downloads GodotSteam ›"; pressed, it
++	// says the same in full.
++	joinery_summary = memnew(Button);
++	joinery_summary->set_theme_type_variation(SNAME("JoineryTextButton"));
++	joinery_summary->set_toggle_mode(true);
+ 	joinery_summary->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
+-	joinery_summary->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_RIGHT);
++	joinery_summary->set_text_alignment(HORIZONTAL_ALIGNMENT_RIGHT);
+ 	joinery_summary->set_v_size_flags(Control::SIZE_SHRINK_CENTER);
+ 	joinery_summary->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+ 	joinery_summary->set_stretch_ratio(8);
+-	joinery_summary->set_mouse_filter(Control::MOUSE_FILTER_PASS);
+ 	joinery_summary->set_auto_translate_mode(AUTO_TRANSLATE_MODE_DISABLED);
++	joinery_summary->connect(SceneStringName(toggled), callable_mp(this, &ProjectDialog::_joinery_update_summary).unbind(1));
+ 	joinery_summary->hide();
+ 	joinery_footer->add_child(joinery_summary);
+ 	joinery_back = memnew(Button);
+diff --git a/editor/project_manager/project_dialog.h b/editor/project_manager/project_dialog.h
+index 1af621e..ec9ec26 100644
+--- a/editor/project_manager/project_dialog.h
++++ b/editor/project_manager/project_dialog.h
+@@ -30,6 +30,7 @@
+ 
+ #pragma once
+ 
++#include "core/io/image.h"
+ #include "core/os/thread.h"
+ #include "core/templates/safe_refcount.h"
+ #include "scene/animation/tween.h"
+@@ -39,6 +40,8 @@ class Button;
+ class CheckBox;
+ class LinkButton;
+ class CheckButton;
++class ColorPicker;
++class PopupPanel;
+ class EditorFileDialog;
+ class FileAccess;
+ class GridContainer;
+@@ -129,6 +132,10 @@ private:
+ 	Control *joinery_footer_rule = nullptr;
+ 	Label *joinery_step_label = nullptr;
+ 	Label *joinery_title = nullptr;
++	// Beside the title: "Optional" on the optional step, and the step dots.
++	Label *joinery_title_note = nullptr;
++	Control *joinery_stepper = nullptr;
++	void _joinery_draw_stepper();
+ 	// One sentence under the title, outside the scrolling page, so the title
+ 	// stays with what it introduces.
+ 	Label *joinery_intro = nullptr;
+@@ -191,8 +198,10 @@ private:
+ 	LineEdit *joinery_steam_app_id = nullptr;
+ 	Label *joinery_steam_error = nullptr;
+ 	VBoxContainer *joinery_connect_box = nullptr;
+-	CheckBox *joinery_connect_steam = nullptr;
+-	CheckBox *joinery_connect_direct = nullptr;
++	Button *joinery_connect_steam = nullptr;
++	Button *joinery_connect_direct = nullptr;
++	PanelContainer *joinery_connect_track = nullptr;
++	void _joinery_style_segments();
+ 	Ref<ButtonGroup> joinery_connect_group;
+ 	// Step 2, apps: one summary line ("Godot, Blender…", "3 ready · …") with
+ 	// Change… opening the grouped rows below.
+@@ -204,7 +213,7 @@ private:
+ 	Label *joinery_docker_text = nullptr;
+ 	Button *joinery_check_again = nullptr;
+ 	// Files, licences and network use, above the footer on the last two steps.
+-	Label *joinery_summary = nullptr;
++	Button *joinery_summary = nullptr;
+ 
+ 	// Step 2: one row per app, grouped Engine / 3D / 2D / Audio. How Joinery
+ 	// connects to each app sits under one collapsed Advanced disclosure.
+@@ -247,12 +256,35 @@ private:
+ 	// with Add… or dropped on the window; each image has a one-line note.
+ 	// `joinery game apply` copies them in (setup_imports.py), from a file
+ 	// beside the project, so no path or note goes through a shell.
+-	VBoxContainer *joinery_ref_rows = nullptr;
++	GridContainer *joinery_ref_rows = nullptr;
+ 	Button *joinery_ref_add = nullptr;
+ 	Label *joinery_ref_error = nullptr;
+ 	Vector<String> joinery_ref_paths;
+ 	Vector<LineEdit *> joinery_ref_notes;
+ 	Vector<Control *> joinery_ref_row_nodes;
++	Vector<Ref<Image>> joinery_ref_images;
++	Timer *joinery_ref_error_timer = nullptr;
++	void _joinery_draw_drop_zone();
++	void _joinery_show_ref_problem(const String &p_problem, const String &p_detail);
++	// The palette: five swatches that answer the art direction's palette
++	// question with hex values, through its hidden field.
++	static const int JOINERY_SWATCHES = 5;
++	VBoxContainer *joinery_palette_box = nullptr;
++	Button *joinery_swatches[JOINERY_SWATCHES] = {};
++	Color joinery_palette[JOINERY_SWATCHES];
++	bool joinery_palette_set[JOINERY_SWATCHES] = {};
++	int joinery_palette_editing = -1;
++	Button *joinery_palette_pick = nullptr;
++	PopupPanel *joinery_palette_popup = nullptr;
++	ColorPicker *joinery_palette_picker = nullptr;
++	LineEdit *joinery_palette_field = nullptr;
++	void _joinery_build_palette();
++	void _joinery_draw_swatch(int p_index);
++	void _joinery_edit_swatch(int p_index);
++	void _joinery_swatch_picked(const Color &p_color);
++	void _joinery_clear_swatch();
++	void _joinery_pick_palette();
++	void _joinery_palette_changed();
+ 	VBoxContainer *joinery_doc_rows = nullptr;
+ 	Button *joinery_doc_add = nullptr;
+ 	Label *joinery_doc_error = nullptr;

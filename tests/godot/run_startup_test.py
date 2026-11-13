@@ -31,12 +31,14 @@ CAPTURES = (
     "startup-setup-art.png",
 )
 #: The new-project wizard's pages, captured by visual_startup_test.gd in each
-#: theme: starting point cards (and the VR room card further down), features
-#: with Steam and Online play on (the app ID field and the connect choice), the
-#: app ID error, brief and art direction with References, the dropped reference
-#: images and design documents, and the creating page.
+#: theme: starting point cards (and the VR room card further down), the name,
+#: folder and pitch under them, features with Steam and Online play on (the app
+#: ID field and the connect choice), the app ID error, the look with its drop
+#: zone and palette, the dropped reference images and design documents, and the
+#: creating page.
 WIZARD_PAGES = (
     "setup-1-details",
+    "setup-1-fields",
     "setup-1-vr-room",
     "setup-2-tools",
     "setup-2-steam-error",
