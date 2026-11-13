@@ -20,7 +20,7 @@ static func theme(context: Node, c: Dictionary) -> Theme:
 	_inputs(t, c, m)
 	_buttons(t, c, m)
 	# Collapsible section headers read exactly like the plain JoinerySection labels.
-	t.set_font("font", "JoinerySectionButton", bold_font(context))
+	t.set_font("font", "JoinerySectionButton", UI_THEME.medium_font(context))
 	_pickers(t, c, m, context)
 	_switch(t, c, m)
 	_checks(t, c, m)
@@ -137,7 +137,6 @@ static func _text_types(t: Theme, c: Dictionary, m: Dictionary, context: Node) -
 	var size: int = m["size"]
 	t.set_stylebox("normal", "Label", StyleBoxEmpty.new())
 	t.set_color("font_color", "Label", c["text"])
-	var bold := bold_font(context)
 	var semibold := UI_THEME.medium_font(context)
 	var caption := roundi(size * float(UI_THEME.TYPE["caption"]))
 	var labels := {
@@ -148,12 +147,13 @@ static func _text_types(t: Theme, c: Dictionary, m: Dictionary, context: Node) -
 		"JoineryBodyLarge": [roundi(size * float(UI_THEME.TYPE["body_lg"])), c["text"], semibold],
 		# Every transcript card's title: body size, semibold, so it leads its rows by weight alone.
 		"JoineryCardTitle": [size, c["text"], semibold],
-		"JoineryTitle": [roundi(size * float(UI_THEME.TYPE["title"])), c["text"], bold],
-		"JoineryDisplay": [roundi(size * float(UI_THEME.TYPE["display"])), c["text"], bold],
+		# Headings lead by size and a semibold weight, never bold: bold at title size shouts.
+		"JoineryTitle": [roundi(size * float(UI_THEME.TYPE["title"])), c["text"], semibold],
+		"JoineryDisplay": [roundi(size * float(UI_THEME.TYPE["display"])), c["text"], semibold],
 		"JoineryError": [size, c["danger"], null],
 		"JoineryMuted": [size, c["text_muted"], null],
 		"JoineryNumeric": [caption, c["text_muted"], UI_THEME.numeric_font(context)],
-		"JoinerySection": [caption, c["text_muted"], bold],
+		"JoinerySection": [caption, c["text_muted"], semibold],
 		"JoineryMono": [size, c["text"], UI_THEME.mono_font(context)],
 	}
 	for type_name: String in labels:

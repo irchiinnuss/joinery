@@ -24,8 +24,10 @@ const SPACE := {1: 4, 2: 8, 3: 12, 4: 16, 5: 24, 6: 32}
 const GUTTER := 4
 ## Corner radii in logical pixels, multiplied by [method unit]. Read with [method radius].
 const RADIUS := {"xs": 4, "sm": 6, "md": 8, "lg": 12, "xl": 16, "full": 999}
-## Type scale as factors of the editor font size. Read with [method font_size].
-const TYPE := {"caption": 0.85, "body": 1.0, "body_lg": 1.15, "title": 1.3, "display": 1.7}
+## Type scale as factors of the editor font size. Read with [method font_size]. Four sizes:
+## caption, body, title (body_lg is the same step: a lead sentence sits at a page title's size)
+## and display for the one heading of a full screen. Nothing is heavier than semibold.
+const TYPE := {"caption": 0.85, "body": 1.0, "body_lg": 1.15, "title": 1.15, "display": 1.6}
 ## Control heights as factors of the editor font size. Read with [method control_h].
 ## xs: inline text buttons; sm: chips and the composer picker; md: buttons, inputs and
 ## settings rows; lg: provider cards and wizard rows.
