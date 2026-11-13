@@ -50,6 +50,13 @@ const ALLOWED := [
 	},
 	{
 		"kind": "overflow",
+		"class": "MarginContainer",
+		"text": "",
+		"inside": "InspectorDock",
+		"reason": "Joinery's Select a node hint: it shares the Inspector's container (see below)",
+	},
+	{
+		"kind": "overflow",
 		"class": "EditorInspector",
 		"text": "",
 		"reason": "Stock Godot Inspector in a side column: it fills the dock margin by design",

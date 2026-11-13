@@ -94,6 +94,7 @@ func _enter_tree() -> void:
 	get_editor_interface().get_editor_main_screen().add_child(_workspace)
 	_workspace.hide()
 	get_editor_interface().get_inspector().resource_selected.connect(_on_resource_selected)
+	preload("inspector_hint.gd").attach(get_editor_interface().get_inspector())
 	get_editor_interface().get_file_system_dock().selection_changed.connect(_on_file_selected)
 	get_editor_interface().get_selection().selection_changed.connect(_on_workspace_selection)
 	get_editor_interface().get_resource_filesystem().filesystem_changed.connect(
@@ -300,6 +301,11 @@ func _offer_setup_if_pending() -> void:
 
 
 func _exit_tree() -> void:
+	var hint := get_editor_interface().get_inspector().get_parent().get_node_or_null(
+		"JoinerySelectHint"
+	)
+	if hint != null:
+		hint.queue_free()
 	if _review_tab != null:
 		remove_control_from_bottom_panel(_review_tab)
 		_review_tab.queue_free()
