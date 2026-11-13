@@ -71,6 +71,8 @@ def held(
     reviewer_on: bool = False,
     done: Sequence[Result] = (),
     live_edits: int = 0,
+    live_scenes: Iterable[str] = (),
+    editor_keeps_live: bool = False,
     art_gate: bool = False,
     last_chance: bool = False,
     unsaved: Iterable[str] = (),
@@ -81,14 +83,17 @@ def held(
     ``notes`` are the submit's own notes for the user (placement and the like);
     ``peer`` the reviewer agent's review (``reviewer_on`` when one should have
     run); ``done`` the to-do's done-when results; ``live_edits`` the live scene
-    edits waiting with the change, which the editor itself keeps; ``art_gate``
-    an art gate riding on the review; ``last_chance`` Joinery's own submit of a
-    change the agent left; ``unsaved`` the scenes with unsaved edits in the editor
-    ("res://…"), whose saved file an accept would overwrite.
+    edits waiting with the change in ``live_scenes`` ("res://…", "" for a scene
+    never saved), which only the editor can keep: with ``editor_keeps_live`` it
+    does, with its own Accept (the chat's own request); otherwise they wait.
+    ``art_gate`` an art gate riding on the review; ``last_chance`` Joinery's own
+    submit of a change the agent left; ``unsaved`` the scenes that had unsaved
+    edits in the editor when the request was sent ("res://…"): the user's own
+    work, which an accept must never write over or save.
     """
     reasons: list[str] = []
     paths = [str(c.get("path", "")) for c in changes]
-    if not paths:
+    if not paths and not live_edits:
         reasons.append("no file changes")
     if direction_paths(paths):
         reasons.append("it changes the art direction or the game brief")
@@ -100,15 +105,18 @@ def held(
         reasons.append("the reviewer didn't finish")
     if any(result.status != "pass" for result in done):
         reasons.append("a done-when item didn't pass")
-    if live_edits:
+    live = [s.removeprefix("res://") for s in live_scenes] if live_edits else []
+    if live_edits and not editor_keeps_live:
         reasons.append("it has live scene edits")
     if art_gate:
         reasons.append("the art direction needs approval")
     if last_chance:
         reasons.append("Joinery submitted it for the agent")
     open_unsaved = {u.removeprefix("res://") for u in unsaved}
-    if open_unsaved.intersection(paths):
+    if open_unsaved.intersection([*paths, *live]):
         reasons.append("a scene it changes has unsaved edits")
+    if "" in live:
+        reasons.append("a scene it changes isn't saved yet")
     return reasons
 
 

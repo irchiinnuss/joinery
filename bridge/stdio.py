@@ -1006,6 +1006,16 @@ async def _serve(
                     # change is in review the agent can't change anything more.
                     if not controller.review_open:
                         raise ValueError("No change is waiting for your decision.")
+                    pending = gateway.transaction
+                    if (
+                        data.get("auto")
+                        and data.get("accept")
+                        and pending is not None
+                        and pending.id == str(data.get("transaction_id", ""))
+                    ):
+                        # The editor's own Accept of a change Joinery said may be kept
+                        # without asking (its live scene edits): recorded as such.
+                        pending.auto_accepted = True
                     decision = await controller.decide(
                         str(data.get("transaction_id", "")),
                         bool(data.get("accept", False)),

@@ -18,7 +18,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal
 
 from joinery import auto_accept, done_when, metrics, reasons
-from joinery.claims import LEAD_BUSY, live_refusal
+from joinery.claims import LEAD_BUSY, MAIN, live_refusal
 from joinery.peer_review import PeerReview, Reviewer, ReviewPlan, request_for
 from joinery.reasons import Reason
 from joinery.routing import change_risk
@@ -1012,7 +1012,22 @@ class TurnController:
             )
         self.review_open = True
         done = {"done": list(self._done_items)} if self._done_items else None
-        if preview is not None and self._may_auto_accept(preview, notes, peer):
+        mode = self._auto_mode(preview, notes, peer)
+        if mode == "editor":
+            # Live scene edits only the editor can keep: it accepts the change with
+            # its own Accept, without opening the review (``auto_accept`` hint).
+            if preview is not None:
+                self.emit({**preview, "auto_accept": True, "auto_accept_held": []})
+            self._to(TurnState.IN_REVIEW, extra={**(done or {}), "auto_accept": True})
+            return self._result(
+                "accepted",
+                True,
+                transaction_id=self.review_id,
+                changes=changes,
+                next=NEXT_AUTO,
+                notes=notes,
+            )
+        if preview is not None and mode == "core":
             self._to(TurnState.IN_REVIEW, extra=done)
             if await self._auto_accept():
                 return self._result(
@@ -1039,27 +1054,38 @@ class TurnController:
             notes=notes,
         )
 
-    def _may_auto_accept(
-        self, preview: Mapping[str, Any], notes: list[str], peer: PeerReview | None
-    ) -> bool:
-        """The project keeps passing changes without asking, and nothing about this
-        one needs the user (``joinery.auto_accept.held``)."""
-        if not self.auto_accepts or not auto_accept.enabled(self.gateway.project):
-            return False
+    def _auto_mode(
+        self,
+        preview: Mapping[str, Any] | None,
+        notes: list[str],
+        peer: PeerReview | None,
+    ) -> Literal["", "core", "editor"]:
+        """Whether the change is kept without asking (``joinery.auto_accept.held``):
+        "core" accepts it here, "editor" leaves it to the editor's own Accept
+        because live scene edits come with it, "" waits for the user. Only the
+        chat's own request has its live edits kept by the editor; a task's wait."""
+        project = getattr(self.gateway, "project", None)
+        if not self.auto_accepts or project is None or not auto_accept.enabled(project):
+            return ""
         held = auto_accept.held(
-            changes=list(preview.get("changes") or []),
+            changes=list(preview.get("changes") or []) if preview is not None else [],
             notes=notes,
             peer=peer,
             reviewer_on=self.reviewer is not None,
             done=self._done if self.todo is not None else [],
             live_edits=self.live_edits,
-            art_gate="art_gate" in preview,
+            live_scenes=sorted(self.live_scenes),
+            editor_keeps_live=self.gateway.task_id == MAIN,
+            art_gate="art_gate" in preview
+            if preview is not None
+            else self.gateway.art_gate is not None,
             last_chance=self._last_chance,
             unsaved=auto_accept.unsaved_scenes(self.gateway.editor_context),
         )
         if held:
             self.emit({"kind": "auto_accept_held", "reasons": held})
-        return not held
+            return ""
+        return "editor" if self.live_edits else "core"
 
     async def _auto_accept(self) -> bool:
         """Accept the change in review through the user's own Accept path. False

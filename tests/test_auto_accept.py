@@ -80,6 +80,14 @@ def test_a_clean_change_needs_nobody() -> None:
         changes=[{"path": "a.gd"}], peer=PeerReview("skipped"), reviewer_on=True
     )
     assert info == [] and skipped == []
+    # Live edits the editor keeps itself, in a saved scene with no unsaved work.
+    live = auto_accept.held(
+        changes=[],
+        live_edits=2,
+        live_scenes=["res://room.tscn"],
+        editor_keeps_live=True,
+    )
+    assert live == []
 
 
 @pytest.mark.parametrize(
@@ -240,6 +248,78 @@ def test_an_accept_that_fails_leaves_the_change_in_review(
     assert tx.auto_accepted is False
     assert session.kinds()[-3:] == ["in_review", "auto_accept_held", "file_preview"]
     assert session.turn.state is TurnState.IN_REVIEW and session.turn.review_open
+
+
+def test_on_live_edits_alone_go_to_the_editor_with_the_hint(session: Session) -> None:
+    auto_accept.set_enabled(session.root, True)
+    session.turn.begin("Put the mug on the table")
+    session.turn.record_live_edit("res://room.tscn", True)
+    result = session.run(lambda: session.turn.submit("Mug on the table"))
+    assert result.status == "accepted" and result.as_tool_result()["auto_accepted"]
+    # The editor keeps them with its own Accept: the turn waits for its decision.
+    assert session.turn.state is TurnState.IN_REVIEW and session.turn.review_open
+    state = next(e for e in session.events if e.get("state") == "in_review")
+    assert state["auto_accept"] is True
+    assert "auto_accept_held" not in session.kinds()
+    assert "file_decision" not in session.kinds()
+    session.turn.live_decided()
+    assert session.turn.state is TurnState.IDLE
+
+
+def test_on_files_with_live_edits_go_to_the_editor_with_the_hint(
+    session: Session,
+) -> None:
+    auto_accept.set_enabled(session.root, True)
+    session.turn.begin("Make a script and move the mug")
+    tx = session.stage({"a.gd": "extends Node\n"})
+    session.turn.record_live_edit("res://room.tscn", True)
+    result = session.run(lambda: session.turn.submit("Script and mug"))
+    assert result.status == "accepted" and result.transaction_id == tx.id
+    preview = next(e for e in session.events if e["kind"] == "file_preview")
+    assert preview["auto_accept"] is True and preview["auto_accept_held"] == []
+    # Nothing is accepted here: the editor's own Accept decides the files too.
+    assert session.state == "review" and tx.auto_accepted is False
+    assert session.kinds()[-2:] == ["file_preview", "in_review"]
+
+
+@pytest.mark.parametrize(
+    ("scene", "unsaved", "task", "reason"),
+    [
+        ("res://room.tscn", ["res://room.tscn"], "", "unsaved edits"),
+        ("", [], "", "isn't saved yet"),
+        ("res://room.tscn", [], "t1", "live scene edits"),
+    ],
+)
+def test_live_edits_still_wait_when_the_editor_must_not_keep_them(
+    session: Session, scene: str, unsaved: list[str], task: str, reason: str
+) -> None:
+    auto_accept.set_enabled(session.root, True)
+    # The user's own unsaved work from before the request is never saved for them.
+    session.gateway.editor_context = {"unsaved_scenes": json.dumps(unsaved)}
+    if task:
+        session.gateway.task_id = task
+    session.turn.begin("Put the mug on the table")
+    session.turn.record_live_edit(scene, True)
+    result = session.run(lambda: session.turn.submit("Mug on the table"))
+    assert result.status == "in_review"
+    (held,) = [e for e in session.events if e["kind"] == "auto_accept_held"]
+    assert any(reason in r for r in held["reasons"])
+    state = next(e for e in session.events if e.get("state") == "in_review")
+    assert "auto_accept" not in state
+
+
+def test_the_editors_own_accept_is_recorded_as_automatic(session: Session) -> None:
+    session.turn.begin("Add a script")
+    tx = session.stage({"a.gd": "extends Node\n"})
+
+    async def go() -> dict[str, Any]:
+        await session.turn.submit("A script")
+        tx.auto_accepted = True  # what the host does for the editor's "auto" decision
+        return await session.turn.decide(tx.id, True)
+
+    decision = session.run(go)
+    assert decision["auto_accepted"] is True
+    assert decision["message"] == auto_accept.ACCEPTED
 
 
 def test_a_parallel_task_is_kept_through_the_crews_accept(
