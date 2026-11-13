@@ -767,15 +767,17 @@ func _changes(light: bool, width: int) -> void:
 	chat.show_status("Focus mode on", 30.0, "Undo", func() -> void: pass)
 	await _shot("art-gate", light, width, chat)
 	chat.show_status("")
-	if width == WIDTHS[-1]:
-		await _documents(light, width, chat)
+	await _documents(light, width, chat)
 	host.queue_free()
 	await _frames(2)
 
 
-## The art direction and the game brief in the document view, at the wide size only.
+## The art direction page at every width (the rules, further down the board and the folded
+## technical rules, a bible still mostly open, and the wait for the bridge), and the game brief
+## in the document view at the wide size only.
 func _documents(light: bool, width: int, chat: Control) -> void:
 	var dialogs: GDScript = load("res://addons/joinery/art_review_dialog.gd")
+	var pages: GDScript = load("res://addons/joinery/art_page.gd")
 	var picture := _thumbnail()
 	var reference := "art/reference/door_sketch.png"
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("res://art/reference"))
@@ -809,23 +811,29 @@ func _documents(light: bool, width: int, chat: Control) -> void:
 			"When adding sound: the audio section is open. Ask about it.",
 		],
 	}
-	var size := Vector2i(roundi(width * 0.8), roundi(HEIGHT * 0.9))
-	var dialog: Window = dialogs.open(chat, event, size, func() -> void: pass)
-	await _frames(4)
-	var screen := "sidebar-art-direction-%s-%d" % ["light" if light else "dark", width]
-	_check(_checks.snapshot(screen, root, [dialog]), "Capture " + screen)
+	var page: Control = pages.attach(chat)
+	_check(page != null, "The art direction opens as a sidebar page")
+	pages.present(chat, event, func() -> void: pass)
+	await _shot("art-direction", light, width, chat)
 	# The references board and the folded technical rules, further down.
-	var scroll := dialog.find_children("*", "ScrollContainer", true, false)[0] as ScrollContainer
-	var technical: Node = dialog.find_child("Technical", true, false)
-	technical.call("set_open", true)
+	var scroll := page.find_children("*", "ScrollContainer", true, false)[0] as ScrollContainer
+	page.find_child("Technical", true, false).call("set_open", true)
 	await _frames(2)
-	scroll.scroll_vertical = int(dialog.find_child("References", true, false).position.y)
+	scroll.scroll_vertical = int(page.find_child("References", true, false).position.y)
+	await _shot("art-board", light, width, chat)
+	page.call("set_open", false)
+	var open := {"text": BIBLE.get_slice("## 6.", 0) + "## 19. Never\n- Neon\n", "version": 2}
+	pages.present(chat, open, func() -> void: pass)
+	await _shot("art-direction-open", light, width, chat)
+	page.call("set_open", false)
+	page.call("open_waiting")
+	await _shot("art-loading", light, width, chat)
+	page.call("set_open", false)
 	await _frames(2)
-	screen = "sidebar-art-board-%s-%d" % ["light" if light else "dark", width]
-	_check(_checks.snapshot(screen, root, [dialog]), "Capture " + screen)
-	dialog.hide()
-	dialog.queue_free()
-	await _frames(2)
+	if width != WIDTHS[-1]:
+		return
+	var size := Vector2i(roundi(width * 0.8), roundi(HEIGHT * 0.9))
+	var screen := ""
 	var brief: Window = dialogs.open_document(
 		chat, "Game brief", BRIEF, size, "Change the game brief: "
 	)

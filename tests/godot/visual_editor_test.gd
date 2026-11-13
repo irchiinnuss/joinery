@@ -988,13 +988,9 @@ func _dialogs() -> void:
 		_plugin.call("_on_art_review", {"text": bible, "sha256": ""})
 		await get_tree().create_timer(0.3).timeout
 		var dock: Control = _plugin.get("_dock")
-		var dialog: ConfirmationDialog
-		for node: Node in dock.find_children("*", "ConfirmationDialog", true, false):
-			if (node as Window).visible:
-				dialog = node as ConfirmationDialog
-		_check(dialog != null, "Art review dialog must open")
-		if dialog != null:
-			await _shot("art-review", [dialog], dialog)
-			dialog.hide()
-			dialog.queue_free()
+		var page := dock.find_child("ArtDirection", true, false) as Control
+		_check(page != null and page.visible, "Art direction must open as a sidebar page")
+		if page != null:
+			await _shot("art-review", [dock])
+			page.call("set_open", false)
 			await _frames()
