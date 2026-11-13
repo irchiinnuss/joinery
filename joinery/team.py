@@ -79,7 +79,7 @@ _SYNC_LOCK = f"{TEAM_DIR}/sync.lock"
 #: Written into a transaction's folder when it holds a teammate's version.
 CONFLICT_FILE = "team.json"
 #: Documents a teammate's change sends back for the local user's approval.
-SHARED_DOCUMENTS = {"art/bible.md": "art bible", "design/brief.md": "game brief"}
+SHARED_DOCUMENTS = {"art/bible.md": "look", "design/brief.md": "game brief"}
 BIBLE = "art/bible.md"
 APPROVAL = ".joinery/art-approval.json"
 #: How far back a teammate's change to a file is worth a warning.
@@ -641,7 +641,7 @@ def approve_document(project: Path, path: str) -> dict[str, Any]:
     """
     project = _project(project)
     if path == BIBLE:
-        raise TeamError("Approve the art bible in /art, where its rules are shown.")
+        raise TeamError("Approve the look in /art, where its rules are shown.")
     if path not in SHARED_DOCUMENTS:
         raise TeamError(f"{path} doesn't need an approval.")
     data = _read_json(project / DOCUMENTS_FILE)

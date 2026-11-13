@@ -141,7 +141,7 @@ def environment_issues(
                     section,
                     name,
                     rules.tonemap,
-                    f"tonemap is {name} in {where}; the art bible uses {rules.tonemap}",
+                    f"tonemap is {name} in {where}; the look uses {rules.tonemap}",
                     "high",
                     {"tonemap_mode": TONEMAPS[rules.tonemap]},
                 )
@@ -155,7 +155,7 @@ def environment_issues(
                     section,
                     f"{exposure:g}",
                     _range_text(rules.exposure),
-                    f"exposure {exposure:g} in {where}; the art bible allows "
+                    f"exposure {exposure:g} in {where}; the look allows "
                     f"{_range_text(rules.exposure)}",
                     _severity(exposure, rules.exposure),
                     {"tonemap_exposure": _nearest(exposure, rules.exposure)},
@@ -176,7 +176,7 @@ def environment_issues(
                     section,
                     state,
                     "on" if wanted else "off",
-                    f"{check} is {state} in {where}; the art bible has it "
+                    f"{check} is {state} in {where}; the look has it "
                     f"{'on' if wanted else 'off'}",
                     "medium",
                     {key: wanted},
@@ -203,7 +203,7 @@ def environment_issues(
                 section,
                 f"{value:g}",
                 _range_text(bounds),
-                f"{check} {value:g} in {where}; the art bible's grading allows "
+                f"{check} {value:g} in {where}; the look's grading allows "
                 f"{_range_text(bounds)}",
                 _severity(value, bounds),
                 props,
@@ -269,8 +269,8 @@ def ui_issues(
                         Section("ext_resource", attrs.get("id", "").strip('"')),
                         path.removeprefix("res://"),
                         ", ".join(sorted(a.removeprefix("res://") for a in allowed)),
-                        f"uses the font {path.removeprefix('res://')}, which the art "
-                        "bible doesn't list",
+                        f"uses the font {path.removeprefix('res://')}, which the look "
+                        "doesn't list",
                         "medium",
                         swap=(path, first),
                     )
@@ -337,7 +337,7 @@ def ui_issues(
                         section,
                         f"{size} px",
                         f"{wanted} px",
-                        f"{key} is {size} px, below the art bible's minimum ({wanted} px here)",
+                        f"{key} is {size} px, below the look's minimum ({wanted} px here)",
                         "high" if size < 0.75 * min_px else "medium",
                         {key: wanted},
                     )

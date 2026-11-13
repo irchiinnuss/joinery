@@ -171,8 +171,8 @@ def _references(argv: list[str]) -> int:
         names = ["art/reference/" + Path(p.split("=", 1)[0]).name for p in pictures]
         names += ["design/docs/" + Path(d).name for d in documents]
         notes = [
-            ("Pictures go on the art bible's reference board. That changes the "
-            "bible, so approve it again in /art afterwards."),
+            ("Pictures go on the look's reference board. That changes the "
+            "look, so approve it again in /art afterwards."),
             ("Documents are listed in the game brief, and its open sections are "
             "copied from matching headings in Markdown or text ones."),
         ]
@@ -180,8 +180,8 @@ def _references(argv: list[str]) -> int:
         return 0
     steps = [
         {"step": "references", "state": "done",
-         "message": f"Added {len(pictures)} reference image to art/reference/ and the art "
-         "bible's reference board. Say what to avoid in each in /art."},
+         "message": f"Added {len(pictures)} reference image to art/reference/ and the "
+         "look's reference board. Say what to avoid in each in /art."},
     ]
     print(json.dumps({"transaction_id": "fixture", "state": "accepted", "changes": [],
                       "steps": steps}))

@@ -167,7 +167,7 @@ def test_ui_theme_changes_are_checked_against_the_bible(
     (tx.stage / "ui").mkdir()
     (tx.stage / "ui/theme.tres").write_text(LOW_CONTRAST)
     with pytest.raises(
-        ValueError, match="Art bible check failed: ui/theme.tres: Button"
+        ValueError, match="Look check failed: ui/theme.tres: Button"
     ):
         finish(gateway, tx)
 

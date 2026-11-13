@@ -179,7 +179,7 @@ def _check_format(
     suffix = Path(export).suffix.lower().lstrip(".")
     if rule is not None and rule.container != suffix:
         raise ValueError(
-            f"The art bible asks for {rule.container.upper()} files in "
+            f"The look asks for {rule.container.upper()} files in "
             f"{Path(export).parent.as_posix()}; export {Path(export).with_suffix('.' + rule.container).as_posix()} instead."
         )
     return rule

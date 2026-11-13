@@ -45,7 +45,7 @@ def broken(session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     async def rules(*_a: Any) -> list[str]:
-        return ["art/models/a.glb: 9000 triangles, over the art bible's 600 budget"]
+        return ["art/models/a.glb: 9000 triangles, over the look's 600 budget"]
 
     monkeypatch.setattr("joinery.submission.check_rules", rules)
     session.turn.begin("Ashtray")
@@ -271,35 +271,35 @@ def test_an_agent_that_prechecks_and_fixes_submits_once(
     ("line", "rule", "measured", "expected", "node"),
     [
         (
-            "art/t/brick.png: 2048x2048, over the art bible's 1024 px limit",
+            "art/t/brick.png: 2048x2048, over the look's 1024 px limit",
             "art_bible.texture_size",
             "2048x2048",
             "1024 px",
             "",
         ),
         (
-            "art/m/a.glb: 9000 triangles, over the art bible's 600 budget",
+            "art/m/a.glb: 9000 triangles, over the look's 600 budget",
             "art_bible.triangles",
             "9000 triangles",
             "600",
             "",
         ),
         (
-            "audio/sfx/hit.wav: true peak -0.2 dBTP, above the art bible's -1.0 dBTP",
+            "audio/sfx/hit.wav: true peak -0.2 dBTP, above the look's -1.0 dBTP",
             "art_bible.true_peak",
             "-0.2 dBTP",
             "-1.0 dBTP",
             "",
         ),
         (
-            "audio/music/a.ogg: -9.0 LUFS, the art bible asks for -16.0 ± 1.0",
+            "audio/music/a.ogg: -9.0 LUFS, the look asks for -16.0 ± 1.0",
             "art_bible.loudness",
             "-9.0 LUFS",
             "-16.0 ± 1.0",
             "",
         ),
         (
-            "art/m/a.glb: material 'Wood' roughness 0.05, the art bible allows 0.3-1",
+            "art/m/a.glb: material 'Wood' roughness 0.05, the look allows 0.3-1",
             "art_bible.roughness",
             "0.05",
             "0.3-1",
@@ -307,7 +307,7 @@ def test_an_agent_that_prechecks_and_fixes_submits_once(
         ),
         (
             (
-                "ui/theme.tres: font size 9 (Label) is below the art bible's 18 px at "
+                "ui/theme.tres: font size 9 (Label) is below the look's 18 px at "
                 "1080p (18 px at this project's 1080 px viewport)"
             ),
             "art_bible.text_size",
@@ -317,7 +317,7 @@ def test_an_agent_that_prechecks_and_fixes_submits_once(
         ),
         (
             (
-                "art/m/a.blend: armature 'Rig' has 90 deform bones, over the art bible's "
+                "art/m/a.blend: armature 'Rig' has 90 deform bones, over the look's "
                 "64 budget"
             ),
             "art_bible.bones",
@@ -326,9 +326,9 @@ def test_an_agent_that_prechecks_and_fixes_submits_once(
             "Rig",
         ),
         (
-            "art/m/a.glb: something new the bible checks",
+            "art/m/a.glb: something new the look checks",
             "art_bible.rule",
-            "something new the bible checks",
+            "something new the look checks",
             "",
             "",
         ),

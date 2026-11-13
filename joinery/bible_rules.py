@@ -325,9 +325,7 @@ def load_rules(project: Path) -> BibleRules:
     try:
         return parse_rules(text)
     except ValueError as error:
-        raise ValueError(
-            f"The art bible's checked rules are invalid: {error}"
-        ) from error
+        raise ValueError(f"The look's checked rules are invalid: {error}") from error
 
 
 # --- folders -----------------------------------------------------------------
@@ -528,7 +526,7 @@ def palette_problems(rules: BibleRules) -> list[str]:
             if ratio < access.min_ui_contrast:
                 problems.append(
                     f"{text} on {background} has contrast {ratio:.1f}:1, "
-                    f"below the {access.min_ui_contrast:g}:1 the bible asks for"
+                    f"below the {access.min_ui_contrast:g}:1 the look asks for"
                 )
     distinct = list(dict.fromkeys(access.colour_blind_distinct))
     unknown = [r for r in distinct if _resolve_colour(r, roles) is None]
@@ -1100,7 +1098,7 @@ def ui_resource_problems(
                     if ratio < rules.min_ui_contrast:
                         problems.append(
                             f"{path}: {group} text on its {state} background has "
-                            f"contrast {ratio:.1f}:1, below the art bible's "
+                            f"contrast {ratio:.1f}:1, below the look's "
                             f"{rules.min_ui_contrast:g}:1"
                         )
         if minimum is None:
@@ -1121,7 +1119,7 @@ def ui_resource_problems(
             if size < minimum - 1e-9:
                 where = owner if kind != "resource" else key.split("/")[0]
                 problems.append(
-                    f"{path}: font size {size} ({where}) is below the art bible's "
+                    f"{path}: font size {size} ({where}) is below the look's "
                     f"{rules.min_text_px} px at 1080p ({minimum:g} px at this "
                     f"project's {height} px viewport)"
                 )
@@ -1258,16 +1256,16 @@ def _material_problems(
         low, high = rules.roughness
         if not low - 1e-6 <= roughness <= high + 1e-6:
             problems.append(
-                f"{path}: material {name!r} roughness {roughness:.2f}, the art "
-                f"bible allows {low:g}-{high:g}"
+                f"{path}: material {name!r} roughness {roughness:.2f}, the look "
+                f"allows {low:g}-{high:g}"
             )
     if metallic is not None:
         if rules.metallic is not None:
             low, high = rules.metallic
             if not low - 1e-6 <= metallic <= high + 1e-6:
                 problems.append(
-                    f"{path}: material {name!r} metallic {metallic:.2f}, the art "
-                    f"bible allows {low:g}-{high:g}"
+                    f"{path}: material {name!r} metallic {metallic:.2f}, the look "
+                    f"allows {low:g}-{high:g}"
                 )
         pattern = rules.metallic_requires_name
         if (
@@ -1277,7 +1275,7 @@ def _material_problems(
         ):
             problems.append(
                 f"{path}: material {name!r} is metallic ({metallic:.2f}) but its "
-                "name does not say metal; the art bible keeps metallic for real metal"
+                "name does not say metal; the look keeps metallic for real metal"
             )
     if luminance is not None and rules.albedo_luminance is not None:
         low, high = rules.albedo_luminance
@@ -1285,7 +1283,7 @@ def _material_problems(
             shade = "black" if luminance < low else "white"
             problems.append(
                 f"{path}: material {name!r} base colour is near pure {shade} "
-                f"(luminance {luminance:.3f}; the art bible allows {low:g}-{high:g})"
+                f"(luminance {luminance:.3f}; the look allows {low:g}-{high:g})"
             )
     return problems
 
@@ -1306,10 +1304,7 @@ def _name_problems(
     if not bad:
         return []
     return [
-        (
-            f"{path}: {'; '.join(bad)} do not follow the art bible's naming "
-            f"pattern {pattern}"
-        )
+        (f"{path}: {'; '.join(bad)} do not follow the look's naming pattern {pattern}")
     ]
 
 
@@ -1344,7 +1339,7 @@ def _texel_problem(path: str, what: str, density: float, rule: TexelRule) -> str
     if abs(density - rule.px_per_m) <= rule.tolerance * rule.px_per_m:
         return None
     return (
-        f"{path}: {what} texel density {density:.0f} px/m, the art bible asks "
+        f"{path}: {what} texel density {density:.0f} px/m, the look asks "
         f"for {rule.px_per_m:g} ± {rule.tolerance:.0%}"
     )
 
@@ -1386,22 +1381,22 @@ def _glb_problems(path: str, data: bytes, rules: BibleRules) -> list[str]:
     problems: list[str] = []
     if budget is not None and measured.triangles > budget:
         problems.append(
-            f"{path}: {measured.triangles} triangles, over the art bible's {budget} budget"
+            f"{path}: {measured.triangles} triangles, over the look's {budget} budget"
         )
     if bones is not None and measured.bones > bones:
         problems.append(
-            f"{path}: {measured.bones} bones in a skin, over the art bible's {bones} budget"
+            f"{path}: {measured.bones} bones in a skin, over the look's {bones} budget"
         )
     if morphs is not None and measured.morph_targets > morphs:
         problems.append(
-            f"{path}: {measured.morph_targets} morph targets on a mesh, over the art "
-            f"bible's {morphs} budget; keep fewer shape keys for the game (bake_shape_keys)"
+            f"{path}: {measured.morph_targets} morph targets on a mesh, over the "
+            f"look's {morphs} budget; keep fewer shape keys for the game (bake_shape_keys)"
         )
     if models.applied_scale:
         scaled = [n.name for n in measured.nodes if n.mesh and _scale_off(n.scale)]
         if scaled:
             problems.append(
-                f"{path}: scale is not applied on {_few(scaled)}; the art bible "
+                f"{path}: scale is not applied on {_few(scaled)}; the look "
                 "asks for scale 1"
             )
     if pivot is not None and measured.bbox_min and measured.bbox_max:
@@ -1476,7 +1471,7 @@ def blend_problems(path: str, measured: BlendMeasure, rules: BibleRules) -> list
     triangles = sum(o.triangles for o in meshes)
     if budget is not None and triangles > budget:
         problems.append(
-            f"{path}: {triangles} triangles, over the art bible's {budget} budget"
+            f"{path}: {triangles} triangles, over the look's {budget} budget"
         )
     bones = _folder_value(models.max_bones, path)
     if bones is not None:
@@ -1484,13 +1479,13 @@ def blend_problems(path: str, measured: BlendMeasure, rules: BibleRules) -> list
             if armature.deform_bones > bones:
                 problems.append(
                     f"{path}: armature {armature.name!r} has {armature.deform_bones} "
-                    f"deform bones, over the art bible's {bones} budget"
+                    f"deform bones, over the look's {bones} budget"
                 )
     if models.applied_scale:
         scaled = [o.name for o in objects if _scale_off(o.scale)]
         if scaled:
             problems.append(
-                f"{path}: scale is not applied on {_few(scaled)}; the art bible "
+                f"{path}: scale is not applied on {_few(scaled)}; the look "
                 "asks for scale 1"
             )
     pivot = _folder_value(models.pivot, path)
@@ -1549,23 +1544,23 @@ def _format_problems(
     problems: list[str] = []
     if got.container != rule.container:
         problems.append(
-            f"{path}: {got.container.upper()} file, the art bible asks for "
+            f"{path}: {got.container.upper()} file, the look asks for "
             f"{rule.container.upper()} in {folder}"
         )
         return problems
     if rule.sample_rates and got.sample_rate not in rule.sample_rates:
         problems.append(
-            f"{path}: {got.sample_rate} Hz, the art bible allows "
+            f"{path}: {got.sample_rate} Hz, the look allows "
             + ", ".join(f"{r} Hz" for r in rule.sample_rates)
         )
     if rule.channels and got.channels not in rule.channels:
         problems.append(
-            f"{path}: {got.channels} channel(s), the art bible allows "
+            f"{path}: {got.channels} channel(s), the look allows "
             + " or ".join(str(c) for c in rule.channels)
         )
     if rule.bit_depths and got.bits is not None and got.bits not in rule.bit_depths:
         problems.append(
-            f"{path}: {got.bits}-bit, the art bible allows "
+            f"{path}: {got.bits}-bit, the look allows "
             + " or ".join(f"{b}-bit" for b in rule.bit_depths)
         )
     return problems
@@ -1586,9 +1581,7 @@ def _texture_problems(path: str, data: bytes, rules: TextureRules) -> list[str]:
     width, height = size
     problems: list[str] = []
     if limit is not None and max(width, height) > limit:
-        problems.append(
-            f"{path}: {width}x{height}, over the art bible's {limit} px limit"
-        )
+        problems.append(f"{path}: {width}x{height}, over the look's {limit} px limit")
     if rules.power_of_two and not all(v > 0 and v & (v - 1) == 0 for v in size):
         problems.append(f"{path}: {width}x{height} is not a power of two on both sides")
     return problems
@@ -1635,7 +1628,7 @@ async def check_rules(
         stem = PurePosixPath(path).name.split(".")[0]
         if pattern is not None and not re.fullmatch(pattern, stem):
             problems.append(
-                f"{path}: file name {stem!r} does not follow the art bible's "
+                f"{path}: file name {stem!r} does not follow the look's "
                 f"pattern {pattern}"
             )
         if suffix == ".glb":
@@ -1723,8 +1716,8 @@ async def check_rules(
         ceiling = rules.audio.true_peak_max_dbtp
         if ceiling is not None and values["true_peak"] > ceiling:
             problems.append(
-                f"{path}: true peak {values['true_peak']:.1f} dBTP, above the art "
-                f"bible's {ceiling:.1f} dBTP"
+                f"{path}: true peak {values['true_peak']:.1f} dBTP, above the "
+                f"look's {ceiling:.1f} dBTP"
             )
         if path in stems:
             continue
@@ -1736,7 +1729,7 @@ async def check_rules(
             and abs(values["lufs"] - target) > rules.audio.lufs_tolerance
         ):
             problems.append(
-                f"{path}: {values['lufs']:.1f} LUFS, the art bible asks for "
+                f"{path}: {values['lufs']:.1f} LUFS, the look asks for "
                 f"{target:.1f} ± {rules.audio.lufs_tolerance:.1f}"
             )
     return problems
@@ -1826,7 +1819,7 @@ async def _sprite_problems(
             problems.append(f"{path}: colours could not be counted")
         elif counts[path] > limit:
             problems.append(
-                f"{path}: {counts[path]} distinct colours, over the art bible's "
+                f"{path}: {counts[path]} distinct colours, over the look's "
                 f"{limit} per sprite"
             )
     return problems

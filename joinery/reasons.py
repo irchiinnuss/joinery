@@ -69,12 +69,12 @@ _BIBLE: tuple[tuple[str, re.Pattern[str], str], ...] = tuple(
     for rule, pattern, fix in (
         (
             "art_bible.file_name",
-            r"file name '(?P<m>[^']*)' does not follow the art bible's pattern (?P<e>.+)",
+            r"file name '(?P<m>[^']*)' does not follow the look's pattern (?P<e>.+)",
             "Rename the file (and its lock entry) to match the pattern.",
         ),
         (
             "art_bible.texture_size",
-            r"(?P<m>\d+x\d+), over the art bible's (?P<e>\d+ px) limit",
+            r"(?P<m>\d+x\d+), over the look's (?P<e>\d+ px) limit",
             "Export the texture smaller from the tool that made it.",
         ),
         (
@@ -88,7 +88,7 @@ _BIBLE: tuple[tuple[str, re.Pattern[str], str], ...] = tuple(
                 r"(?P<m>\d+%) of its colours are more than ΔE \S+ from the palette "
                 r"\(allowed (?P<e>\d+%)\)"
             ),
-            "Repaint or recolour with the art bible's palette.",
+            "Repaint or recolour with the look's palette.",
         ),
         (
             "art_bible.albedo",
@@ -100,67 +100,67 @@ _BIBLE: tuple[tuple[str, re.Pattern[str], str], ...] = tuple(
         ),
         (
             "art_bible.sprite_colours",
-            r"(?P<m>\d+) distinct colours, over the art bible's (?P<e>\d+) per sprite",
-            "Reduce the sprite to the bible's colour count.",
+            r"(?P<m>\d+) distinct colours, over the look's (?P<e>\d+) per sprite",
+            "Reduce the sprite to the look's colour count.",
         ),
         (
             "art_bible.true_peak",
-            r"true peak (?P<m>\S+ dBTP), above the art bible's (?P<e>\S+ dBTP)",
+            r"true peak (?P<m>\S+ dBTP), above the look's (?P<e>\S+ dBTP)",
             "Lower the gain or add a limiter in the patch and render again.",
         ),
         (
             "art_bible.loudness",
-            r"(?P<m>\S+ LUFS), the art bible asks for (?P<e>.+)",
+            r"(?P<m>\S+ LUFS), the look asks for (?P<e>.+)",
             "Change the patch's output level and render again.",
         ),
         (
             "art_bible.audio_format",
             (
-                r"(?P<m>\S+ file|\d+ Hz|\d+ channel\(s\)|\d+-bit), the art bible "
+                r"(?P<m>\S+ file|\d+ Hz|\d+ channel\(s\)|\d+-bit), the look "
                 r"(?:asks for|allows) (?P<e>.+)"
             ),
-            "Render again in the format the art bible asks for.",
+            "Render again in the format the look asks for.",
         ),
         (
             "art_bible.triangles",
-            r"(?P<m>\d+ triangles), over the art bible's (?P<e>\d+) budget",
+            r"(?P<m>\d+ triangles), over the look's (?P<e>\d+) budget",
             "Reduce the model's triangles (decimate or simplify in Blender).",
         ),
         (
             "art_bible.bones",
             (
                 r"(?:armature '(?P<n>[^']*)' has )?(?P<m>\d+ (?:deform )?bones)(?: in a "
-                r"skin)?, over the art bible's (?P<e>\d+) budget"
+                r"skin)?, over the look's (?P<e>\d+) budget"
             ),
             "Remove or merge deform bones in Blender.",
         ),
         (
             "art_bible.applied_scale",
-            r"scale is not applied on (?P<n>.+); the art bible asks for (?P<e>scale 1)",
+            r"scale is not applied on (?P<n>.+); the look asks for (?P<e>scale 1)",
             "Apply scale on those objects in Blender.",
         ),
         (
             "art_bible.pivot",
             r"(?P<n>.+?) pivot is not (?P<e>.+?): (?P<m>.+)",
-            "Move the object's origin as the art bible asks, in Blender.",
+            "Move the object's origin as the look asks, in Blender.",
         ),
         (
             "art_bible.texel_density",
             (
-                r"(?P<n>.+?) texel density (?P<m>\d+ px/m), the art bible asks for "
+                r"(?P<n>.+?) texel density (?P<m>\d+ px/m), the look asks for "
                 r"(?P<e>.+)"
             ),
-            "Rescale the UVs or the texture to the bible's texel density.",
+            "Rescale the UVs or the texture to the look's texel density.",
         ),
         (
             "art_bible.naming",
-            r"(?P<n>.+) do not follow the art bible's naming pattern (?P<e>.+)",
+            r"(?P<n>.+) do not follow the look's naming pattern (?P<e>.+)",
             "Rename those to match the pattern.",
         ),
         (
             "art_bible.roughness",
             (
-                r"material '(?P<n>[^']*)' roughness (?P<m>\S+), the art bible allows "
+                r"material '(?P<n>[^']*)' roughness (?P<m>\S+), the look allows "
                 r"(?P<e>\S+)"
             ),
             "Set the material's roughness inside the allowed range.",
@@ -168,7 +168,7 @@ _BIBLE: tuple[tuple[str, re.Pattern[str], str], ...] = tuple(
         (
             "art_bible.metallic",
             (
-                r"material '(?P<n>[^']*)' (?:metallic (?P<m>\S+), the art bible allows "
+                r"material '(?P<n>[^']*)' (?:metallic (?P<m>\S+), the look allows "
                 r"(?P<e>\S+)|is metallic \((?P<m2>\S+)\) but its name does not say metal)"
             ),
             "Make it non-metallic, or name it as metal if it is.",
@@ -177,7 +177,7 @@ _BIBLE: tuple[tuple[str, re.Pattern[str], str], ...] = tuple(
             "art_bible.base_colour",
             (
                 r"material '(?P<n>[^']*)' base colour is near pure \w+ \(luminance "
-                r"(?P<m>\S+); the art bible allows (?P<e>[^)]+)\)"
+                r"(?P<m>\S+); the look allows (?P<e>[^)]+)\)"
             ),
             "Move the base colour away from pure black or white.",
         ),
@@ -185,14 +185,14 @@ _BIBLE: tuple[tuple[str, re.Pattern[str], str], ...] = tuple(
             "art_bible.contrast",
             (
                 r"(?P<n>.+?) text on its \w+ background has contrast (?P<m>\S+), below "
-                r"the art bible's (?P<e>\S+)"
+                r"the look's (?P<e>\S+)"
             ),
             "Raise the contrast between the text and its background.",
         ),
         (
             "art_bible.text_size",
-            r"font size (?P<m>\d+) \((?P<n>[^)]*)\) is below the art bible's (?P<e>.+)",
-            "Raise the font size to at least the bible's minimum.",
+            r"font size (?P<m>\d+) \((?P<n>[^)]*)\) is below the look's (?P<e>.+)",
+            "Raise the font size to at least the look's minimum.",
         ),
         (
             "art_bible.unmeasured",
@@ -225,7 +225,7 @@ def art_bible(line: str) -> Reason:
         "art_bible.rule",
         path,
         measured=_clip(text),
-        fix="Change the asset so it meets the art bible's rule.",
+        fix="Change the asset so it meets the look's rule.",
     )
 
 
@@ -382,7 +382,7 @@ GENERIC: dict[str, tuple[str, str, str]] = {
     ),
     "art_gate": (
         "art_gate.unapproved",
-        "an approved art bible",
+        "an approved look",
         "Stop; the user approves the art direction first (/art).",
     ),
     "checks": (
@@ -418,8 +418,8 @@ GENERIC: dict[str, tuple[str, str, str]] = {
     ),
     "art_bible": (
         "art_bible.rule",
-        "the approved art bible's rules",
-        "Change the asset so it meets the art bible's rule.",
+        "the approved look's rules",
+        "Change the asset so it meets the look's rule.",
     ),
     "godot_import": (
         "godot_import.failed",

@@ -100,11 +100,11 @@ def test_the_body_is_still_judged_on_a_rigged_character(tmp_path: Path) -> None:
     hero["objects"][0]["name"] = "hero.body"
     hero["armatures"][0]["deform_bones"] = 5
     assert check(hero, tmp_path) == [
-        f"{HERO}: 4000 triangles, over the art bible's 3000 budget",
-        f"{HERO}: armature 'Hero_Rig' has 5 deform bones, over the art bible's 4 budget",
-        f"{HERO}: scale is not applied on 'hero.body'; the art bible asks for scale 1",
+        f"{HERO}: 4000 triangles, over the look's 3000 budget",
+        f"{HERO}: armature 'Hero_Rig' has 5 deform bones, over the look's 4 budget",
+        f"{HERO}: scale is not applied on 'hero.body'; the look asks for scale 1",
         (
-            f"{HERO}: object names 'hero.body' do not follow the art bible's "
+            f"{HERO}: object names 'hero.body' do not follow the look's "
             f"naming pattern {PATTERN}"
         ),
     ]
@@ -116,7 +116,7 @@ def test_a_mesh_named_like_a_widget_is_checked_like_any_mesh(tmp_path: Path) -> 
     hero["objects"].append(obj("WGT-Cape", scale=[0.5, 0.5, 0.5], triangles=10))
     problems = check(hero, tmp_path)
     assert (
-        f"{HERO}: scale is not applied on 'WGT-Cape'; the art bible asks for scale 1"
+        f"{HERO}: scale is not applied on 'WGT-Cape'; the look asks for scale 1"
         in problems
     )
     assert any("object names 'WGT-Cape'" in line for line in problems), problems
@@ -127,7 +127,7 @@ def test_mesh_data_names_are_still_checked(tmp_path: Path) -> None:
     hero = rigged(mesh="base")
     assert check(hero, tmp_path) == [
         (
-            f"{HERO}: mesh data names 'base' do not follow the art bible's "
+            f"{HERO}: mesh data names 'base' do not follow the look's "
             f"naming pattern {PATTERN}"
         )
     ]
@@ -168,9 +168,9 @@ def test_the_glb_counts_and_names_only_what_ships(tmp_path: Path) -> None:
         RIG_BLOCK,
     )
     assert run_checks(root, [glb]) == [
-        f"{glb}: 5 bones in a skin, over the art bible's 4 budget",
+        f"{glb}: 5 bones in a skin, over the look's 4 budget",
         (
-            f"{glb}: node names 'WGT-Hero_Rig_root' do not follow the art bible's "
+            f"{glb}: node names 'WGT-Hero_Rig_root' do not follow the look's "
             f"naming pattern {PATTERN}"
         ),
     ]

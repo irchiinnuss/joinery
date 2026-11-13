@@ -128,7 +128,7 @@ def test_a_failed_rule_still_wins_over_a_clean_import(
     monkeypatch.setattr("joinery.submission.check_rules", rules)
     problems = asyncio.run(submission.checks(tx, [], rules=True, godot=True))
     assert [p.check for p in problems] == ["art_bible"]
-    assert problems[0].message.startswith("Art bible check failed: art/models/a.glb")
+    assert problems[0].message.startswith("Look check failed: art/models/a.glb")
     assert problems[0].paths == ["art/models/a.glb"]
     asyncio.run(gateway.close())
 

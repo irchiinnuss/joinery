@@ -169,7 +169,7 @@ def test_models_use_the_most_specific_folder_budget(tmp_path: Path) -> None:
         check_rules(root, ["art/props/crate.glb", "art/hall.glb"], measured(""))
     )
     assert problems == [
-        "art/props/crate.glb: 12 triangles, over the art bible's 10 budget"
+        "art/props/crate.glb: 12 triangles, over the look's 10 budget"
     ]
 
 
@@ -182,8 +182,8 @@ def test_audio_peak_and_loudness_violations_are_named(tmp_path: Path) -> None:
         check_rules(root, ["audio/sfx/loud.wav", "audio/music/quiet.wav"], measured())
     )
     assert problems == [
-        "audio/music/quiet.wav: -29.7 LUFS, the art bible asks for -16.0 ± 1.0",
-        "audio/sfx/loud.wav: true peak -0.1 dBTP, above the art bible's -1.0 dBTP",
+        "audio/music/quiet.wav: -29.7 LUFS, the look asks for -16.0 ± 1.0",
+        "audio/sfx/loud.wav: true peak -0.1 dBTP, above the look's -1.0 dBTP",
     ]
 
 
@@ -594,12 +594,12 @@ def test_glb_scale_pivot_and_texel_density_are_measured(tmp_path: Path) -> None:
     builder.quad("Crate_Wood", wood, scale=[2.0, 2.0, 2.0], translation=[0.0, 0.5, 0.0])
     root = v2_stage(tmp_path, {"art/props/crate.glb": builder.build()})
     assert run_checks(root, ["art/props/crate.glb"]) == [
-        "art/props/crate.glb: scale is not applied on 'Crate_Wood'; the art bible asks for scale 1",
+        "art/props/crate.glb: scale is not applied on 'Crate_Wood'; the look asks for scale 1",
         (
             "art/props/crate.glb: model pivot is not bottom-centre (lowest point at y 0, "
             "centred in x and z): lowest y 0.500, centre x 0.000 z 0.000 m (tolerance 0.02 m)"
         ),
-        "art/props/crate.glb: 'Crate_Wood' texel density 128 px/m, the art bible asks for 256 ± 20%",
+        "art/props/crate.glb: 'Crate_Wood' texel density 128 px/m, the look asks for 256 ± 20%",
     ]
 
 
@@ -618,19 +618,19 @@ def test_glb_bones_names_and_material_factors_are_measured(tmp_path: Path) -> No
     root = v2_stage(tmp_path, {"art/characters/hero.glb": builder.build()})
     problems = run_checks(root, ["art/characters/hero.glb"])
     assert problems == [
-        "art/characters/hero.glb: 3 bones in a skin, over the art bible's 2 budget",
+        "art/characters/hero.glb: 3 bones in a skin, over the look's 2 budget",
         (
             "art/characters/hero.glb: node names 'cube.001'; mesh names 'cube.001' "
-            "do not follow the art bible's naming pattern ^[A-Z][A-Za-z0-9]*(_[A-Z][A-Za-z0-9]*){0,2}$"
+            "do not follow the look's naming pattern ^[A-Z][A-Za-z0-9]*(_[A-Z][A-Za-z0-9]*){0,2}$"
         ),
-        "art/characters/hero.glb: material 'Shiny_Plastic' roughness 0.10, the art bible allows 0.4-0.95",
+        "art/characters/hero.glb: material 'Shiny_Plastic' roughness 0.10, the look allows 0.4-0.95",
         (
             "art/characters/hero.glb: material 'Shiny_Plastic' is metallic (1.00) but its "
-            "name does not say metal; the art bible keeps metallic for real metal"
+            "name does not say metal; the look keeps metallic for real metal"
         ),
         (
             "art/characters/hero.glb: material 'Snow' base colour is near pure white "
-            "(luminance 1.000; the art bible allows 0.03-0.92)"
+            "(luminance 1.000; the look allows 0.03-0.92)"
         ),
     ]
 
@@ -739,25 +739,25 @@ def test_blend_budgets_scale_pivot_and_materials_fail(tmp_path: Path) -> None:
         root, ["art/props/crate.blend"], blend_line("art/props/crate.blend", crate)
     )
     assert problems == [
-        "art/props/crate.blend: 120 triangles, over the art bible's 100 budget",
-        "art/props/crate.blend: scale is not applied on 'Crate.001'; the art bible asks for scale 1",
+        "art/props/crate.blend: 120 triangles, over the look's 100 budget",
+        "art/props/crate.blend: scale is not applied on 'Crate.001'; the look asks for scale 1",
         (
             "art/props/crate.blend: 'Crate.001' pivot is not bottom-centre (lowest point at "
             "y 0, centred in x and z): lowest y 0.000, centre x 1.000 z 1.000 m (tolerance 0.02 m)"
         ),
-        "art/props/crate.blend: 'Crate.001' texel density 400 px/m, the art bible asks for 256 ± 20%",
+        "art/props/crate.blend: 'Crate.001' texel density 400 px/m, the look asks for 256 ± 20%",
         (
-            "art/props/crate.blend: object names 'Crate.001' do not follow the art bible's "
+            "art/props/crate.blend: object names 'Crate.001' do not follow the look's "
             "naming pattern ^[A-Z][A-Za-z0-9]*(_[A-Z][A-Za-z0-9]*){0,2}$"
         ),
-        "art/props/crate.blend: material 'Gold' roughness 0.20, the art bible allows 0.4-0.95",
+        "art/props/crate.blend: material 'Gold' roughness 0.20, the look allows 0.4-0.95",
         (
             "art/props/crate.blend: material 'Gold' is metallic (1.00) but its name does not "
-            "say metal; the art bible keeps metallic for real metal"
+            "say metal; the look keeps metallic for real metal"
         ),
         (
             "art/props/crate.blend: material 'Gold' base colour is near pure black "
-            "(luminance 0.000; the art bible allows 0.03-0.92)"
+            "(luminance 0.000; the look allows 0.03-0.92)"
         ),
     ]
 
@@ -771,7 +771,7 @@ def test_blend_bone_budget_counts_deform_bones(tmp_path: Path) -> None:
         ["art/characters/hero.blend"],
         blend_line("art/characters/hero.blend", rig),
     ) == [
-        "art/characters/hero.blend: armature 'Hero_Rig' has 3 deform bones, over the art bible's 2 budget"
+        "art/characters/hero.blend: armature 'Hero_Rig' has 3 deform bones, over the look's 2 budget"
     ]
 
 
@@ -806,7 +806,7 @@ def test_v1_triangle_budget_now_also_measures_blend_sources(tmp_path: Path) -> N
     )
     # Only the v1 rule applies: no scale, naming or material checks were opted into.
     assert problems == [
-        "art/props/crate.blend: 11 triangles, over the art bible's 10 budget"
+        "art/props/crate.blend: 11 triangles, over the look's 10 budget"
     ]
 
 
@@ -847,12 +847,12 @@ def test_audio_format_per_folder(tmp_path: Path) -> None:
     )
     problems = run_checks(root, sorted(files), probe)
     assert problems == [
-        "audio/music/theme.wav: WAV file, the art bible asks for OGG in audio/music",
-        "audio/sfx/wide.wav: 22050 Hz, the art bible allows 44100 Hz, 48000 Hz",
-        "audio/sfx/wide.wav: 2 channel(s), the art bible allows 1",
-        "audio/sfx/wide.wav: 8-bit, the art bible allows 16-bit",
-        "audio/music/bad.ogg: 44100 Hz, the art bible allows 48000 Hz",
-        "audio/music/bad.ogg: 1 channel(s), the art bible allows 2",
+        "audio/music/theme.wav: WAV file, the look asks for OGG in audio/music",
+        "audio/sfx/wide.wav: 22050 Hz, the look allows 44100 Hz, 48000 Hz",
+        "audio/sfx/wide.wav: 2 channel(s), the look allows 1",
+        "audio/sfx/wide.wav: 8-bit, the look allows 16-bit",
+        "audio/music/bad.ogg: 44100 Hz, the look allows 48000 Hz",
+        "audio/music/bad.ogg: 1 channel(s), the look allows 2",
     ]
 
 
@@ -898,8 +898,8 @@ def test_texture_size_and_power_of_two(tmp_path: Path) -> None:
     samples_out = "JOINERY_FILE:art/textures/wall_albedo.png\n" + "786e64ff" * 4 + "\n"
     assert run_checks(root, sorted(files), samples_out) == [
         "art/textures/broken_mask.png: image size could not be read",
-        "art/textures/huge_normal.png: 1024x1024, over the art bible's 512 px limit",
-        "art/ui/odd_icon.jpg: 96x64, over the art bible's 64 px limit",
+        "art/textures/huge_normal.png: 1024x1024, over the look's 512 px limit",
+        "art/ui/odd_icon.jpg: 96x64, over the look's 64 px limit",
         "art/ui/odd_icon.jpg: 96x64 is not a power of two on both sides",
     ]
 
@@ -933,7 +933,7 @@ def test_sprites_count_distinct_colours(tmp_path: Path) -> None:
     )
     assert run_checks(
         root, ["art/sprites/coin.png", "art/sprites/hero.png"], output
-    ) == ["art/sprites/hero.png: 9 distinct colours, over the art bible's 4 per sprite"]
+    ) == ["art/sprites/hero.png: 9 distinct colours, over the look's 4 per sprite"]
     assert run_checks(root, ["art/sprites/coin.png"], "", ok=False) == [
         "art/sprites/coin.png: colours could not be counted"
     ]
@@ -951,7 +951,7 @@ def test_file_names_follow_the_folder_pattern(tmp_path: Path) -> None:
     assert problems == [
         (
             "art/textures/Wall Albedo.png: file name 'Wall Albedo' does not follow the "
-            "art bible's pattern ^[a-z0-9]+(_[a-z0-9]+)*$"
+            "look's pattern ^[a-z0-9]+(_[a-z0-9]+)*$"
         )
     ]
 
@@ -1037,7 +1037,7 @@ def test_palette_problems_report_contrast_and_colour_blind_clashes() -> None:
     )
     problems = palette_problems(rules)
     assert problems[0].startswith("ui_text on ui_base has contrast 1.")
-    assert problems[0].endswith("below the 4.5:1 the bible asks for")
+    assert problems[0].endswith("below the 4.5:1 the look asks for")
     assert (
         problems[1]
         == "accessibility.ui_pairs names 'ink', which [palette.roles] does not define"
@@ -1092,8 +1092,8 @@ def test_ui_theme_contrast_and_font_sizes() -> None:
     rules = parse_rules(V2_BLOCK).accessibility
     problems = ui_resource_problems("ui/theme.tres", THEME, rules, 1080)
     assert problems == [
-        "ui/theme.tres: Button text on its normal background has contrast 1.5:1, below the art bible's 4.5:1",
-        "ui/theme.tres: font size 10 (Label) is below the art bible's 18 px at 1080p (18 px at this project's 1080 px viewport)",
+        "ui/theme.tres: Button text on its normal background has contrast 1.5:1, below the look's 4.5:1",
+        "ui/theme.tres: font size 10 (Label) is below the look's 18 px at 1080p (18 px at this project's 1080 px viewport)",
     ]
 
 
@@ -1101,8 +1101,8 @@ def test_ui_scene_overrides_scale_with_the_viewport() -> None:
     rules = parse_rules(V2_BLOCK).accessibility
     # 18 px at 1080p is 12 px at 720p: 11 fails, white on black passes contrast.
     assert ui_resource_problems("game/ui/hud.tscn", SCENE, rules, 720) == [
-        "game/ui/hud.tscn: font size 9 (LabelSettings_s) is below the art bible's 18 px at 1080p (12 px at this project's 720 px viewport)",
-        "game/ui/hud.tscn: font size 11 (Play) is below the art bible's 18 px at 1080p (12 px at this project's 720 px viewport)",
+        "game/ui/hud.tscn: font size 9 (LabelSettings_s) is below the look's 18 px at 1080p (12 px at this project's 720 px viewport)",
+        "game/ui/hud.tscn: font size 11 (Play) is below the look's 18 px at 1080p (12 px at this project's 720 px viewport)",
     ]
     assert ui_resource_problems("game/ui/hud.tscn", SCENE, rules, 540) == []
 
@@ -1300,15 +1300,15 @@ def test_blender_measures_a_real_blend_in_the_worker(tmp_path: Path) -> None:
 
     problems = asyncio.run(check_rules(tmp_path, ["art/props/crate.blend"], measure))
     assert problems == [
-        "art/props/crate.blend: 2 triangles, over the art bible's 1 budget",
-        "art/props/crate.blend: armature 'Rig' has 2 deform bones, over the art bible's 1 budget",
-        "art/props/crate.blend: scale is not applied on 'Crate_Wood'; the art bible asks for scale 1",
+        "art/props/crate.blend: 2 triangles, over the look's 1 budget",
+        "art/props/crate.blend: armature 'Rig' has 2 deform bones, over the look's 1 budget",
+        "art/props/crate.blend: scale is not applied on 'Crate_Wood'; the look asks for scale 1",
         # A 2 m quad scaled by 2 is 16 m² of 128 x 128 px: 32 px/m.
-        "art/props/crate.blend: 'Crate_Wood' texel density 32 px/m, the art bible asks for 256 ± 20%",
-        "art/props/crate.blend: material 'Gold' roughness 0.20, the art bible allows 0.4-0.95",
+        "art/props/crate.blend: 'Crate_Wood' texel density 32 px/m, the look asks for 256 ± 20%",
+        "art/props/crate.blend: material 'Gold' roughness 0.20, the look allows 0.4-0.95",
         (
             "art/props/crate.blend: material 'Gold' is metallic (1.00) but its name does not "
-            "say metal; the art bible keeps metallic for real metal"
+            "say metal; the look keeps metallic for real metal"
         ),
     ]
 
@@ -1371,7 +1371,7 @@ def test_worker_scripts_measure_real_audio_and_images(tmp_path: Path) -> None:
             "art/textures/wall_albedo.png: 50% of the albedo is near pure black or white "
             "(luminance outside 0.03-0.92; allowed 25%)"
         ),
-        "art/sprites/hero.png: 5 distinct colours, over the art bible's 4 per sprite",
-        "audio/music/theme.ogg: 44100 Hz, the art bible allows 48000 Hz",
-        "audio/music/theme.ogg: 1 channel(s), the art bible allows 2",
+        "art/sprites/hero.png: 5 distinct colours, over the look's 4 per sprite",
+        "audio/music/theme.ogg: 44100 Hz, the look allows 48000 Hz",
+        "audio/music/theme.ogg: 1 channel(s), the look allows 2",
     ]

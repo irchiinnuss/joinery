@@ -669,17 +669,17 @@ def _bible_upgrade(project: Path, yes: bool, as_json: bool) -> int:
     def edit(stage: Path) -> None:
         path = stage / BIBLE_PATH
         if not path.is_file():
-            raise ValueError("The project has no art bible.")
+            raise ValueError("The project has no look.")
         text = path.read_text(encoding="utf-8")
         from joinery.bible_upgrade import upgrade_text
 
         upgraded = upgrade_text(text)
         if upgraded == text:
-            raise ValueError("The art bible is already up to date.")
+            raise ValueError("The look is already up to date.")
         path.write_text(upgraded, encoding="utf-8")
 
     try:
-        tx = game_setup.stage_change(project.resolve(), "Upgrade the art bible", edit)
+        tx = game_setup.stage_change(project.resolve(), "Upgrade the look", edit)
     except (OSError, ValueError) as exc:
         if as_json:
             print(json.dumps({"error": str(exc)}))
@@ -693,7 +693,7 @@ def _bible_upgrade(project: Path, yes: bool, as_json: bool) -> int:
             {
                 "step": "bible",
                 "state": "done",
-                "message": "The art bible changed. Review it and approve it again.",
+                "message": "The look changed. Review it and approve it again.",
             }
         ]
 
@@ -1128,7 +1128,7 @@ def _parser() -> argparse.ArgumentParser:
         "--yes", action="store_true", help="accept the reviewed change without asking"
     )
     match_cmd = commands.add_parser(
-        "match", help="audit the project against the art bible; list what drifts"
+        "match", help="audit the project against the look; list what drifts"
     )
     match_cli.add_arguments(match_cmd)
     design_cmd = commands.add_parser(
@@ -1137,7 +1137,8 @@ def _parser() -> argparse.ArgumentParser:
     design_cli.add_arguments(design_cmd)
     update_cli.add_update(
         commands.add_parser(
-            "update", help="check GitHub Releases for a newer Joinery; install it on request"
+            "update",
+            help="check GitHub Releases for a newer Joinery; install it on request",
         )
     )
     update_cli.add_verify(

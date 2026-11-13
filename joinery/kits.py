@@ -349,7 +349,7 @@ def looks(
                 rules.palette.max_delta_e
             ):
                 raise ValueError(
-                    f"{colour} is not in the art bible's palette. "
+                    f"{colour} is not in the look's palette. "
                     f"Use one of: {', '.join(palette)}."
                 )
         elif palette:
@@ -534,7 +534,7 @@ def plan(
         pattern = _folder_value(rules.naming.nodes, path)
         if pattern and (bad := [n for n in names if not re.fullmatch(pattern, n)]):
             raise ValueError(
-                f"The names {', '.join(bad[:3])} don't follow the art bible's naming "
+                f"The names {', '.join(bad[:3])} don't follow the look's naming "
                 f"pattern {pattern}. Choose a name that does."
             )
         pattern = _folder_value(rules.naming.files, path)
@@ -542,7 +542,7 @@ def plan(
             re.fullmatch(pattern, Path(m["glb"]).stem) for m in models
         ):
             raise ValueError(
-                f"The file name {stem!r} doesn't follow the art bible's file naming "
+                f"The file name {stem!r} doesn't follow the look's file naming "
                 f"pattern {pattern}. Choose a name that does."
             )
     return Plan(
@@ -761,7 +761,7 @@ def _measure(project: Path, made: Plan) -> list[str]:
             measured = measure_glb((project / path).read_bytes())
             if made.budget is not None and measured.triangles > made.budget:
                 problems.append(
-                    f"{path}: {measured.triangles} triangles, over the art bible's "
+                    f"{path}: {measured.triangles} triangles, over the look's "
                     f"{made.budget}"
                 )
             if made.pivot == "bottom-centre" and measured.bbox_min is not None:

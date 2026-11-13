@@ -67,7 +67,7 @@ SECTIONS: tuple[Section, ...] = (
         True,
         "2-4 sentences: what it feels like, and what it must never feel like.",
         ("any",),
-        "Before approving the bible",
+        "Before approving the look",
     ),
     Section(
         2,
@@ -87,7 +87,7 @@ SECTIONS: tuple[Section, ...] = (
         True,
         "A board of your own material: what to take from each, and what not to.",
         ("any",),
-        "Before approving the bible",
+        "Before approving the look",
     ),
     Section(
         4,
@@ -117,7 +117,7 @@ SECTIONS: tuple[Section, ...] = (
         True,
         "The overall look, and where detail goes versus where it stays simple.",
         ("any",),
-        "Before approving the bible",
+        "Before approving the look",
     ),
     Section(
         7,
@@ -127,7 +127,7 @@ SECTIONS: tuple[Section, ...] = (
         True,
         "Roles with hex values, value structure, saturation ceiling outside accents.",
         ("any",),
-        "Before approving the bible",
+        "Before approving the look",
     ),
     Section(
         8,
@@ -217,7 +217,7 @@ SECTIONS: tuple[Section, ...] = (
         True,
         "Overall sound, SFX character, music tempo and keys, patches, loudness.",
         ("any",),
-        "Before approving the bible",
+        "Before approving the look",
         ("Sound palette",),
     ),
     Section(
@@ -248,7 +248,7 @@ SECTIONS: tuple[Section, ...] = (
         True,
         "Hard bans. Anything here is refused rather than argued about.",
         ("any",),
-        "Before approving the bible",
+        "Before approving the look",
     ),
     Section(
         20,

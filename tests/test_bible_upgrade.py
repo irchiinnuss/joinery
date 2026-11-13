@@ -240,7 +240,7 @@ def test_cli_upgrade_is_a_reviewed_transaction_that_clears_approval(
     approve(project, "tester")
     assert approved(project)
     [tx] = list_transactions(project)
-    assert tx.summary == "Upgrade the art bible" and tx.state == "accepted"
+    assert tx.summary == "Upgrade the look" and tx.state == "accepted"
 
 
 def test_cli_upgrade_with_yes_and_when_already_current(

@@ -192,7 +192,7 @@ def resolve_targets(
                 target = default_lufs
             if target is None:
                 raise ValueError(
-                    f"The art bible sets no loudness for {Path(export).parent.as_posix()}; "
+                    f"The look sets no loudness for {Path(export).parent.as_posix()}; "
                     "give normalise a lufs target (music is usually -16, ambience -22)."
                 )
             ceiling = step.true_peak

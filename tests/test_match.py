@@ -520,7 +520,7 @@ def test_a_scripted_task_makes_a_normal_reviewed_change(
         crew = test.crew()
         task = await crew.start_scripted(
             "Match the lighting",
-            "Match the lighting, as the art bible asks.",
+            "Match the lighting, as the look asks.",
             [
                 ScriptedCall(
                     "joinery-sound",
@@ -788,4 +788,4 @@ def test_recipe_preimages_are_not_asset_checks(tmp_path: Path) -> None:
     found = asyncio.run(
         check_rules(tmp_path, ["recipes/inputs/old.png", "art/new.png"], FakeWorker())
     )
-    assert found == ["art/new.png: 128x128, over the art bible's 64 px limit"]
+    assert found == ["art/new.png: 128x128, over the look's 64 px limit"]

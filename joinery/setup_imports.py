@@ -370,19 +370,19 @@ def plan_notes(project: Path, chosen: Plan) -> list[str]:
         bible_path = project / BIBLE_PATH
         if not bible_path.is_file():
             notes.append(
-                "There's no art bible yet, so the references only go into art/reference/."
+                "There's no look yet, so the references only go into art/reference/."
             )
         elif (
             board_rows(bible_path.read_text(encoding="utf-8"), chosen.references)
             is None
         ):
             notes.append(
-                "The art bible has no reference board. Upgrade it in /art to list them."
+                "The look has no reference board. Upgrade it in /art to list them."
             )
         else:
             notes.append(
-                "Pictures go on the art bible's reference board. That changes the "
-                "bible, so approve it again in /art afterwards."
+                "Pictures go on the look's reference board. That changes the "
+                "look, so approve it again in /art afterwards."
             )
     if chosen.documents:
         if (project / brief.BRIEF_PATH).is_file():
@@ -604,13 +604,8 @@ def _count(number: int, one: str, many: str) -> str:
 def reference_message(count: int, rows: int | None) -> str:
     added = f"Added {_count(count, 'reference image', 'reference images')} to {REFERENCE_DIR}/"
     if rows is None:
-        return (
-            added + ". Put them on the art bible's reference board when you write it."
-        )
-    return (
-        added
-        + " and the art bible's reference board. Say what to avoid in each in /art."
-    )
+        return added + ". Put them on the look's reference board when you write it."
+    return added + " and the look's reference board. Say what to avoid in each in /art."
 
 
 def document_message(count: int, drafted: list[str] | None) -> str:

@@ -19,7 +19,7 @@ from joinery.art_approval import approved
 from joinery.transactions import FileTransaction
 
 ACTIONS = ("list", "preview", "make", "edit", "from-blend")
-ART_GATE = "Approve the art bible first: in chat, type /art and approve it."
+ART_GATE = "Approve the look first: in chat, type /art and approve it."
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:

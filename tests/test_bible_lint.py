@@ -173,7 +173,7 @@ def test_suggestions_put_required_first_then_the_projects_kind() -> None:
     report = bible_lint.lint_text(rendered({"title": "Keep", "vision": "Quiet."}))
     three_d = bible_lint.suggestions_for(report, "3d")
     assert three_d[0] == (
-        "Before approving the bible: the references, visual style, palette, audio and "
+        "Before approving the look: the references, visual style, palette, audio and "
         "never sections are not set yet. Ask about them."
     )
     assert three_d[1].startswith("The reference board is empty.")
@@ -198,14 +198,14 @@ def test_first_format_bible_is_offered_the_upgrade(tmp_path: Path) -> None:
     write(tmp_path, v1_bible({"title": "Old"}))
     assert bible_lint.lint(tmp_path).version == 1
     suggestions = bible_lint.suggestions(tmp_path)
-    assert any(s.startswith("This bible uses the first format.") for s in suggestions)
+    assert any(s.startswith("This look uses the first format.") for s in suggestions)
     # Sections v1 never had are missing, not open: the upgrade covers them.
     assert not any("shape language" in s for s in suggestions)
 
 
 def test_no_bible_suggests_drafting_one(tmp_path: Path) -> None:
     assert bible_lint.lint(tmp_path).version == 0
-    assert bible_lint.suggestions(tmp_path)[0].startswith("There is no art bible yet.")
+    assert bible_lint.suggestions(tmp_path)[0].startswith("There is no look yet.")
 
 
 def test_project_dimension_comes_from_the_blueprint(

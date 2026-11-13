@@ -210,7 +210,7 @@ def _gaps(text: str) -> list[Gap]:
                 heading="Title",
                 required=True,
                 relevant_for=["any"],
-                moment="Before approving the bible",
+                moment="Before approving the look",
             )
         )
     for section in bible_schema.SECTIONS:
@@ -263,7 +263,7 @@ def lint_text(text: str, project: Path | None = None) -> BibleReport:
 def lint(project: Path) -> BibleReport:
     path = project / BIBLE
     if not path.is_file():
-        return BibleReport(version=0, problems=["The project has no art bible yet."])
+        return BibleReport(version=0, problems=["The project has no look yet."])
     return lint_text(path.read_text(errors="replace"), project)
 
 
@@ -322,20 +322,20 @@ def suggestions_for(report: BibleReport, dimension: str | None) -> list[str]:
     if report.version == 0:
         return [
             (
-                "There is no art bible yet. Offer to draft one with the user: vision, "
+                "There is no look yet. Offer to draft one with the user: vision, "
                 "look, palette, sound and what to never do."
             )
         ]
     out: list[str] = []
     required = [g for g in report.gaps if g.required]
     if required:
-        out.append(_sentence("Before approving the bible", required, "not set yet"))
-    out += [f"The bible needs a fix: {problem}." for problem in report.problems[:3]]
+        out.append(_sentence("Before approving the look", required, "not set yet"))
+    out += [f"The look needs a fix: {problem}." for problem in report.problems[:3]]
     if len(report.problems) > 3:
-        out.append(f"The bible has {len(report.problems) - 3} more problems to fix.")
+        out.append(f"The look has {len(report.problems) - 3} more problems to fix.")
     if report.version < bible_schema.VERSION:
         out.append(
-            "This bible uses the first format. Offer the upgrade: it keeps every "
+            "This look uses the first format. Offer the upgrade: it keeps every "
             "line, adds the new sections as open, and needs approving again."
         )
     elif not report.references:
@@ -353,7 +353,7 @@ def suggestions_for(report: BibleReport, dimension: str | None) -> list[str]:
     for _rank, _index, gap in open_gaps:
         grouped.setdefault(gap.moment, []).append(gap)
     out += [_sentence(moment, gaps, "open") for moment, gaps in grouped.items()]
-    wording = bible_writing.suggestion("bible", report.filler, _FILLER_INSTEAD)
+    wording = bible_writing.suggestion("look", report.filler, _FILLER_INSTEAD)
     if wording is not None:
         out.append(wording)
     return out

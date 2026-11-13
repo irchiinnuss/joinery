@@ -141,7 +141,7 @@ def filler(text: str, skip: Collection[str] = ()) -> list[tuple[str, str]]:
 def suggestion(document: str, hits: list[tuple[str, str]], instead: str) -> str | None:
     """One line naming the filler words and where they are, or None.
 
-    `document` is "bible" or "brief"; `instead` says what to write in their
+    `document` is "look" or "brief"; `instead` says what to write in their
     place, as the end of a sentence.
     """
     if not hits:

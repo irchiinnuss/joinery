@@ -193,7 +193,7 @@ def test_game_apply_reads_the_wizards_files_and_removes_them(
     steps = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     by_step = {step["step"]: step for step in steps}
     assert by_step["references"]["message"] == (
-        "Added 1 reference image to art/reference/ and the art bible's reference "
+        "Added 1 reference image to art/reference/ and the look's reference "
         "board. Say what to avoid in each in /art."
     )
     assert by_step["design-docs"]["message"].startswith(

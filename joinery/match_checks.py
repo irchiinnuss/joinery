@@ -420,7 +420,7 @@ def _materials(
                 "medium",
                 f"{socket} {found:.2f}",
                 target,
-                f"{material.name}: {socket.lower()} {found:.2f}, the art bible allows {target}",
+                f"{material.name}: {socket.lower()} {found:.2f}, the look allows {target}",
                 subject=material.name,
                 fix=None
                 if owner is None
@@ -612,7 +612,7 @@ def _music_mix(
         "high" if gap > 3 * max(rules.lufs_tolerance, 1) else "medium",
         f"{values['lufs']:.1f} LUFS",
         f"{target:g} LUFS",
-        f"the {subject} is {values['lufs']:.1f} LUFS, the art bible asks for "
+        f"the {subject} is {values['lufs']:.1f} LUFS, the look asks for "
         f"{target:g} ± {rules.lufs_tolerance:g}",
         fix=fix,
         needs_you=why,
@@ -696,7 +696,7 @@ async def sound(audit: _Audit, paths: list[str]) -> None:
             assert target is not None
             gap = abs(values["lufs"] - target)
             measured, wanted = f"{values['lufs']:.1f} LUFS", f"{target:g} LUFS"
-            message = f"{values['lufs']:.1f} LUFS, the art bible asks for {target:g} ± {rules.lufs_tolerance:g}"
+            message = f"{values['lufs']:.1f} LUFS, the look asks for {target:g} ± {rules.lufs_tolerance:g}"
             severity: Severity = (
                 "high" if gap > 3 * max(rules.lufs_tolerance, 1) else "medium"
             )

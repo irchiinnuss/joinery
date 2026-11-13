@@ -78,7 +78,7 @@ def create_project(
         )
     if (references or documents) and blueprint is None:
         raise ValueError(
-            "References and design documents go on the art bible and the game brief, "
+            "References and design documents go on the look and the game brief, "
             "which come with a starting point. Add --blueprint (blank is an empty game)."
         )
     existed = path.exists()

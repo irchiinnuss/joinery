@@ -71,8 +71,8 @@ def main(args: argparse.Namespace) -> int:
         print(json.dumps(data))
         return 0
     if not audit.rules:
-        print("The art bible has no checked rules, so there is nothing to match yet.")
-    print(audit.summary or "Nothing the art bible checks is in this project yet.")
+        print("The look has no checked rules, so there is nothing to match yet.")
+    print(audit.summary or "Nothing the look checks is in this project yet.")
     for finding in audit.findings[:SHOWN]:
         how = finding.fix.label if finding.fix else "needs you: " + finding.needs_you
         print(f"  {finding.severity:<6} {finding.path}: {finding.message} ({how})")

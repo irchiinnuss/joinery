@@ -382,7 +382,7 @@ async def checks(
         return [
             Problem(
                 "art_bible",
-                "Art bible check failed: " + line,
+                "Look check failed: " + line,
                 _paths([line]),
                 items=[reasons.art_bible(line)],
             )

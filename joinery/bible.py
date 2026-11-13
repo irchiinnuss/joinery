@@ -131,7 +131,7 @@ def write_bible(
     destination = project / BIBLE_PATH
     if destination.exists():
         raise FileExistsError(
-            f"{destination} already exists; changing a bible is a reviewed edit, "
+            f"{destination} already exists; changing the look is a reviewed edit, "
             "not something project setup should overwrite"
         )
     filled = dict(answers)

@@ -133,7 +133,7 @@ def test_looks_follow_the_palette_and_material_ranges() -> None:
     assert kits.looks(crate, BibleRules(), "Crate")["wood"]["colour"] == "#a87b4f"
     chosen = kits.looks(crate, RULES, "Crate", {"wood": "#6b8f3a"})
     assert chosen["wood"]["colour"] == "#6b8f3a"
-    with pytest.raises(ValueError, match="not in the art bible's palette"):
+    with pytest.raises(ValueError, match="not in the look's palette"):
         kits.looks(crate, RULES, "Crate", {"wood": "#ff00ff"})
     with pytest.raises(ValueError, match="has no material 'glass'"):
         kits.looks(crate, RULES, "Crate", {"glass": "#2b2d42"})

@@ -344,5 +344,5 @@ def test_stems_are_judged_by_their_section_mix(tmp_path: Path) -> None:
     assert asyncio.run(check_rules(root, files, measured(-16.2))) == []
     problems = asyncio.run(check_rules(root, files, measured(-12.0)))
     assert problems == [
-        "music/theme.tres (main mix): -12.0 LUFS, the art bible asks for -16.0 ± 1.0"
+        "music/theme.tres (main mix): -12.0 LUFS, the look asks for -16.0 ± 1.0"
     ]

@@ -274,7 +274,7 @@ def plan(
                 for f in found
             ]
             request = (
-                f"{title}, as the art bible asks. Joinery measured:\n"
+                f"{title}, as the look asks. Joinery measured:\n"
                 + "\n".join(lines)
                 + "\nEach fix is a typed operation in the app that owns the file."
             )

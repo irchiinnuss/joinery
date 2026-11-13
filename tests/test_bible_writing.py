@@ -180,9 +180,9 @@ def test_filler_ignores_words_that_only_contain_one() -> None:
 def test_suggestion_lists_where_and_caps_the_list() -> None:
     assert suggestion("bible", [], "x") is None
     hits = [(w, "Vision") for w in FILLER_WORDS[:7]]
-    line = suggestion("bible", hits, "a hex")
+    line = suggestion("look", hits, "a hex")
     assert line is not None
-    assert line.startswith("Filler words in the bible: stunning (Vision), ")
+    assert line.startswith("Filler words in the look: stunning (Vision), ")
     assert "and 2 more" in line and line.endswith("instead: a hex.")
     single = suggestion("brief", [("vibrant", "Palette (checked)")], "a number")
     assert single == (
@@ -216,7 +216,7 @@ def test_bible_lint_suggests_but_never_blocks(tmp_path: Path) -> None:
     ]
     tips = bible_lint.suggestions_for(after, None)
     assert tips[-1] == (
-        "Filler words in the bible: stunning (Vision), immersive (Vision), "
+        "Filler words in the look: stunning (Vision), immersive (Vision), "
         "vibrant (Palette). Say what each means here instead: a hex, a size, "
         "a shape or a named reference."
     )
@@ -224,7 +224,7 @@ def test_bible_lint_suggests_but_never_blocks(tmp_path: Path) -> None:
     (tmp_path / "art").mkdir()
     (tmp_path / "art" / "bible.md").write_text(sloppy)
     summary = bible_lint.summary(tmp_path)
-    assert summary["suggestions"][-1].startswith("Filler words in the bible: ")
+    assert summary["suggestions"][-1].startswith("Filler words in the look: ")
     assert not any("Filler" in p for p in summary["problems"])
 
 

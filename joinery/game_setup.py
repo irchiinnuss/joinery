@@ -253,7 +253,7 @@ def write_bible(
             report,
             "bible",
             "skipped",
-            "Kept the art bible that is already there.",
+            "Kept the look that is already there.",
             board_rows=rows,
         )
     written = bible.write_from_answers_file(project, preset)
@@ -274,7 +274,7 @@ def write_bible(
         report,
         "bible",
         "done",
-        "Wrote the art bible draft. Finish and approve it before asset work.",
+        "Wrote a draft of the look. Finish and approve it before asset work.",
         board_rows=rows,
     )
 
@@ -363,8 +363,12 @@ def apply_choices(
         message += f" The files it changed were copied to {applied.backup} first."
     steps.append(
         _step(
-            report, "blueprint", "done", message,
-            features=applied.features, backup=applied.backup,
+            report,
+            "blueprint",
+            "done",
+            message,
+            features=applied.features,
+            backup=applied.backup,
         )
     )
     if imports:

@@ -413,13 +413,13 @@ def test_a_teammates_bible_or_brief_change_needs_approval_again(
     team.push(ana)
     pulled = team.pull(ben)
     assert pulled["documents"] == ["art/bible.md"]
-    assert "The art bible changed: approve it" in pulled["message"]
+    assert "The look changed: approve it" in pulled["message"]
     assert not art_approval.approved(ben)
     assert art_approval.status(ben) == {
         "state": "needs_approval",
         "by_teammate": "Ana Lima",
     }
-    assert team.gate_message(ben).startswith("Ana changed the art bible.")
+    assert team.gate_message(ben).startswith("Ana changed the look.")
     with pytest.raises(team.TeamError, match="/art"):
         team.approve_document(ben, "art/bible.md")
     art_approval.approve(ben, "Ben")
