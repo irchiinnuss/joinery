@@ -44,6 +44,13 @@ const TRANSPORT := 40
 ## Dialog sizes in em (multiples of the body font): the agent connect dialog and document
 ## dialogs (art direction, brief). Read with [method dialog_size].
 const DIALOG := {"connect": Vector2(32, 36), "doc": Vector2(48, 36)}
+## Width caps in logical pixels × unit: column, every sidebar page and the chat (transcript and
+## composer), centred once the sidebar is wider; group, a settings group; measure, a line of
+## prose (about 70 characters at body size). Read with [method max_w].
+const MAX_W := {"column": 640, "group": 560, "measure": 560}
+## Palette swatch heights in logical pixels × unit: sm in a miniature (the art gate), md on the
+## page, lg on a wide page. Read with [method swatch_h].
+const SWATCH_H := {"sm": 24, "md": 56, "lg": 72}
 ## Durations in seconds. fast: hover and focus colour; base: fades and reveals; confirm: success
 ## flash; enter/exit: entrances and exits (exits are 20% shorter); menu: popovers and menus;
 ## stagger: delay between list rows. Animation helpers live in ui_motion.gd.
@@ -254,6 +261,16 @@ static func send_px(context: Node) -> int:
 ## Audio transport button side in pixels (TRANSPORT × unit).
 static func transport_px(context: Node) -> int:
 	return roundi(TRANSPORT * unit(context))
+
+
+## A MAX_W cap ("column", "group", "measure") in pixels.
+static func max_w(context: Node, name := "column") -> int:
+	return roundi(int(MAX_W.get(name, MAX_W["column"])) * unit(context))
+
+
+## A SWATCH_H height ("sm", "md", "lg") in pixels.
+static func swatch_h(context: Node, name := "md") -> int:
+	return roundi(int(SWATCH_H.get(name, SWATCH_H["md"])) * unit(context))
 
 
 ## A DIALOG size ("connect", "doc") in pixels: em × the body font size.

@@ -28,6 +28,7 @@ const READINESS := {
 	"unavailable": ["Not available yet", "off"],
 }
 const _INDICATOR := preload("activity_indicator.gd")
+const _BLOCKS := preload("ui_blocks.gd")
 
 
 ## A labelled field: the label above, the control at full width, an optional help caption and
@@ -89,6 +90,8 @@ class Chip:
 		set(value):
 			max_width = value
 			fit()
+	## A file name to trim in the middle ("door_with…name.glb"), keeping its end; "" trims the end.
+	var middle_text := ""
 
 	## Animate out, then emit removed and free the chip.
 	func dismiss() -> void:
@@ -100,15 +103,20 @@ class Chip:
 			return
 		var font := label.get_theme_font("font")
 		var font_size := label.get_theme_font_size("font_size")
-		var width := font.get_string_size(label.text, 0, -1, font_size).x
+		var text := middle_text if not middle_text.is_empty() else label.text
+		var width := font.get_string_size(text, 0, -1, font_size).x
 		var cap := 16.0 * font_size
 		if max_width > 0.0:
 			# Icon, gaps, × and the chip's own padding: everything but the name.
 			var chrome := get_combined_minimum_size().x - label.get_combined_minimum_size().x
 			cap = minf(cap, maxf(2.0 * font_size, max_width - chrome))
 		label.custom_minimum_size.x = minf(width, cap)
+		if not middle_text.is_empty():
+			label.text = _BLOCKS.middle(text, font, font_size, cap)
 		label.text_overrun_behavior = (
-			TextServer.OVERRUN_TRIM_ELLIPSIS if width > cap else TextServer.OVERRUN_NO_TRIMMING
+			TextServer.OVERRUN_TRIM_ELLIPSIS
+			if width > cap and middle_text.is_empty()
+			else TextServer.OVERRUN_NO_TRIMMING
 		)
 
 
@@ -165,13 +173,16 @@ class SwitchRow:
 	func is_on() -> bool:
 		return switch_button.button_pressed
 
-	## Until the project answers: the switch waits, and the row says so instead of looking
-	## locked. Any [method set_disabled_reason] (the answer) replaces it.
+	## Until the project answers: a skeleton bar holds the switch's place (nothing claims
+	## a value yet). Any [method set_disabled_reason] (the answer) brings the switch back.
 	func set_checking() -> void:
-		set_disabled_reason("Checking…")
+		set_disabled_reason("")
+		_BLOCKS.wait_for(switch_button, true)
+		switch_button.disabled = true
 
 	## Disable the switch and show [param text] under the title; "" enables it again.
 	func set_disabled_reason(text: String) -> void:
+		_BLOCKS.wait_for(switch_button, false)
 		switch_button.disabled = not text.is_empty()
 		reason.text = text
 		reason.visible = not text.is_empty()
@@ -799,57 +810,42 @@ static func switch_row(title: String, description := "", on := false) -> SwitchR
 	return row
 
 
-## A banner with one sentence and one secondary action ("Lost connection. [Reconnect]",
-## "Open Docker Desktop… [Check again]"). The text label is the "Text" child and the button
-## the "Action" child; connect to the button's pressed signal. [param variation] is
-## JoineryBanner for something that went wrong, JoineryCard for plain guidance.
+## A banner with one sentence and one secondary action ("Lost connection. [Reconnect]"): the
+## "Text" label and the "Action" button; [param variation] JoineryBanner or JoineryCard.
 static func notice(
 	text: String, action_text: String, variation := "JoineryBanner"
 ) -> PanelContainer:
-	var panel := PanelContainer.new()
-	panel.theme_type_variation = variation
-	var line := HBoxContainer.new()
-	line.theme_type_variation = "JoineryRow"
-	panel.add_child(line)
-	var words := label(text, "", true)
-	words.name = "Text"
-	words.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	line.add_child(words)
-	var button := secondary(action_text)
-	button.name = "Action"
-	button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	line.add_child(button)
-	return panel
+	return _BLOCKS.notice(text, action_text, variation)
 
 
-## A centred empty state: a faint [param icon_name] icon, a [param title], an optional
-## [param line] saying what to do, and an optional [param action] button. Fills the height.
+## A centred empty state (a preview pane): a faint [param icon_name] icon, a [param title], an
+## optional [param line] saying what to do, and an optional [param action] button.
 static func empty_state(
 	icon_name: String, title: String, line := "", action: Button = null
 ) -> VBoxContainer:
-	var block := VBoxContainer.new()
-	block.theme_type_variation = "JoineryTight"
-	block.alignment = BoxContainer.ALIGNMENT_CENTER
-	block.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	var icon := TextureRect.new()
-	icon.stretch_mode = TextureRect.STRETCH_KEEP_CENTERED
-	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	bind_icon(icon, icon_name, "texture")
-	icon.theme_changed.connect(
-		func() -> void: icon.self_modulate = UI_THEME.color(icon, "text_faint")
-	)
-	block.add_child(icon)
-	var heading := label(title, "JoineryBodyLarge")
-	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	block.add_child(heading)
-	if not line.is_empty():
-		var hint := label(line, "JoineryCaption", true)
-		hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		block.add_child(hint)
-	if action != null:
-		action.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-		block.add_child(action)
-	return block
+	return _BLOCKS.empty_state(icon_name, title, line, action)
+
+
+## A loading skeleton: [param lines] text-shaped bars that breathe (ui_blocks.gd).
+static func skeleton(lines := 2) -> VBoxContainer:
+	return _BLOCKS.skeleton(lines)
+
+
+## An empty or first-run view: picture, heading, one primary, a quiet secondary (ui_blocks.gd).
+static func blankslate(
+	icon: String, heading: String, primary: Button = null, secondary: Button = null, line := ""
+) -> VBoxContainer:
+	return _BLOCKS.blankslate(icon, heading, primary, secondary, line)
+
+
+## The palette as swatches, [param roles] {role, hex, use}, SWATCH_H tall (ui_blocks.gd).
+static func palette_strip(roles: Array, size := "md") -> VBoxContainer:
+	return _BLOCKS.palette_strip(roles, size)
+
+
+## Reference images at 4:3 with a one-line take; 0 [param columns] fits 2–4 (ui_blocks.gd).
+static func reference_grid(refs: Array, columns := 0) -> GridContainer:
+	return _BLOCKS.reference_grid(refs, columns)
 
 
 ## A [Readiness] badge, hidden until [method Readiness.set_entry] gets a known status.

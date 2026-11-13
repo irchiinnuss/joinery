@@ -6,6 +6,8 @@ const UI_MOTION := preload("res://addons/joinery/ui_motion.gd")
 const UI := preload("res://addons/joinery/ui_components.gd")
 const INDICATOR := preload("res://addons/joinery/activity_indicator.gd")
 const SETTINGS := preload("res://addons/joinery/journeyman_settings.gd")
+const STYLE := preload("res://addons/joinery/sidebar_style.gd")
+const BLOCKS := preload("res://addons/joinery/ui_blocks.gd")
 const TEXT_ROLES := ["text", "text_muted", "text_faint", "accent", "success", "danger"]
 const SURFACES := ["surface", "surface_sunken", "surface_raised"]
 const LABELS := [
@@ -62,6 +64,8 @@ func _run() -> void:
 	await _check_watch(config)
 	await _check_motion()
 	await _check_components()
+	await _check_blocks()
+	await _check_column()
 	await _check_settings()
 	_host.queue_free()
 	Engine.remove_meta("joinery_ui_config")
@@ -571,10 +575,19 @@ func _check_settings() -> void:
 	_check(page.visible and not header.visible and not chat.visible, "Settings replace the chat")
 	var texts := _texts(page)
 	for expected: String in [
-		"Settings", "Appearance", "Theme", "Accent", "Text size", "Reduce motion"
+		"Settings",
+		"Agent",
+		"Appearance",
+		"Project",
+		"Theme",
+		"Accent",
+		"Text size",
+		"Reduce motion"
 	]:
 		_check(expected in texts, "Settings show " + expected)
-	for gone: String in ["Editor", "Start new requests in", "Saved for you in"]:
+	for gone: String in [
+		"Editor", "Start new requests in", "Saved for you in", "Checking", "Agent: ", "Replies"
+	]:
 		_check(
 			not texts.any(func(text: String) -> bool: return text.begins_with(gone)),
 			gone + " is gone"
@@ -599,11 +612,24 @@ func _check_settings() -> void:
 	while page.get("_history_job") != null and Time.get_ticks_msec() < deadline:
 		await process_frame
 	_check(not history.text.is_empty(), "History shows a size or Unavailable")
+	_check(_accents(page) <= 1, "Settings show at most one filled accent button")
+	var advanced: Control = page.find_child("Advanced", true, false)
+	_check(advanced != null and not advanced.get("open"), "Advanced starts folded")
+	for folded: String in ["Show reply times", "Open review details", "Reviewer agent"]:
+		var row := _find_text(page, folded)
+		_check(row != null and advanced.is_ancestor_of(row), folded + " waits under Advanced")
+	var auto := _find_text(page, "Accept changes automatically")
+	var agent_group: Control = page.find_child("AgentGroup", true, false)
+	_check(
+		auto != null and agent_group != null and agent_group.is_ancestor_of(auto),
+		"Accept changes automatically sits in the Agent group"
+	)
+	_check(_find_text(page, "Keep versions") != null, "Older versions reads Keep versions")
 	var art: Button = null
 	for button: Node in page.find_children("*", "Button", true, false):
-		if (button as Button).text == "Art direction":
+		if (button as Button).text == "The look":
 			art = button
-	_check(art != null, "Art direction row exists")
+	_check(art != null, "The look row exists")
 	if art != null:
 		art.pressed.emit()
 	_check((dock.get("ran") as Array).has("/art"), "Rows run their command through the dock")
@@ -612,13 +638,16 @@ func _check_settings() -> void:
 	var agent_setting: Control = page.get("_agent")
 	var agent_row: Control = agent_setting.get("row")
 	var switch_agent: Button = agent_setting.get("switch_button")
-	_check(agent_row.get("title").text == "Agent: none connected", "No agent is named yet")
-	_check(switch_agent.text == "Connect", "Without an agent the row offers Connect")
+	_check(agent_row.get("title").text == "No agent", "No agent is named yet")
+	_check(
+		switch_agent.text == "Connect" and switch_agent.theme_type_variation == "JoineryLinkButton",
+		"Without an agent the row offers Connect, as a link"
+	)
 	dock.set("_agent_name", "Claude Code")
 	page.set_open(false)
 	page.set_open(true)
-	_check(agent_row.get("title").text == "Agent: Claude Code", agent_row.get("title").text)
-	_check(switch_agent.text == "Switch", "The row offers Switch: " + switch_agent.text)
+	_check(agent_row.get("title").text == "Claude Code", agent_row.get("title").text)
+	_check(switch_agent.text == "Change ›", "The row offers Change: " + switch_agent.text)
 	switch_agent.pressed.emit()
 	_check(switches[0] == 1, "Switch opens the Connect screen through the dock")
 	page.set_open(false)
@@ -626,6 +655,197 @@ func _check_settings() -> void:
 	_check(UI_THEME.set_pref("text_size", "Normal") == OK, "Restore the text size")
 	dock.queue_free()
 	await process_frame
+
+
+## The skeleton, the blankslate, the palette strip and the reference grid.
+func _check_blocks() -> void:
+	var themed := VBoxContainer.new()
+	themed.theme = UI_THEME.build(_host)
+	themed.size = Vector2(480, 600)
+	_host.add_child(themed)
+	var lines := UI.skeleton(3)
+	themed.add_child(lines)
+	await process_frame
+	var bars := lines.find_children("Bar", "Panel", true, false)
+	_check(bars.size() == 3, "A skeleton has one bar per line")
+	_check(
+		(bars[0] as Control).custom_minimum_size.y > 0 and not "Checking" in _texts(lines),
+		"Skeleton bars are text-shaped and say nothing"
+	)
+	_check(
+		(bars[2] as Control).size.x < (bars[0] as Control).size.x,
+		"The last line of a paragraph is shorter"
+	)
+	var value := UI.skeleton(1)
+	themed.add_child(value)
+	await process_frame
+	var bar := value.find_children("Bar", "Panel", true, false)[0] as Control
+	_check(
+		is_equal_approx(bar.custom_minimum_size.x, UI_THEME.space(_host, 6) * 2.0),
+		"A one-line skeleton is a value-sized bar"
+	)
+	var connect := UI.primary("Connect")
+	var which := UI.quiet_link("Which one?")
+	var blank := UI.blankslate("chats", "Connect an agent", connect, which)
+	themed.add_child(blank)
+	await process_frame
+	_check(blank.find_child("Picture", true, false) != null, "A blankslate leads with a picture")
+	_check(_texts(blank) == ["Connect an agent", "Connect", "Which one?"], str(_texts(blank)))
+	_check(_accents(blank) == 1, "A blankslate has exactly one primary action")
+	_check(connect.size_flags_horizontal == Control.SIZE_SHRINK_CENTER, "Its actions are centred")
+	var bare := UI.blankslate("", "No look yet")
+	themed.add_child(bare)
+	_check(
+		bare.find_child("Picture", true, false) == null and _accents(bare) == 0,
+		"Picture and actions are optional"
+	)
+	var roles := [
+		{"role": "Primary", "hex": "#7a4a2b", "use": "Wood"},
+		{"role": "Accent", "hex": "#2b6a7a"},
+		{"role": "Light", "hex": ""},
+	]
+	var strip := UI.palette_strip(roles, "md")
+	themed.add_child(strip)
+	await process_frame
+	var swatches: Control = strip.get_node("Swatches")
+	_check(
+		is_equal_approx(swatches.custom_minimum_size.y, UI_THEME.swatch_h(_host, "md")),
+		"Swatches are SWATCH_H tall"
+	)
+	_check(swatches.get("roles").size() == 3, "One swatch per role")
+	var tip: String = swatches.call("_get_tooltip", Vector2(1, 1))
+	_check(tip.contains("Primary") and tip.contains("#7a4a2b") and tip.contains("Wood"), tip)
+	var empty_tip: String = swatches.call("_get_tooltip", Vector2(swatches.size.x - 1, 1))
+	_check(empty_tip.contains("Not chosen"), "An empty slot says so: " + empty_tip)
+	var picked: Array[int] = []
+	swatches.connect("swatch_pressed", func(index: int) -> void: picked.append(index))
+	var click := InputEventMouseButton.new()
+	click.button_index = MOUSE_BUTTON_LEFT
+	click.pressed = true
+	click.position = Vector2(swatches.size.x / 2.0, 2)
+	swatches.call("_gui_input", click)
+	_check(picked == [1], "A click reports its swatch: %s" % [picked])
+	_check(_texts(strip.get_node("Names")) == ["Primary", "Accent", "Light"], "Role names")
+	var picture := Image.create(64, 48, false, Image.FORMAT_RGBA8)
+	picture.fill(Color.CORAL)
+	var path := OS.get_cache_dir().path_join("joinery-ui-theme-test/reference.png")
+	picture.save_png(path)
+	var refs := [
+		{"title": "Brass handle", "image": path, "take": "worn brass", "not": "shiny gold"},
+		{"title": "Monument Valley", "take": "chunky shapes"},
+	]
+	var grid := UI.reference_grid(refs, 3)
+	themed.add_child(grid)
+	await process_frame
+	await process_frame
+	var tiles := grid.get_children()
+	_check(tiles.size() == 2 and grid.columns == 3, "One tile per reference, three columns")
+	_check(tiles[0].find_child("Picture", true, false) != null, "A picture shows the image")
+	_check(
+		(
+			tiles[1].find_child("StandIn", true, false) != null
+			and tiles[1].find_child("Picture", true, false) == null
+		),
+		"A reference without a picture is a stand-in tile, not a word"
+	)
+	_check((tiles[0].get_node("Take") as Label).text == "worn brass", "The caption is the take")
+	_check((tiles[0] as Control).tooltip_text.contains("Not: shiny gold"), "Not goes to the tip")
+	var frame := tiles[0].get_node("Frame") as Control
+	_check(absf(frame.size.y - frame.size.x * 0.75) <= 1.0, "Tiles are 4:3")
+	var auto := UI.reference_grid(refs)
+	themed.add_child(auto)
+	auto.size = Vector2(320, 0)
+	auto.resized.emit()
+	_check(auto.columns == 2, "Narrow, two columns")
+	auto.size = Vector2(UI_THEME.max_w(_host, "column"), 0)
+	auto.resized.emit()
+	_check(auto.columns == 4, "Wide, four columns")
+	# The empty chat: no accent action while connected; the Connect blankslate has exactly one.
+	var empty: Control = load("res://addons/joinery/sidebar_empty.gd").new()
+	themed.add_child(empty)
+	empty.call("set_connection", "connected")
+	_check(_accents(empty) == 0, "The empty chat has no filled accent button")
+	_check(
+		_texts(empty.get("start")).has("Select something, then say what to change."),
+		"One caption line, no Type / hint"
+	)
+	empty.call("set_connection", "none")
+	_check(_accents(empty) == 1, "Without an agent, Connect is the one accent action")
+	_check(not (empty.get("start") as Control).visible, "The examples step aside")
+	var long_name := "door_with_long_descriptive_name.glb"
+	var font := _host.get_theme_default_font()
+	var short := BLOCKS.middle(long_name, font, 14, 120.0)
+	_check(
+		short.contains("…") and short.ends_with(".glb") and short.begins_with("door"),
+		"Middle ellipsis keeps both ends: " + short
+	)
+	themed.queue_free()
+	await process_frame
+
+
+## The chat's centred column: at 340 and 480 px it fills the width; at 1000 it is MAX_W.column
+## wide and centred.
+func _check_column() -> void:
+	var page := ScrollContainer.new()
+	page.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_host.add_child(page)
+	var body := VBoxContainer.new()
+	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	page.add_child(body)
+	var row := Label.new()
+	row.text = "Row"
+	body.add_child(row)
+	var column := STYLE.centered_column(page)
+	_check(column != null and body.get_parent() == column, "The page's content moves in")
+	_check(STYLE.centered_column(page) == column, "Asking again returns the same column")
+	var cap := float(UI_THEME.max_w(_host, "column"))
+	_check(UI_THEME.MAX_W == {"column": 640, "group": 560, "measure": 560}, "MAX_W token")
+	_check(UI_THEME.SWATCH_H == {"sm": 24, "md": 56, "lg": 72}, "SWATCH_H token")
+	for width: int in [340, 480, 1000]:
+		page.size = Vector2(width, 400)
+		await process_frame
+		await process_frame
+		var wide := minf(width, cap)
+		_check(
+			absf(body.size.x - wide) <= 1.0,
+			"At %d px the column is %.0f wide, not %.0f" % [width, wide, body.size.x]
+		)
+		_check(
+			absf(body.position.x - floorf((width - wide) / 2.0)) <= 1.0,
+			"At %d px the column is centred (%.0f)" % [width, body.position.x]
+		)
+	var group := STYLE.centered_column(page, "group")
+	await process_frame
+	_check(group == column and absf(body.size.x - UI_THEME.max_w(_host, "group")) <= 1.0, "560")
+	var holder := VBoxContainer.new()
+	_host.add_child(holder)
+	var composer := PanelContainer.new()
+	holder.add_child(composer)
+	var wrapped := STYLE.centered_column(composer)
+	_check(composer.get_parent() == wrapped and wrapped.get_parent() == holder, "Wrapped in place")
+	composer.hide()
+	_check(not wrapped.visible, "A hidden row takes its column with it")
+	page.queue_free()
+	holder.queue_free()
+	await process_frame
+
+
+## Visible buttons filled with the accent (primary), under [param node].
+func _accents(node: Node) -> int:
+	var count := 0
+	for child: Node in node.find_children("*", "Button", true, false):
+		var button := child as Button
+		if button.theme_type_variation == "JoineryPrimaryButton" and button.is_visible_in_tree():
+			count += 1
+	return count
+
+
+## The first Label or Button under [param node] whose text is [param text], or null.
+func _find_text(node: Node, text: String) -> Control:
+	for child: Node in node.find_children("*", "", true, false):
+		if (child is Label or child is Button) and child.get("text") == text:
+			return child
+	return null
 
 
 func _texts(node: Node) -> Array[String]:

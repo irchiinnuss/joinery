@@ -3,8 +3,10 @@ extends SceneTree
 ## the dock's edges. The header's last icon glyph, the readiness line and "Check again", the
 ## user's bubble, the reply, the review row, a check card and the composer share the same left
 ## and right edge; the transcript's scrollbar sits in the gutter, and the header row starts
-## SPACE.1 under the top edge. Chips with long names end in an ellipsis inside the gutter
-## instead of widening the sidebar, and Settings' reviewer Model field shows "Same as
+## SPACE.1 under the top edge. In a sidebar wider than MAX_W.column (1000 px) the conversation,
+## its cards and the composer share one centred column of that width instead. Chips with long
+## names end in an ellipsis (a file name in the middle) inside the gutter instead of widening
+## the sidebar, and Settings' reviewer Model field shows "Same as
 ## Journeyman" uncut, and "Older versions" beside or above its choice uncut. Settings' rows start
 ## on the same left edge as the chat.
 
@@ -124,6 +126,11 @@ func _measure(width: int) -> void:
 	var left := dock.position.x + gutter
 	var right := dock.end.x - gutter
 	_check(gutter > 0.0, "The sidebar has a gutter")
+	# The chat's centred column: the whole width up to MAX_W.column, then centred.
+	var span := minf(right - left, float(_theme.max_w(chat, "column")))
+	var column_left := left + floorf((right - left - span) / 2.0)
+	var column_right := column_left + span
+	_check(width < 1000 or span < right - left, "A wide sidebar centres the chat (%d px)" % width)
 
 	# Every row of the dock's column spans the gutter to gutter; the transcript's content does.
 	var content: Control = chat.get("_content")
@@ -133,7 +140,7 @@ func _measure(width: int) -> void:
 			continue
 		_both(row, left, right, "Row " + str(row.name), width)
 	var body: Control = transcript.get("_body")
-	_both(body, left, right, "The conversation", width)
+	_both(body, column_left, column_right, "The conversation", width)
 	var scroller := transcript as Control
 	_check(
 		scroller.get_global_rect().end.x <= dock.end.x + 0.5,
@@ -165,16 +172,14 @@ func _measure(width: int) -> void:
 	_both(header.get("notice").get("_panel"), left, right, "The setup notice", width)
 
 	# The conversation: the bubble, the reply and the review row on the same edges.
-	_both(card.get("_bubble"), left, right, "The user's bubble", width)
-	_on(_reply(transcript), "left", left, "The reply", width)
-	_on(_reply(transcript), "right", right, "The reply", width)
-	_on(card.get("_ready_row"), "left", left, "The review row", width)
-	_on(card.get("_ready_row"), "right", right, "The review row", width)
+	_both(card.get("_bubble"), column_left, column_right, "The user's bubble", width)
+	_both(_reply(transcript), column_left, column_right, "The reply", width)
+	_both(card.get("_ready_row"), column_left, column_right, "The review row", width)
 
 	# A check card and the composer.
-	_both(tasks.get("design_card"), left, right, "The design card", width)
-	_both(chat.get("_composer"), left, right, "The composer", width)
-	await _long_chips(chat, width, right)
+	_both(tasks.get("design_card"), column_left, column_right, "The design card", width)
+	_both(chat.get("_composer"), column_left, column_right, "The composer", width)
+	await _long_chips(chat, width, column_right)
 	await _model_field(chat, width, left)
 	host.free()
 	await _frames(2)
@@ -212,9 +217,14 @@ func _long_chips(chat: Control, width: int, right: float) -> void:
 			end <= right + 1.0, "A long chip ends at %.0f, past %.0f (%d px)" % [end, right, width]
 		)
 		var label: Label = chip.get("label")
+		var trimmed := label.text_overrun_behavior == TextServer.OVERRUN_TRIM_ELLIPSIS
 		_check(
-			label.text_overrun_behavior == TextServer.OVERRUN_TRIM_ELLIPSIS,
-			"A long name ends in an ellipsis (%d px)" % width
+			label.text.contains("…") or trimmed,
+			"A long name is trimmed with an ellipsis (%d px): %s" % [width, label.text]
+		)
+		_check(
+			label.text.ends_with(".png") or label.text.ends_with("Latch"),
+			"A long name keeps its end (%d px): %s" % [width, label.text]
 		)
 	var none: Array[Dictionary] = []
 	composer.call("set_targets", none)
@@ -226,14 +236,20 @@ func _long_chips(chat: Control, width: int, right: float) -> void:
 func _model_field(chat: Control, width: int, left: float) -> void:
 	var settings: Node = chat.get("_settings")
 	settings.call("set_open", true)
+	var advanced: Node = settings.find_child("Advanced", true, false)
+	advanced.call("set_open", true)
 	await _frames(4)
+	# Settings is one MAX_W.group column of cards; a row's text starts SPACE.4 inside its card.
+	var right := chat.get_global_rect().end.x - float(_theme.gutter(chat))
+	var span := minf(right - left, float(_theme.max_w(chat, "group")))
+	var start: float = left + floorf((right - left - span) / 2.0) + _theme.space(chat, 4)
 	var theme_row := (settings.get("_theme_picker") as Control).get_parent()
-	_on(theme_row.get_child(0), "left", left, "Settings' Theme row", width)
+	_on(theme_row.get_child(0), "left", start, "Settings' Theme row", width)
 	var art: Button = null
 	for node: Node in settings.find_children("*", "Button", true, false):
-		if (node as Button).text == "Art direction":
+		if (node as Button).text == "The look":
 			art = node
-	_on(art, "left", left, "Settings' Art direction row", width)
+	_on(art, "left", start, "Settings' The look row", width)
 	var reviewer: Node = settings.find_child("ReviewerSetting", true, false)
 	_check(reviewer != null, "Settings shows the Reviewer agent (%d px)" % width)
 	if reviewer != null:

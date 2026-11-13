@@ -6,6 +6,7 @@ extends RefCounted
 
 const UI_THEME := preload("ui_theme.gd")
 const UI_MOTION := preload("ui_motion.gd")
+const COLUMN := preload("sidebar_column.gd")
 
 
 ## Give [param control] the [param variation] panel with its side padding set to SPACE
@@ -263,11 +264,12 @@ static func scroll_in_gutter(scroller: ScrollContainer) -> void:
 	)
 
 
-## A sidebar page (Settings, Chats) on the chat's edges: its rows' text starts on the gutter
-## where the transcript's text does (the JoineryInset rows inside [param body] lose their left
-## inset; a row's hover fill reaches outward instead), [param page]'s scrollbar keeps its room
-## in the gutter, and the page spans the sidebar like the transcript, with no narrower cap.
-static func page_edges(page: ScrollContainer, body: Control) -> void:
+## A sidebar page (Settings, Chats, the art direction) on the chat's edges: its rows' text
+## starts on the gutter where the transcript's text does (the JoineryInset rows inside
+## [param body] lose their left inset; a row's hover fill reaches outward instead),
+## [param page]'s scrollbar keeps its room in the gutter, and the page shares the chat's
+## column: MAX_W[[param max_w]] wide, centred in a wider sidebar ([method centered_column]).
+static func page_edges(page: ScrollContainer, body: Control, max_w := "column") -> void:
 	var local := Theme.new()
 	for inset: String in ["JoineryInset", "JoineryInsetTall"]:
 		local.set_type_variation(inset, "MarginContainer")
@@ -275,6 +277,57 @@ static func page_edges(page: ScrollContainer, body: Control) -> void:
 	body.theme = local
 	page.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_RESERVE
 	scroll_in_gutter(page)
+	centered_column(page, max_w)
+
+
+## Hold [param page]'s content in one column at most MAX_W[[param max_w]] wide ("column" 640,
+## "group" 560), centred when the sidebar is wider; a narrower sidebar is filled. A
+## ScrollContainer keeps scrolling from edge to edge (its content moves into the column, which
+## gets the content's size flags); any other control is wrapped in place. Returns the column
+## (sidebar_column.gd); calling it again returns the same one.
+static func centered_column(page: Control, max_w := "column") -> Container:
+	var target := page
+	if page is ScrollContainer:
+		target = null
+		for child: Node in page.get_children():
+			if child is Control:
+				target = child as Control
+				break
+		if target == null:
+			return null
+		if target.get_script() == COLUMN:
+			target.set("cap", max_w)
+			return target as Container
+	var holder := target.get_parent()
+	if holder != null and holder.get_script() == COLUMN:
+		holder.set("cap", max_w)
+		return holder as Container
+	var column: Container = COLUMN.new()
+	column.name = "Column"
+	column.set("cap", max_w)
+	column.size_flags_horizontal = target.size_flags_horizontal | Control.SIZE_FILL
+	column.size_flags_vertical = target.size_flags_vertical
+	column.size_flags_stretch_ratio = target.size_flags_stretch_ratio
+	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if holder != null:
+		var index := target.get_index()
+		holder.remove_child(target)
+		holder.add_child(column)
+		holder.move_child(column, index)
+	column.add_child(target)
+	if not page is ScrollContainer:
+		# A wrapped row that hides (an idle task list) takes its column with it, so its parent
+		# adds no gap for it.
+		column.visible = target.visible
+		target.set_meta("_joinery_shown", target.visible)
+		target.visibility_changed.connect(
+			func() -> void:
+				# Its own visible property only: a parent hiding (Settings open) is not a change.
+				if target.visible != bool(target.get_meta("_joinery_shown", true)):
+					target.set_meta("_joinery_shown", target.visible)
+					column.visible = target.visible
+		)
+	return column
 
 
 ## In Joinery's layout the sidebar is alone in its dock slot, which hides its tabs. There the

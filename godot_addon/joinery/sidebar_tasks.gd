@@ -39,6 +39,7 @@ const PLAYTEST_CARD := preload("playtest_card.gd")
 const VARIANTS := preload("sidebar_variants.gd")
 const SCENE_VARIANT := preload("sidebar_scene_variant.gd")
 const UI_MOTION := preload("ui_motion.gd")
+const STYLE := preload("sidebar_style.gd")
 ## Seconds a finished task's card stays before it steps out.
 const LINGER := 4.0
 ## Final state -> how its transcript line ends.
@@ -98,6 +99,8 @@ static func attach(sidebar: Control, content: Control, before: Control) -> VBoxC
 	tasks.dock = sidebar
 	content.add_child(tasks)
 	content.move_child(tasks, before.get_index())
+	# Agents' cards share the chat's centred column.
+	STYLE.centered_column(tasks)
 	var composer: Object = sidebar.get("_composer")
 	if composer != null and composer.has_signal("alongside"):
 		composer.connect("alongside", tasks.run_alongside)
