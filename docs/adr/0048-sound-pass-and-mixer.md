@@ -119,6 +119,8 @@ level.tscn"), one row per change and Stop.
 
 ### 4. The Mixer
 
+(Replaced by Godot's Audio panel and `/mix`; see the amendment below. Kept as decided then.)
+
 A **Mixer** tab in the bottom panel (`mixer_tab.gd`, `mixer_strip.gd`, `mixer_music.gd`): one
 strip per bus with a fader, mute, solo, a live meter, a reverb and a compressor with one amount
 each, and **Duck music under** Off / Voice / SFX (the Music compressor's sidechain); **Add them**
@@ -152,3 +154,26 @@ layer with a small waveform of its stem and its level in the default state.
   the mix again.
 - Two parallel tasks on a project never opened in Godot can clash on the `.uid` files each
   stage's import writes; opening the project once first avoids it.
+
+## Amendment: no second mixer
+
+The Mixer page is gone. It duplicated Godot's own Audio panel, and two places for the same
+buses left the user asking which one the game used. Joinery does not rebuild what Godot already
+does well: the Audio panel, opened from its icon in the rail, is the one place for bus faders,
+mute, solo, bypass and effects.
+
+What the Mixer had that the Audio panel lacks stays, as the sidebar's `/mix` (`sidebar_mix.gd`),
+each command one `mixer_save` message and so one reviewed change written by the same host code
+(`bridge/mixer_save.py`, `joinery/mixer.py`, `joinery/music_track.py`):
+
+- `/mix buses` adds the game core's missing buses (was **Add them**).
+- `/mix duck voice|sfx|off` sets the Music compressor's sidechain (was **Duck music under**).
+- `/mix <bus> <dB>|mute|unmute|solo|unsolo` sets a bus as a reviewed change instead of the
+  Audio panel's immediate write, when the user wants it in Review.
+- `/mix <track> <layer> <dB>|mute|unmute|solo|unsolo` sets a music layer in
+  `music/<track>.tres` (was the Music rows).
+- Other words become a request to Journeyman in the message box.
+
+Live audition of a track's layers at each intensity (**Play**, **Intensity**) is not kept: the
+game plays the track, and the review's layer view (`review_music.gd`) shows each layer's stem
+and level.

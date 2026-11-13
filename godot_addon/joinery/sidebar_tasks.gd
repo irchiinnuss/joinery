@@ -34,6 +34,7 @@ const MATCH := preload("sidebar_match.gd")
 const SOUND_PASS := preload("sidebar_sound_pass.gd")
 const IDLE := preload("sidebar_idle.gd")
 const MEMORY := preload("sidebar_memory.gd")
+const MIX := preload("sidebar_mix.gd")
 const COMMANDS := preload("sidebar_commands.gd")
 const PLAYTEST_CARD := preload("playtest_card.gd")
 const VARIANTS := preload("sidebar_variants.gd")
@@ -126,6 +127,8 @@ static func attach(sidebar: Control, content: Control, before: Control) -> VBoxC
 	IDLE.attach(sidebar, tasks)
 	# "/remember" and Remember this: a line for JOURNEYMAN.md, through Review.
 	MEMORY.attach(sidebar, tasks)
+	# "/mix": the buses and the music mix, through Review (Godot's Audio panel does the rest).
+	MIX.attach(sidebar, tasks)
 	# The project's own commands (.joinery/commands): slash entries with a small form.
 	COMMANDS.attach(sidebar, tasks)
 	# A request's to-do: its steps, Go, and what "done" means, checked.

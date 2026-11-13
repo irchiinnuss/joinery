@@ -1,4 +1,4 @@
-"""A small adaptive music track for the Mixer's widget test and the visual suite.
+"""A small adaptive music track for the /mix command test and the visual suite.
 
 Writes res://music/<name>.tres (joinery.music_track) and one short WAV stem per
 layer under audio/music/<name>/, synthesised here (soft tones and a pulse), so

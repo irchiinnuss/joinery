@@ -80,7 +80,6 @@ func _run() -> void:
 	await _timeline()
 	await load(get_script().resource_path.get_base_dir().path_join("visual_team.gd")).screens(self)
 	await _share()
-	await _sound.mixer(self)
 	await _tools()
 	await _panels(base, dock)
 	await load(get_script().resource_path.get_base_dir().path_join("visual_tour.gd")).tour(self)

@@ -424,8 +424,8 @@ func is_current(agent: String, profile: String) -> bool:
 	return is_ready() and agent == _agent and profile == _profile
 
 
-## The Mixer tab Save mix ({kind: "mixer_save", bus_layout?, tracks?}): the host writes it as
-## a reviewed change (bridge/mixer_save.py). False when not connected.
+## A "/mix" change ({kind: "mixer_save", bus_layout?, tracks?}, sidebar_mix.gd): the host
+## writes it as a reviewed change (bridge/mixer_save.py). False when not connected.
 func send_mixer(line: Dictionary) -> bool:
 	if not is_ready():
 		return false

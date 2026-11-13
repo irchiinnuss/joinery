@@ -176,8 +176,6 @@ EDITOR_SCREENS = (
     "share-built",
     "share-steam",
     "share-publish",
-    "mixer-empty",
-    "mixer",
     "tools",
     "tools-blender",
     "tools-animation",

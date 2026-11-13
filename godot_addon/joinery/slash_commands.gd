@@ -54,6 +54,8 @@ signal tour_requested
 signal idle_requested(action: String)
 ## "/remember <text>": a line for JOURNEYMAN.md, as a reviewed change (sidebar_memory.gd).
 signal remember_requested(text: String)
+## "/mix <words>": a change to the buses or the music mix, as a reviewed change (sidebar_mix.gd).
+signal mix_requested(words: String)
 ## A project's own command ("/new-enemy name=Bat"): its form or its request
 ## (sidebar_commands.gd). [param words] are the words after it.
 signal project_command_requested(command: String, words: PackedStringArray)
@@ -79,6 +81,7 @@ const COMMANDS := {
 	"/tidy": ["Find what the game never uses", "ui"],
 	"/variants": ["Try a few ways side by side", "ui"],
 	"/sound-pass": ["Add the sounds the level lacks", "ui"],
+	"/mix": ["Buses, ducking and music layers", "ui"],
 	"/setup": ["Change project apps", "ui"],
 	"/focus": ["Toggle focus mode", "ui"],
 	"/toolbar": ["Show or hide viewport tools", "ui"],
@@ -209,6 +212,8 @@ func run(entry: String) -> bool:
 			idle_requested.emit(" ".join(arguments(entry)).strip_edges().to_lower())
 		elif command == "/remember":
 			remember_requested.emit(" ".join(arguments(entry)).strip_edges())
+		elif command == "/mix":
+			mix_requested.emit(" ".join(arguments(entry)))
 		elif command == "/sound-pass":
 			sound_pass_requested.emit(" ".join(arguments(entry)))
 		elif command == "/record":

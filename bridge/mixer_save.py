@@ -1,7 +1,8 @@
-"""The Mixer's Save mix as a reviewed change.
+"""A mix change as a reviewed change.
 
-The Mixer tab plays every change live in the editor; nothing is written until
-Save mix. Then it sends ``mixer_save``::
+The sidebar's ``/mix`` (sidebar_mix.gd) sends one ``mixer_save`` per command;
+Godot's own Audio panel is the editor's mixer and Joinery has no second one
+(ADR 0048, amendment). The message::
 
     {"kind": "mixer_save",
      "bus_layout": {"path": "res://default_bus_layout.tres",
@@ -14,8 +15,8 @@ Save mix. Then it sends ``mixer_save``::
                 {"layers": {"pads": {"volume_db": -2.0, "muted": false, "solo": false}}}}}
 
 Either part may be left out. The host reads the files as they are now, applies
-the values (joinery.mixer, joinery.music_track; whatever the Mixer doesn't
-manage stays) and starts a scripted task of the crew that writes them through
+the values (joinery.mixer, joinery.music_track; whatever the message
+doesn't name stays) and starts a scripted task of the crew that writes them through
 Godot's ``write_file``: the change goes through the checks, the reviewer and
 the Review tab like any other, and nothing is written before the user accepts.
 """
@@ -145,9 +146,7 @@ def plan(project: Path, data: dict[str, Any]) -> SavePlan:
     if any(t.startswith(TRACKS + "/") for t in result.targets):
         what.append("the music layer mix")
     result.request = (
-        "Save the Mixer's "
-        + " and ".join(what or ["mix"])
-        + ", as set and heard in the editor."
+        "Change " + " and ".join(what or ["the mix"]) + ", as asked with /mix."
     )
     return result
 

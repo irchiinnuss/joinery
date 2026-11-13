@@ -1208,7 +1208,7 @@ async def _serve(
                         [str(f) for f in data.get("findings") or []],
                     )
                 elif data.get("kind") == "mixer_save":
-                    # The Mixer tab's Save mix: a reviewed change of the bus layout
+                    # A /mix change: a reviewed change of the bus layout
                     # and the music tracks' layer mix (bridge/mixer_save.py).
                     await mixer_save.start(crew, project, data, task_prompt())
                 elif data.get("kind") == "tidy_remove":

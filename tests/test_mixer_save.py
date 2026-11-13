@@ -1,4 +1,4 @@
-"""The Mixer tab's Save mix in the chat host (bridge/mixer_save.py)."""
+"""A /mix change in the chat host (bridge/mixer_save.py)."""
 
 from __future__ import annotations
 

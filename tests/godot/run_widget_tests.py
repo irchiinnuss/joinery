@@ -69,7 +69,7 @@ CASES = {
     "complex_models_setting_test.gd": "complex models setting: ok",
     "fix_errors_setting_test.gd": "fix errors setting: ok",
     "auto_accept_setting_test.gd": "auto accept setting: ok",
-    "mixer_test.gd": "mixer: ok",
+    "mix_command_test.gd": "mix command: ok",
     "sound_pass_card_test.gd": "sound pass card: ok",
     "sidebar_margins_test.gd": "sidebar margins: ok",
     "tour_test.gd": "tour: ok",
@@ -143,7 +143,7 @@ def _run(selected: list[str], temporary: Path) -> int:
     audio = project / "audio/sfx/door_creak.wav"
     audio.parent.mkdir(parents=True)
     shutil.copyfile(ROOT / "testbed/audio/sfx/door_creak.wav", audio)
-    if "mixer_test.gd" in cases:
+    if "mix_command_test.gd" in cases:
         plant_music(project)
     if "review_dialogue_test.gd" in cases:
         # The review plays a .dlg file through the game's own dialogue scripts.
