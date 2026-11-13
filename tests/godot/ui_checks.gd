@@ -119,7 +119,10 @@ static func _walk(
 			return  # Scrolled out of view: not shown, not judged.
 		if control.modulate.a <= 0.01 or control.self_modulate.a <= 0.01:
 			return
-		_check(screen, root, control, window, clip, findings)
+		# Mostly scrolled out of view, what is under it in the frame is something else (the
+		# page's footer): its colours can't be judged.
+		if clip.intersection(rect).get_area() >= rect.get_area() * 0.5:
+			_check(screen, root, control, window, clip, findings)
 		if control.clip_contents or control is ScrollContainer:
 			inner = clip.intersection(rect)
 	for child: Node in node.get_children():

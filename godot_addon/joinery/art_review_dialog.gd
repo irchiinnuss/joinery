@@ -2,11 +2,11 @@
 extends RefCounted
 ## The art direction in a window, for when there is no sidebar to show art_page.gd in, and
 ## the bible's parsing both share. Top to bottom: what to fix first (one-line offers from
-## the bible checks, each filling the message box), an "Update to the new layout" offer for
-## a first-format bible, the five sections people decide (Feel, Look, Palette, Sound,
-## Never), the references board (images from art/reference with their captions), and the
-## technical rules folded under "Technical rules (preset for you)". The footer says
-## what approving does, with Close and "Approve these rules" on its trailing edge.
+## the bible checks, each filling the message box), the five sections people decide (Feel,
+## Look, Palette, Sound, Never), the references board (images from art/reference with their
+## captions), and the technical rules folded under "Checked rules". The footer says what
+## approving does, with Close and "Approve look" on its trailing edge. A draft in the first
+## layout is brought to the new one without asking (the dock's upgrade_bible).
 ##
 ## [method open_document] shows any other project document (the game brief) the same way,
 ## read-only, with "Ask Journeyman to change it": edits are reviewed changes like any other.
@@ -14,12 +14,9 @@ extends RefCounted
 const UI_THEME := preload("ui_theme.gd")
 const UI := preload("ui_components.gd")
 const STYLE := preload("sidebar_style.gd")
-const TITLE := "Art direction"
-const APPROVE := "Approve these rules"
-const CONSEQUENCE := (
-	"Approving lets Journeyman start making art and sound that follows these rules. "
-	+ "If the rules change, you'll be asked again."
-)
+const TITLE := "The look"
+const APPROVE := "Approve look"
+const CONSEQUENCE := "Journeyman makes art and sound to match. Changes ask again."
 ## The sections people decide, and the bible headings that feed each one (lower case, without
 ## their numbers). Every other section is a technical rule.
 const SECTIONS := [
@@ -29,8 +26,13 @@ const SECTIONS := [
 	["Sound", ["audio", "sound"]],
 	["Never", ["never"]],
 ]
-## Bible checks that the dialog shows another way (the upgrade offer, the board).
-const OWN_OFFERS := ["This bible uses the first format", "There is no art bible yet"]
+## Bible checks that the dialog shows another way (the silent upgrade, the board).
+const OWN_OFFERS := [
+	"This look uses the first format",
+	"There is no look yet",
+	"This bible uses the first format",
+	"There is no art bible yet",
+]
 ## At most this many offers; the rest wait until these are done.
 const MAX_OFFERS := 3
 ## Board thumbnails, in multiples of the font size.
@@ -41,7 +43,7 @@ const IMAGE_SUFFIXES := ["png", "jpg", "jpeg", "webp", "bmp", "tga", "svg"]
 ## Open the dialog on [param parent] at [param size]. [param content] is the art review event
 ## ({text, sha256, approved, version, references, suggestions}) or just the bible's text.
 ## [param on_approve] runs when the user approves. When [param parent] has
-## fill_composer(text) and upgrade_bible(), the offers use them.
+## fill_composer(text) and upgrade_bible(), the offers and the silent upgrade use them.
 static func open(
 	parent: Control, content: Variant, size: Vector2i, on_approve: Callable
 ) -> ConfirmationDialog:
@@ -99,11 +101,12 @@ static func _fill(
 	head.theme_type_variation = "JoineryTight"
 	page.add_child(head)
 	head.add_child(UI.label(TITLE, "JoineryTitle"))
-	var state := "Approved" if approved else "Draft: not approved yet"
+	var state := "Approved" if approved else "Draft"
 	head.add_child(UI.label(state, "JoineryCaption"))
 	var text := str(event.get("text", ""))
-	if int(event.get("version", 2)) == 1:
-		page.add_child(_upgrade_offer(parent, dialog))
+	# A draft in the first layout is brought to the new one without asking.
+	if int(event.get("version", 2)) == 1 and not approved and parent.has_method("upgrade_bible"):
+		parent.call("upgrade_bible", str(event.get("sha256", "")))
 	var offers := _offers(parent, dialog, event.get("suggestions", []))
 	if offers != null:
 		page.add_child(offers)
@@ -117,7 +120,7 @@ static func _fill(
 	page.add_child(foot)
 	foot.add_child(UI.label(CONSEQUENCE, "JoineryCaption", true))
 	if parent.has_method("fill_composer"):
-		var ask := UI.link("Ask Journeyman to change it")
+		var ask := UI.quiet_link("Ask Journeyman to change it")
 		ask.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 		STYLE.hug_left(ask)
 		ask.pressed.connect(
@@ -128,7 +131,7 @@ static func _fill(
 		)
 		foot.add_child(ask)
 	if approved and parent.has_method("run_command"):
-		var tidy := UI.link("Make the project match these rules")
+		var tidy := UI.quiet_link("Make the project match")
 		tidy.tooltip_text = "Fix what drifts, as reviewed changes (/match)"
 		tidy.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 		STYLE.hug_left(tidy)
@@ -491,7 +494,7 @@ static func _thumbnail(file: String) -> Texture2D:
 
 
 static func _technical(parts: Array) -> Control:
-	var section := UI.section("Technical rules (preset for you)", true)
+	var section := UI.section("Checked rules", true)
 	section.name = "Technical"
 	section.body.theme_type_variation = "JoineryStack"
 	section.body.add_child(
@@ -551,39 +554,6 @@ static func _offers(parent: Control, dialog: AcceptDialog, suggestions: Array) -
 			)
 			row.add_child(ask)
 	return group
-
-
-static func _upgrade_offer(parent: Control, dialog: AcceptDialog) -> Control:
-	var panel := PanelContainer.new()
-	panel.name = "Upgrade"
-	panel.theme_type_variation = "JoineryCard"
-	var row := HBoxContainer.new()
-	row.theme_type_variation = "JoineryRow"
-	panel.add_child(row)
-	var words := VBoxContainer.new()
-	words.theme_type_variation = "JoineryTight"
-	words.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(words)
-	words.add_child(UI.label("These rules use an older layout.", "", true))
-	words.add_child(
-		UI.label(
-			"Updating keeps every line and adds the new sections. You'll need to approve it again.",
-			"JoineryCaption",
-			true
-		)
-	)
-	var button := UI.secondary("Update to the new layout")
-	button.name = "Update"
-	button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	button.disabled = not parent.has_method("upgrade_bible")
-	button.pressed.connect(
-		func() -> void:
-			parent.call("upgrade_bible")
-			dialog.hide()
-			dialog.queue_free()
-	)
-	row.add_child(button)
-	return panel
 
 
 static func _rich(bbcode: String) -> RichTextLabel:

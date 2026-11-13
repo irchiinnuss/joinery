@@ -289,9 +289,10 @@ static func _large_icon(context: Control, icon: String, tint: Color) -> Texture2
 
 ## The palette as colour (Milanote's swatch cards): one swatch per role in [param roles]
 ## ({role, hex, use}), side by side, SWATCH_H[[param size]] tall, with the role names under them
-## in faint caption text while each swatch has room for its name. A role without a hex is an
-## empty dashed slot. Hover or focus shows the role, its hex and its use as the tooltip.
-static func palette_strip(roles: Array, size := "md") -> VBoxContainer:
+## in faint caption text while each swatch has room for its name ([param captions] false: never,
+## a miniature). A role without a hex is an empty dashed slot. Hover or focus shows the role, its
+## hex and its use as the tooltip.
+static func palette_strip(roles: Array, size := "md", captions := true) -> VBoxContainer:
 	var block := VBoxContainer.new()
 	block.name = "PaletteStrip"
 	block.theme_type_variation = "JoineryTight"
@@ -312,11 +313,12 @@ static func palette_strip(roles: Array, size := "md") -> VBoxContainer:
 		name.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		names.add_child(name)
 	# Narrow (five swatches in a 340 px sidebar), the names move to the tooltips only.
+	names.visible = captions
 	strip.resized.connect(
 		func() -> void:
 			var count := maxi(strip.roles.size(), 1)
 			var room := strip.size.x / count
-			names.visible = room >= UI_THEME.font_size(strip, "caption") * 5.0
+			names.visible = captions and room >= UI_THEME.font_size(strip, "caption") * 5.0
 	)
 	return block
 
@@ -396,8 +398,10 @@ class PaletteSwatches:
 		if count == 0:
 			return
 		var gap := UI_THEME.space(self, 1) / 2.0
-		var outer := UI_THEME.radius(self, "lg")
-		var inner := UI_THEME.radius(self, "sm")
+		# A miniature (SWATCH_H.sm, inside a card) keeps its corners small.
+		var small := size_name == "sm"
+		var outer := UI_THEME.radius(self, "sm" if small else "lg")
+		var inner := UI_THEME.radius(self, "xs" if small else "sm")
 		var wide := (size.x - gap * (count - 1)) / count
 		var faint := get_theme_color("border_subtle", "Joinery")
 		var hairline := maxf(UI_THEME.unit(self), 1.0)
@@ -438,9 +442,9 @@ class PaletteSwatches:
 ## Reference images in a grid: each tile shows the picture (a PNG, JPEG or WebP, or a Krita
 ## board's own preview) at 4:3 with RADIUS.md corners, its one-line "take" under it, and what
 ## it is not ("Not: …") in the tooltip. A reference without a picture (a game, film or place)
-## is a sunken tile with an icon and its title, never a word drawn as the picture.
+## is a raised tile with an icon and its title, never a word drawn as the picture.
 ## [param columns] fixes the count; 0 picks two to four from the width. [param refs] are
-## {title, image, take, not}; image is a file path.
+## {title, image, take, not, icon}; image is a file path, icon the stand-in's glyph ("image").
 static func reference_grid(refs: Array, columns := 0) -> GridContainer:
 	var grid := GridContainer.new()
 	grid.name = "ReferenceGrid"
@@ -503,7 +507,7 @@ static func _reference(ref: Dictionary) -> VBoxContainer:
 		stand_in.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		frame.add_child(stand_in)
 		var glyph := STYLE.glyph("text_faint")
-		STYLE.set_glyph(glyph, "image", "text_faint")
+		STYLE.set_glyph(glyph, str(ref.get("icon", "image")), "text_faint")
 		glyph.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 		stand_in.add_child(glyph)
 		var name := UI.label(title, "JoineryCaption")
@@ -514,7 +518,9 @@ static func _reference(ref: Dictionary) -> VBoxContainer:
 		frame,
 		func() -> void:
 			var box := StyleBoxFlat.new()
-			box.bg_color = frame.get_theme_color("surface_sunken", "Joinery")
+			# A picture sits on the sunken ground; a stand-in on the raised one, like a card.
+			var ground := "surface_sunken" if texture != null else "surface_raised"
+			box.bg_color = frame.get_theme_color(ground, "Joinery")
 			box.set_corner_radius_all(UI_THEME.radius(frame, "md"))
 			box.anti_aliasing = true
 			frame.add_theme_stylebox_override("panel", box)
@@ -528,6 +534,11 @@ static func _reference(ref: Dictionary) -> VBoxContainer:
 	caption.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	tile.add_child(caption)
 	return tile
+
+
+## A small picture of [param path] (an image, or a Krita board's own preview), or null.
+static func picture(path: String, context: Control) -> Texture2D:
+	return _thumbnail(path, context)
 
 
 ## A small texture for [param path]: the image itself, or a Krita board's own preview

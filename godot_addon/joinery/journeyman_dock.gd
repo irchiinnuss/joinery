@@ -55,7 +55,7 @@ const REVIEW_PATH := "res://addons/joinery/review_panel.gd"
 const ART_DIALOG := preload("res://addons/joinery/art_review_dialog.gd")
 const REVIEW_WAIT := "Next message…"
 const PERSONA := "Journeyman"
-const DISCARDED := "Discarded. Your files were not touched."
+const DISCARDED := "Discarded"
 const BRIEF_PATH := "res://design/brief.md"
 ## Minimum dock width in font sizes: in Joinery's layout, the whole visible sidebar.
 const MIN_EM := 26
@@ -69,6 +69,8 @@ var min_em := MIN_EM
 var connection_state := "connecting"
 ## The latest art review ({text, sha256, approved, version, references, suggestions}).
 var art_review_event: Dictionary = {}
+## Look versions already brought to the new layout (upgrade_bible), by sha256.
+var _upgraded := {}
 var _content: VBoxContainer
 var _header: HEADER_SCRIPT
 var _transcript: HISTORY_SCRIPT
@@ -288,16 +290,16 @@ func _on_art_review_event(event: Dictionary) -> void:
 	art_review_event = event.duplicate(true)
 
 
-## Asset work stopped at the art gate: the request's card holds it until approval.
-func _on_art_gate(_event: Dictionary) -> void:
+## Asset work stopped at the art gate: the request's card holds it, with the look in small.
+func _on_art_gate(event: Dictionary) -> void:
 	var card := _card()
 	if card != null:
-		card.show_art_gate()
+		card.show_art_gate("", event.get("look", art_review_event))
 
 
 ## The art direction was approved: requests the gate held go out again as they were.
 func _on_art_approved(_sha256: String) -> void:
-	show_status("Art direction approved")
+	show_status("Look approved")
 	_resume_ready = true
 	_resume_held()
 
@@ -578,22 +580,19 @@ func _open_brief() -> void:
 	ART_DIALOG.show_document(self, "Game brief", text, "Change the game brief: ")
 
 
-## "Update to the new layout" in the art direction dialog.
-func upgrade_bible() -> void:
-	show_status("Updating the art direction…", 30.0)
-	_slash.upgrade_bible()
+## Bring a draft of the look in the first layout to the new one without asking (the art page
+## does this on open). Tried once per version; a failure leaves the draft as it is.
+func upgrade_bible(version := "") -> void:
+	version = version if not version.is_empty() else str(art_review_event.get("sha256", ""))
+	if not _upgraded.has(version):
+		_upgraded[version] = true
+		_slash.upgrade_bible()
 
 
-func _on_bible_upgraded(ok: bool, message: String) -> void:
-	if not ok:
-		_transcript.add_notice(
-			"Couldn't update the art direction. " + message if not message.is_empty() else "",
-			"error"
-		)
-		show_status("")
-		return
-	show_status("Art direction updated. Approve it again when it looks right.", 5.0)
-	art_review_requested.emit()
+func _on_bible_upgraded(ok: bool, _message: String) -> void:
+	var page: Variant = get_meta("joinery_art_page") if has_meta("joinery_art_page") else null
+	if ok and page is Control and (page as Control).visible:
+		art_review_requested.emit()
 
 
 func _on_feature_planned(plan: Dictionary) -> void:
@@ -897,7 +896,7 @@ func _arrive() -> void:
 
 ## Close the review. [param kind] is "success", "rejected", "info" or "error"; the message is
 ## shown on the request's card, or as a notice when there is none. A discard always reads
-## "Discarded. Your files were not touched.": nothing in the game changed.
+## "Discarded": nothing in the game changed.
 func hide_edit_review(message: String = "", kind := "info") -> void:
 	var was_pending := _review_pending
 	_review_pending = false

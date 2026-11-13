@@ -1,7 +1,8 @@
 extends SceneTree
-## The art direction dialog: the five decided sections, the references board with its images,
-## bible-check offers that fill the composer, the upgrade offer for a first-format bible, and
-## "Approve these rules"; and the same rules as a sidebar page, where only a click on Approve
+## The look in a window: the five decided sections, the references board with its images,
+## bible-check offers that fill the composer, a first-format draft brought to the new layout
+## without asking, and "Approve look"; and the same look as a sidebar page (palette strip,
+## reference grid, feel and tags, empty slots, the sticky footer), where only a click on Approve
 ## approves.
 
 const DOCK_PATH := "res://addons/joinery/journeyman_dock.gd"
@@ -70,6 +71,13 @@ func _event(version: int) -> Dictionary:
 				"file": ""
 			},
 		],
+		"palette":
+		[
+			{"role": "Primary", "hex": "#8a5a3b", "use": "walls and wood"},
+			{"role": "Accent", "hex": "#2e86ab", "use": "interactables only"},
+			{"role": "Shadow tint", "hex": "#2b2d42", "use": ""},
+		],
+		"gaps": [],
 		"suggestions":
 		[
 			"Before approving the bible: the palette section is not set yet. " + "Ask about it.",
@@ -111,9 +119,7 @@ func _run() -> void:
 		chat, _event(1), Vector2i(900, 700), approve
 	)
 	await process_frame
-	_check(
-		dialog.get_ok_button().text == "Approve these rules", "The button reads Approve these rules"
-	)
+	_check(dialog.get_ok_button().text == "Approve look", "The button reads Approve look")
 	var board := dialog.find_child("Board", true, false)
 	_check(board != null and board.get_child_count() == 2, "The references board lists both")
 	if board != null and board.get_child_count() == 2:
@@ -138,22 +144,19 @@ func _run() -> void:
 	_check(never != null and never.text.contains("Neon"), "Never shows the hard bans")
 	var technical := dialog.find_child("Technical", true, false)
 	_check(technical != null and not technical.body.visible, "Technical rules start folded")
+	_check(technical.header.text == "Checked rules", "The technical rules are the checked rules")
+	_check(dialog.find_child("Upgrade", true, false) == null, "No update offer: it just happens")
+	_check(chat._slash._jobs.has("upgrade"), "A first-format draft is upgraded without asking")
+	var deadline := Time.get_ticks_msec() + 30000
+	while chat._slash._jobs.has("upgrade") and Time.get_ticks_msec() < deadline:
+		await process_frame
+	_check(not chat._slash._jobs.has("upgrade"), "The update finishes")
+	# This project has no bible file, so the update fails, quietly.
 	_check(
-		technical.header.text == "Technical rules (preset for you)",
-		"The technical rules say they were preset"
-	)
-	var upgrade := dialog.find_child("Upgrade", true, false)
-	_check(
-		upgrade != null and upgrade.is_visible_in_tree(), "A first-format bible offers the update"
-	)
-	var update := upgrade.find_child("Update", true, false) as Button
-	_check(update.text == "Update to the new layout", "The update says what it does")
-	var upgrade_texts: Array[String] = []
-	for label: Node in upgrade.find_children("*", "Label", true, false):
-		upgrade_texts.append((label as Label).text)
-	_check(
-		upgrade_texts.any(func(text: String) -> bool: return text.contains("approve it again")),
-		"The update says approval is needed again"
+		not Array(chat._transcript.notice_texts()).any(
+			func(text: String) -> bool: return text.contains("update")
+		),
+		"A failed silent update says nothing in the chat"
 	)
 	var offers := dialog.find_child("Offers", true, false)
 	var rows: Array = offers.get_children().filter(
@@ -178,21 +181,12 @@ func _run() -> void:
 	chat._prompt.clear()
 	await process_frame
 
-	# The update runs `joinery bible --upgrade` through a job.
+	# The same version is not upgraded twice.
 	dialog = dialog_script.open(chat, _event(1), Vector2i(900, 700), approve)
+	_check(not chat._slash._jobs.has("upgrade"), "A version is upgraded once")
+	dialog.hide()
+	dialog.queue_free()
 	await process_frame
-	update = dialog.find_child("Update", true, false) as Button
-	update.pressed.emit()
-	_check(chat._slash._jobs.has("upgrade"), "Update runs the CLI through a job")
-	var deadline := Time.get_ticks_msec() + 30000
-	while chat._slash._jobs.has("upgrade") and Time.get_ticks_msec() < deadline:
-		await process_frame
-	_check(not chat._slash._jobs.has("upgrade"), "The update finishes")
-	# This project has no bible file, so the update says why it couldn't run.
-	_check(
-		chat._transcript.notice_texts()[-1].begins_with("Couldn't update the art direction."),
-		"A failed update says so in the chat"
-	)
 
 	# Given only the text, the dialog picks up the bridge's event when the sidebar hears it.
 	chat.art_review_event = {}
@@ -214,7 +208,7 @@ func _run() -> void:
 	_check(dialog.find_child("Board", true, false) != null, "The board comes from the event")
 	dialog.get_ok_button().pressed.emit()
 	await process_frame
-	_check(approved[0] == 1, "Approve these rules approves")
+	_check(approved[0] == 1, "Approve look approves")
 
 	# An approved bible says so and can't be approved twice.
 	var done := _event(2)
@@ -233,52 +227,84 @@ func _run() -> void:
 	quit(1 if _failed else 0)
 
 
-## The sidebar page: opened by the sidebar's art request, it waits for the bridge, shows the
-## rules, and approves only from a click on Approve.
+## The sidebar page: opened by the sidebar's art request, it waits for the bridge (a skeleton
+## after a second), shows the look, and approves only from a click on Approve.
 func _page(chat: Control) -> void:
 	var pages: Script = load(PAGE_PATH)
 	var bare := Control.new()
 	_check(not pages.present(bare, _event(2), func() -> void: pass), "No sidebar, no page")
 	bare.free()
 	var page: Control = pages.attach(chat)
-	_check(page != null and pages.attach(chat) == page, "The sidebar has one art direction page")
+	_check(page != null and pages.attach(chat) == page, "The sidebar has one look page")
 	var transcript: Control = chat._transcript
 	var approved := [0]
 	var approve := func() -> void: approved[0] += 1
 	chat.art_review_requested.emit()
 	await process_frame
 	_check(page.visible and not transcript.visible, "/art opens the page in place of the chat")
-	_check(page.find_child("Waiting", true, false).visible, "The page says it is reading")
+	var skeleton := page.find_child("Skeleton", true, false) as Control
+	_check(not skeleton.visible, "Under a second, the page shows nothing while it reads")
+	_check(
+		page.find_children("*", "Label", true, false).all(
+			func(label: Node) -> bool: return not (label as Label).text.contains("Reading")
+		),
+		"No reading sentence"
+	)
+	await create_timer(1.2).timeout
+	_check(skeleton.is_visible_in_tree(), "After a second, a skeleton shaped like the page")
 	_check(not page.find_child("Foot", true, false).visible, "Nothing to approve while reading")
-	pages.present(chat, _event(1), approve)
+	var event := _event(2)
+	event["sha256"] = "page"
+	pages.present(chat, event, approve)
 	await process_frame
-	_check(not page.find_child("Waiting", true, false).visible, "The rules replace the wait")
+	await process_frame
+	_check(not page.find_child("Waiting", true, false).visible, "The look replaces the wait")
 	_check(
 		chat.find_children("*", "ConfirmationDialog", true, false).is_empty(),
 		"No window opens over the sidebar"
 	)
-	var titles := page.find_children("*", "Label", true, false).filter(
-		func(label: Node) -> bool: return (label as Label).text == "Art direction"
+	var title := page.find_child("Title", true, false) as Label
+	_check(title.text == "The look", "Titled The look")
+	var texts: Array[String] = []
+	for label: Node in page.find_children("*", "Label", true, false):
+		if (label as Label).is_visible_in_tree():
+			texts.append((label as Label).text)
+	for gone: String in [
+		"Draft, not approved yet", "To do first", "These rules use an older layout", "References"
+	]:
+		_check(not texts.has(gone), "Gone: " + gone)
+	_check(page.find_child("Upgrade", true, false) == null, "No update offer on the page")
+	var palette := page.find_child("Palette", true, false)
+	_check(palette != null, "The palette leads, as colour")
+	var swatches: Control = palette.get_node("Swatches")
+	_check((swatches.get("roles") as Array).size() == 3, "One swatch per role")
+	_check(swatches.call("_get_tooltip", Vector2(1, 1)).contains("#8a5a3b"), "Hover shows the hex")
+	var grid := page.find_child("References", true, false) as GridContainer
+	_check(grid != null and grid.get_child_count() == 3, "Two references and Add reference")
+	var tile := grid.get_child(0)
+	var picture := tile.find_child("Picture", true, false) as TextureRect
+	_check(picture != null and picture.texture != null, "The photo shows as a picture")
+	_check(
+		(tile.find_child("Take", true, false) as Label).text == "warm stone against a cold sky",
+		"A tile's caption is its take"
 	)
-	_check(titles.size() == 1, "The title shows once")
+	_check(str(tile.tooltip_text).contains("Not: the haze"), "What to leave is in the tooltip")
+	_check(grid.get_child(1).find_child("StandIn", true, false) != null, "A game is an icon tile")
+	_check(grid.get_child(2).name == "AddReference", "Add reference is the last tile")
+	_check(
+		(page.find_child("FeelLine", true, false) as Label).text.begins_with("Calm"),
+		"The feel is one sentence"
+	)
+	var tags := page.find_child("Feel", true, false).find_child("Tags", true, false)
+	_check(tags != null and tags.get_child_count() >= 3, "The look's phrases are tags")
+	var never := page.find_child("Never", true, false).find_child("Tags", true, false)
+	_check(never != null and never.get_child_count() == 3, "Never is three chips")
+	_check(page.find_child("SoundText", true, false) != null, "A decided sound shows its words")
+	var technical: Node = page.find_child("Technical", true, false)
+	_check(not technical.get("body").visible, "Checked rules start folded")
+	_check(technical.get("header").text == "Checked rules", "Technical rules are Checked rules")
 	var state := page.find_child("State", true, false) as Label
-	_check(state.text == "Draft, not approved yet", "The page says the rules are a draft")
-	var rules := page.find_child("Rules", true, false)
-	_check(
-		(rules.find_child("Feel", true, false) as RichTextLabel).text.contains("Calm"),
-		"Feel shows the vision"
-	)
-	_check(rules.find_child("StillOpen", true, false) == null, "Nothing is open in a full bible")
-	_check(
-		page.find_child("Upgrade", true, false) != null, "A first-format bible offers the update"
-	)
-	var offers := page.find_child("Offers", true, false)
-	var asks := offers.find_children("Ask", "Button", true, false)
-	_check(asks.size() == 2, "Each check is one line with its own Ask")
-	_check(
-		asks.all(func(ask: Node) -> bool: return ask.theme_type_variation == "JoineryQuietLink"),
-		"Ask is a quiet link, so Approve is the one accent action"
-	)
+	_check(state.text == "Draft", "The footer says Draft")
 	var accents := page.find_children("*", "Button", true, false).filter(
 		func(button: Node) -> bool:
 			return (
@@ -289,35 +315,75 @@ func _page(chat: Control) -> void:
 	_check(accents.size() == 1, "One accent action on the page")
 	var approve_button := page.find_child("Approve", true, false) as Button
 	_check(
-		approve_button.text == "Approve these rules" and not approve_button.disabled,
-		"Approve these rules is ready"
+		approve_button.text == "Approve look" and not approve_button.disabled,
+		"Approve look is ready"
 	)
-	var technical: Node = page.find_child("Technical", true, false)
-	_check(not technical.get("body").visible, "Technical rules start folded")
 	_check(approved[0] == 0, "Opening the page approves nothing")
-	(asks[0] as Button).pressed.emit()
+	# A tile opens full width; Back returns to the look.
+	tile.gui_input.emit(_click())
+	await process_frame
+	var expanded := page.find_child("Expanded", true, false)
+	_check(expanded != null, "A tile opens full width")
+	var lines: Array[String] = []
+	for label: Node in expanded.find_children("*", "Label", true, false):
+		lines.append((label as Label).text)
+	_check(
+		lines.has("Not: the haze") and lines.has("Take: warm stone against a cold sky"),
+		"Take and Not"
+	)
+	(page.find_child("Back", true, false) as Button).pressed.emit()
+	await process_frame
+	_check(page.visible and page.find_child("Palette", true, false) != null, "Back to the look")
+	# A section's Change shows on hover in a wide sidebar.
+	await process_frame
+	var change_link := page.find_child("FeelHeading", true, false).find_child("Change", true, false)
+	_check((change_link as Control).self_modulate.a == 0.0, "Change waits for the pointer")
+	# A section's Change asks Journeyman.
+	var change := page.find_child("NeverHeading", true, false).find_child("Change", true, false)
+	(change as Button).pressed.emit()
 	await process_frame
 	_check(not page.visible and transcript.visible, "Asking goes back to the chat")
-	_check(chat._prompt.text.contains("palette section"), "Asking fills the message box")
+	_check(chat._prompt.text.contains("never"), "Asking fills the message box")
 	_check(approved[0] == 0, "Asking approves nothing")
 	chat._prompt.clear()
 
-	# A bible mostly not written yet: one "Still open" line with one Ask.
-	var open := {"text": "# Bible\n\n## Vision\nCalm.\n", "version": 2, "sha256": "x"}
+	# A look mostly not decided: dashed swatches, slots in place, Approve held for the palette.
+	var open := {
+		"text": "# Bible\n\n## Vision\nCalm.\n",
+		"version": 2,
+		"sha256": "x",
+		"gaps": [{"section": "palette", "heading": "Palette", "required": true}],
+	}
 	pages.present(chat, open, approve)
 	await process_frame
-	var line := page.find_child("OpenLine", true, false) as Label
+	_check(page.find_child("PaletteEmpty", true, false) != null, "Dashed swatches for no palette")
+	_check(page.find_child("Choose", true, false) != null, "Choose colours with Journeyman")
+	_check(page.find_child("SoundOpen", true, false) != null, "Sound: Not decided yet")
+	_check(page.find_child("NeverOpen", true, false) != null, "Never: Not decided yet")
+	_check(state.text == "Choose colours first", "The footer says what comes first")
+	_check(approve_button.disabled, "Approve waits for the palette")
+	# Only optional sections open: Approve stays enabled.
+	open["gaps"] = [{"section": "audio", "heading": "Audio", "required": false}]
+	pages.present(chat, open, approve)
+	await process_frame
+	_check(not approve_button.disabled and state.text == "Draft", "Optional gaps don't hold it")
+	# Nothing decided at all: one blankslate.
+	pages.present(chat, {"text": "# Bible\n", "version": 2, "sha256": "y"}, approve)
+	await process_frame
+	var slate := page.find_child("Blankslate", true, false)
+	_check(slate != null, "Nothing decided: a blankslate")
 	_check(
-		line != null and line.text == "Still open: Look, Palette, Sound, Never",
-		"The open sections share one line"
+		(slate.find_child("Heading", true, false) as Label).text == "No look yet",
+		"Headed No look yet"
 	)
-	_check(page.find_children("AskOpen", "Button", true, false).size() == 1, "One Ask for them")
-	_check(page.find_child("Upgrade", true, false) == null, "A current bible offers no update")
+	_check(not page.find_child("Foot", true, false).visible, "Nothing to approve yet")
+	pages.present(chat, open, approve)
+	await process_frame
 
 	# Approve: once, from the click, then back to the chat.
 	approve_button.pressed.emit()
 	await process_frame
-	_check(approved[0] == 1, "Approve these rules approves")
+	_check(approved[0] == 1, "Approve look approves")
 	_check(not page.visible and transcript.visible, "Approving goes back to the chat")
 	approve_button.pressed.emit()
 	_check(approved[0] == 1, "A closed page can't approve again")
@@ -326,14 +392,15 @@ func _page(chat: Control) -> void:
 	approve_button.pressed.emit()
 	_check(approved[0] == 1, "Nothing is approved while the page is reading")
 
-	# Approved rules: no Approve, and the way to make the project match.
+	# Approved: the day, no Approve, and the way to make the project match.
 	var done := _event(2)
 	done["approved"] = true
+	done["approved_on"] = "2026-11-12"
 	pages.present(chat, done, approve)
 	await process_frame
-	_check(state.text == "Approved", "The page says the rules are approved")
-	_check(not approve_button.visible, "Approved rules can't be approved again")
-	_check(page.find_child("Match", true, false).visible, "Approved rules offer Make it match")
+	_check(state.text == "Approved · 12 Nov", "The footer says when it was approved")
+	_check(not approve_button.visible, "An approved look can't be approved again")
+	_check(page.find_child("Match", true, false).visible, "Approved offers Make the project match")
 	(page.find_child("Back", true, false) as Button).pressed.emit()
 	await process_frame
 	_check(not page.visible and transcript.visible, "Back returns to the chat")
@@ -352,7 +419,7 @@ func _page(chat: Control) -> void:
 	)
 	_check(not page.find_child("Foot", true, false).visible, "The brief has nothing to approve")
 	var document := page.find_child("Document", true, false)
-	_check(document != null, "The brief shows in one card")
+	_check(document != null, "The brief shows as one document")
 	(document.find_child("AskChange", true, false) as Button).pressed.emit()
 	await process_frame
 	_check(chat._prompt.text.begins_with("Change it: "), "Asking starts the change message")
@@ -361,7 +428,14 @@ func _page(chat: Control) -> void:
 	chat.art_review_requested.emit()
 	await process_frame
 	_check(
-		(page.find_child("Title", true, false) as Label).text == "Art direction",
-		"The art direction gets its own title back"
+		(page.find_child("Title", true, false) as Label).text == "The look",
+		"The look gets its own title back"
 	)
 	page.call("set_open", false)
+
+
+func _click() -> InputEventMouseButton:
+	var click := InputEventMouseButton.new()
+	click.button_index = MOUSE_BUTTON_LEFT
+	click.pressed = true
+	return click

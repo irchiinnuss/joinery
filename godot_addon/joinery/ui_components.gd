@@ -839,8 +839,8 @@ static func blankslate(
 
 
 ## The palette as swatches, [param roles] {role, hex, use}, SWATCH_H tall (ui_blocks.gd).
-static func palette_strip(roles: Array, size := "md") -> VBoxContainer:
-	return _BLOCKS.palette_strip(roles, size)
+static func palette_strip(roles: Array, size := "md", captions := true) -> VBoxContainer:
+	return _BLOCKS.palette_strip(roles, size, captions)
 
 
 ## Reference images at 4:3 with a one-line take; 0 [param columns] fits 2–4 (ui_blocks.gd).

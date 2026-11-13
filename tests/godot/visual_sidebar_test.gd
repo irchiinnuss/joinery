@@ -38,6 +38,14 @@ Metres, +Y up; door 2.1 m; prop ≤ 3 000 triangles.
 ## 19. Never (hard bans)
 - Neon, photo-real faces, lens flares
 """
+## The look's palette roles, as the bridge sends them.
+const PALETTE := [
+	{"role": "Wood", "hex": "#8a5a3b", "use": "doors, piers, crates"},
+	{"role": "Sea", "hex": "#2e86ab", "use": "water and the accent on interactables"},
+	{"role": "Sand", "hex": "#e9d8a6", "use": "stone and paths"},
+	{"role": "Shadow", "hex": "#2b2d42", "use": "shadow tint"},
+	{"role": "Lamp", "hex": "#f2a541", "use": "lamp light only"},
+]
 const BRIEF := """# Harbour Keeper
 
 ## Pitch
@@ -286,12 +294,7 @@ func _states(light: bool, width: int) -> void:
 	chat.show_timing({"outcome": "done", "total_ms": 72000, "first_response_ms": 250})
 	await _shot("accepted", light, width, chat)
 
-	chat.show_agent_message(
-		(
-			"The **Door** is 20% wider and the `Wood` material is darker. "
-			+ "The source file and the exported model both changed."
-		)
-	)
+	chat.show_agent_message("The **Door** is 20% wider and the `Wood` material is darker.")
 	await _shot("conversation", light, width, chat)
 
 	# Joinery's own lines: a fresh session from a summary, and a change that didn't pass.
@@ -763,7 +766,14 @@ func _changes(light: bool, width: int) -> void:
 	chat.call("_on_submit", "Make the door look older")
 	chat.set_chat_busy(true)
 	chat.set_chat_state("working", "Opening door.blend in Blender")
-	chat.call("_on_art_gate", {"needs_art_approval": true})
+	var sketch := "art/reference/door_sketch.png"
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("res://art/reference"))
+	DirAccess.copy_absolute(_thumbnail(), ProjectSettings.globalize_path("res://" + sketch))
+	var look := {
+		"palette": PALETTE,
+		"references": [{"reference": "my door sketch", "kind": "sketch", "file": sketch}],
+	}
+	chat.call("_on_art_gate", {"needs_art_approval": true, "look": look})
 	chat.set_chat_busy(false)
 	await _shot("art-gate", light, width, chat)
 	chat.show_status("")
@@ -772,9 +782,9 @@ func _changes(light: bool, width: int) -> void:
 	await _frames(2)
 
 
-## The art direction page at every width (the rules, further down the board and the folded
-## technical rules, a bible still mostly open, and the wait for the bridge), and the game brief
-## on the same page.
+## The look at every width: the moodboard (palette, references, feel, Never, Sound), further
+## down with the checked rules open, a reference opened full width, a look still mostly open,
+## an approved one, the skeleton while the bridge reads it; and the game brief on the same page.
 func _documents(light: bool, width: int, chat: Control) -> void:
 	var dialogs: GDScript = load("res://addons/joinery/art_review_dialog.gd")
 	var pages: GDScript = load("res://addons/joinery/art_page.gd")
@@ -784,8 +794,10 @@ func _documents(light: bool, width: int, chat: Control) -> void:
 	DirAccess.copy_absolute(picture, ProjectSettings.globalize_path("res://" + reference))
 	var event := {
 		"text": BIBLE,
+		"sha256": "harbour",
 		"approved": false,
-		"version": 1,
+		"version": 2,
+		"palette": PALETTE,
 		"references":
 		[
 			{
@@ -804,29 +816,59 @@ func _documents(light: bool, width: int, chat: Control) -> void:
 				"avoid": "its saturated greens",
 				"file": "",
 			},
+			{
+				"id": "R3",
+				"reference": "Harbour at dusk",
+				"kind": "place",
+				"take": "lamp light on wet stone",
+				"avoid": "the fog",
+				"file": "",
+			},
 		],
-		"suggestions":
-		[
-			"Before approving the bible: the palette section is not set yet. Ask about it.",
-			"When adding sound: the audio section is open. Ask about it.",
-		],
+		"gaps": [{"section": "audio", "heading": "Audio", "required": false}],
+		"suggestions": ["When adding sound: the audio section is open. Ask about it."],
 	}
 	var page: Control = pages.attach(chat)
-	_check(page != null, "The art direction opens as a sidebar page")
+	_check(page != null, "The look opens as a sidebar page")
 	pages.present(chat, event, func() -> void: pass)
 	await _shot("art-direction", light, width, chat)
-	# The references board and the folded technical rules, further down.
+	# Further down, with the checked rules open.
 	var scroll := page.find_children("*", "ScrollContainer", true, false)[0] as ScrollContainer
 	page.find_child("Technical", true, false).call("set_open", true)
 	await _frames(2)
-	scroll.scroll_vertical = int(page.find_child("References", true, false).position.y)
+	scroll.scroll_vertical = int(page.find_child("Feel", true, false).position.y)
 	await _shot("art-board", light, width, chat)
+	# A reference opened full width.
+	(
+		page
+		. call(
+			"_expand",
+			{
+				"title": "my door sketch",
+				"image": "res://" + reference,
+				"take": "the brass handle",
+				"not": "the heavy frame",
+			}
+		)
+	)
+	await _shot("art-reference", light, width, chat)
 	page.call("set_open", false)
-	var open := {"text": BIBLE.get_slice("## 6.", 0) + "## 19. Never\n- Neon\n", "version": 2}
+	var open := {
+		"text": BIBLE.get_slice("## 6.", 0) + "## 19. Never\n- Neon\n",
+		"version": 2,
+		"gaps": [{"section": "palette", "heading": "Palette", "required": true}],
+	}
 	pages.present(chat, open, func() -> void: pass)
 	await _shot("art-direction-open", light, width, chat)
 	page.call("set_open", false)
+	var approved := event.duplicate(true)
+	approved["approved"] = true
+	approved["approved_on"] = "2026-11-12"
+	pages.present(chat, approved, func() -> void: pass)
+	await _shot("art-approved", light, width, chat)
+	page.call("set_open", false)
 	page.call("open_waiting")
+	page.call("_skeleton_in")
 	await _shot("art-loading", light, width, chat)
 	page.call("set_open", false)
 	await _frames(2)
