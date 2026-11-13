@@ -1,0 +1,120 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ninjacornix <milanvrankic@gmail.com>
+Date: Fri, 13 Nov 2026 18:21:18 +0100
+Subject: [PATCH] feat(editor): files in their own side column, Output alone at
+ the bottom
+
+Joinery-only, not for upstream. FileSystem moves from the bottom panel to the outer left column, left of Scene and Inspector, and the bottom panel opens only Output by default. The addon opens and hides these docks from the rail. Saved Joinery layouts migrate once (layout 4); the classic view is unchanged.
+---
+ editor/docks/filesystem_dock.cpp |  6 ++---
+ editor/editor_node.cpp           | 44 +++++++++++++++++++++++++-------
+ 2 files changed, 38 insertions(+), 12 deletions(-)
+
+diff --git a/editor/docks/filesystem_dock.cpp b/editor/docks/filesystem_dock.cpp
+index f58c419..a5c3386 100644
+--- a/editor/docks/filesystem_dock.cpp
++++ b/editor/docks/filesystem_dock.cpp
+@@ -4436,9 +4436,9 @@ FileSystemDock::FileSystemDock() {
+ 	}
+ 	set_icon_name("Folder");
+ 	set_dock_shortcut(ED_SHORTCUT_AND_COMMAND("docks/open_filesystem", TTRC("Open FileSystem Dock"), KeyModifierMask::ALT | Key::F));
+-	// Joinery: assets go to the bottom alongside the hierarchy, for the
+-	// same reason (ADR 0005).
+-	set_default_slot(EditorSettings::is_joinery_layout() ? EditorDock::DOCK_SLOT_BOTTOM : EditorDock::DOCK_SLOT_LEFT_BR);
++	// Joinery: the files have their own side column, left of Scene and
++	// Inspector; the bottom panel is left to Output (JOINERY_SHELL_LAYOUT 4).
++	set_default_slot(EditorSettings::is_joinery_layout() ? EditorDock::DOCK_SLOT_LEFT_UL : EditorDock::DOCK_SLOT_LEFT_BR);
+ 	set_available_layouts(DOCK_LAYOUT_ALL);
+ 
+ 	ProjectSettings::get_singleton()->add_hidden_prefix("file_customization/");
+diff --git a/editor/editor_node.cpp b/editor/editor_node.cpp
+index 5439aba..b3716a9 100644
+--- a/editor/editor_node.cpp
++++ b/editor/editor_node.cpp
+@@ -858,10 +858,11 @@ bool EditorNode::_is_project_data_missing() {
+ }
+ 
+ // Joinery: the bottom docks a Joinery layout opens, in their tab order.
+-// Scene and Inspector sit in the left column instead (JOINERY_SHELL_LAYOUT 3).
+-static const char *JOINERY_OPEN_BOTTOM_DOCKS[] = { "FileSystem", "Output" };
++// Scene and Inspector sit in the left column instead (JOINERY_SHELL_LAYOUT 3),
++// and FileSystem in its own column left of them (JOINERY_SHELL_LAYOUT 4).
++static const char *JOINERY_OPEN_BOTTOM_DOCKS[] = { "Output" };
+ // Joinery: version of the saved Joinery dock arrangement; older ones migrate once.
+-static const int JOINERY_SHELL_LAYOUT = 3;
++static const int JOINERY_SHELL_LAYOUT = 4;
+ 
+ void EditorNode::_notification(int p_what) {
+ 	switch (p_what) {
+@@ -1006,8 +1007,8 @@ void EditorNode::_notification(int p_what) {
+ 
+ 		case NOTIFICATION_READY: {
+ 			// Store the default order of bottom docks. It can only be determined dynamically.
+-			// Joinery: the default layout opens only Files and Output at the
+-			// bottom, in that order. Every other bottom dock starts closed and
++			// Joinery: the default layout opens only Output at the bottom.
++			// Every other bottom dock starts closed and
+ 			// stays one click away in the bottom panel's menu and Editor > Editor
+ 			// Docks; the debugger still opens itself on Run.
+ 			PackedStringArray bottom_docks;
+@@ -6384,8 +6385,7 @@ void EditorNode::_load_editor_layout() {
+ 		} else {
+ 			ep.step(TTR("Loading docks..."), 1, true);
+ 			// Joinery: a new project starts from the Joinery default, which
+-			// closes every bottom dock except Files and
+-			// Output. Stock Godot only needs the bottom panel's own settings
++			// closes every bottom dock except Output. Stock Godot only needs the bottom panel's own settings
+ 			// here, because its docks already sit where its default puts them.
+ 			editor_dock_manager->load_docks_from_config(default_layout, "docks", true);
+ 			// Initialize some default values.
+@@ -6489,6 +6489,29 @@ void EditorNode::_load_editor_layout() {
+ 				config->set_value("docks", "dock_hsplit_2", 280);
+ 			}
+ 		}
++		// Joinery: layout 4 moves FileSystem from the bottom panel to its own
++		// column left of Scene and Inspector, so the bottom panel holds Output.
++		if (!switched && joinery_layout && int(config->get_value(EDITOR_NODE_CONFIG_SECTION, "joinery_shell_layout", 0)) < 4) {
++			const String files = "FileSystem";
++			for (int slot = 1; slot <= EditorDock::DOCK_SLOT_MAX; slot++) {
++				const String key = "dock_" + itos(slot);
++				PackedStringArray names = String(config->get_value("docks", key, "")).split(",", false);
++				names.erase(files);
++				config->set_value("docks", key, String(",").join(names));
++			}
++			const String key = "dock_" + itos(EditorDock::DOCK_SLOT_LEFT_UL + 1);
++			PackedStringArray names = String(config->get_value("docks", key, "")).split(",", false);
++			names.insert(0, files);
++			config->set_value("docks", key, String(",").join(names));
++			config->set_value("docks", key + "_selected_tab_idx", 0);
++			Array closed = config->get_value("docks", "dock_closed", Array());
++			closed.erase(files);
++			config->set_value("docks", "dock_closed", closed);
++			// The column was empty, so its saved width is 0.
++			if (int(config->get_value("docks", "dock_hsplit_1", 0)) <= 0) {
++				config->set_value("docks", "dock_hsplit_1", 240);
++			}
++		}
+ 		if (!switched) {
+ 			editor_dock_manager->load_docks_from_config(config, "docks", true);
+ 		}
+@@ -9432,7 +9455,9 @@ EditorNode::EditorNode() {
+ 	// Joinery: native utility panels now default to the bottom. The READY
+ 	// notification records their full bottom order after every dock exists.
+ 	if (joinery_layout) {
+-		// Scene above Inspector in the left column; the rest at the bottom.
++		// Files in the outer left column, Scene above Inspector in the next
++		// one; the rest at the bottom.
++		default_layout->set_value(docks_section, "dock_1", filesystem_dock->get_effective_layout_key());
+ 		default_layout->set_value(docks_section, "dock_3", SceneTreeDock::get_singleton()->get_effective_layout_key());
+ 		default_layout->set_value(docks_section, "dock_4", InspectorDock::get_singleton()->get_effective_layout_key());
+ 		default_layout->set_value(docks_section, "dock_5", String());
+@@ -9448,7 +9473,8 @@ EditorNode::EditorNode() {
+ 		default_layout->set_value(docks_section, "dock_9", String());
+ 	}
+ 
+-	int hsplits[] = { 0, dock_hsize, -dock_hsize, 0 };
++	// Joinery: the files column opens narrower than Scene and Inspector.
++	int hsplits[] = { joinery_layout ? 240 : 0, dock_hsize, -dock_hsize, 0 };
+ 	for (int i = 0; i < (int)std_size(hsplits); i++) {
+ 		default_layout->set_value(docks_section, "dock_hsplit_" + itos(i + 1), hsplits[i]);
+ 	}
