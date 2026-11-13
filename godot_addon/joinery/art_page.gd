@@ -15,6 +15,10 @@ extends VBoxContainer
 ## Opening the page (/art, the art gate's "Review the look", Settings) shows it at once: the
 ## last rules the sidebar heard, or "Reading the art direction…" until the bridge answers.
 ## Without a sidebar to hold it, art_review_dialog.gd shows the same rules in a window.
+##
+## The same page shows the game brief (/brief, [method show_document]): read-only, each section
+## its name over its words in one card, with "Ask Journeyman to change it" at its end. Edits to
+## it are reviewed changes like any other; the brief has nothing to approve.
 
 signal closed
 
@@ -45,6 +49,7 @@ var event: Dictionary = {}
 var _on_approve := Callable()
 var _scroll: ScrollContainer
 var _body: VBoxContainer
+var _title: Label
 var _state: Label
 var _content: VBoxContainer
 var _waiting: Control
@@ -78,6 +83,17 @@ static func attach(sidebar: Control) -> Control:
 	if sidebar.has_signal("art_review_requested"):
 		sidebar.connect("art_review_requested", page.open_waiting)
 	return page
+
+
+## Show the project document [param text] (Markdown) under [param title] on
+## [param sidebar]'s page; "Ask Journeyman to change it" starts a message with [param ask].
+## False when there is no page to show it on.
+static func present_document(sidebar: Control, title: String, text: String, ask := "") -> bool:
+	var page := attach(sidebar)
+	if page == null:
+		return false
+	page.call("show_document", title, text, ask)
+	return true
 
 
 ## Show [param review] (an art review event) on [param sidebar]'s page, with
@@ -161,12 +177,50 @@ func open_waiting() -> void:
 		)
 
 
+## Show [param text], a project document, read-only under [param title], and open the page.
+func show_document(title: String, text: String, ask := "") -> void:
+	set_open(false)
+	set_open(true)
+	_set_title(title)
+	_clear()
+	_waiting.hide()
+	_foot.hide()
+	_state.text = "Journeyman reads this before every request. Changes to it are reviewed."
+	_state.show()
+	var card := _card()
+	card.name = "Document"
+	var column: VBoxContainer = card.get_child(0)
+	column.theme_type_variation = "JoineryStack"
+	var parts := DIALOG.sections(text)
+	if parts.is_empty():
+		column.add_child(_rich(DIALOG.to_bbcode(text)))
+	for part: Array in parts:
+		var body := DIALOG.clean(str(part[1]))
+		if body.is_empty():
+			continue
+		var item := VBoxContainer.new()
+		item.theme_type_variation = "JoineryTight"
+		item.add_child(STYLE.card_title(str(part[0]), true))
+		item.add_child(_rich(DIALOG.to_bbcode(body)))
+		column.add_child(item)
+	if not ask.is_empty() and _can_ask():
+		var change := UI.quiet_link("Ask Journeyman to change it")
+		change.name = "AskChange"
+		change.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+		STYLE.hug_left(change)
+		change.pressed.connect(_ask.bind(ask))
+		column.add_child(change)
+	_content.add_child(card)
+	UI_MOTION.stagger(_content.get_children())
+
+
 ## Show [param review] with [param on_approve] for Approve, and open the page.
 func show_review(review: Dictionary, on_approve: Callable) -> void:
 	var reopened := visible and not event.is_empty()
 	var scroll := _scroll.scroll_vertical
 	set_open(true)
 	_on_approve = on_approve
+	_set_title(TITLE)
 	_fill(review)
 	if reopened:
 		# A fresher copy of the rules on screen: keep the reader's place.
@@ -178,9 +232,7 @@ func show_review(review: Dictionary, on_approve: Callable) -> void:
 func _fill(review: Dictionary) -> void:
 	event = review.duplicate(true)
 	_waiting.hide()
-	for child: Node in _content.get_children():
-		_content.remove_child(child)
-		child.queue_free()
+	_clear()
 	var approved := bool(event.get("approved", false))
 	_state.text = "Approved" if approved else "Draft, not approved yet"
 	_state.show()
@@ -202,9 +254,8 @@ func _fill(review: Dictionary) -> void:
 
 func _show_waiting(text: String, running: bool) -> void:
 	event = {}
-	for child: Node in _content.get_children():
-		_content.remove_child(child)
-		child.queue_free()
+	_set_title(TITLE)
+	_clear()
 	_state.hide()
 	_foot.hide()
 	_waiting_text.text = text
@@ -233,9 +284,10 @@ func _build_title() -> void:
 	back.shortcut_in_tooltip = false
 	back.pressed.connect(func() -> void: closed.emit())
 	row.add_child(back)
-	var title := UI.label(TITLE, "JoineryTitle")
-	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(title)
+	_title = UI.label(TITLE, "JoineryTitle")
+	_title.name = "Title"
+	_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(_title)
 	_state = UI.label("", "JoineryCaption", true)
 	_state.name = "State"
 	top.add_child(_inset(_state))
@@ -489,6 +541,17 @@ func _technical(parts: Array) -> Control:
 
 
 # --- Helpers -----------------------------------------------------------------------------------
+
+
+func _set_title(text: String) -> void:
+	_title.text = text
+	accessibility_name = text
+
+
+func _clear() -> void:
+	for child: Node in _content.get_children():
+		_content.remove_child(child)
+		child.queue_free()
 
 
 func _can_ask() -> bool:

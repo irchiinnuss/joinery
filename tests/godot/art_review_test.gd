@@ -338,3 +338,30 @@ func _page(chat: Control) -> void:
 	await process_frame
 	_check(not page.visible and transcript.visible, "Back returns to the chat")
 	_check(approved[0] == 1, "Closing approves nothing")
+
+	# The game brief on the same page, read-only, with one way to ask for a change.
+	var dialogs: Script = load(DIALOG_PATH)
+	dialogs.show_document(chat, "Game brief", "# Quarry\n\n## Pitch\nA calm dig.\n", "Change it: ")
+	await process_frame
+	_check(page.visible and not transcript.visible, "/brief opens the page in place of the chat")
+	_check(
+		(page.find_child("Title", true, false) as Label).text == "Game brief", "Titled Game brief"
+	)
+	_check(
+		chat.find_children("*", "AcceptDialog", true, false).is_empty(), "No window for the brief"
+	)
+	_check(not page.find_child("Foot", true, false).visible, "The brief has nothing to approve")
+	var document := page.find_child("Document", true, false)
+	_check(document != null, "The brief shows in one card")
+	(document.find_child("AskChange", true, false) as Button).pressed.emit()
+	await process_frame
+	_check(chat._prompt.text.begins_with("Change it: "), "Asking starts the change message")
+	_check(not page.visible and transcript.visible, "Asking goes back to the chat")
+	chat._prompt.clear()
+	chat.art_review_requested.emit()
+	await process_frame
+	_check(
+		(page.find_child("Title", true, false) as Label).text == "Art direction",
+		"The art direction gets its own title back"
+	)
+	page.call("set_open", false)

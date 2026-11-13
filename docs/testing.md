@@ -137,7 +137,7 @@ Screens:
 - `sidebar-*`, at 480 and 1000 px: connecting, no assistant, empty, chips,
   command menu, a request sending, working (steps and timer), waiting for review
   (thumbnail and footer), accepted (with Revert), conversation, not sent (Retry),
-  lost connection banner, settings and the art direction page (its rules, board,
+  lost connection banner, settings, the game brief and the art direction page (its rules, board,
   open sections and loading). At 480 px also each Appearance accent
   (Brass, Blue, Green, Violet) and settings with Reduce motion on.
 - `editor-*`: layout, disconnected/busy/commands/settings sidebar, the Review

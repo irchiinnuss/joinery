@@ -104,6 +104,7 @@ SIDEBAR_STATES = (
     "art-board",
     "art-direction-open",
     "art-loading",
+    "brief",
     "settings",
     "settings-compact",
     "settings-policy",
@@ -118,8 +119,8 @@ SIDEBAR_STATES = (
 )
 # The sidebar's docked widths: its narrowest, its usual one and a wide dock.
 SIDEBAR_WIDTHS = (340, 480, 1000)
-# Captured at the wide width only: the game brief document.
-SIDEBAR_WIDE = ("brief",)
+# Captured at the wide width only (none at the moment).
+SIDEBAR_WIDE: tuple[str, ...] = ()
 # Captured at the narrow width only: each Appearance accent, and Reduce motion on.
 SIDEBAR_NARROW = (
     "accent-brass",

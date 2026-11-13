@@ -573,9 +573,7 @@ func _open_brief() -> void:
 		)
 		return
 	var text := FileAccess.get_file_as_string(BRIEF_PATH)
-	ART_DIALOG.open_document(
-		self, "Game brief", text, ART_DIALOG.document_size(self), "Change the game brief: "
-	)
+	ART_DIALOG.show_document(self, "Game brief", text, "Change the game brief: ")
 
 
 ## "Update to the new layout" in the art direction dialog.

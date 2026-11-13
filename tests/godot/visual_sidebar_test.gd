@@ -774,7 +774,7 @@ func _changes(light: bool, width: int) -> void:
 
 ## The art direction page at every width (the rules, further down the board and the folded
 ## technical rules, a bible still mostly open, and the wait for the bridge), and the game brief
-## in the document view at the wide size only.
+## on the same page.
 func _documents(light: bool, width: int, chat: Control) -> void:
 	var dialogs: GDScript = load("res://addons/joinery/art_review_dialog.gd")
 	var pages: GDScript = load("res://addons/joinery/art_page.gd")
@@ -830,18 +830,10 @@ func _documents(light: bool, width: int, chat: Control) -> void:
 	await _shot("art-loading", light, width, chat)
 	page.call("set_open", false)
 	await _frames(2)
-	if width != WIDTHS[-1]:
-		return
-	var size := Vector2i(roundi(width * 0.8), roundi(HEIGHT * 0.9))
-	var screen := ""
-	var brief: Window = dialogs.open_document(
-		chat, "Game brief", BRIEF, size, "Change the game brief: "
-	)
-	await _frames(4)
-	screen = "sidebar-brief-%s-%d" % ["light" if light else "dark", width]
-	_check(_checks.snapshot(screen, root, [brief]), "Capture " + screen)
-	brief.hide()
-	brief.queue_free()
+	# The game brief on the same page.
+	dialogs.show_document(chat, "Game brief", BRIEF, "Change the game brief: ")
+	await _shot("brief", light, width, chat)
+	page.call("set_open", false)
 	await _frames(2)
 
 

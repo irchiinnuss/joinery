@@ -747,8 +747,8 @@ again.
   **Help › Joinery Tour** and **Joinery › Tour**.
 - `/idle` lists the fixes and checks waiting for when you're away, `/idle now`
   starts them at once and `/idle clear` drops them (see When you're away below).
-- `/brief` opens `design/brief.md` read-only, with **Ask Journeyman to change
-  it**. With no brief, **Write the brief** drafts one from the starting point.
+- `/brief` opens `design/brief.md` read-only on the same sidebar page as `/art`,
+  each section in one card, with **Ask Journeyman to change it**. With no brief, **Write the brief** drafts one from the starting point.
 - `/tools` gives each app's state and its one action (for example Start Docker
   or Rebuild), the same report as the app rail and project setup. When an app
   needs something, the sidebar header says so in one line.

@@ -150,6 +150,14 @@ static func document_size(parent: Control) -> Vector2i:
 	)
 
 
+## A project document read-only: on the sidebar's page (art_page.gd) when [param parent] is
+## the sidebar, else in a window ([method open_document]).
+static func show_document(parent: Control, title: String, text: String, ask := "") -> void:
+	var page: GDScript = load("res://addons/joinery/art_page.gd")
+	if not page.present_document(parent, title, text, ask):
+		open_document(parent, title, text, document_size(parent), ask)
+
+
 ## A project document ([param text], Markdown) read-only under [param title], with Close and,
 ## when [param parent] has fill_composer(), "Ask Journeyman to change it", which starts a
 ## message with [param ask].
