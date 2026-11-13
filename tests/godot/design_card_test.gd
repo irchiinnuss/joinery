@@ -97,12 +97,12 @@ func _run() -> void:
 	_check(card != null and tasks.visible, "The design card shows")
 	_check(_checks == 1, "It checked the project once")
 	_check(
-		(card.get("title_label") as Label).text == "7 design problems",
+		(card.get("title_label") as Label).text == "7 design issues",
 		"The headline counts: " + (card.get("title_label") as Label).text
 	)
 	_check(
-		card.call("step_text") == "3 high · 3 medium · 1 low",
-		"How serious, in one line: " + card.call("step_text")
+		card.call("step_text").is_empty(),
+		"The glyphs say how serious, no counts line: " + card.call("step_text")
 	)
 	var rows: Array = card.call("finding_rows")
 	_check(rows.size() == 5, "The first five findings show: %d" % rows.size())
@@ -165,11 +165,11 @@ func _run() -> void:
 	)
 	_check(card.get("state") == "ready", "The agent pass is over")
 	_check(
-		(card.get("title_label") as Label).text == "8 design problems",
+		(card.get("title_label") as Label).text == "8 design issues",
 		"The agent's finding joins Joinery's"
 	)
 	_check(not (card.get("deeper") as Button).is_visible_in_tree(), "Look deeper is spent")
-	_check(card.call("step_text").contains("high"), "The severity line follows")
+	_check(card.call("step_text").is_empty(), "No counts line follows")
 	_check(
 		(card.get("_step") as Label).tooltip_text.contains("2 of the agent's findings"),
 		"Dropped findings are counted, quietly"
@@ -213,15 +213,15 @@ func _run() -> void:
 	_clean = true
 	var settings: Control = dock.get("_settings")
 	settings.call("set_open", true)
+	# The checks wait under Advanced.
+	settings.find_child("Advanced", true, false).call("set_open", true)
 	var row := _button(settings, "Design check")
 	_check(row != null, "Settings has Design check")
 	row.pressed.emit()
 	await process_frame
 	card = tasks.get("design_card")
 	_check(card != null and not settings.visible, "Settings opens the card")
-	_check(
-		(card.get("title_label") as Label).text == "No design problems found", "A clean headline"
-	)
+	_check((card.get("title_label") as Label).text == "No design issues found", "A clean headline")
 	_check(
 		card.call("step_text") == "Checked the brief, 6 input actions, 25 scripts and 8 scenes",
 		"It says what it read: " + card.call("step_text")

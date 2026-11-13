@@ -91,15 +91,17 @@ func _run() -> void:
 	_check(title == "8 accessibility problems", "The headline counts the problems: " + title)
 	var words: PackedStringArray = card.call("area_words")
 	_check(words[0] == "Contrast 0%" and words[5] == "Screen readers 75%", ", ".join(words))
-	_check(card.call("step_text") == "3 high · 4 medium · 1 low", "How serious, in one line")
+	_check(card.call("step_text").is_empty(), "The glyphs say how serious, not a counts line")
 	var first: Control = (card.call("finding_rows") as Array)[0]
-	var row_text := (first.find_children("", "Label", true, false)[0] as Label).text
+	var parts := first.find_children("", "Label", true, false)
+	# The file in the text colour, then the finding in its own words.
+	var row_text := "%s: %s" % [(parts[0] as Label).text, (parts[1] as Label).text]
 	_check(
 		row_text.begins_with('main.tscn: "Score: 12" (#777777 on #888888)'),
 		"A finding reads in its own words, with its file: " + row_text
 	)
 	var fix_all: Button = card.get("fix_all")
-	_check(fix_all.text == "Fix 7 things", "Fix all names how many: " + fix_all.text)
+	_check(fix_all.text == "Fix 7", "Fix all names how many: " + fix_all.text)
 	_check(card.get("_needs").text == "1 needs you", "What Joinery can't fix is counted")
 
 	# The same findings by Xbox Accessibility Guideline, with what Joinery checks.
@@ -180,6 +182,8 @@ func _run() -> void:
 	_check(tasks.get("access_card") == null, "Dismissed")
 	var settings: Control = dock.get("_settings")
 	settings.call("set_open", true)
+	# The checks wait under Advanced.
+	settings.find_child("Advanced", true, false).call("set_open", true)
 	var row := _button(settings, "Accessibility check")
 	_check(row != null, "Settings has Accessibility check")
 	row.pressed.emit()

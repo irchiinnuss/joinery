@@ -136,7 +136,7 @@ def test_the_summary_turn_is_quiet_and_read_only(tmp_path: Path) -> None:
         "idle",
     ]
     notice = next(e for e in events if e["kind"] == "notice")
-    assert notice == {"kind": "notice", "level": "info", "text": compaction.NOTICE}
+    assert notice == {"kind": "notice", "level": "divider", "text": compaction.NOTICE}
     assert events[-2] == Usage().model_dump()
     assert store.latest() == summary
 
@@ -270,7 +270,7 @@ def test_the_open_chat_keeps_its_summary(tmp_path: Path) -> None:
     assert recorder.latest() is not None, "Without a chat it goes to .joinery"
     recorder.begin({"text": "Make the door wider"}, ())
     recorder.save(SessionSummary(text="- Harbour at dusk", agent="codex"))
-    recorder.observe({"kind": "notice", "level": "info", "text": compaction.NOTICE})
+    recorder.observe({"kind": "notice", "level": "divider", "text": compaction.NOTICE})
     latest = recorder.latest()
     assert latest is not None and latest.text == "- Harbour at dusk"
     meta, entries = chats.read(tmp_path, recorder.chat_id)

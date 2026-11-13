@@ -563,7 +563,11 @@ func _handle(event: Dictionary) -> void:
 		"review_media":
 			review_media.emit(event)
 		"notice":
-			_notice(str(event.get("text", "")), "error" if event.get("level") == "warn" else "info")
+			var level := str(event.get("level", "info"))
+			_notice(
+				str(event.get("text", "")),
+				"error" if level == "warn" else ("divider" if level == "divider" else "info")
+			)
 		"file_preview":
 			file_preview.emit(event)
 		"art_review":

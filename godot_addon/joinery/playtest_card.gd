@@ -18,6 +18,7 @@ signal fix_requested(request: String)
 const UI_THEME := preload("ui_theme.gd")
 const UI_MOTION := preload("ui_motion.gd")
 const UI := preload("ui_components.gd")
+const BLOCKS := preload("ui_blocks.gd")
 const STYLE := preload("sidebar_style.gd")
 const INDICATOR := preload("activity_indicator.gd")
 const MAP := preload("playtest_map.gd")
@@ -445,9 +446,8 @@ func _item_row(item: Dictionary) -> VBoxContainer:
 	var head := HBoxContainer.new()
 	head.theme_type_variation = "JoineryRowTight"
 	row.add_child(head)
-	var dot := UI.status_dot(str(DOTS.get(str(item.get("severity", "low")), "off")))
-	dot.tooltip_text = str(item.get("severity", ""))
-	head.add_child(dot)
+	# Glyph and colour, so severity reads without colour too.
+	head.add_child(BLOCKS.severity_glyph(str(item.get("severity", "low"))))
 	var title := str(item.get("title", "Finding"))
 	if item.get("t") != null:
 		title += " · " + _clock(float(item["t"]))

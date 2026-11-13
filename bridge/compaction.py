@@ -34,10 +34,8 @@ from joinery.turn import TurnController
 
 #: Seconds the agent has to write its summary.
 SUMMARY_SECONDS = 90
-NOTICE = (
-    "The conversation was getting long, so Journeyman continues in a fresh session "
-    "from a short summary."
-)
+#: Drawn as a quiet divider in the chat (level "divider"): the work goes on as before.
+NOTICE = "New session · summary carried over"
 
 
 class SessionBridge(Protocol):
@@ -133,7 +131,7 @@ async def compact(
         await bridge.new_session()
         controller.primer, controller.primer_chat = summary.text, chat_id
         controller.meter.reset()
-        emit({"kind": "notice", "level": "info", "text": NOTICE})
+        emit({"kind": "notice", "level": "divider", "text": NOTICE})
         emit(Usage().model_dump())
         return summary
     finally:

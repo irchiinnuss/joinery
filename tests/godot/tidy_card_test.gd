@@ -197,6 +197,8 @@ func _run() -> void:
 	_clean = true
 	var settings: Control = dock.get("_settings")
 	settings.call("set_open", true)
+	# The checks wait under Advanced.
+	settings.find_child("Advanced", true, false).call("set_open", true)
 	var row := _button(settings, "Unused content")
 	_check(row != null, "Settings has Unused content")
 	row.pressed.emit()

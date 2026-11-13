@@ -1,8 +1,9 @@
 @tool
 extends PanelContainer
 ## The design check (`/design`): what breaks the game or goes against its own brief, at a
-## glance. One headline ("3 design problems"), one line per finding with its severity dot and
-## "Ask agent to fix", the evidence in the line's tooltip. Nothing here changes the game: Ask
+## glance. One headline ("3 design issues"), one line per finding with its severity glyph and
+## colour and "Ask agent to fix", the evidence in the line's tooltip. Check again is the ↻
+## beside the title. Nothing here changes the game: Ask
 ## agent to fix puts a ready request in the composer, which the user sends as a normal
 ## reviewed change. "Look deeper" asks the designer agent for judgement calls; each one it
 ## makes cites evidence or is dropped before it gets here.
@@ -18,8 +19,7 @@ const UI_MOTION := preload("ui_motion.gd")
 const UI := preload("ui_components.gd")
 const STYLE := preload("sidebar_style.gd")
 const INDICATOR := preload("activity_indicator.gd")
-## Severity -> status dot state.
-const DOTS := {"high": "attention", "medium": "working", "low": "off"}
+const BLOCKS := preload("ui_blocks.gd")
 ## Findings shown before "Show all".
 const FIRST_FINDINGS := 5
 
@@ -34,6 +34,7 @@ var again: Button
 var _dots: Control
 var _status: TextureRect
 var _step: Label
+var _line: HBoxContainer
 var _findings: VBoxContainer
 var _more: Button
 var _foot: HBoxContainer
@@ -65,6 +66,10 @@ func _init() -> void:
 	title_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	title_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	head.add_child(title_label)
+	again = _small_icon("reload", "Check again")
+	again.pressed.connect(func() -> void: recheck_requested.emit())
+	again.hide()
+	head.add_child(again)
 	stop = _small_icon("stop", "Stop the design agent")
 	stop.pressed.connect(_on_stop)
 	stop.hide()
@@ -76,6 +81,7 @@ func _init() -> void:
 	line.theme_type_variation = "JoineryRowTight"
 	UI.bind_height(line, "xs", false)
 	column.add_child(line)
+	_line = line
 	_dots = INDICATOR.new()
 	_dots.set("running", true)
 	line.add_child(_dots)
@@ -88,11 +94,6 @@ func _init() -> void:
 	_step.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	_step.mouse_filter = Control.MOUSE_FILTER_PASS
 	line.add_child(_step)
-	again = UI.quiet_link("Check again")
-	UI.bind_height(again, "xs")
-	again.pressed.connect(func() -> void: recheck_requested.emit())
-	again.hide()
-	line.add_child(again)
 	_findings = VBoxContainer.new()
 	_findings.theme_type_variation = "JoineryTight"
 	_findings.accessibility_name = "Design problems"
@@ -150,7 +151,8 @@ func show_report(data: Dictionary, agent_ran := false, dropped := 0) -> void:
 	if findings.is_empty():
 		_settle("done", "Checked " + read_line(data))
 	else:
-		_settle("", severity_line(findings))
+		# The glyphs say how serious; no "3 high · 3 medium" line repeats them.
+		_settle("", "")
 	_step.tooltip_text = "Checked " + read_line(data)
 	if dropped > 0:
 		_step.tooltip_text += (
@@ -169,25 +171,12 @@ func apply_failed(message: String) -> void:
 	again.visible = true
 
 
-## "No design problems found" or "3 design problems".
+## "No design issues found" or "3 design issues".
 static func headline(data: Dictionary) -> String:
 	var count := (data.get("findings", []) as Array).size()
 	if count == 0:
-		return "No design problems found"
-	return "%d design %s" % [count, "problem" if count == 1 else "problems"]
-
-
-## "2 high · 1 medium": how serious, at a glance.
-static func severity_line(findings: Array) -> String:
-	var counts := {"high": 0, "medium": 0, "low": 0}
-	for item: Variant in findings:
-		var severity := str((item as Dictionary).get("severity", "low"))
-		counts[severity] = int(counts.get(severity, 0)) + 1
-	var words := PackedStringArray()
-	for severity: String in ["high", "medium", "low"]:
-		if int(counts[severity]) > 0:
-			words.append("%d %s" % [int(counts[severity]), severity])
-	return " · ".join(words)
+		return "No design issues found"
+	return "%d design %s" % [count, "issue" if count == 1 else "issues"]
 
 
 ## What the check read: "the brief, 6 input actions, 25 scripts and 8 scenes".
@@ -254,7 +243,7 @@ func _row(item: Dictionary) -> HBoxContainer:
 	row.mouse_filter = Control.MOUSE_FILTER_PASS
 	UI.bind_height(row, "xs", false)
 	var severity := str(item.get("severity", "low"))
-	row.add_child(UI.status_dot(str(DOTS.get(severity, "off"))))
+	row.add_child(BLOCKS.severity_glyph(severity))
 	var agent := str(item.get("source", "check")) == "agent"
 	var words := UI.label(plain(str(item.get("title", ""))), "JoineryCaption")
 	words.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -324,6 +313,7 @@ func _working(words: String) -> void:
 	_status.hide()
 	_step.text = words
 	_step.tooltip_text = words
+	_line.show()
 
 
 func _settle(kind: String, words: String) -> void:
@@ -335,6 +325,8 @@ func _settle(kind: String, words: String) -> void:
 	_status.visible = not kind.is_empty()
 	_step.text = words
 	_step.tooltip_text = words
+	# Only with something to say.
+	_line.visible = not words.is_empty()
 
 
 func _on_stop() -> void:

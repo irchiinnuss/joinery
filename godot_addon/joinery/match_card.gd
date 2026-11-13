@@ -1,9 +1,11 @@
 @tool
 extends PanelContainer
-## "Make it match" (ADR 0045): the project against its art bible, at a glance. One headline
-## that says how much drifts, one row per area with its score ("Palette 72%"), the top
-## findings (what was measured, what the bible asks for), and the call to action: Fix all, or
-## Fix on one area. The fixes run as parallel tasks with their own cards; each change is
+## "Make it match" (ADR 0045): the project against its look (the art bible), at a glance. One
+## headline that says how much is off ("9 things off the look"), one row per area with its
+## score ("Palette 72%", "—" when an area had nothing to check), the top findings (a severity
+## glyph and colour, the file, what was measured and what the look asks for), and the call to
+## action on the right of the last line: "Fix 8", or Fix on one area. Check again is the ↻
+## beside the title. The fixes run as parallel tasks with their own cards; each change is
 ## reviewed in the Review tab. While they run the card counts what is ready to review, and
 ## after each accept the project is checked again so the scores rise in place.
 ##
@@ -22,13 +24,14 @@ signal review_pressed
 signal target_changed(target: String)
 
 const UI_THEME := preload("ui_theme.gd")
+const BLOCKS := preload("ui_blocks.gd")
 const UI_MOTION := preload("ui_motion.gd")
 const UI := preload("ui_components.gd")
 const STYLE := preload("sidebar_style.gd")
 const INDICATOR := preload("activity_indicator.gd")
 const GUIDELINES := preload("access_guidelines.gd")
-## Severity -> status dot state.
-const DOTS := {"high": "attention", "medium": "working", "low": "off"}
+## A score bar's width in logical px × unit: one length for every area, so they compare.
+const BAR_W := 120.0
 ## Findings shown before "Show all".
 const FIRST_FINDINGS := 3
 ## Below this card width, in em, it shows one finding fewer.
@@ -37,7 +40,7 @@ const FINAL := ["accepted", "discarded", "done", "failed", "stopped"]
 ## Per kind: [title while checking, step while checking, accessible name].
 const WORDS := {
 	"match":
-	["Checking against the art bible", "Measuring every asset, scene and theme…", "Make it match"],
+	["Checking against the look", "Measuring every asset, scene and theme…", "Make it match"],
 	"access":
 	["Checking accessibility", "Playing the game and reading its menus…", "Accessibility check"],
 	"perf": ["Measuring performance", "Playing the game to measure it…", "Performance check"],
@@ -66,7 +69,7 @@ class ScoreBar:
 			self,
 			func() -> void:
 				var unit := UI_THEME.unit(self)
-				custom_minimum_size = Vector2(roundf(unit * 56.0), maxf(3.0, roundf(unit * 4.0)))
+				custom_minimum_size = Vector2(roundf(unit * BAR_W), maxf(3.0, roundf(unit * 4.0)))
 		)
 
 	func set_score(value: float) -> void:
@@ -109,9 +112,9 @@ var _findings: VBoxContainer
 var _more: Button
 ## The user pressed Show all: every finding stays shown whatever the width.
 var _all_shown := false
-var _foot: HFlowContainer
+var _line: HBoxContainer
+var _foot: HBoxContainer
 var _needs: Label
-var _kept: Label
 var _run: Array = []
 
 
@@ -144,6 +147,10 @@ func _init(card_kind := "match") -> void:
 	if kind == "perf":
 		target_picker = _target_picker()
 		head.add_child(target_picker)
+	_again = _small_icon("reload", "Check again")
+	_again.pressed.connect(func() -> void: recheck_requested.emit())
+	_again.hide()
+	head.add_child(_again)
 	stop = _small_icon("stop", "Stop making it match" if kind == "match" else "Stop the fixes")
 	stop.pressed.connect(_on_stop)
 	stop.hide()
@@ -155,6 +162,7 @@ func _init(card_kind := "match") -> void:
 	line.theme_type_variation = "JoineryRowTight"
 	UI.bind_height(line, "xs", false)
 	column.add_child(line)
+	_line = line
 	_dots = INDICATOR.new()
 	_dots.set("running", true)
 	line.add_child(_dots)
@@ -172,11 +180,6 @@ func _init(card_kind := "match") -> void:
 	_review.pressed.connect(func() -> void: review_pressed.emit())
 	_review.hide()
 	line.add_child(_review)
-	_again = UI.quiet_link("Check again")
-	UI.bind_height(_again, "xs")
-	_again.pressed.connect(func() -> void: recheck_requested.emit())
-	_again.hide()
-	line.add_child(_again)
 	_areas = VBoxContainer.new()
 	_areas.theme_type_variation = "JoineryTight"
 	_areas.accessibility_name = "Scores by area"
@@ -211,29 +214,21 @@ func _init(card_kind := "match") -> void:
 		guidelines.connect("opened", _by_guideline)
 	else:
 		column.add_child(_more)
-	# Fix all and its two counts on one line; in a narrow sidebar the counts flow onto the next.
-	_foot = HFlowContainer.new()
-	STYLE.on_theme_overrides(
-		_foot,
-		func() -> void:
-			_foot.add_theme_constant_override("h_separation", UI_THEME.space(_foot, 2))
-			_foot.add_theme_constant_override("v_separation", UI_THEME.space(_foot, 1))
-	)
+	# What needs you on the left, the call to action on the right.
+	_foot = HBoxContainer.new()
+	_foot.theme_type_variation = "JoineryRow"
 	_foot.hide()
 	column.add_child(_foot)
+	_needs = UI.label("", "JoineryCaption")
+	_needs.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_needs.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_needs.mouse_filter = Control.MOUSE_FILTER_PASS
+	_foot.add_child(_needs)
 	fix_all = UI.primary("Fix all")
 	UI.bind_height(fix_all, "sm")
 	UI_MOTION.press_feedback(fix_all)
 	fix_all.pressed.connect(func() -> void: fix_requested.emit([]))
 	_foot.add_child(fix_all)
-	_needs = UI.label("", "JoineryCaption")
-	_needs.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	_needs.mouse_filter = Control.MOUSE_FILTER_PASS
-	_foot.add_child(_needs)
-	_kept = UI.label("", "JoineryCaption")
-	_kept.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	_kept.mouse_filter = Control.MOUSE_FILTER_PASS
-	_foot.add_child(_kept)
 
 
 ## Measuring again: the scores stay while the dots run.
@@ -261,11 +256,10 @@ func show_audit(data: Dictionary) -> void:
 	if not errors.is_empty():
 		_settle("warning", "%d couldn't be measured. Details are in Output." % errors.size())
 	elif findings.is_empty():
-		_settle(
-			"done", "Checked against the art bible's rules" if kind == "match" else facts_line(data)
-		)
+		_settle("done", "Checked against the look" if kind == "match" else facts_line(data))
 	else:
-		_settle("", severity_line(findings))
+		# The glyphs say how serious; no "4 high · 5 medium" line repeats them.
+		_settle("", "")
 	_again.visible = true
 	_review.visible = _ready_count() > 0
 	_fill_areas(data.get("areas", []), before)
@@ -274,17 +268,21 @@ func show_audit(data: Dictionary) -> void:
 		guidelines.call("show_xag", (data.get("facts", {}) as Dictionary).get("xag", {}), findings)
 		if guidelines.visible:
 			_by_guideline(true)
-	fix_all.text = "Fix %d %s" % [fixable, "thing" if fixable == 1 else "things"]
+	fix_all.text = "Fix %d" % fixable
+	fix_all.accessibility_name = "Fix %d %s" % [fixable, "thing" if fixable == 1 else "things"]
 	fix_all.visible = fixable > 0
 	var needs := findings.size() - fixable
 	_needs.text = ("%d needs you" if needs == 1 else "%d need you") % needs if needs > 0 else ""
 	_needs.tooltip_text = _needs_detail(findings)
-	_needs.visible = needs > 0
+	# Files kept as they are (final, or excluded in joinery.toml) are named under Show all.
 	var kept: Array = data.get("excluded", [])
-	_kept.text = "%d kept as they are" % kept.size() if not kept.is_empty() else ""
-	_kept.tooltip_text = "Final or excluded in joinery.toml [match]:\n" + "\n".join(kept)
-	_kept.visible = not kept.is_empty()
-	_foot.visible = fix_all.visible or _needs.visible or _kept.visible
+	_more.tooltip_text = (
+		"Kept as they are (joinery.toml [match]):\n" + "\n".join(kept)
+		if not kept.is_empty()
+		else ""
+	)
+	_foot.visible = fix_all.visible or needs > 0
+	_sync_line()
 	var after := _scores()
 	if not before.is_empty() and _total(after) > _total(before):
 		UI_MOTION.pulse(self)
@@ -319,6 +317,7 @@ func apply_run(event: Dictionary) -> void:
 				words = done_line()
 			_settle("warning" if failed > 0 or next != "done" else "done", words)
 			_review.visible = _ready_count() > 0
+			_sync_line()
 			_again.visible = true
 			_findings.visible = _findings.get_child_count() > 0
 			_areas.visible = not _area_rows.is_empty()
@@ -348,15 +347,15 @@ func task_changed(task_id: String, task_state: String) -> bool:
 ## The headline: what drifts, in one line.
 static func headline(data: Dictionary) -> String:
 	if not bool(data.get("rules", true)):
-		return "The art bible has no checked rules yet"
+		return "The look has no checked rules yet"
 	var count := (data.get("findings", []) as Array).size()
 	if count == 0:
 		return (
-			"Everything matches the art bible"
+			"Everything matches the look"
 			if not (data.get("areas", []) as Array).is_empty()
-			else "Nothing to check against the art bible yet"
+			else "Nothing to check against the look yet"
 		)
-	return "%d %s from the art bible" % [count, "thing drifts" if count == 1 else "things drift"]
+	return "%d %s off the look" % [count, "thing" if count == 1 else "things"]
 
 
 ## The headline of an accessibility or performance check.
@@ -388,19 +387,6 @@ static func facts_line(data: Dictionary) -> String:
 	if windowed:
 		line += " · %d draw calls" % int(measured.get("draw_calls", 0))
 	return line
-
-
-## "3 high · 5 medium": how serious what drifts is, at a glance.
-static func severity_line(findings: Array) -> String:
-	var counts := {"high": 0, "medium": 0, "low": 0}
-	for item: Variant in findings:
-		var severity := str((item as Dictionary).get("severity", "low"))
-		counts[severity] = int(counts.get(severity, 0)) + 1
-	var words := PackedStringArray()
-	for severity: String in ["high", "medium", "low"]:
-		if int(counts[severity]) > 0:
-			words.append("%d %s" % [int(counts[severity]), severity])
-	return " · ".join(words)
 
 
 ## "Making 5 changes… 2 ready to review".
@@ -473,15 +459,24 @@ func _fill_areas(areas: Array, before: Dictionary) -> void:
 			added.append(_area_rows[id]["row"])
 		var row: Dictionary = _area_rows[id]
 		var score := int(entry.get("score", 0))
-		UI_MOTION.roll_number(row["number"] as Label, score, "%d%%")
-		(row["bar"] as ScoreBar).set_score(score)
+		if int(entry.get("checked", 1)) == 0:
+			# Nothing in this area to check: a dash, not a 0% that reads as a failure.
+			(row["number"] as Label).text = "—"
+			(row["bar"] as ScoreBar).set_score(0.0)
+		else:
+			UI_MOTION.roll_number(row["number"] as Label, score, "%d%%")
+			(row["bar"] as ScoreBar).set_score(score)
 		_show_fix(row["fix"] as Button, int(entry.get("fixable", 0)) > 0)
 		(row["row"] as Control).tooltip_text = (
-			"%d of %d match"
-			% [
-				int(entry.get("checked", 0)) - int(entry.get("failing", 0)),
-				int(entry.get("checked", 0))
-			]
+			(
+				"%d of %d match"
+				% [
+					int(entry.get("checked", 0)) - int(entry.get("failing", 0)),
+					int(entry.get("checked", 0))
+				]
+			)
+			if int(entry.get("checked", 1)) > 0
+			else "Nothing to check here yet"
 		)
 		if before.has(id) and score > int(before[id]):
 			UI_MOTION.flash(row["number"] as Label)
@@ -573,15 +568,24 @@ func _finding_row(item: Dictionary) -> HBoxContainer:
 	row.theme_type_variation = "JoineryRowTight"
 	row.mouse_filter = Control.MOUSE_FILTER_PASS
 	var severity := str(item.get("severity", "low"))
-	var dot := UI.status_dot(str(DOTS.get(severity, "off")))
-	row.add_child(dot)
+	# Glyph and colour, so severity reads without colour too.
+	row.add_child(BLOCKS.severity_glyph(severity))
 	var name := str(item.get("path", "")).get_file()
-	var shown := "%s  %s → %s" % [name, str(item.get("measured", "")), str(item.get("target", ""))]
+	var shown := "%s → %s" % [str(item.get("measured", "")), str(item.get("target", ""))]
 	if kind != "match":
 		# A check's finding reads best in its own words: what was seen, and where.
 		shown = str(item.get("message", ""))
-		if name != "project.godot":
-			shown = "%s: %s" % [name, shown]
+	if kind == "match" or name != "project.godot":
+		# The file in the text colour; what is off, muted.
+		var file := UI.label(name, "JoineryCaption")
+		file.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		file.mouse_filter = Control.MOUSE_FILTER_PASS
+		STYLE.on_theme_overrides(
+			file,
+			func() -> void:
+				file.add_theme_color_override("font_color", file.get_theme_color("text", "Joinery"))
+		)
+		row.add_child(file)
 	var words := UI.label(shown, "JoineryCaption")
 	words.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	words.size_flags_vertical = Control.SIZE_SHRINK_CENTER
@@ -712,6 +716,12 @@ func _working(words: String) -> void:
 	_status.hide()
 	_step.text = words
 	_step.tooltip_text = words
+	_line.show()
+
+
+## The status line shows only with something to say: a step, a result, or Review.
+func _sync_line() -> void:
+	_line.visible = not _step.text.is_empty() or _review.visible or _dots.visible
 
 
 func _settle(kind: String, words: String) -> void:
@@ -723,6 +733,7 @@ func _settle(kind: String, words: String) -> void:
 	_status.visible = not kind.is_empty()
 	_step.text = words
 	_step.tooltip_text = words
+	_sync_line()
 
 
 func _on_stop() -> void:

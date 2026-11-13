@@ -84,9 +84,11 @@ func _run() -> void:
 	var words: PackedStringArray = card.call("area_words")
 	_check(words[0] == "Frame time 0%" and words[2] == "Lights 0%", ", ".join(words))
 	var first: Control = (card.call("finding_rows") as Array)[0]
-	var row_text := (first.find_children("", "Label", true, false)[0] as Label).text
+	var parts := first.find_children("", "Label", true, false)
+	# The file in the text colour, then the finding in its own words.
+	var row_text := "%s: %s" % [(parts[0] as Label).text, (parts[1] as Label).text]
 	_check(row_text.begins_with("hot.gd: Costs 41.3 ms"), "A script finding: " + row_text)
-	_check((card.get("fix_all") as Button).text == "Fix 3 things", "Three can be fixed")
+	_check((card.get("fix_all") as Button).text == "Fix 3", "Three can be fixed")
 	_check(card.get("_needs").text == "1 needs you", "The frame time needs the others")
 
 	# Another machine: measured again.

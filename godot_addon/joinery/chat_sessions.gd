@@ -301,7 +301,10 @@ func render(entries: Array) -> void:
 				_transcript.call("add_message", PERSONA, text)
 			"notice":
 				var level := str(entry.get("level", "info"))
-				_transcript.call("add_notice", text, "error" if level != "info" else "info")
+				var kind := (
+					"info" if level == "info" else ("divider" if level == "divider" else "error")
+				)
+				_transcript.call("add_notice", text, kind)
 			"change":
 				var id := str(entry.get("transaction_id", ""))
 				if card != null and not id.is_empty():

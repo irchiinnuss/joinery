@@ -96,12 +96,13 @@ def failure_notice(result: SubmitResult) -> dict[str, Any]:
             )
         )
     else:
+        # One line the chat can show whole ("Change not applied · <the first reason>"); the
+        # reasons in full follow after a line break, behind the line's › in the sidebar.
         reasons = [r for r in dict.fromkeys(map(_plain, result.problems)) if r]
-        text = (
-            "Journeyman's change didn't pass Joinery's checks"
-            + (": " + "; ".join(reasons[:2]) if reasons else "")
-            + ". Nothing was changed."
-        )
+        text = "Change not applied" + (" · " + reasons[0] if reasons else "")
+        if reasons:
+            detail = "; ".join(reasons[:2])
+            text += "\n" + detail[:1].upper() + detail[1:] + ". Nothing was changed."
     return {"kind": "notice", "level": "warn", "text": text}
 
 

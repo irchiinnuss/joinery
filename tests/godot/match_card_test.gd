@@ -84,7 +84,7 @@ func _run() -> void:
 	_check(card != null and tasks.visible, "The match card shows")
 	_check(_audits == 1, "It measured the project once")
 	_check(
-		(card.get("title_label") as Label).text == "9 things drift from the art bible",
+		(card.get("title_label") as Label).text == "9 things off the look",
 		"The headline says how much drifts: " + (card.get("title_label") as Label).text
 	)
 	var words: PackedStringArray = card.call("area_words")
@@ -97,27 +97,33 @@ func _run() -> void:
 		),
 		"One score per area: " + ", ".join(words)
 	)
-	_check(card.call("step_text") == "4 high · 5 medium", "How serious, in one line")
+	_check(
+		card.call("step_text").is_empty() and not (card.get("_line") as Control).visible,
+		"The severity glyphs say how serious; no counts line repeats them"
+	)
+	_check((card.get("_again") as Button).text.is_empty(), "Check again is the ↻ icon")
 	_check((card.call("finding_rows") as Array).size() == 3, "The top three findings show")
 	var first: Control = (card.call("finding_rows") as Array)[0]
+	var parts := first.find_children("", "Label", true, false)
 	_check(
-		(first.find_children("", "Label", true, false)[0] as Label).text.begins_with(
-			"wall.png  100% off-palette → ≤ 5%"
+		(
+			(parts[0] as Label).text == "wall.png"
+			and (parts[1] as Label).text == "100% off-palette → ≤ 5%"
 		),
-		"A finding says what was measured and what the bible asks"
+		"A finding names the file, then what was measured and what the look asks"
 	)
 	var more := _button(card, "Show all 9")
 	_check(more != null, "The rest wait behind Show all")
 	more.pressed.emit()
 	_check((card.call("finding_rows") as Array).size() == 9, "Show all shows every finding")
 	var fix_all: Button = card.get("fix_all")
-	_check(
-		fix_all.visible and fix_all.text == "Fix 8 things",
-		"Fix all names how many: " + fix_all.text
-	)
+	_check(fix_all.visible and fix_all.text == "Fix 8", "Fix all names how many: " + fix_all.text)
 	_check(_button(card, "Fix") != null, "Each area that can be fixed has Fix")
 	_check(card.get("_needs").text == "1 needs you", "What Joinery can't fix is counted")
-	_check(card.get("_kept").text == "2 kept as they are", "Final and excluded files are counted")
+	_check(
+		(card.get("_more") as Button).tooltip_text.begins_with("Kept as they are"),
+		"Final and excluded files are named under Show all, not counted in the footer"
+	)
 	_check((card.call("area_fix", "models") as Button).disabled, "A clean area has no Fix")
 
 	# One area's Fix asks for that area only.
@@ -183,8 +189,7 @@ func _run() -> void:
 		"Scores rose: " + ", ".join(words)
 	)
 	_check(
-		(card.get("title_label") as Label).text == "1 thing drifts from the art bible",
-		"The headline follows"
+		(card.get("title_label") as Label).text == "1 thing off the look", "The headline follows"
 	)
 	_check(not (card.get("fix_all") as Button).visible, "Nothing left to fix by itself")
 
@@ -195,6 +200,8 @@ func _run() -> void:
 	_check(tasks.get("match_card") == null, "Dismissed")
 	var settings: Control = dock.get("_settings")
 	settings.call("set_open", true)
+	# The checks wait under Advanced.
+	settings.find_child("Advanced", true, false).call("set_open", true)
 	var row := _button(settings, "Make it match")
 	_check(row != null, "Settings has Make it match")
 	row.pressed.emit()

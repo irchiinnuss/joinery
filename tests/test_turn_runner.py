@@ -246,7 +246,7 @@ def test_a_failed_auto_submit_asks_once_then_says_so(host: Host) -> None:
     assert "file_preview" not in kinds and kinds.count("notice") == 1
     notice = host.events[kinds.index("notice")]
     assert notice["level"] == "warn"
-    assert notice["text"].startswith("Journeyman's change didn't pass Joinery's checks")
+    assert notice["text"].startswith("Change not applied · ")
     assert "ashtray.tscn uses a file the change doesn't include" in notice["text"]
     assert "Not submitted" not in notice["text"], "The agent's wording stays with it"
     assert notice["text"].endswith("Nothing was changed.")
@@ -481,8 +481,8 @@ def test_the_summary_primes_only_its_own_chat() -> None:
         (
             [Problem("godot_import", "Godot import/script validation failed: ERROR x")],
             (
-                "Journeyman's change didn't pass Joinery's checks: Godot couldn't import "
-                "it. Nothing was changed."
+                "Change not applied · Godot couldn't import it\n"
+                "Godot couldn't import it. Nothing was changed."
             ),
         ),
         (
@@ -495,8 +495,8 @@ def test_the_summary_primes_only_its_own_chat() -> None:
         (
             [Problem("tests", "The project's tests failed: ...", ["test/a_test.gd"])],
             (
-                "Journeyman's change didn't pass Joinery's checks: the project's tests "
-                "failed (a_test.gd). Nothing was changed."
+                "Change not applied · the project's tests failed (a_test.gd)\n"
+                "The project's tests failed (a_test.gd). Nothing was changed."
             ),
         ),
     ],

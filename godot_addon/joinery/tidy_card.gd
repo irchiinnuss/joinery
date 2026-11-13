@@ -85,6 +85,19 @@ func _init() -> void:
 	title_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	title_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	head.add_child(title_label)
+	# Check again is the ↻ beside the title, like every check card's.
+	again = UI.icon_button("reload", "Check again")
+	again.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	UI_MOTION.press_feedback(again)
+	STYLE.on_theme_overrides(
+		again,
+		func() -> void:
+			var side := float(UI_THEME.control_h(again, "sm"))
+			again.custom_minimum_size = Vector2(side, side)
+	)
+	again.pressed.connect(func() -> void: recheck_requested.emit())
+	again.hide()
+	head.add_child(again)
 	close = UI.icon_button("close", "Dismiss")
 	close.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	UI_MOTION.press_feedback(close)
@@ -112,11 +125,6 @@ func _init() -> void:
 	_step.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	_step.mouse_filter = Control.MOUSE_FILTER_PASS
 	line.add_child(_step)
-	again = UI.quiet_link("Check again")
-	UI.bind_height(again, "xs")
-	again.pressed.connect(func() -> void: recheck_requested.emit())
-	again.hide()
-	line.add_child(again)
 	# The rows scroll in their own share of the window, so the card never pushes the composer.
 	_scroll = ScrollContainer.new()
 	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
