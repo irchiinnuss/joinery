@@ -694,23 +694,14 @@ func _send_view(request_id: String) -> void:
 		_job.send_line(JSON.stringify(line))
 
 
-func decide_files(identifier: String, accept: bool) -> void:
+## Accept or discard the change [param identifier]. [param auto]: the editor's own Accept of a
+## change Joinery said may be kept without asking (review_flow.gd), recorded as such.
+func decide_files(identifier: String, accept: bool, auto := false) -> void:
 	if _job != null and _connected:
-		(
-			_job
-			. send_line(
-				(
-					JSON
-					. stringify(
-						{
-							"kind": "decision",
-							"transaction_id": identifier,
-							"accept": accept,
-						}
-					)
-				)
-			)
-		)
+		var line := {"kind": "decision", "transaction_id": identifier, "accept": accept}
+		if auto:
+			line["auto"] = true
+		_job.send_line(JSON.stringify(line))
 
 
 func rollback_files(identifier: String) -> void:

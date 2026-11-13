@@ -108,6 +108,9 @@ var request := ""
 var targets: Array = []
 var state := "sending"
 var transaction_id := ""
+## Live scene edits kept without asking (review_flow.gd): Undo takes them back first, then
+## reverts the files, if any. Returns "" or why it couldn't.
+var undo_live := Callable()
 ## The RichTextLabel holding the request text (selectable).
 var text_label: RichTextLabel
 var _bubble: PanelContainer
@@ -677,9 +680,10 @@ func _gate_app() -> String:
 ## Revert, "Reverting…" or "Too old to revert" on the accepted line.
 func _sync_revert(accepted: bool) -> void:
 	var file_change := accepted and not transaction_id.is_empty()
-	_revert.visible = file_change and _revertible
+	var live := accepted and undo_live.is_valid()
+	_revert.visible = (file_change and _revertible) or live
 	_revert.disabled = false
-	_too_old.visible = file_change and not _revertible
+	_too_old.visible = file_change and not _revertible and not live
 	_reverting.hide()
 
 
@@ -689,6 +693,15 @@ func _on_revert() -> void:
 		return
 	_revert.hide()
 	_error.hide()
+	if undo_live.is_valid():
+		var why: String = undo_live.call()
+		if not why.is_empty():
+			revert_finished(false, why)
+			return
+		undo_live = Callable()
+		if transaction_id.is_empty():
+			revert_finished(true)
+			return
 	_reverting.show()
 	UI_MOTION.fade_in(_reverting)
 	_sync_activity()

@@ -14,12 +14,19 @@ extends Node
 ##
 ## A change Joinery kept without asking (`[agents] auto_accept`, ADR 0085) never opens a review:
 ## its file_decision says auto_accepted, the request's card shows "Accepted automatically" with
-## Undo, and the files it wrote are rescanned like any accepted change's.
+## Undo, and the files it wrote are rescanned like any accepted change's. When live scene edits
+## come with it, only the editor can keep them: Joinery sends the change with an auto_accept
+## hint and the flow runs the editor's own Accept (plugin.gd's, the one the button runs) without
+## opening the review: the files first, then the live edits, rolled back if the preview went
+## stale. Undo takes the live edits back through the scene's undo history, then reverts the
+## files.
 
 ## Reasons a turn ends without its change ("idle" with one of these): the preview goes.
 const DROPPED := ["failed", "cancelled", "stopped", "needs_user"]
 const AUTO_ACCEPTED := "Accepted automatically"
 
+## The undo history of a scene (UndoRedo for [param root]), for tests; empty asks the editor.
+var history_for := Callable()
 ## The plugin (plugin.gd): its review panel, sidebar and live preview.
 var _plugin: Object
 var _chat: Node
@@ -27,6 +34,10 @@ var _live_summary := ""
 var _live_waiting := false
 ## The task whose live edit is on screen ("" for Journeyman's own request).
 var _live_owner := ""
+## The change whose files the flow accepted on its own, waiting for their decision.
+var _auto_files := ""
+## Undo for the live edits kept last (see _live_undo).
+var _undo_live := Callable()
 
 
 ## Follow [param chat] (chat_bridge.gd) for [param plugin].
@@ -113,6 +124,11 @@ func _follow(event: Dictionary) -> void:
 	var state := str(event.get("state", ""))
 	if state == "in_review":
 		_live_waiting = false
+		if not _auto_files.is_empty():
+			return  # Its files are being kept; the live edits follow their decision.
+		# Kept without asking: the editor's own Accept, with no review opened.
+		if bool(event.get("auto_accept", false)) and _live_owner.is_empty() and _keep_live(""):
+			return
 		# A file review shows the live edit with it; otherwise the scene review opens.
 		if _pending() and (_plugin.get("_file_review") as Dictionary).is_empty():
 			_plugin.call("_open_review", _live_summary)
@@ -132,6 +148,8 @@ func _pending() -> bool:
 
 
 func _on_file_preview(event: Dictionary) -> void:
+	if bool(event.get("auto_accept", false)) and _accept_files(event):
+		return
 	_plugin.set("_file_review", event.duplicate(true))
 	(
 		_plugin
@@ -178,15 +196,27 @@ func _on_revise(path: String) -> void:
 
 
 ## Journeyman's own change was kept without asking: no review opened for it, so the card takes
-## the quiet outcome line and the editor picks up the files, as after an Accept.
+## the quiet outcome line and the editor picks up the files, as after an Accept. Live edits that
+## came with it are kept now, after their files, as the Accept button does.
 func _on_file_decision(event: Dictionary) -> void:
 	if not bool(event.get("auto_accepted", false)) or event.has("task_id"):
 		return
 	var id := str(event.get("transaction_id", ""))
+	var undo := Callable()
+	if id == _auto_files:
+		_auto_files = ""
+		if not _keep_live(id):
+			# The preview changed before it was kept: the files go back, the scene waits.
+			_chat.call("rollback_files", id)
+			if _pending():
+				_plugin.call("_open_review", _live_summary)
+			return
+		undo = _undo_live
 	var dock: Variant = _plugin.get("_dock")
 	var card: Variant = (dock as Object).call("_card") if dock is Object else null
 	if card is Object:
 		(card as Object).set("transaction_id", id)
+		(card as Object).set("undo_live", undo)
 		(card as Object).call("set_outcome", "auto", str(event.get("message", AUTO_ACCEPTED)))
 	var paths := PackedStringArray()
 	for change: Variant in event.get("changes", []):
@@ -195,6 +225,65 @@ func _on_file_decision(event: Dictionary) -> void:
 		_plugin.call("_on_review_row_applied", id, paths, event.get("changes", []))
 	if dock is Object and (dock as Object).has_method("refresh_revertible"):
 		(dock as Object).call("refresh_revertible")
+
+
+## A change with live edits that Joinery said may be kept: accept its files the way the Accept
+## button does (the live preview checked first), with no review opened. False when the preview
+## can't be kept as it is, so the review opens as usual.
+func _accept_files(event: Dictionary) -> bool:
+	var edits: Variant = _plugin.get("_edits")
+	if not _live_owner.is_empty() or not _pending():
+		return false
+	if not bool(((edits as Object).call("prepare_accept") as Dictionary).get("success", false)):
+		return false
+	_auto_files = str(event.get("transaction_id", ""))
+	_live_waiting = false
+	_chat.call("decide_files", _auto_files, true, true)
+	return true
+
+
+## Keep the live edits on screen with the editor's own Accept (quiet: no review, no notice).
+## Returns false when it refused (the preview went stale), leaving them pending. A change with
+## no files ([param transaction_id] "") shows its card's line here.
+func _keep_live(transaction_id: String) -> bool:
+	if not _pending():
+		return false
+	var root: Variant = (_plugin.get("_edits") as Object).get("root")
+	_plugin.call("_accept_scene_edit", true)
+	if _pending():
+		return false
+	_undo_live = _live_undo(root)
+	if transaction_id.is_empty():
+		var dock: Variant = _plugin.get("_dock")
+		var card: Variant = (dock as Object).call("_card") if dock is Object else null
+		if card is Object:
+			(card as Object).set("undo_live", _undo_live)
+			(card as Object).call("set_outcome", "auto", AUTO_ACCEPTED)
+	return true
+
+
+## Undo for the live edits just kept in [param root]'s scene: their own step in its undo history,
+## taken back while nothing was done after it. Returns "" or why it can't.
+func _live_undo(root: Variant) -> Callable:
+	var history := _history(root)
+	if history == null:
+		return Callable()
+	var version := history.get_version()
+	return func() -> String:
+		if not is_instance_valid(history) or history.get_version() != version:
+			return "The scene changed since. Use Edit > Undo in the scene."
+		history.undo()
+		return ""
+
+
+func _history(root: Variant) -> UndoRedo:
+	if history_for.is_valid():
+		return history_for.call(root) as UndoRedo
+	if not root is Object or not is_instance_valid(root) or not _plugin.has_method("get_undo_redo"):
+		return null
+	var manager: Object = _plugin.call("get_undo_redo")
+	var id: int = manager.call("get_object_history_id", root)
+	return manager.call("get_history_undo_redo", id) as UndoRedo
 
 
 ## The reviewer's notes arrived after the review opened.
