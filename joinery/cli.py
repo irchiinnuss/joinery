@@ -15,6 +15,7 @@ from typing import Any
 
 from joinery import (
     __version__,
+    auto_accept,
     blueprints,
     brief,
     bug_reports,
@@ -1265,6 +1266,12 @@ def _parser() -> argparse.ArgumentParser:
             "fix-errors", help="show or change what happens to console errors"
         )
     )
+    auto_accept.add_arguments(
+        commands.add_parser(
+            "auto-accept",
+            help="show or change whether passing changes are kept without asking",
+        )
+    )
     workspace = commands.add_parser(
         "workspace", help="list assets and desktop viewers as JSON"
     )
@@ -1722,6 +1729,8 @@ def main(argv: list[str] | None = None) -> int:
         return _reviewer(args)
     if args.command == "complex-models":
         return complex_models.main(args)
+    if args.command == "auto-accept":
+        return auto_accept.main(args)
     if args.command == "fix-errors":
         return console_errors.main(args)
     if args.command == "agents":

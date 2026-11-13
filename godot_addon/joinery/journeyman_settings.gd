@@ -20,6 +20,7 @@ const DESIGN_SETTING := preload("design_setting.gd")
 const COMPLEX_MODELS_SETTING := preload("complex_models_setting.gd")
 const FIX_ERRORS_SETTING := preload("fix_errors_setting.gd")
 const AGENT_SETTING := preload("agent_setting.gd")
+const AUTO_ACCEPT_SETTING := preload("auto_accept_setting.gd")
 const PATH := "Joinery/journeyman.cfg"
 const TEXT_SIZES := UI_THEME.TEXT_SIZES
 const MODES := ["Auto", "Fast", "Thorough"]
@@ -393,6 +394,8 @@ func _build_replies() -> void:
 	section.body.add_child(UI.setting_row("Reply mode", _mode_picker))
 	_timings_switch = _switch_row(section, "Show reply times", "show_timings", true)
 	_details_switch = _switch_row(section, "Open review details", "details_open", false)
+	# Changes that pass every check kept without asking (`[agents] auto_accept`).
+	section.body.add_child(AUTO_ACCEPT_SETTING.new())
 
 
 ## The closed picker says what the chosen reply mode does.
