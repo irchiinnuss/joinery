@@ -41,6 +41,7 @@ TRANSACTION = "joinery.transaction.id"
 ROUND = "joinery.round"
 OUTCOME = "joinery.outcome"
 DECISION = "joinery.decision"
+AUTO_ACCEPTED = "joinery.decision.auto"
 AGENT = "joinery.agent"
 TASK = "joinery.task.id"
 WORKER_START_MS = "joinery.worker.start_ms"
@@ -269,8 +270,11 @@ def prune(project: Path, keep: int = KEEP) -> None:
         old.unlink(missing_ok=True)
 
 
-def record_decision(project: Path, transaction_id: str, accepted: bool) -> None:
-    """The user's Accept or Reject, added to the change's file when there is one."""
+def record_decision(
+    project: Path, transaction_id: str, accepted: bool, *, auto: bool = False
+) -> None:
+    """The user's Accept or Reject, added to the change's file when there is one.
+    ``auto``: Joinery accepted it by the project's choice (joinery.auto_accept)."""
     try:
         target = _file(project, transaction_id)
         if not target.is_file():
@@ -290,6 +294,7 @@ def record_decision(project: Path, transaction_id: str, accepted: bool) -> None:
                         KIND: DECIDED,
                         TRANSACTION: transaction_id,
                         DECISION: "accepted" if accepted else "rejected",
+                        **({AUTO_ACCEPTED: True} if auto else {}),
                     },
                     "status": {"code": "OK"},
                 }
@@ -394,6 +399,7 @@ def summarise(identifier: str, spans: list[dict[str, Any]]) -> dict[str, Any]:
     reported = False
     turns = 0
     decision = ""
+    auto = False
     #: Which model ran which role's turns: (role, model, tier) -> turns.
     models: dict[tuple[str, str, str], int] = {}
     routes: dict[str, int] = {}
@@ -403,6 +409,7 @@ def summarise(identifier: str, spans: list[dict[str, Any]]) -> dict[str, Any]:
         kind = str(attrs.get(KIND, ""))
         if kind == DECIDED:
             decision = str(attrs.get(DECISION, ""))
+            auto = attrs.get(AUTO_ACCEPTED) is True
             continue
         if kind in {CHANGE, FINDINGS}:
             continue
@@ -448,6 +455,7 @@ def summarise(identifier: str, spans: list[dict[str, Any]]) -> dict[str, Any]:
         "requests": len(roots),
         "outcome": str(root_attrs.get(OUTCOME, "")),
         "decision": decision,
+        "auto_accepted": auto,
         "agent": str(root_attrs.get(AGENT, "")),
         "model": str(root_attrs.get(RESPONSE_MODEL, "")),
         "total_ms": round(total),

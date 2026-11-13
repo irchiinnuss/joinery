@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, cast
 from mcp.types import CallToolResult, TextContent
 
 from joinery import (
+    auto_accept,
     live_game,
     metrics,
     references,
@@ -1437,6 +1438,11 @@ class ProjectGateway:
         }
         if notice:
             event["message"] = "Change discarded. " + notice
+        if accept and tx.auto_accepted:
+            # Kept without asking (joinery.auto_accept): the card says so, with Undo.
+            event["auto_accepted"] = True
+            event["summary"] = tx.summary
+            event["message"] = auto_accept.ACCEPTED
         if accept and tx.timeline.get("state") == "failed":
             # The change is kept either way; say why the Timeline lacks it.
             event["message"] = "Change accepted. " + tx.timeline.get("message", "")

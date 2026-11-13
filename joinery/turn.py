@@ -17,7 +17,7 @@ from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal
 
-from joinery import done_when, metrics, reasons
+from joinery import auto_accept, done_when, metrics, reasons
 from joinery.claims import LEAD_BUSY, live_refusal
 from joinery.peer_review import PeerReview, Reviewer, ReviewPlan, request_for
 from joinery.reasons import Reason
@@ -149,7 +149,9 @@ class Problem:
 
 @dataclass
 class SubmitResult:
-    status: Literal["in_review", "failed", "needs_user", "nothing_to_review"]
+    status: Literal[
+        "in_review", "accepted", "failed", "needs_user", "nothing_to_review"
+    ]
     attempt: int
     attempts_left: int
     final: bool
@@ -175,6 +177,8 @@ class SubmitResult:
         }
         if self.notes:
             result["notes"] = self.notes
+        if self.status == "accepted":
+            result["auto_accepted"] = True
         return result
 
 
@@ -192,6 +196,12 @@ NEXT_REVIEW = (
     "The change is on screen for the user. Say in a sentence or two what you made "
     "and where you placed it (scene and node), plainly and without Joinery's own "
     "steps, and make no more changes this turn."
+)
+NEXT_AUTO = (
+    "The project keeps changes that pass every check, so this one was accepted "
+    "automatically. Say in a sentence or two what you made and where you placed it "
+    "(scene and node) and that it was kept. Don't ask the user to accept it, and make "
+    "no more changes this turn."
 )
 NEXT_NOTHING = (
     "Nothing is staged and no live edit is waiting. Make the change first, or end "
@@ -346,6 +356,12 @@ class TurnController:
         self._done: list[done_when.Result] = []
         self._done_print: tuple[dict[str, str], int] | None = None
         self._verifying: asyncio.Task[list[done_when.Result]] | None = None
+        #: This turn's changes may be accepted without asking when the project says so
+        #: (``joinery.auto_accept``); a variant never is, the user picks among them.
+        self.auto_accepts = True
+        #: The host's Accept, the same path the user's Accept button takes (its
+        #: events, follow-ups and the task's card); None decides here and emits.
+        self.auto_decide: Callable[[str], Awaitable[dict[str, Any]]] | None = None
         gateway.turn = self
 
     # --- State -----------------------------------------------------------------------
@@ -995,12 +1011,24 @@ class TurnController:
                 next=NEXT_STOP,
             )
         self.review_open = True
-        if preview is not None:
+        done = {"done": list(self._done_items)} if self._done_items else None
+        if preview is not None and self._may_auto_accept(preview, notes, peer):
+            self._to(TurnState.IN_REVIEW, extra=done)
+            if await self._auto_accept():
+                return self._result(
+                    "accepted",
+                    True,
+                    transaction_id=str(preview["transaction_id"]),
+                    changes=changes,
+                    next=NEXT_AUTO,
+                    notes=notes,
+                )
+            # The accept didn't go through: the change waits for the user after all.
             self.emit(preview)
-        self._to(
-            TurnState.IN_REVIEW,
-            extra={"done": list(self._done_items)} if self._done_items else None,
-        )
+        else:
+            if preview is not None:
+                self.emit(preview)
+            self._to(TurnState.IN_REVIEW, extra=done)
         self.gateway.start_media(self.emit)
         return self._result(
             "in_review",
@@ -1010,6 +1038,52 @@ class TurnController:
             next=NEXT_REVIEW,
             notes=notes,
         )
+
+    def _may_auto_accept(
+        self, preview: Mapping[str, Any], notes: list[str], peer: PeerReview | None
+    ) -> bool:
+        """The project keeps passing changes without asking, and nothing about this
+        one needs the user (``joinery.auto_accept.held``)."""
+        if not self.auto_accepts or not auto_accept.enabled(self.gateway.project):
+            return False
+        held = auto_accept.held(
+            changes=list(preview.get("changes") or []),
+            notes=notes,
+            peer=peer,
+            reviewer_on=self.reviewer is not None,
+            done=self._done if self.todo is not None else [],
+            live_edits=self.live_edits,
+            art_gate="art_gate" in preview,
+            last_chance=self._last_chance,
+            unsaved=auto_accept.unsaved_scenes(self.gateway.editor_context),
+        )
+        if held:
+            self.emit({"kind": "auto_accept_held", "reasons": held})
+        return not held
+
+    async def _auto_accept(self) -> bool:
+        """Accept the change in review through the user's own Accept path. False
+        when the accept didn't go through, so the change waits for the user."""
+        identifier = self.review_id
+        tx = self.gateway.transaction
+        if tx is None or tx.id != identifier:
+            return False
+        tx.auto_accepted = True
+        try:
+            if self.auto_decide is not None:
+                await self.auto_decide(identifier)
+            else:
+                self.emit(await self.decide(identifier, True))
+        except (OSError, ValueError) as exc:
+            tx.auto_accepted = False
+            self.emit(
+                {
+                    "kind": "auto_accept_held",
+                    "reasons": [f"the accept didn't go through: {exc}"],
+                }
+            )
+            return False
+        return self.review_id != identifier or not self.review_open
 
     async def precheck(self) -> dict[str, Any]:
         """Run the submit's deterministic checks on the change as it is, read-only.
@@ -1315,7 +1389,12 @@ class TurnController:
     async def decide(self, transaction_id: str, accept: bool) -> dict[str, Any]:
         """The user's Accept or Discard on the change in review."""
         event = await self.gateway.decide(transaction_id, accept)
-        metrics.record_decision(self.gateway.project, transaction_id, accept)
+        metrics.record_decision(
+            self.gateway.project,
+            transaction_id,
+            accept,
+            auto=bool(event.get("auto_accepted")),
+        )
         if transaction_id == self.review_id:
             self.review_open = False
             if self.state is TurnState.IN_REVIEW:

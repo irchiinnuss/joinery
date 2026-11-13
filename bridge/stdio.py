@@ -720,6 +720,23 @@ async def _serve(
                     emit(art_review_event(project))
                 after_decision(decision)
 
+        async def auto_accept(transaction_id: str) -> dict[str, Any]:
+            """Joinery's own Accept of a passing change (joinery.auto_accept): the
+            path the user's Accept takes below, for the chat's change or a task's."""
+            assert crew is not None and variants is not None
+            owned = crew.owner(transaction_id)
+            if owned is not None:
+                decision = await crew.decide(transaction_id, True)
+            else:
+                decision = await controller.decide(transaction_id, True)
+            emit_decisions([decision])
+            if owned is None:
+                emit_decisions(await variants.lead_decided(transaction_id, True))
+            return decision
+
+        controller.auto_decide = auto_accept
+        crew.auto_decide = auto_accept
+
         async def start_variants(data: dict[str, Any], origin: str) -> dict[str, Any]:
             """``/variants``, Try 3 ways, Try other ways, or the lead's start_variants."""
             assert variants is not None

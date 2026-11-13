@@ -287,6 +287,8 @@ class FileTransaction:
         #: The reviewer agent's notes ([{severity, text, file?}]) and how its review went.
         self.review_notes: list[dict[str, str]] = []
         self.reviewer: dict[str, Any] = {}
+        #: Kept without the user's Accept, by the project's choice (joinery.auto_accept).
+        self.auto_accepted = False
 
     @property
     def original(self) -> Path:
@@ -341,6 +343,8 @@ class FileTransaction:
             data["review_notes"] = self.review_notes
         if self.reviewer:
             data["reviewer"] = self.reviewer
+        if self.auto_accepted:
+            data["auto_accepted"] = True
         if self.state in PENDING:
             # The full inventory is only needed until the decision.
             data["base"] = self.base
@@ -740,6 +744,7 @@ class FileTransaction:
         ]
         reviewer = raw.get("reviewer")
         transaction.reviewer = dict(reviewer) if isinstance(reviewer, dict) else {}
+        transaction.auto_accepted = raw.get("auto_accepted") is True
         # Never accept journal paths outside this project, even after local tampering.
         for path in transaction.base:
             _safe(path)

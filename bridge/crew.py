@@ -210,6 +210,9 @@ class Crew:
         self.tasks: dict[str, Task] = {}
         #: A provider's own live edit waiting for the editor: {request id: task}.
         self._editor: dict[str, Task] = {}
+        #: Joinery's own Accept of a task's change (joinery.auto_accept): the chat host
+        #: sets the same path the user's Accept takes; by default decide and tell.
+        self.auto_decide: Callable[[str], Awaitable[dict[str, Any]]] = self._auto_decide
 
     def emit(self, event: dict[str, Any]) -> None:
         self._out(event)
@@ -361,7 +364,11 @@ class Crew:
                 # Nobody is left to fix what the checks found: it stops here.
                 await controller.end(True, last=True)
             last = controller.last_result
-            if last is not None and last.status in {"in_review", "nothing_to_review"}:
+            if last is not None and last.status in {
+                "in_review",
+                "accepted",
+                "nothing_to_review",
+            }:
                 outcome = "done"
             elif last is not None and last.problems:
                 task.message = "; ".join(p.message for p in last.problems)[:300]
@@ -485,6 +492,9 @@ class Crew:
         )
         if self._reviewer is not None:
             controller.reviewer = self._reviewer(lane, controller)
+        # A variant is one of several ways: the user picks, it is never kept on its own.
+        controller.auto_accepts = not group
+        controller.auto_decide = lambda transaction_id: self.auto_decide(transaction_id)
         task = Task(task_id, title, request, origin, lane, controller, group=group)
         task.step = f"Starting {self.provider}…"
         if error:
@@ -701,6 +711,7 @@ class Crew:
         if task is None:
             raise ValueError("That change isn't waiting in a running task.")
         decision = await task.controller.decide(transaction_id, accept)
+        task.transaction_id = transaction_id
         task.state = "accepted" if accept else "discarded"
         task.message = str(decision.get("message", ""))
         task.step = ""
@@ -710,6 +721,11 @@ class Crew:
         # Otherwise the lane closes when its agent is done (_run).
         self.emit(task.event())
         return {**decision, "task_id": task.id}
+
+    async def _auto_decide(self, transaction_id: str) -> dict[str, Any]:
+        decision = await self.decide(transaction_id, True)
+        self.emit(decision)
+        return decision
 
     def editor_result(self, request_id: str, result: dict[str, Any]) -> bool:
         """The editor answered a task's own live edit; False when none waits."""
