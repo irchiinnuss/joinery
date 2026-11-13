@@ -310,6 +310,8 @@ static func _buttons(t: Theme, c: Dictionary, m: Dictionary) -> void:
 		"hover": raised.lerp(c["text"], 0.07),
 		"pressed": raised.lerp(c["text"], 0.12),
 		"border": c["border_subtle"],
+		# A hairline, so a secondary action (Discard, Open…) reads as a button on any fill.
+		"width": maxf(1.0, roundf(m["u"])),
 		"icon": c["text"],
 	}
 	var square := (float(m["h"]["md"]) - float(m["icon"])) / 2.0
@@ -545,8 +547,17 @@ static func _panels(t: Theme, c: Dictionary, m: Dictionary) -> void:
 		"JoineryCardSelected":
 		[c["accent_tint"], c["accent"], roundf(2 * float(m["u"])), "lg", _sp(m, 3), _sp(m, 3)],
 		"JoineryBanner": [c["danger_tint"], Color.TRANSPARENT, 0.0, "md", _sp(m, 3), _sp(m, 3)],
-		# Half a step vertically, so a 24 px remove target still fits CONTROL_H.sm.
-		"JoineryChip": [c["accent_tint"], Color.TRANSPARENT, 0.0, "md", _sp(m, 2), _sp(m, 1) / 2.0],
+		# Half a step vertically, so a 24 px remove target still fits CONTROL_H.sm. Chips are
+		# fully round: decisions take lg, controls md, chips full.
+		"JoineryChip":
+		[
+			c["accent_tint"],
+			Color.TRANSPARENT,
+			0.0,
+			"full",
+			_sp(m, 2) + _sp(m, 1) / 2.0,
+			_sp(m, 1) / 2.0
+		],
 		"JoineryPopup":
 		[c["surface_raised"], c["border_subtle"], hairline, "lg", _sp(m, 1), _sp(m, 1)],
 		# A card that explains something beside its trigger (the rail's readiness card).
@@ -557,10 +568,13 @@ static func _panels(t: Theme, c: Dictionary, m: Dictionary) -> void:
 		"JoineryComposerFocused":
 		[c["surface_sunken"], c["accent"], hairline, "xl", _sp(m, 2), _sp(m, 2)],
 		"JoineryBubble": [c["surface_raised"], Color.TRANSPARENT, 0.0, "xl", _sp(m, 3), _sp(m, 3)],
-		# The one transcript card (a request, a check, a task, a plan): filled, no border; only a
-		# selected card draws one (JoineryCardSelected).
+		# The decision card (a change waiting, the art gate, a check with its fix, a settings
+		# group): the one lifted surface, a hairline and a soft shadow, so the thing awaiting
+		# the user leads. Everything else is plain rows on the surface.
 		"JoineryChangeCard":
-		[c["surface_raised"], Color.TRANSPARENT, 0.0, "lg", _sp(m, 3), _sp(m, 3)],
+		[c["surface_card"], c["border_subtle"], hairline, "lg", _sp(m, 3), _sp(m, 3)],
+		# The user's own request in the transcript: no fill, a quiet rule on its leading edge.
+		"JoineryRequest": [Color.TRANSPARENT, Color.TRANSPARENT, 0.0, "", _sp(m, 3), _sp(m, 1)],
 		"JoineryMediaFrame": [c["surface_sunken"], Color.TRANSPARENT, 0.0, "md", 0.0, 0.0],
 		# A quiet status pill (the review's checks): raised, fully round, caption-sized.
 		"JoineryStatusChip":
@@ -588,6 +602,15 @@ static func _panels(t: Theme, c: Dictionary, m: Dictionary) -> void:
 		t.set_stylebox(
 			"panel", type_name, _box(spec[0], spec[1], spec[2], corner, spec[4], spec[5])
 		)
+	var lifted := t.get_stylebox("panel", "JoineryChangeCard") as StyleBoxFlat
+	lifted.shadow_color = c["shadow"]
+	lifted.shadow_size = roundi(6 * float(m["u"]))
+	lifted.shadow_offset = Vector2(0, roundf(2 * float(m["u"])))
+	lifted.anti_aliasing = true
+	var rule := t.get_stylebox("panel", "JoineryRequest") as StyleBoxFlat
+	rule.border_color = c["border_strong"]
+	rule.border_width_left = maxi(2, roundi(2 * float(m["u"])))
+	rule.content_margin_left = _sp(m, 3)
 	# The sidebar's header row sits right under its top edge, level with the editor's tab row.
 	t.get_stylebox("panel", "JoineryDock").content_margin_top = _sp(m, 1)
 	t.set_stylebox("panel", "ScrollContainer", StyleBoxEmpty.new())

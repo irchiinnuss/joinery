@@ -168,8 +168,9 @@ func _init(text := "", context: Array = []) -> void:
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_bubble = PanelContainer.new()
 	_bubble.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	# SPACE.3 on every side, like the panel's top and bottom.
-	STYLE.boxed(_bubble, "JoineryChangeCard", 3)
+	# Not a card: a quiet rule on the leading edge, the words SPACE.3 after it, so the
+	# request reads apart from the replies while only a decision is lifted.
+	_bubble.theme_type_variation = "JoineryRequest"
 	add_child(_bubble)
 	text_label = RichTextLabel.new()
 	text_label.fit_content = true

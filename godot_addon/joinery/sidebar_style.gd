@@ -181,15 +181,17 @@ static func filled(button: Button) -> void:
 	)
 
 
-## A filled button sitting on a raised card: its resting fill becomes the dock's ground
-## (surface), so it stays visible on the card's surface_raised fill.
+## A filled button sitting on a decision card: where the card is darker than a raised fill
+## (the dark theme) its resting fill becomes the dock's ground (surface), so it stays visible;
+## on the light theme's near-white card the raised fill already stands out and is kept.
 static func on_card(button: Button) -> void:
 	on_theme_overrides(
 		button,
 		func() -> void:
 			button.remove_theme_stylebox_override("normal")
 			var source := button.get_theme_stylebox("normal", button.theme_type_variation)
-			if source is StyleBoxFlat:
+			var card := button.get_theme_color("surface_card", "Joinery")
+			if source is StyleBoxFlat and card.get_luminance() < 0.5:
 				var box := source.duplicate() as StyleBoxFlat
 				box.bg_color = button.get_theme_color("surface", "Joinery")
 				button.add_theme_stylebox_override("normal", box)

@@ -123,6 +123,7 @@ const DARK := {
 	"surface": Color("202123"),
 	"surface_sunken": Color("18191b"),
 	"surface_raised": Color("2b2d30"),
+	"surface_card": Color("27292c"),
 	"border_subtle": Color("404247"),
 	"border_strong": Color("7c7f86"),
 	"text": Color("eeede8"),
@@ -135,6 +136,7 @@ const LIGHT := {
 	"surface": Color("f7f6f3"),
 	"surface_sunken": Color("ffffff"),
 	"surface_raised": Color("ebe9e2"),
+	"surface_card": Color("fdfcfa"),
 	"border_subtle": Color("c9c6bd"),
 	"border_strong": Color("7c7e76"),
 	"text": Color("25262a"),
@@ -297,8 +299,9 @@ static func is_dark(context: Node) -> bool:
 
 
 ## Every colour role (see the design spec A1) for the current theme and accent. Keys: surface,
-## surface_sunken, surface_raised, border_subtle, border_strong, text, text_muted, text_faint,
-## accent, accent_hover, accent_pressed, on_accent, accent_tint, success, danger, danger_tint.
+## surface_sunken, surface_raised, surface_card (the lifted fill of a decision card),
+## border_subtle, border_strong, text, text_muted, text_faint, accent, accent_hover,
+## accent_pressed, on_accent, accent_tint, success, danger, danger_tint, shadow.
 static func palette(context: Node) -> Dictionary:
 	var dark := is_dark(context)
 	var colors: Dictionary = (DARK if dark else LIGHT).duplicate()
@@ -309,6 +312,8 @@ static func palette(context: Node) -> Dictionary:
 	colors["on_accent"] = Color("1a1a1a") if dark else Color.WHITE
 	colors["accent_tint"] = (colors["surface_sunken"] as Color).lerp(accent, 0.14)
 	colors["danger_tint"] = (colors["surface"] as Color).lerp(colors["danger"], 0.12)
+	# The one elevation: a decision card's soft drop shadow.
+	colors["shadow"] = Color(0, 0, 0, 0.32) if dark else Color(0.16, 0.13, 0.08, 0.07)
 	return colors
 
 

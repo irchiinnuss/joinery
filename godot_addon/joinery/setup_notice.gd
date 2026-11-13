@@ -62,6 +62,7 @@ var watch_refreshes := Engine.is_editor_hint()
 var refresh_state_path := ""
 
 var _panel: PanelContainer
+var _glyph: TextureRect
 var _text: Label
 var _action: Button
 var _bar: ProgressBar
@@ -102,22 +103,43 @@ func _init() -> void:
 			add_theme_constant_override("margin_top", gap)
 			add_theme_constant_override("margin_bottom", gap)
 	)
-	_panel = UI.card()
+	# Not a card: one line on the surface (a glyph, the sentence, the fix) over a hairline,
+	# so the decision cards stay the only lifted things in the sidebar.
+	_panel = PanelContainer.new()
 	_panel.accessibility_name = "Joinery setup"
 	add_child(_panel)
+	STYLE.on_theme_overrides(
+		_panel,
+		func() -> void:
+			var line := StyleBoxFlat.new()
+			line.bg_color = Color.TRANSPARENT
+			line.border_color = _panel.get_theme_color("border_subtle", "Joinery")
+			line.border_width_bottom = maxi(1, roundi(UI_THEME.unit(_panel)))
+			line.content_margin_bottom = UI_THEME.space(_panel, 2)
+			_panel.add_theme_stylebox_override("panel", line)
+	)
 	var column := VBoxContainer.new()
 	column.theme_type_variation = "JoineryRow"
 	_panel.add_child(column)
+	var line_row := HBoxContainer.new()
+	line_row.theme_type_variation = "JoineryRow"
+	column.add_child(line_row)
+	_glyph = STYLE.glyph("text_muted")
+	STYLE.set_glyph(_glyph, "warning", "text_muted")
+	_glyph.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	line_row.add_child(_glyph)
 	_text = UI.label("", "", true)
 	_text.name = "Text"
-	column.add_child(_text)
+	_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_text.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	line_row.add_child(_text)
 	# Secondary: the toolbar's Play or the review's Accept is the view's one accent.
 	_action = UI.secondary("")
-	STYLE.filled(_action)
 	_action.name = "Action"
-	_action.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	_action.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	UI.bind_height(_action, "sm")
 	_action.pressed.connect(_on_action)
-	column.add_child(_action)
+	line_row.add_child(_action)
 	_bar = ProgressBar.new()
 	_bar.name = "Progress"
 	_bar.show_percentage = false
@@ -304,6 +326,11 @@ func _refresh() -> void:
 			var id := str((found as Dictionary).get("id", ""))
 			action = str(ACTION_TEXT.get(id, (found as Dictionary).get("label", "")))
 	_kind = kind
+	var failed_now := not _said.is_empty() or not str(_addon.get("last_error", "")).is_empty()
+	STYLE.set_glyph(
+		_glyph, "error" if failed_now else "warning", "danger" if failed_now else "text_muted"
+	)
+	_glyph.visible = not refreshing()
 	var fresh := _text.text != words or not visible
 	_text.text = words
 	_text.tooltip_text = words

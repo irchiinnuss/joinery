@@ -169,11 +169,18 @@ TEXT_AA = 4.5
 NON_TEXT_AA = 3.0
 #: Every role that is drawn as text, and the fills it is drawn on.
 TEXT_ROLES = ("text", "text_muted", "text_faint", "success", "danger", "accent", "accent_hover")
-TEXT_FILLS = ("surface", "surface_sunken", "surface_raised", "accent_tint", "danger_tint")
+TEXT_FILLS = (
+    "surface",
+    "surface_sunken",
+    "surface_raised",
+    "surface_card",
+    "accent_tint",
+    "danger_tint",
+)
 #: Icons (text_muted glyphs), field and stop-button borders (border_strong) and the focus ring
 #: (accent), on every fill a control sits on.
 NON_TEXT_ROLES = ("text_muted", "border_strong", "accent")
-NON_TEXT_FILLS = ("surface", "surface_sunken", "surface_raised", "accent_tint")
+NON_TEXT_FILLS = ("surface", "surface_sunken", "surface_raised", "surface_card", "accent_tint")
 
 
 def _palette_tokens() -> tuple[dict[str, dict[str, str]], dict[str, tuple[str, str]]]:

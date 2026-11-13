@@ -22,15 +22,18 @@ func _init(message := "", context: Array = []) -> void:
 	targets = context.duplicate(true)
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	accessibility_name = "Queued message: " + message
-	# The request card's outline without its fill, SPACE.2 inside on every side.
+	# A request still to send reads like a sent one: the quiet rule on the leading edge, no
+	# card (only a decision is lifted), the words SPACE.3 after the rule.
 	STYLE.on_theme_overrides(
 		self,
 		func() -> void:
-			var source := get_theme_stylebox("panel", "JoineryChangeCard")
+			var source := get_theme_stylebox("panel", "JoineryRequest")
 			if source == null:
 				return
 			var box := source.duplicate() as StyleBox
-			box.set_content_margin_all(float(UI_THEME.space(self, 2)))
+			box.content_margin_top = float(UI_THEME.space(self, 1))
+			box.content_margin_bottom = float(UI_THEME.space(self, 1))
+			box.content_margin_right = 0.0
 			add_theme_stylebox_override("panel", box)
 	)
 	var row := HBoxContainer.new()
