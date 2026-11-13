@@ -1,0 +1,371 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ninjacornix <milanvrankic@gmail.com>
+Date: Fri, 13 Nov 2026 14:23:39 +0100
+Subject: [PATCH] feat(editor): projects empty state is one blankslate, agent
+ chip in the header
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Joinery-only, not for upstream. With no projects the list draws no box: a 480 px blankslate shows three starting-point captures, the heading "Make your first game", New project and Open…. The tagline is gone. The agent moves to a chip at the header's trailing edge (its mark, its name, a chevron) whose menu changes the agent or checks for updates; it hides while the connect screen is open.
+---
+ editor/project_manager/project_manager.cpp | 194 ++++++++++++++++-----
+ editor/project_manager/project_manager.h   |  15 +-
+ 2 files changed, 166 insertions(+), 43 deletions(-)
+
+diff --git a/editor/project_manager/project_manager.cpp b/editor/project_manager/project_manager.cpp
+index 7e83afa..7080272 100644
+--- a/editor/project_manager/project_manager.cpp
++++ b/editor/project_manager/project_manager.cpp
+@@ -66,6 +66,7 @@
+ #include "scene/gui/line_edit.h"
+ #include "scene/gui/margin_container.h"
+ #include "scene/gui/menu_bar.h"
++#include "scene/gui/menu_button.h"
+ #include "scene/gui/option_button.h"
+ #include "scene/gui/panel_container.h"
+ #include "scene/gui/rich_text_label.h"
+@@ -74,6 +75,7 @@
+ #include "scene/main/scene_tree.h"
+ #include "scene/main/window.h"
+ #include "scene/resources/image_texture.h"
++#include "scene/resources/style_box_flat.h"
+ #include "scene/theme/theme_db.h"
+ #include "servers/display/display_server.h"
+ #include "servers/navigation_3d/navigation_server_3d.h"
+@@ -124,10 +126,10 @@ void ProjectManager::_notification(int p_what) {
+ 			// Joinery: the window is Joinery's, and the build string stays in About.
+ 			SceneTree::get_singleton()->get_root()->set_title("Joinery");
+ 
+-			// Joinery: why the list is empty and the one action that fills it.
+-			const String line1 = TTR("No projects yet.");
+-			const String line2 = TTR("Create one and Journeyman will help you build it.");
+-			empty_list_message->set_text(vformat("[center][b]%s[/b] %s[/center]", line1, line2));
++			// Joinery: the empty state's heading is its own label (see
++			// _joinery_build_blankslate); the stock message stays empty.
++			empty_list_message->set_text(String());
++			empty_list_message->hide();
+ 
+ 			_titlebar_resized();
+ 		} break;
+@@ -534,10 +536,15 @@ void ProjectManager::_update_list_placeholder() {
+ 			c->set_visible(has_projects);
+ 		}
+ 	}
++	// Joinery: an empty list draws no box; the blankslate sits on the page.
++	if (is_inside_tree()) {
++		project_list_panel->add_theme_style_override(SceneStringName(panel), has_projects ? get_theme_stylebox("project_list", "ProjectManager") : Ref<StyleBox>(memnew(StyleBoxEmpty)));
++	}
+ 	if (has_projects) {
+ 		empty_list_placeholder->hide();
+ 		return;
+ 	}
++	_joinery_build_blankslate();
+ 
+ 	// Joinery: a project starts from Create, never from the Asset Store, so
+ 	// neither the store button nor its online note is offered here.
+@@ -1590,12 +1597,8 @@ ProjectManager::ProjectManager() {
+ 		local_projects_vb->set_name("LocalProjectsTab");
+ 		_add_main_view(MAIN_VIEW_PROJECTS, TTRC("Projects"), Ref<Texture2D>(), local_projects_vb);
+ 
+-		// Joinery: one quiet line under the wordmark saying what this is for.
+-		joinery_tagline = memnew(Label);
+-		joinery_tagline->set_text(TTRC("Make your game by talking to the apps you already use."));
+-		joinery_tagline->set_theme_type_variation(SNAME("JoineryMuted"));
+-		joinery_tagline->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
+-		local_projects_vb->add_child(joinery_tagline);
++		// Joinery: no tagline under the wordmark; the empty state says what to
++		// do, and the list says the rest.
+ 
+ 		// Project list's top bar.
+ 		{
+@@ -1705,6 +1708,22 @@ ProjectManager::ProjectManager() {
+ 
+ 				empty_list_placeholder->add_child(empty_list_message);
+ 
++				// Joinery: a blankslate in one 480 px column. Three starting
++				// points as pictures, one heading, then New project and Open….
++				empty_list_placeholder->set_h_size_flags(SIZE_SHRINK_CENTER);
++				empty_list_placeholder->set_custom_minimum_size(Size2(480, 0) * EDSCALE);
++				joinery_blank_shots = memnew(HBoxContainer);
++				joinery_blank_shots->set_alignment(BoxContainer::ALIGNMENT_CENTER);
++				joinery_blank_shots->add_theme_constant_override("separation", 8 * EDSCALE);
++				joinery_blank_shots->set_mouse_filter(MOUSE_FILTER_IGNORE);
++				joinery_blank_shots->hide();
++				empty_list_placeholder->add_child(joinery_blank_shots);
++				joinery_blank_title = memnew(Label);
++				joinery_blank_title->set_text(TTRC("Make your first game"));
++				joinery_blank_title->set_theme_type_variation(SNAME("JoineryTitle"));
++				joinery_blank_title->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_CENTER);
++				empty_list_placeholder->add_child(joinery_blank_title);
++
+ 				FlowContainer *empty_list_actions = memnew(FlowContainer);
+ 				empty_list_actions->set_alignment(FlowContainer::ALIGNMENT_CENTER);
+ 				// The medium gap between a pair of actions.
+@@ -1713,13 +1732,14 @@ ProjectManager::ProjectManager() {
+ 				empty_list_placeholder->add_child(empty_list_actions);
+ 
+ 				empty_list_create_project = memnew(Button);
+-				empty_list_create_project->set_text(TTRC("Create project"));
++				empty_list_create_project->set_text(TTRC("New project"));
+ 				empty_list_create_project->set_theme_type_variation("JoineryPrimaryButton");
+ 				empty_list_actions->add_child(empty_list_create_project);
+ 				empty_list_create_project->connect(SceneStringName(pressed), callable_mp(this, &ProjectManager::_new_project));
+ 
+ 				empty_list_import_project = memnew(Button);
+-				empty_list_import_project->set_text(TTRC("Open existing project"));
++				empty_list_import_project->set_text(String::utf8("Open…"));
++				empty_list_import_project->set_tooltip_text(TTRC("Open a game you already have"));
+ 				empty_list_import_project->set_theme_type_variation("JoinerySecondaryButton");
+ 				empty_list_actions->add_child(empty_list_import_project);
+ 				empty_list_import_project->connect(SceneStringName(pressed), callable_mp(this, &ProjectManager::_import_project));
+@@ -2103,6 +2123,9 @@ void ProjectManager::_joinery_show_connection() {
+ 		if (joinery_tagline) {
+ 			joinery_tagline->hide();
+ 		}
++		if (joinery_agent_menu) {
++			joinery_agent_menu->hide();
++		}
+ 		joinery_connect->call("open_settings");
+ 		return;
+ 	}
+@@ -2142,35 +2165,117 @@ void ProjectManager::_joinery_show_connection() {
+ 		joinery_tagline->hide();
+ 	}
+ 	joinery_home = home;
+-	// The agent in use, as a chip at the end of the project list's top bar.
+-	// Pressing it reopens the connect screen.
++	// The agent in use, as a chip at the header's trailing edge: its mark,
++	// its name and a chevron. Its menu changes the agent or checks for updates.
++	joinery_agent_menu = memnew(MenuButton);
++	joinery_agent_menu->set_name("JoineryAgentChip");
++	// A raised chip, not a bare word: MenuButton starts flat.
++	joinery_agent_menu->set_flat(false);
++	joinery_agent_menu->set_theme_type_variation(SNAME("JoinerySecondaryButton"));
++	joinery_agent_menu->set_v_size_flags(Control::SIZE_SHRINK_CENTER);
++	joinery_agent_menu->set_tooltip_text(TTR("The agent Journeyman uses"));
++	joinery_agent_menu->get_popup()->add_item(TTR(String::utf8("Change agent…")), 0);
++	joinery_agent_menu->get_popup()->add_item(TTR("Check for updates"), 1);
++	joinery_agent_menu->get_popup()->connect(SceneStringName(id_pressed), callable_mp(this, &ProjectManager::_joinery_agent_menu));
+ 	joinery_agent_row = memnew(HBoxContainer);
+ 	joinery_agent_row->add_theme_constant_override(SNAME("separation"), 8 * EDSCALE);
++	joinery_agent_row->set_mouse_filter(MOUSE_FILTER_IGNORE);
++	joinery_agent_row->set_anchors_and_offsets_preset(PRESET_FULL_RECT);
+ 	joinery_agent_icon = memnew(TextureRect);
+ 	joinery_agent_icon->set_stretch_mode(TextureRect::STRETCH_KEEP_CENTERED);
+ 	joinery_agent_icon->set_v_size_flags(Control::SIZE_SHRINK_CENTER);
++	joinery_agent_icon->set_mouse_filter(MOUSE_FILTER_IGNORE);
+ 	joinery_agent_row->add_child(joinery_agent_icon);
+ 	joinery_agent_name = memnew(Label);
+ 	joinery_agent_name->set_theme_type_variation(SNAME("JoineryLabel"));
+ 	joinery_agent_name->set_v_size_flags(Control::SIZE_SHRINK_CENTER);
+ 	joinery_agent_name->set_auto_translate_mode(AUTO_TRANSLATE_MODE_DISABLED);
++	joinery_agent_name->set_mouse_filter(MOUSE_FILTER_IGNORE);
+ 	joinery_agent_row->add_child(joinery_agent_name);
+-	joinery_agent_chip = memnew(Button);
+-	joinery_agent_chip->set_theme_type_variation(SNAME("JoineryLinkButton"));
+-	joinery_agent_chip->set_text(TTR("Change"));
+-	joinery_agent_chip->set_v_size_flags(Control::SIZE_SHRINK_CENTER);
+-	joinery_agent_chip->set_tooltip_text(TTR("Change the agent Journeyman uses"));
+-	joinery_agent_chip->connect(SceneStringName(pressed), callable_mp(this, &ProjectManager::_joinery_show_connection));
+-	joinery_agent_row->add_child(joinery_agent_chip);
+-	if (joinery_top_bar) {
+-		joinery_top_bar->add_child(joinery_agent_row);
+-	} else {
+-		local_projects_vb->add_child(joinery_agent_row);
+-	}
++	joinery_agent_arrow = memnew(TextureRect);
++	joinery_agent_arrow->set_stretch_mode(TextureRect::STRETCH_KEEP_CENTERED);
++	joinery_agent_arrow->set_v_size_flags(Control::SIZE_SHRINK_CENTER);
++	joinery_agent_arrow->set_mouse_filter(MOUSE_FILTER_IGNORE);
++	joinery_agent_row->add_child(joinery_agent_arrow);
++	joinery_agent_menu->add_child(joinery_agent_row);
++	joinery_agent_row->connect(SceneStringName(minimum_size_changed), callable_mp(this, &ProjectManager::_joinery_fit_agent_chip));
++	joinery_header_row->add_child(joinery_agent_menu);
+ 	_joinery_update_agent_chip();
+ 	_joinery_add_updates();
+ }
+ 
++// The chip is a button with a row drawn on it: its size is the row's, plus
++// the button's own padding on each side.
++void ProjectManager::_joinery_fit_agent_chip() {
++	if (!joinery_agent_menu || !joinery_agent_row || !is_inside_tree()) {
++		return;
++	}
++	const int pad = 12 * EDSCALE;
++	joinery_agent_row->set_offset(SIDE_LEFT, pad);
++	joinery_agent_row->set_offset(SIDE_RIGHT, -pad);
++	const Size2 row = joinery_agent_row->get_combined_minimum_size();
++	const int height = (int)Math::round(get_theme_font_size(SNAME("main_size"), EditorStringName(EditorFonts)) * 2.5);
++	joinery_agent_menu->set_custom_minimum_size(Size2(row.x + 2 * pad, MAX((float)height, row.y)));
++}
++
++void ProjectManager::_joinery_agent_menu(int p_id) {
++	if (p_id == 0) {
++		_joinery_show_connection();
++	} else {
++		_joinery_open_updates();
++	}
++}
++
++// Three starting points as pictures over the empty state's heading: the same
++// captures the new-project wizard shows on its cards (blueprints/<id>/
++// capture.png beside the engine). Only a preview, so they take no input; any
++// that is missing is left out, and with none the heading stands alone.
++void ProjectManager::_joinery_build_blankslate() {
++	if (!joinery_blank_shots || joinery_blank_shots->get_child_count() > 0 || joinery_home.is_empty()) {
++		return;
++	}
++	const int width = 152 * EDSCALE;
++	for (const char *id : { "first-person-3d", "platformer-2d", "top-down" }) {
++		const String path = joinery_home.path_join("blueprints").path_join(id).path_join("capture.png");
++		if (!FileAccess::exists(path)) {
++			continue;
++		}
++		const Ref<Image> image = Image::load_from_file(path);
++		if (image.is_null() || image->is_empty()) {
++			continue;
++		}
++		Ref<Image> shot = image->duplicate();
++		const int height = width * 9 / 16;
++		shot->resize(width, height, Image::INTERPOLATE_LANCZOS);
++		TextureRect *picture = memnew(TextureRect);
++		picture->set_texture(ImageTexture::create_from_image(shot));
++		picture->set_expand_mode(TextureRect::EXPAND_IGNORE_SIZE);
++		picture->set_stretch_mode(TextureRect::STRETCH_KEEP_ASPECT_COVERED);
++		picture->set_custom_minimum_size(Size2(width, height));
++		picture->set_mouse_filter(MOUSE_FILTER_IGNORE);
++		// Rounded like the wizard's cards: the frame's shape clips the picture.
++		PanelContainer *frame = memnew(PanelContainer);
++		Ref<StyleBoxFlat> shape;
++		shape.instantiate();
++		shape->set_corner_radius_all(8 * EDSCALE);
++		shape->set_content_margin_all(0);
++		frame->add_theme_style_override(SceneStringName(panel), shape);
++		frame->set_clip_children_mode(CLIP_CHILDREN_ONLY);
++		frame->set_mouse_filter(MOUSE_FILTER_IGNORE);
++		frame->add_child(picture);
++		joinery_blank_shots->add_child(frame);
++	}
++	joinery_blank_shots->set_visible(joinery_blank_shots->get_child_count() > 0);
++}
++
++// The update dialog's line ("Check for updates", "Joinery 0.7 is available")
++// is the chip menu's second item.
++void ProjectManager::_joinery_set_update_label(const String &p_text) {
++	if (joinery_agent_menu) {
++		joinery_agent_menu->get_popup()->set_item_text(1, p_text);
++	}
++}
++
+ void ProjectManager::_joinery_add_updates() {
+ 	if (joinery_updates || joinery_home.is_empty()) {
+ 		return;
+@@ -2189,17 +2294,9 @@ void ProjectManager::_joinery_add_updates() {
+ 	joinery_updates->set("engine_home", joinery_home);
+ 	add_child(joinery_updates);
+ 
+-	joinery_update_link = memnew(Button);
+-	joinery_update_link->set_theme_type_variation(SNAME("JoineryLinkButton"));
+-	joinery_update_link->set_text(TTR("Check for updates"));
+-	joinery_update_link->set_v_size_flags(Control::SIZE_SHRINK_CENTER);
+-	joinery_update_link->connect(SceneStringName(pressed), callable_mp(this, &ProjectManager::_joinery_open_updates));
+-	joinery_updates->connect(SNAME("label_changed"), callable_mp(joinery_update_link, &Button::set_text));
+-	if (joinery_top_bar) {
+-		joinery_top_bar->add_child(joinery_update_link);
+-	} else {
+-		local_projects_vb->add_child(joinery_update_link);
+-	}
++	// "Check for updates" is the agent chip's second menu item; its text
++	// follows the dialog.
++	joinery_updates->connect(SNAME("label_changed"), callable_mp(this, &ProjectManager::_joinery_set_update_label));
+ 	// At most once a day, and only from an installed Joinery: a new signed
+ 	// version opens the dialog; anything else only changes the link's text.
+ 	joinery_updates->call_deferred(SNAME("check_daily"));
+@@ -2212,7 +2309,12 @@ void ProjectManager::_joinery_open_updates() {
+ }
+ 
+ void ProjectManager::_joinery_update_agent_chip() {
+-	if (!joinery_agent_chip) {
++	if (!joinery_agent_menu) {
++		return;
++	}
++	// Built from the constructor: the theme (icons, font size) comes later.
++	if (!is_inside_tree()) {
++		callable_mp(this, &ProjectManager::_joinery_update_agent_chip).call_deferred();
+ 		return;
+ 	}
+ 	String agent;
+@@ -2230,9 +2332,12 @@ void ProjectManager::_joinery_update_agent_chip() {
+ 	} else if (agent == "opencode") {
+ 		name = "opencode";
+ 	}
+-	joinery_agent_row->set_visible(!agent.is_empty());
++	// Shown with the project list, never over the connect screen.
++	joinery_agent_menu->set_visible(!agent.is_empty() && main_view_container->is_visible());
+ 	joinery_agent_name->set_text(name);
+-	joinery_agent_chip->set_accessibility_name(vformat(TTR("Change agent (now %s)"), name));
++	joinery_agent_menu->set_accessibility_name(vformat(TTR("Agent: %s"), name));
++	joinery_agent_arrow->set_texture(get_editor_theme_icon(SNAME("GuiOptionArrow")));
++	_joinery_fit_agent_chip();
+ 
+ 	// The provider's mark from the addon, at the editor's icon size. A missing
+ 	// or unreadable file leaves the chip as text.
+@@ -2304,7 +2409,14 @@ void ProjectManager::_joinery_simplify() {
+ 		joinery_wordmark->set_tooltip_text(TTR("About Joinery"));
+ 		joinery_wordmark->set_h_size_flags(Control::SIZE_SHRINK_BEGIN);
+ 		joinery_wordmark->connect(SceneStringName(pressed), callable_mp(this, &ProjectManager::_show_about));
+-		header_box->add_child(joinery_wordmark);
++		// The wordmark leads; the agent chip ends the same row.
++		joinery_header_row = memnew(HBoxContainer);
++		header_box->add_child(joinery_header_row);
++		joinery_header_row->add_child(joinery_wordmark);
++		Control *header_spacer = memnew(Control);
++		header_spacer->set_h_size_flags(SIZE_EXPAND_FILL);
++		header_spacer->set_mouse_filter(MOUSE_FILTER_IGNORE);
++		joinery_header_row->add_child(header_spacer);
+ 		if (joinery_tagline) {
+ 			joinery_tagline->get_parent()->remove_child(joinery_tagline);
+ 			header_box->add_child(joinery_tagline);
+diff --git a/editor/project_manager/project_manager.h b/editor/project_manager/project_manager.h
+index 5046350..bb3b139 100644
+--- a/editor/project_manager/project_manager.h
++++ b/editor/project_manager/project_manager.h
+@@ -41,6 +41,7 @@ class EditorTitleBar;
+ class HFlowContainer;
+ class LineEdit;
+ class MarginContainer;
++class MenuButton;
+ class OptionButton;
+ class PanelContainer;
+ class PopupMenu;
+@@ -183,7 +184,6 @@ class ProjectManager : public Control {
+ 	HBoxContainer *joinery_agent_row = nullptr;
+ 	TextureRect *joinery_agent_icon = nullptr;
+ 	Label *joinery_agent_name = nullptr;
+-	Button *joinery_agent_chip = nullptr;
+ 	// The wordmark on the page, flush with the line and the bar under it.
+ 	Button *joinery_wordmark = nullptr;
+ 	MarginContainer *joinery_header = nullptr;
+@@ -196,9 +196,20 @@ class ProjectManager : public Control {
+ 	// loaded from JOINERY_HOME like the connect screen. Its text follows the
+ 	// dialog ("Joinery 0.6.0 is available", "Restart to finish updating").
+ 	Window *joinery_updates = nullptr;
+-	Button *joinery_update_link = nullptr;
+ 	void _joinery_add_updates();
+ 	void _joinery_open_updates();
++	// The header row: the wordmark, then at its trailing edge the agent chip
++	// ("[mark] Codex v"), whose menu changes the agent or checks for updates.
++	HBoxContainer *joinery_header_row = nullptr;
++	MenuButton *joinery_agent_menu = nullptr;
++	TextureRect *joinery_agent_arrow = nullptr;
++	void _joinery_fit_agent_chip();
++	void _joinery_agent_menu(int p_id);
++	void _joinery_set_update_label(const String &p_text);
++	// The empty list's blankslate: starting-point pictures and one heading.
++	HBoxContainer *joinery_blank_shots = nullptr;
++	Label *joinery_blank_title = nullptr;
++	void _joinery_build_blankslate();
+ 
+ 	HBoxContainer *open_btn_container = nullptr;
+ 	PopupMenu *open_options_popup = nullptr;
