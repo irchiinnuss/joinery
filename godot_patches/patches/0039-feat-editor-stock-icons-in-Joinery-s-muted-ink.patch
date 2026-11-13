@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ninjacornix <milanvrankic@gmail.com>
+Date: Fri, 13 Nov 2026 17:26:55 +0100
+Subject: [PATCH] feat(editor): stock icons in Joinery's muted ink
+
+Joinery-only, not for upstream. Buttons, flat buttons and menu buttons tint their icons with Joinery's
+muted text colour at rest and the text colour on hover, so Godot's icons
+next to the sidebar's read as one set. The viewport's overlay buttons
+(the View menu, "Perspective") keep their dark ground over the scene but
+take the toolbar's md radius and compact padding.
+---
+ editor/themes/editor_theme_manager.cpp | 25 +++++++++++++++++++++++++
+ 1 file changed, 25 insertions(+)
+
+diff --git a/editor/themes/editor_theme_manager.cpp b/editor/themes/editor_theme_manager.cpp
+index ff41f5a..3d956d8 100644
+--- a/editor/themes/editor_theme_manager.cpp
++++ b/editor/themes/editor_theme_manager.cpp
+@@ -608,6 +608,31 @@ static void _joinery_populate_styles(const Ref<EditorTheme> &p_theme, const Edit
+ 		p_theme->set_stylebox("fill", "JoineryProgress", fill);
+ 	}
+ 
++	// Stock icons beside Joinery's own glyphs (scene dock, inspector, file dock
++	// and viewport toolbars): the same muted ink at rest and the text colour on
++	// hover, so Godot's filled icons and the sidebar's line icons read as one
++	// set. Coloured icons only darken a little under the muted ink.
++	for (const StringName &type : { SNAME("Button"), SNAME("FlatButton"), SNAME("MenuButton"), SNAME("FlatMenuButton"), SNAME("MenuBar") }) {
++		p_theme->set_color("icon_normal_color", type, text_muted);
++		p_theme->set_color("icon_focus_color", type, text_muted);
++		p_theme->set_color("icon_hover_color", type, text);
++		p_theme->set_color("icon_hover_pressed_color", type, text);
++	}
++
++	// The viewport's View menu ("Perspective") and its other overlay buttons:
++	// still dark over the 3D scene so they read on any picture, but shaped like
++	// the toolbar's buttons above it, md radius and the same compact padding.
++	{
++		Ref<StyleBoxFlat> overlay = p_theme->get_stylebox("Information3dViewport", EditorStringName(EditorStyles));
++		if (overlay.is_valid()) {
++			overlay = overlay->duplicate();
++			overlay->set_corner_radius_all(radius);
++			overlay->set_content_margin_individual(8 * EDSCALE, 4 * EDSCALE, 10 * EDSCALE, 4 * EDSCALE);
++			overlay->set_border_width_all(0);
++			p_theme->set_stylebox("Information3dViewport", EditorStringName(EditorStyles), overlay);
++		}
++	}
++
+ 	// The wordmark in the Project Manager: title size, semibold, in the plain
+ 	// font colour, drawn as a flat button so it opens About. Flush left, so it
+ 	// shares the page's left edge with the line and the bar under it.
