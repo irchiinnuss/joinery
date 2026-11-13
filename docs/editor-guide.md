@@ -210,7 +210,7 @@ panel up.
 
 ### Accepting changes automatically
 
-**Settings → Replies → Accept changes automatically** (off by default) keeps a
+**Settings → Agent → Accept changes automatically** (off by default) keeps a
 change without asking when nothing about it needs you: every check passed with
 nothing to say, the reviewer agent raised no warning, any done-when items
 passed, and the change leaves the art bible, the game brief and the art
@@ -393,7 +393,7 @@ Two more kinds of agent help, and both only read (ADR 0037).
   agent makes its fix as a normal change, checked and reviewed, and it opens
   in the Review tab. If nothing in the project needs to change, the card
   ends with the cause.
-- Settings → Project → **Reviewer agent** turns the reviewer on or off, and
+- Settings → Advanced → **Reviewer agent** turns the reviewer on or off, and
   **Reviewer model** picks its model (empty: the one Journeyman uses). They
   are `[agents] reviewer` and `reviewer_model` in `joinery.toml`, also set
   with `joinery reviewer --set on|off --model <name>`. `joinery transactions
@@ -444,15 +444,18 @@ coins`. The playtester is your provider in the read-only `playtester` role (ADR
 
 `/match` checks the whole project against the approved art bible's checked
 rules and fixes what drifts, as reviewed changes (ADR 0045). **Make it match**
-in Settings, on the Review tab's art bible row and **Make the project match**
+in Settings → Advanced, on the Review tab's **The look** row and **Make the project match**
 at the foot of the approved art direction do the same. No model is needed to check.
 
 - A **Match** card shows above the message box with the other agents at work:
-  one headline (**9 things drift from the art bible**), one row per area with a
-  bar and its score (**Palette 72%**: the share of textures on the palette), and
-  the three most serious findings, each with what was measured and what the
-  bible asks (`wall.png 100% off-palette → ≤ 5%`). **Show all** lists the rest;
-  hovering one says how it would be fixed.
+  one headline (**9 things off the look**) with **↻** (Check again) beside it,
+  one row per area with a bar and its score (**Palette 72%**: the share of
+  textures on the palette; **—** when an area has nothing to check), and the
+  three most serious findings, each with its severity as a glyph and a colour
+  (▲ high, ● medium, ○ low), the file, what was measured and what the look asks
+  (`wall.png 100% off-palette → ≤ 5%`). **Show all** lists the rest; hovering
+  one says how it would be fixed. **Fix 8** sits at the right of the last line,
+  after what needs you.
 - Areas: **Palette** (CIEDE2000 distance of textures to the palette),
   **Textures** (size limits, power of two, texel density of models),
   **Models** (applied scale, pivots, triangle and bone budgets), **Materials**
@@ -486,7 +489,7 @@ at the foot of the approved art direction do the same. No model is needed to che
 ### Accessibility and performance
 
 `/access` checks how accessible the game is and `/perf [target]` how it runs on a
-target machine (ADR 0049, ADR 0050). Both are also in Settings (**Accessibility
+target machine (ADR 0049, ADR 0050). Both are also in Settings → Advanced (**Accessibility
 check**, **Performance check**) and on the Review tab's **Game checks** row, which
 shows their last scores. Each opens a card like the Match card: a headline, a score
 per area, the most serious findings in their own words, **Fix N things** and **Fix**
@@ -527,7 +530,7 @@ headless, then the same seed in a window that never takes focus. No model is nee
 
 ### Checking the design
 
-`/design`, or **Design check** in Settings, checks the game against its own brief and
+`/design`, or **Design check** in Settings → Advanced, checks the game against its own brief and
 design document, and for what breaks it for a player (ADR 0053). It never changes the
 game and needs no model. The card shows how many problems it found, how serious they are
 in one line, and one line per problem with its severity dot and **Ask agent to fix**.
@@ -549,7 +552,7 @@ fix is a normal change you review.
   every finding it makes must point at a real line, or a node in a scene; anything it
   can't back up is dropped before you see it. Its findings join the list. It can't
   change anything; **Stop** stops it.
-- **Check the design** in Settings checks by itself after every change, or every 3, 5 or
+- **Check the design** in Settings → Advanced checks by itself after every change, or every 3, 5 or
   10 accepted changes (`[agents] design_check_every`; Off by default). The card shows
   only when that check finds something.
 - `joinery design --project <path>` prints the same list (`--json` for everything).
@@ -761,16 +764,16 @@ again.
   and after approval the held request goes out again.
 - Changes are accepted or **Discarded** in the Review panel. **Compact** in
   history asks for confirmation inline before it frees space.
-- **Older versions**, under History in Settings, sets how many accepted
+- **Keep versions**, in Settings → Project, sets how many accepted
   changes keep the older versions of the files they replaced (models,
-  textures, sounds), so they can be reverted: **Last 50 changes** (up to 2 GB,
-  the default), **Last 10 changes** (up to 1 GB), **Only the newest**, or
+  textures, sounds), so they can be reverted: **Last 50** (up to 2 GB,
+  the default), **Last 10** (up to 1 GB), **Only the newest**, or
   **Custom…** (changes to keep and space in GB). A choice that would remove
   restore data says so first ("3 older changes can no longer be reverted.
   Frees 120 MB.") and applies only on **Keep fewer**. Project apps (`/setup`)
   has the same choice under **Older versions** and saves it with **Save**.
 - While Journeyman works or a change waits for review, Enter queues the
-  message instead of dropping it (the box says "Queue a message…"). Queued
+  message instead of dropping it (the box says "Next message…"). Queued
   messages wait under **Queued** at the end of the conversation, each with its
   target chips, **Edit** (puts it back in the message box) and **×** (removes
   it). They go out one at a time, oldest first, when the reply finishes and
@@ -989,7 +992,7 @@ model. A change that stacks Godot's box, cylinder or CSG shapes into one object
 goes back to the agent before you see it. Floors, walls, platforms, ramps,
 collision shapes, sketch-built levels and placeholders you ask for by name are
 fine, and only what a change adds or modifies is judged. Prototyping? Turn off
-Settings → Project → **Complex models in Blender** (`[agents] complex_models =
+Settings → Advanced → **Complex models in Blender** (`[agents] complex_models =
 "placeholders"`, or `joinery complex-models --set placeholders`).
 
 ### Shared kits

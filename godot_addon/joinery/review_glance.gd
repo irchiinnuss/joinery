@@ -214,7 +214,7 @@ static func _check_words(name: String) -> String:
 	if name == "Godot import":
 		return "the Godot import"
 	if name == "art bible":
-		return "the art bible"
+		return "the look"
 	return name
 
 

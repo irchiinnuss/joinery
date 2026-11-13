@@ -72,7 +72,7 @@ const COMMANDS := {
 	"/variant": ["Make a variant of this scene", "prompt"],
 	"/feature": ["Add or remove a game feature", "cli"],
 	"/playtest": ["Play the game and report bugs", "ui"],
-	"/match": ["Match the art bible", "ui"],
+	"/match": ["Match the look", "ui"],
 	"/access": ["Check the game's accessibility", "ui"],
 	"/design": ["Check the game design", "ui"],
 	"/perf": ["Measure how the game runs", "ui"],

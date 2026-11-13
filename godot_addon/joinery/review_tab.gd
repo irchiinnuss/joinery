@@ -488,7 +488,7 @@ func _build_list() -> void:
 	_bible_row.theme_type_variation = "JoineryRow"
 	_bible_row.hide()
 	UI.bind_height(_bible_row, "md", false)
-	var bible_title := UI.label("Art bible")
+	var bible_title := UI.label("The look")
 	bible_title.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_bible_row.add_child(bible_title)
 	_bible_dot = UI.status_dot("off")
@@ -498,12 +498,12 @@ func _build_list() -> void:
 	_bible_status.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_bible_row.add_child(_bible_status)
 	_bible_match = UI.quiet("Make it match")
-	_bible_match.tooltip_text = "Fix what drifts from the art bible, as reviewed changes (/match)"
+	_bible_match.tooltip_text = "Fix what is off the look, as reviewed changes (/match)"
 	_bible_match.pressed.connect(func() -> void: _slash.call("request_match"))
 	_bible_row.add_child(_bible_match)
 	_bible_open = UI.quiet("Open")
 	_bible_open.tooltip_text = "Open the art direction (/art)"
-	_bible_open.accessibility_name = "Open the art bible"
+	_bible_open.accessibility_name = "Open the look"
 	_bible_open.pressed.connect(func() -> void: art_requested.emit())
 	_bible_row.add_child(_bible_open)
 
@@ -668,7 +668,7 @@ func _render_bible() -> void:
 			_bible_dot.set("state", "attention")
 			_bible_open.theme_type_variation = "JoinerySecondaryButton"
 			_bible_open.text = "Review"
-	_bible_open.accessibility_name = _bible_open.text + " the art bible"
+	_bible_open.accessibility_name = _bible_open.text + " the look"
 	_bible_match.visible = (
 		state == "approved" and _slash != null and _slash.has_method("request_match")
 	)

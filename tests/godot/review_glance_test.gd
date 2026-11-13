@@ -105,7 +105,7 @@ func _check_words() -> void:
 	)
 	var checks := {"checks": {"ran": ["references", "art bible", "tests"], "skipped": []}}
 	_check(
-		GLANCE.checks_detail(checks) == "Checked references, the art bible and tests.",
+		GLANCE.checks_detail(checks) == "Checked references, the look and tests.",
 		"Checks detail: " + GLANCE.checks_detail(checks)
 	)
 	var skipped := {"checks": {"ran": ["references"], "skipped": ["tests"]}}

@@ -21,7 +21,7 @@ const DOCUMENTS := ["md", "markdown", "txt", "pdf"]
 const MAX_IMAGES := 20
 const MAX_DOCUMENTS := 10
 const CAPTION := (
-	"Your own pictures go on the art bible's reference board, and design documents sit beside "
+	"Your own pictures go on the look's reference board, and design documents sit beside "
 	+ "the game brief for Journeyman to read. Only the files you pick are copied."
 )
 
