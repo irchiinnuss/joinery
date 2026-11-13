@@ -3,9 +3,10 @@ extends RefCounted
 ## Focus mode: the viewport, the sidebar and the bottom tab strip.
 ##
 ## Most control goes through the sidebar, so the rest of Godot's layout is more than the user
-## needs (ADR 0005). Focus mode hides the side dock columns (Scene, Inspector) and collapses
-## the bottom panel to its tab strip, so Review, Files and Output stay one click away and a
-## review still opens in place. The ⤢ button in the scene tab row is its one toggle.
+## needs (ADR 0005). Focus mode hides the side dock columns (Scene, Inspector, FileSystem) and
+## collapses the bottom panel, so a review still opens in place; leaving it brings back the
+## panels the user had open (godot_panels.gd). The ⤢ button in the scene tab row is its one
+## toggle.
 ##
 ## A plugin has no API for hiding built-in docks, so this walks the editor's control tree and
 ## hides the dock columns it finds, remembering each one so it can put everything back. It is
@@ -65,7 +66,8 @@ func show_review(pending: bool) -> void:
 
 func restore() -> void:
 	for container: Control in _hidden:
-		if is_instance_valid(container):
+		# A column whose docks were closed meanwhile (from the rail) stays hidden.
+		if is_instance_valid(container) and (container as TabContainer).get_tab_count() > 0:
 			container.visible = true
 	_hidden.clear()
 	if _active and is_instance_valid(_bottom) and _bottom.current_tab == -1:

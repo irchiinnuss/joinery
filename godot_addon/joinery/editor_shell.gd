@@ -139,6 +139,17 @@ static func current_screen() -> String:
 	return ""
 
 
+## The view the Godot rail button opens: 2D for a Node2D or Control scene, 3D for a Node3D
+## scene, otherwise [param last], the last of 2D and 3D the user had.
+static func godot_view(last: String) -> String:
+	var root := EditorInterface.get_edited_scene_root()
+	if root is Node3D:
+		return "3D"
+	if root is Node2D or root is Control:
+		return "2D"
+	return last
+
+
 ## Make the ⤢ button in the scene tab row the one Focus mode toggle: Godot's distraction-free
 ## button would hide the sidebar too, so it steps aside for a button that calls
 ## [param toggle]. Does nothing when the row has no such button.

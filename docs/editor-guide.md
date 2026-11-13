@@ -8,13 +8,31 @@ project's assets and creation tools, and Joinery's pages; hover an icon for its
 name. The Assets view and each app's view show a large preview, readable asset
 names, search, and an Open action. They update automatically after source
 changes. Joinery's commands are in the **Joinery** menu.
-Scene sits above the Inspector in a column left of the viewport, so a node and
-its properties show together. Review, Files and Output live in the bottom tab
-row, tabs above their content; Import, History, Signals and Groups are one
-click away in its ⋮ menu. Timeline, Share and Mixer are full pages: open them
-from the rail, below the apps. Journeyman stays on the right without a docking
-tab bar. Every bottom tab opens at the same height, which only dragging the
-divider changes.
+
+The viewport and Journeyman are the main surfaces, so Godot's own panels start
+hidden and open from the rail, under the Godot icon, with Godot's own icons:
+Scene, Inspector, FileSystem, Output, Debugger, Audio, Animation and the Shader
+Editor (and any other Godot panel while it is open). Joinery does not rebuild
+what Godot already has: these are Godot's docks, not copies. Click an icon to
+show its panel and again to hide it; a raised icon is a panel on screen. Scene
+sits above the Inspector in a column left of the viewport, and FileSystem has
+its own column left of them. **Ctrl+Alt+I** (Cmd+Option+I on macOS, also
+**Joinery > Show or Hide Scene and Inspector**) shows or hides Scene and
+Inspector together, and **Inspect** in the 2D view's right-click menu shows the
+Inspector for the node under the pointer. Which side panels are open is saved
+in Editor Settings (`joinery/layout/side_panels`), so once you open one it
+stays open in every project. Opening a panel from **Editor > Editor Docks**
+works too.
+
+There is no bottom tab row. A bottom panel (Output, Audio, Debugger,
+Animation, …) opens alone below the viewport, titled with its name; its icon
+again, **×**, or Esc while the pointer is over it hides it. Godot still opens
+one by itself when it needs to, such as the debugger on Run, but Output never
+does: its icon shows a dot while there are new errors (red) or warnings. Every
+bottom panel opens at the same height, which only dragging the divider changes.
+Below the apps, Review opens Joinery's change review the same way, and
+Timeline and Share are full pages. Journeyman stays on the right without a
+docking tab bar.
 
 Scene tabs sit above the viewport: click a tab to switch between open scenes,
 or **+** at the end of the tabs to make a new scene (also **Scene > New Scene**,
@@ -23,8 +41,8 @@ the game runs) shows which Godot screen is open and switches it. The 3D
 viewport's mode tools and Use Snap show by default. Type `/toolbar` in
 Journeyman, or choose **Joinery > Show or Hide Viewport Toolbar**, to hide or
 show them. The preference is saved. **⤢** at the end of the row is Focus: it
-hides the Scene and Inspector column and collapses the bottom panel to its
-tabs, and turns them back on (also `/focus` and **Joinery > Focus**).
+hides every side and bottom panel, and turns back on the ones you had open
+(also `/focus` and **Joinery > Focus**).
 
 **Play** runs the game; **▾** beside it plays the open scene, another scene, or
 turns on Movie Maker.
@@ -614,15 +632,20 @@ end of a level drive it by themselves; set `audio/music/track` to the track's
 melody", "swap the pads for strings" or "a new variation" edit the same track
 and keep your mix.
 
-**The Mixer** tab, beside Share, shows one strip per bus — Master, Music, SFX,
-Ambience, UI, Voice — with a fader, **M**ute, **S**olo, a meter, **Reverb** and
-**Compress**, and **Duck music under** Off, Voice or SFX. An older project
-without these buses gets **Add them**. Under it, pick a track: each layer has
-its fader, Mute and Solo, **Play** auditions the stems in the editor and
-**Intensity** moves from calm to victory so you hear each state. You hear
-every change at once; nothing is written until **Save mix**, which sends the
-bus layout and the track's mix as a normal reviewed change. **Revert** puts
-back what is saved. Saving needs Journeyman connected.
+**Mixing** happens in Godot's own **Audio** panel (its icon in the rail):
+faders, mute, solo, bypass and every effect on the buses Master, Music, SFX,
+Ambience, UI and Voice. Joinery has no second mixer. What that panel doesn't
+do, **`/mix`** does, each as a normal reviewed change (Journeyman connected):
+
+- `/mix buses` adds the game core's buses an older project lacks.
+- `/mix duck voice` (or `sfx`, `off`) makes the music dip while dialogue or
+  effects play: the Music bus's compressor, sidechained.
+- `/mix music -4` sets a bus's level in dB; `/mix ui mute`, `unmute`, `solo`,
+  `unsolo` its flags.
+- `/mix harbour pads -3` sets one layer of the track `res://music/harbour.tres`
+  (`mute`, `unmute`, `solo`, `unsolo` too); the game plays it with that mix.
+- Anything else, like `/mix quieter music in combat`, goes in the message box
+  as a request to Journeyman.
 
 **`/sound-pass`** goes through the level and gives it its sounds. Words after
 it narrow it: `/sound-pass footsteps only`, `/sound-pass ambience and coins`.

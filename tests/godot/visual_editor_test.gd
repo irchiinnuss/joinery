@@ -74,6 +74,9 @@ func _run() -> void:
 	await _shot("layout", [base])
 	_check(base.find_child("JoineryScreenSwitch", true, false) != null, "2D | 3D | Script switch")
 	_check(base.find_child("JoineryFocus", true, false) != null, "⤢ is the Focus toggle")
+	await load(get_script().resource_path.get_base_dir().path_join("visual_panels.gd")).screens(
+		self
+	)
 	await _sidebar(dock)
 	await _reviews(dock)
 	await _approvals()
@@ -953,7 +956,7 @@ func _panels(base: Control, dock: Control) -> void:
 		bottom = candidate as TabContainer
 	if bottom != null:
 		for index: int in bottom.get_tab_count():
-			if bottom.get_tab_title(index) in ["Files", "FileSystem"]:
+			if bottom.get_tab_title(index) == "Output":
 				bottom.current_tab = index
 				break
 		await get_tree().create_timer(0.3).timeout

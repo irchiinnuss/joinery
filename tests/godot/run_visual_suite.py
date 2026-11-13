@@ -136,6 +136,8 @@ SIDEBAR_NARROW = (
 EDITOR_SCREENS = (
     "disconnected",
     "layout",
+    "scene-column-open",
+    "panels-audio",
     "commands",
     "busy",
     "settings",
@@ -456,6 +458,7 @@ def editor(theme: str, capture: Path, logs: Path) -> Harness:
         shutil.copyfile(TESTS / "visual_share.gd", check / "visual_share.gd")
         shutil.copyfile(TESTS / "visual_tour.gd", check / "visual_tour.gd")
         shutil.copyfile(TESTS / "visual_team.gd", check / "visual_team.gd")
+        shutil.copyfile(TESTS / "visual_panels.gd", check / "visual_panels.gd")
         (check / "plugin.cfg").write_text(
             '[plugin]\nname="Visual check"\ndescription="Test"\nauthor="Joinery"\n'
             'version="1"\nscript="test.gd"\n'

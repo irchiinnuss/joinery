@@ -199,7 +199,8 @@ func _pin() -> void:
 	if index != 0:
 		tabs.move_child(dock, 0)
 		index = tabs.get_tab_idx_from_control(dock)
-	if tabs.is_tab_hidden(index):
+	# In Joinery's layout the panel shows one tab at a time (godot_panels.gd); leave it be.
+	if tabs.is_tab_hidden(index) and not tabs.has_meta("joinery_one_tab"):
 		tabs.set_tab_hidden(index, false)
 
 

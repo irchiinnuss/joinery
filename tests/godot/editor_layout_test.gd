@@ -54,33 +54,7 @@ func _run() -> void:
 	for button: Node in switches.get_children():
 		if button is Button:
 			_check(button.text.is_empty(), "Native workspace selectors must be icon-only")
-	# Scene above Inspector in the left column, so a node and its properties show together.
-	for pair: Array in [["Scene", "DockSlotLeftUR"], ["Inspector", "DockSlotLeftBR"]]:
-		var docked: Node
-		for candidate: Node in base.find_children("*", "EditorDock", true, false):
-			if str(candidate.name) == pair[0]:
-				docked = candidate
-				break
-		_check(docked != null, "Missing dock: " + str(pair[0]))
-		if docked != null:
-			_check(docked.get_parent().name == pair[1], "%s must be in %s" % pair)
-			_check((docked as Control).is_visible_in_tree(), str(pair[0]) + " must be open")
-	var dock_titles: Array[String] = [
-		"FileSystem",
-		"Import",
-		"History",
-		"Signals",
-		"Groups",
-	]
-	for title: String in dock_titles:
-		var dock: Node
-		for candidate: Node in base.find_children("*", "EditorDock", true, false):
-			if str(candidate.name) == title:
-				dock = candidate
-				break
-		_check(dock != null, "Missing dock: " + title)
-		if dock != null:
-			_check(dock.get_parent().is_class("EditorBottomPanel"), title + " must be at bottom")
+	await _godot_panels(plugin, base)
 	_check(plugin._shell._toolbars.size() >= 1, "The viewport toolbar must be discovered")
 	for control: Control in plugin._shell._toolbars:
 		_check(control.visible, "Viewport controls show by default")
@@ -90,19 +64,6 @@ func _run() -> void:
 		_check((tabs as Control).is_visible_in_tree(), "Scene tabs (with their + button) must show")
 	var sidebar := base.find_child("DockSlotRightBL", true, false) as TabContainer
 	_check(not sidebar.tabs_visible, "Chat sidebar must not have a dock tab bar")
-	var bottom := base.find_child("*", true, false) as Control
-	for candidate: Node in base.find_children("*", "EditorBottomPanel", true, false):
-		bottom = candidate as Control
-	var bottom_tabs := bottom as TabContainer
-	for index: int in bottom_tabs.get_tab_count():
-		if bottom_tabs.get_tab_title(index) == "Groups":
-			bottom_tabs.current_tab = index
-			break
-	await get_tree().create_timer(0.2).timeout
-	var center_split := base.find_child("DockVSplitCenter", true, false) as SplitContainer
-	_check(bottom.size.y >= center_split.size.y * 0.4, "Bottom docks must open with useful height")
-	await _capture("/tmp/joinery-editor-bottom-height.png")
-	bottom_tabs.current_tab = -1
 	_check(sidebar.get_popup() == null, "Journeyman must not show a docking menu")
 	sidebar.get_tab_bar().tab_rmb_clicked.emit(0)
 	for popup: Node in base.find_children("*", "DockContextPopup", true, false):
@@ -115,20 +76,24 @@ func _run() -> void:
 		"Toolbar diagnostics must stay out of chat"
 	)
 	var scene := EditorInterface.get_edited_scene_root()
-	var selection := EditorInterface.get_selection()
-	selection.clear()
-	selection.add_node(scene.get_node("Door"))
-	await get_tree().create_timer(0.1).timeout
-	print("layout check: object target ", plugin._dock.target_snapshot())
-	_check(
-		str(plugin._dock.target_snapshot()[0]["id"]).ends_with("::Door"),
-		"Engine object selection must reach Chatup"
-	)
-	selection.clear()
-	selection.add_node(scene.get_node("Music"))
-	await get_tree().create_timer(0.1).timeout
-	_check(plugin._dock.target_snapshot()[0]["kind"] == "Audio", "Identify engine audio selection")
-	selection.clear()
+	# The testbed's main scene needs Blender to import; without it no scene is open.
+	if scene != null and scene.has_node("Door"):
+		var selection := EditorInterface.get_selection()
+		selection.clear()
+		selection.add_node(scene.get_node("Door"))
+		await get_tree().create_timer(0.1).timeout
+		print("layout check: object target ", plugin._dock.target_snapshot())
+		_check(
+			str(plugin._dock.target_snapshot()[0]["id"]).ends_with("::Door"),
+			"Engine object selection must reach Chatup"
+		)
+		selection.clear()
+		selection.add_node(scene.get_node("Music"))
+		await get_tree().create_timer(0.1).timeout
+		_check(
+			plugin._dock.target_snapshot()[0]["kind"] == "Audio", "Identify engine audio selection"
+		)
+		selection.clear()
 	for control: Control in plugin._shell._toolbars:
 		_check(not control.visible, "Viewport controls must be toggleable")
 	plugin._on_toggle_toolbar()
@@ -265,6 +230,99 @@ func _rail_states(plugin: EditorPlugin) -> void:
 		_check(wording.is_empty() or tip.contains(wording), "Blender's tooltip names its readiness")
 
 
+## Godot's own panels on the rail: hidden by default, each opened and hidden from its icon,
+## the bottom panel showing one dock at a time, and the choice kept as an editor setting.
+func _godot_panels(plugin: EditorPlugin, base: Control) -> void:
+	var panels: Node = plugin._panels
+	_check(panels != null, "Godot's panels are wired in Joinery's layout")
+	if panels == null:
+		return
+	var settings := EditorInterface.get_editor_settings()
+	settings.set_setting(panels.SIDE_SETTING, PackedStringArray())
+	for id: String in ["Scene", "Inspector", "FileSystem"]:
+		if panels.is_shown(id):
+			panels.hide_panel(id)
+	await get_tree().create_timer(0.3).timeout
+	var bottom := panels._bottom as TabContainer
+	_check(bottom.current_tab == -1 and not bottom.tabs_visible, "No bottom strip by default")
+	var items: Dictionary = plugin._rail._panel_items
+	for id: String in ["Scene", "Inspector", "FileSystem", "Output", "Audio", "Debugger"]:
+		_check(items.has(id), id + " is on the rail")
+		if items.has(id):
+			var button: Button = items[id].button
+			_check(not button.button_pressed, id + " starts hidden")
+			var named: String = button.accessibility_name
+			_check(button.tooltip_text.contains(named), id + "'s icon has a tooltip naming it")
+	_check(not items.has("Review") or items["Review"].get_parent().name == "OwnPanels", "Review")
+	var viewport := base.find_child("DockVSplitCenter", true, false) as Control
+	var narrow := viewport.size.x
+	await _capture("/tmp/joinery-editor-panels-hidden.png")
+	# Scene and Inspector together (Ctrl+Alt+I), side by side with the viewport.
+	panels.toggle_column()
+	await get_tree().create_timer(0.3).timeout
+	for pair: Array in [["Scene", "DockSlotLeftUR"], ["Inspector", "DockSlotLeftBR"]]:
+		var dock: Control = panels._dock(pair[0])
+		_check(dock.get_parent().name == pair[1], "%s opens in %s" % pair)
+		_check(dock.is_visible_in_tree(), str(pair[0]) + " shows")
+		_check(items[pair[0]].button.button_pressed, str(pair[0]) + "'s icon shows it is open")
+	var column := base.find_child("DockVSplitLeftR", true, false) as Control
+	_check(column.size.x >= 200.0, "The column opens at a usable width (%d)" % column.size.x)
+	_check(viewport.size.x < narrow, "The viewport gives the column its width")
+	_check(
+		Array(settings.get_setting(panels.SIDE_SETTING)) == ["Scene", "Inspector"],
+		"The open side panels are an editor preference"
+	)
+	await _capture("/tmp/joinery-editor-panels-column.png")
+	# Focus hides everything; leaving it brings back the user's own choice.
+	plugin._on_toggle_focus()
+	await get_tree().create_timer(0.2).timeout
+	_check(not panels.is_shown("Scene"), "Focus hides the column")
+	plugin._on_toggle_focus()
+	await get_tree().create_timer(0.2).timeout
+	_check(panels.is_shown("Scene"), "Leaving Focus brings the column back")
+	items["Scene"].button.pressed.emit()
+	await get_tree().create_timer(0.2).timeout
+	_check(not panels.is_shown("Scene") and panels.is_shown("Inspector"), "One icon, one panel")
+	panels.toggle_column()
+	await get_tree().create_timer(0.2).timeout
+	_check(not panels.is_shown("Inspector"), "The shortcut hides what shows")
+	print("layout check: side panels checked")
+	items["FileSystem"].button.pressed.emit()
+	await get_tree().create_timer(0.3).timeout
+	var files: Control = panels._dock("FileSystem")
+	_check(files.get_parent().name == "DockSlotLeftUL", "Files open in their own side column")
+	items["FileSystem"].button.pressed.emit()
+	await get_tree().create_timer(0.2).timeout
+	print("layout check: files checked")
+	# A bottom dock shows alone, with its own title and ×, and hides again.
+	items["Audio"].button.pressed.emit()
+	await get_tree().create_timer(0.3).timeout
+	_check(panels.is_shown("Audio"), "Audio opens in the bottom panel")
+	var visible_tabs := 0
+	for index: int in bottom.get_tab_count():
+		visible_tabs += 0 if bottom.is_tab_hidden(index) else 1
+	_check(visible_tabs == 1, "The bottom panel shows one dock (%d tabs)" % visible_tabs)
+	var center_split := base.find_child("DockVSplitCenter", true, false) as Control
+	_check(bottom.size.y >= center_split.size.y * 0.3, "Bottom docks open with useful height")
+	await _capture("/tmp/joinery-editor-panels-audio.png")
+	print("layout check: audio shown")
+	var close := bottom.find_child("JoineryHidePanel", true, false) as Button
+	_check(close != null and close.is_visible_in_tree(), "The bottom panel has a ×")
+	if close != null:
+		close.pressed.emit()
+	_check(bottom.current_tab == -1, "× hides the bottom panel")
+	items["Output"].button.pressed.emit()
+	await get_tree().process_frame
+	_check(panels.is_shown("Output"), "Output opens from the rail")
+	items["Output"].button.pressed.emit()
+	await get_tree().process_frame
+	_check(not panels.is_shown("Output"), "Output's icon again hides it")
+	push_error("Joinery layout check: a deliberate error for Output's mark")
+	await get_tree().create_timer(0.8).timeout
+	_check(items["Output"].dot.visible, "Output's icon marks new errors")
+	_check(not panels.is_shown("Output"), "Output never opens by itself")
+
+
 func _review_in_focus(plugin: EditorPlugin) -> void:
 	if plugin._focus.is_active():
 		plugin._on_toggle_focus()
@@ -272,7 +330,6 @@ func _review_in_focus(plugin: EditorPlugin) -> void:
 	_check(plugin._focus.is_active(), "Focus mode must find the editor docks")
 	var dock := (plugin._review_tab as Control).get_parent() as Control
 	var tabs := dock.get_parent() as TabContainer
-	_check(tabs.is_visible_in_tree(), "Focus mode keeps the bottom tab strip")
 	_check(tabs.current_tab == -1, "Focus mode collapses the bottom panel to its strip")
 	var focus_button := EditorInterface.get_base_control().find_child("JoineryFocus", true, false)
 	_check(focus_button != null and focus_button.button_pressed, "⤢ shows Focus mode is on")
@@ -286,7 +343,7 @@ func _review_in_focus(plugin: EditorPlugin) -> void:
 	await _capture("/tmp/joinery-editor-focus-review.png")
 	plugin._close_review("", "info")
 	await get_tree().process_frame
-	_check(tabs.is_visible_in_tree(), "The bottom tab strip stays once nothing waits")
+	_check(tabs.current_tab == -1 and not tabs.tabs_visible, "The panel hides once nothing waits")
 	focus_button.pressed.emit()
 	_check(not plugin._focus.is_active(), "⤢ turns Focus mode off")
 	_check(not focus_button.button_pressed, "⤢ shows Focus mode is off")

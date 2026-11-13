@@ -1,8 +1,13 @@
 @tool
 extends VBoxContainer
 ## The app rail beside the viewport. The fork provides the column (JoineryNavigation); the
-## addon fills it: Godot, a divider, Assets and each project app, a divider, and Joinery's own
-## pages (Timeline, Share, Mixer). Every item has a tooltip naming it.
+## addon fills it: Godot and Godot's own panels (Scene, Inspector, FileSystem, Output, Audio,
+## …, with Godot's icons), a divider, Assets and each project app, a divider, and Joinery's own
+## pages (Review, Timeline, Share). Every item has a tooltip naming it.
+##
+## A panel item opens or hides that Godot dock (godot_panels.gd) and shows a raised pill while
+## the dock shows; it never takes the selection from the app or page on screen. Output's item
+## carries a dot while Godot marks new errors or warnings.
 ##
 ## Each app shows its official logo in its own colours (icons/apps, see licenses/tool-logos.md);
 ## an app without one (and Assets, the pages and custom tools) shows a
@@ -15,6 +20,8 @@ extends VBoxContainer
 ## last checked. Every command runs as a job, off the UI thread.
 
 signal tool_selected(tool: String)
+## A Godot panel item (or Review) was pressed: show or hide that dock.
+signal panel_toggled(id: String)
 
 const UI_THEME := preload("ui_theme.gd")
 const UI_COMPONENTS := preload("ui_components.gd")
@@ -80,6 +87,12 @@ var _card: Card
 var _card_layer: Control
 var _card_tool := ""
 var _card_idle := 0.0
+## Godot's panels under the Godot item, Joinery's own docks (Review) above the pages, and
+## their items by dock name.
+var _panel_box: VBoxContainer
+var _own_box: VBoxContainer
+var _panel_items: Dictionary = {}
+var _panel_signature: Array = []
 
 
 ## The readiness card beside an app: name, the plain sentence, the one action, Check again
@@ -179,7 +192,14 @@ func _ready() -> void:
 	_pages.theme_type_variation = "JoineryTight"
 	_pages.hide()
 	_pages.add_child(HSeparator.new())
+	_own_box = VBoxContainer.new()
+	_own_box.name = "OwnPanels"
+	_own_box.theme_type_variation = "JoineryTight"
+	_pages.add_child(_own_box)
 	add_child(_pages)
+	_panel_box = VBoxContainer.new()
+	_panel_box.name = "GodotPanels"
+	_panel_box.theme_type_variation = "JoineryTight"
 	_build_card()
 	_refresh_readiness()
 
@@ -190,6 +210,8 @@ func _exit_tree() -> void:
 			job.call("cancel")
 	_job = null
 	_action_job = null
+	if is_instance_valid(_panel_box) and _panel_box.get_parent() == null:
+		_panel_box.free()
 
 
 func _process(delta: float) -> void:
@@ -260,7 +282,8 @@ func update_tools(tools: Array, assets: Array) -> void:
 	_signature = signature
 	for child: Node in _tools.get_children():
 		_tools.remove_child(child)
-		child.queue_free()
+		if child != _panel_box:
+			child.queue_free()
 	for id: String in _buttons.keys():
 		if not _page_ids.has(id):
 			_buttons.erase(id)
@@ -273,12 +296,16 @@ func update_tools(tools: Array, assets: Array) -> void:
 			added_all = true
 		_add_tool(id, str(tool["name"]), _icon_source(id, str(tool.get("domain", ""))))
 		if id == "godot":
-			# Godot's own view, then the apps that make the project's assets.
+			# Godot's own view and its panels, then the apps that make the project's assets.
+			_tools.add_child(_panel_box)
 			_tools.add_child(HSeparator.new())
 			_add_all_assets()
 			added_all = true
 	if not added_all:
 		_add_all_assets()
+	if _panel_box.get_parent() == null:
+		_tools.add_child(_panel_box)
+		_tools.move_child(_panel_box, 0)
 	_apply_readiness(_readiness)
 	select_tool(_selected)
 
@@ -321,6 +348,51 @@ func add_page(id: String, title: String, source: Dictionary) -> void:
 	_add_tool(id, title, source, _pages)
 	_pages.show()
 	select_tool(_selected)
+
+
+## Show [param panels] (godot_panels.gd panels()): Godot's under the Godot item, Joinery's
+## own (Review) above the pages. Rebuilt only when the list changes.
+func set_panels(panels: Array[Dictionary]) -> void:
+	var signature: Array = []
+	for panel: Dictionary in panels:
+		signature.append([panel["id"], panel["title"], panel["icon"], panel["own"]])
+	if signature == _panel_signature:
+		return
+	_panel_signature = signature
+	for box: VBoxContainer in [_panel_box, _own_box]:
+		for child: Node in box.get_children():
+			box.remove_child(child)
+			child.queue_free()
+	_panel_items.clear()
+	for panel: Dictionary in panels:
+		var id := str(panel["id"])
+		var button := _button("Panel" + id.replace(" ", ""), str(panel["title"]))
+		button.pressed.connect(func() -> void: panel_toggled.emit(id))
+		var source := {"editor": str(panel["icon"])}
+		var item := _item(button, source, false)
+		(_own_box if bool(panel["own"]) else _panel_box).add_child(item)
+		_panel_items[id] = item
+	if not _own_box.get_children().is_empty():
+		_pages.show()
+
+
+## Show which panels are on screen ([param shown]: id → bool) and Output's mark ("error",
+## "warning" or "").
+func set_panel_states(shown: Dictionary, output_mark := "") -> void:
+	for id: String in _panel_items:
+		var item: RailItem = _panel_items[id]
+		var on := bool(shown.get(id, false))
+		if item.button.button_pressed != on:
+			item.button.set_pressed_no_signal(on)
+			_sync(item)
+		var title := str(item.button.accessibility_name)
+		var tip := ("Hide " if on else "Show ") + title
+		if id == "Output" and not output_mark.is_empty():
+			tip += " · new " + ("errors" if output_mark == "error" else "warnings")
+		item.button.tooltip_text = tip
+		var dot := item.dot as UI_COMPONENTS.StatusDot
+		dot.visible = id == "Output" and not output_mark.is_empty()
+		dot.state = "attention" if output_mark == "error" else "working"
 
 
 func _add_all_assets() -> void:
@@ -420,6 +492,8 @@ func _sync(item: RailItem, instant := false) -> void:
 func _all_items() -> Array[RailItem]:
 	var items: Array[RailItem] = []
 	for item: RailItem in _items.values():
+		items.append(item)
+	for item: RailItem in _panel_items.values():
 		items.append(item)
 	return items
 

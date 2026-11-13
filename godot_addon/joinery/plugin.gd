@@ -23,6 +23,7 @@ const REVIEW_TAB_SCRIPT := preload("res://addons/joinery/review_tab.gd")
 const REVIEW_CHECKS := preload("res://addons/joinery/review_checks.gd")
 const FLOW_SCRIPT := preload("res://addons/joinery/review_flow.gd")
 const EDITOR_CONTEXT := preload("res://addons/joinery/editor_context.gd")
+const PANELS_SCRIPT := preload("res://addons/joinery/godot_panels.gd")
 
 ## Focus mode is remembered, so a user who wants the stripped-back layout gets
 ## it on every launch instead of re-toggling it each session.
@@ -51,6 +52,8 @@ var _focus: RefCounted
 var _workspace: Control
 var _shell: RefCounted
 var _rail: Control
+## Godot's own panels on the rail, in Joinery's layout (godot_panels.gd).
+var _panels: Node
 var _sidebar_tabs: TabContainer
 var _sidebar_tabs_were_visible := true
 var _chat: Node
@@ -192,6 +195,9 @@ func _restore_focus() -> void:
 		for id: String in _pages:
 			_rail.add_page(id, str(_pages[id]["title"]), _pages[id]["icon"])
 		_workspace.refresh()
+	if _joinery_layout:
+		_panels = PANELS_SCRIPT.new()
+		_panels.attach(self, _rail)
 	main_screen_changed.connect(_on_main_screen_changed)
 	# Godot's classic layout opens as Godot arranges it; Focus mode stays one command away.
 	var focus := settings.has_setting(FOCUS_SETTING) and bool(settings.get_setting(FOCUS_SETTING))
@@ -321,6 +327,8 @@ func _exit_tree() -> void:
 		_rail.queue_free()
 	if _focus != null:
 		_focus.restore()
+	if _panels != null:
+		_panels.detach(self)
 	if is_instance_valid(_sidebar_tabs):
 		_sidebar_tabs.tabs_visible = _sidebar_tabs_were_visible
 	if is_instance_valid(_connect_dialog):
@@ -580,23 +588,12 @@ func _on_tool_selected(tool: String) -> void:
 		_open_rail_page(tool)
 		return
 	if tool == "godot":
-		get_editor_interface().set_main_screen_editor(_godot_view())
+		get_editor_interface().set_main_screen_editor(SHELL_SCRIPT.godot_view(_last_view))
 		if _rail != null:
 			_rail.select_tool("godot")
 		return
 	_open_workspace()
 	_workspace.select_tool(tool)
-
-
-## The view the Godot rail button opens: 2D for a Node2D or Control scene, 3D for a Node3D
-## scene, otherwise the last of 2D and 3D the user had.
-func _godot_view() -> String:
-	var root := EditorInterface.get_edited_scene_root()
-	if root is Node3D:
-		return "3D"
-	if root is Node2D or root is Control:
-		return "2D"
-	return _last_view
 
 
 func _on_main_screen_changed(screen: String) -> void:

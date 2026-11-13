@@ -41,3 +41,20 @@ testbed copy. It checks migrated dock parents, icon-only vertical selectors,
 hidden/toggleable viewport controls, rail-to-Blender navigation and creator-only
 filtering, then captures both the 3D editor and the tool workspace. The ordinary
 viewer test additionally checks readable-name search and creator filtering.
+
+## Amendment: Godot's panels live on the rail
+
+The viewport and Journeyman are the main surfaces, and Joinery does not rebuild
+what Godot already has. In Joinery's layout Godot's own docks (Scene, Inspector,
+FileSystem, Output, Debugger, Audio, Animation, Shader Editor, and any other
+Godot dock while it is open) are rail icons under the Godot item, drawn with
+Godot's own icons (`godot_panels.gd`). They start hidden; an icon shows its dock
+and hides it again. Scene sits above Inspector left of the viewport and
+FileSystem has its own column left of them (fork patch 0040, layout 4). There is
+no bottom tab row: a bottom dock opens alone, titled with its name, and its icon,
+× or Esc hides it. Output never opens by itself; its icon shows a dot for new
+errors or warnings. The open side docks are an editor setting
+(`joinery/layout/side_panels`), absent meaning none, so existing layouts lose the
+column once. Joinery's own Mixer page was removed for the same reason: Godot's
+Audio panel is the one place for buses (ADR 0048 amendment). The classic view
+keeps Godot's stock docks and tab rows.

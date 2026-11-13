@@ -133,29 +133,44 @@ func _run() -> void:
 	(editor[0] as Node).notification.call_deferred(NOTIFICATION_WM_CLOSE_REQUEST)
 
 
-## Where Scene, FileSystem and Inspector sit: in Joinery's layout FileSystem is in the bottom
-## panel and Scene above Inspector in the left column; in the classic one all three are in the
-## side columns, as stock Godot puts them.
+## Where Scene, FileSystem and Inspector sit: in Joinery's layout they start hidden and open
+## from the rail into the side columns (FileSystem left of Scene above Inspector); in the
+## classic one all three are open in the side columns, as stock Godot puts them.
 func _check_docks(base: Control, classic: bool) -> void:
-	for type: String in ["SceneTreeDock", "FileSystemDock", "InspectorDock"]:
+	var panels: Node = _plugin.get("_panels")
+	_check((panels == null) == classic, "Godot's panels are on the rail only in Joinery's")
+	var slots := {
+		"SceneTreeDock": "DockSlotLeftUR",
+		"InspectorDock": "DockSlotLeftBR",
+		"FileSystemDock": "DockSlotLeftUL",
+	}
+	for type: String in slots:
 		var docks := base.find_children("*", type, true, false)
 		_check(docks.size() == 1, type + " exists")
 		if docks.is_empty():
 			continue
-		var holder := (docks[0] as Node).get_parent()
-		var bottom := holder != null and holder.is_class("EditorBottomPanel")
-		var expect_bottom := not classic and type == "FileSystemDock"
-		_check(
-			bottom == expect_bottom,
-			"%s is %s" % [type, "in the bottom panel" if expect_bottom else "in a side column"]
-		)
-		if not classic and type != "FileSystemDock":
-			var slot := "DockSlotLeftUR" if type == "SceneTreeDock" else "DockSlotLeftBR"
-			_check(holder != null and holder.name == slot, "%s is in %s" % [type, slot])
 		var control := docks[0] as Control
+		var holder := control.get_parent()
+		_check(
+			holder == null or not holder.is_class("EditorBottomPanel"),
+			type + " is not at the bottom"
+		)
 		if classic and type != "InspectorDock":
 			# Stock Godot opens Scene and FileSystem; Inspector shares its slot with Node.
 			_check(control.is_visible_in_tree(), type + " is open")
+		if classic or panels == null:
+			continue
+		_check(not control.is_visible_in_tree(), type + " starts hidden")
+		var id := str(panels.call("_key", control))
+		panels.call("show_panel", id)
+		_check(control.get_parent().name == slots[type], "%s opens in %s" % [type, slots[type]])
+		panels.call("hide_panel", id)
+		_check(not control.is_visible_in_tree(), type + " hides again")
+	for node: Node in base.find_children("*", "EditorBottomPanel", true, false):
+		var bottom := node as TabContainer
+		_check(
+			bottom.tabs_visible == classic, "The bottom tab strip shows only in the classic view"
+		)
 	var files := base.find_children("*", "FileSystemDock", true, false)
 	if not files.is_empty():
 		# An empty title shows the dock's name, FileSystem, as stock Godot does.
