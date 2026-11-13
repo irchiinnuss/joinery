@@ -16,6 +16,8 @@ const _LAST_LINE := 0.6
 const _TILE_GLYPH := 1.75
 ## A reference image is 4:3.
 const _TILE_RATIO := 0.75
+## How far a typographic reference tile's ground leans toward its colour from the look.
+const _TINT := 0.22
 ## Reference images are kept at most this wide (logical px × unit); the grid never shows more.
 const _THUMB_W := 320
 ## Reference columns by room (logical px × unit): two below the first width, three below the
@@ -442,9 +444,11 @@ class PaletteSwatches:
 ## Reference images in a grid: each tile shows the picture (a PNG, JPEG or WebP, or a Krita
 ## board's own preview) at 4:3 with RADIUS.md corners, its one-line "take" under it, and what
 ## it is not ("Not: …") in the tooltip. A reference without a picture (a game, film or place)
-## is a raised tile with an icon and its title, never a word drawn as the picture.
+## is typographic: its title set large and what it is small ("Hob", "game") on a ground tinted
+## with one of the look's colours; no icon stands in for a picture it does not have.
 ## [param columns] fixes the count; 0 picks two to four from the width. [param refs] are
-## {title, image, take, not, icon}; image is a file path, icon the stand-in's glyph ("image").
+## {title, image, take, not, kind, tint}; image is a file path, kind the word under the title
+## ("game"), tint the colour its ground leans toward (none: the raised fill).
 static func reference_grid(refs: Array, columns := 0) -> GridContainer:
 	var grid := GridContainer.new()
 	grid.name = "ReferenceGrid"
@@ -499,28 +503,18 @@ static func _reference(ref: Dictionary) -> VBoxContainer:
 		picture.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		frame.add_child(picture)
 	else:
-		var stand_in := VBoxContainer.new()
-		stand_in.name = "StandIn"
-		stand_in.theme_type_variation = "JoineryTight"
-		stand_in.alignment = BoxContainer.ALIGNMENT_CENTER
-		stand_in.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		stand_in.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-		frame.add_child(stand_in)
-		var glyph := STYLE.glyph("text_faint")
-		STYLE.set_glyph(glyph, str(ref.get("icon", "image")), "text_faint")
-		glyph.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-		stand_in.add_child(glyph)
-		var name := UI.label(title, "JoineryCaption")
-		name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		name.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		stand_in.add_child(name)
+		frame.add_child(_stand_in(title, str(ref.get("kind", ""))))
+	var tint: Variant = ref.get("tint")
 	STYLE.on_theme_overrides(
 		frame,
 		func() -> void:
 			var box := StyleBoxFlat.new()
-			# A picture sits on the sunken ground; a stand-in on the raised one, like a card.
+			# A picture sits on the sunken ground; a stand-in on the raised one, leaning a
+			# little toward its colour from the look so the board reads as one palette.
 			var ground := "surface_sunken" if texture != null else "surface_raised"
 			box.bg_color = frame.get_theme_color(ground, "Joinery")
+			if texture == null and tint is Color:
+				box.bg_color = box.bg_color.lerp(tint as Color, _TINT)
 			box.set_corner_radius_all(UI_THEME.radius(frame, "md"))
 			box.anti_aliasing = true
 			frame.add_theme_stylebox_override("panel", box)
@@ -534,6 +528,44 @@ static func _reference(ref: Dictionary) -> VBoxContainer:
 	caption.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	tile.add_child(caption)
 	return tile
+
+
+## A reference with no picture, set in type: the title at title size on the tile's lower
+## edge, what it is ("game") small above it, both SPACE.3 in from the corner.
+static func _stand_in(title: String, kind: String) -> MarginContainer:
+	var stand_in := MarginContainer.new()
+	stand_in.name = "StandIn"
+	stand_in.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stand_in.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	STYLE.on_theme_overrides(
+		stand_in,
+		func() -> void:
+			var pad := UI_THEME.space(stand_in, 3)
+			for side: String in ["left", "right", "top", "bottom"]:
+				stand_in.add_theme_constant_override("margin_" + side, pad)
+	)
+	var words := VBoxContainer.new()
+	words.theme_type_variation = "JoineryFlush"
+	words.alignment = BoxContainer.ALIGNMENT_END
+	words.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stand_in.add_child(words)
+	if not kind.is_empty():
+		var what := UI.label(kind.to_lower(), "JoineryCaption")
+		what.name = "Kind"
+		what.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		# On a tinted ground the muted ink loses its contrast: the full text colour, smaller.
+		STYLE.on_theme_overrides(
+			what,
+			func() -> void:
+				what.add_theme_color_override("font_color", what.get_theme_color("text", "Joinery"))
+		)
+		words.add_child(what)
+	var name := UI.label(title, "JoineryTitle", true)
+	name.name = "Title"
+	name.max_lines_visible = 2
+	name.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	words.add_child(name)
+	return stand_in
 
 
 ## A small picture of [param path] (an image, or a Krita board's own preview), or null.

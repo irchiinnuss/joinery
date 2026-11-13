@@ -280,7 +280,7 @@ func _page(chat: Control) -> void:
 	_check((swatches.get("roles") as Array).size() == 3, "One swatch per role")
 	_check(swatches.call("_get_tooltip", Vector2(1, 1)).contains("#8a5a3b"), "Hover shows the hex")
 	var grid := page.find_child("References", true, false) as GridContainer
-	_check(grid != null and grid.get_child_count() == 3, "Two references and Add reference")
+	_check(grid != null and grid.get_child_count() == 2, "Two references, one tile each")
 	var tile := grid.get_child(0)
 	var picture := tile.find_child("Picture", true, false) as TextureRect
 	_check(picture != null and picture.texture != null, "The photo shows as a picture")
@@ -289,8 +289,17 @@ func _page(chat: Control) -> void:
 		"A tile's caption is its take"
 	)
 	_check(str(tile.tooltip_text).contains("Not: the haze"), "What to leave is in the tooltip")
-	_check(grid.get_child(1).find_child("StandIn", true, false) != null, "A game is an icon tile")
-	_check(grid.get_child(2).name == "AddReference", "Add reference is the last tile")
+	var stand_in := grid.get_child(1).find_child("StandIn", true, false)
+	_check(stand_in != null, "A game without a picture is a typographic tile")
+	_check(
+		stand_in != null and stand_in.find_child("TextureRect", true, false) == null,
+		"…with no icon standing in for a picture"
+	)
+	var add := page.find_child("AddReference", true, false) as Control
+	_check(
+		add != null and add.get_parent() == grid.get_parent(), "Add reference sits under the board"
+	)
+	_check(add != null and add.size.y < grid.get_child(0).size.y / 2.0, "…small, not a tile")
 	_check(
 		(page.find_child("FeelLine", true, false) as Label).text.begins_with("Calm"),
 		"The feel is one sentence"

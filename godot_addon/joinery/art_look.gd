@@ -16,9 +16,6 @@ const EMPTY_ROLES := 5
 ## At most this many tags under the feel.
 const MAX_TAGS := 6
 ## A reference kind's stand-in glyph, when it has no picture.
-const KIND_ICONS := {
-	"game": "play", "film": "animation", "place": "scene", "sketch": "image", "photo": "image"
-}
 const MONTHS := ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 
@@ -46,14 +43,23 @@ static func empty_roles() -> Array:
 	return empty
 
 
-## The board's references as reference_grid items ({title, image, take, not, icon}).
+## The board's references as reference_grid items ({title, image, take, not, kind, tint}): a
+## reference with no picture leans toward the look's colours in turn, so the board reads as one
+## palette rather than as grey placeholders.
 static func references(event: Dictionary) -> Array:
+	var colours: Array[Color] = []
+	for role: Dictionary in roles(event):
+		if Color.html_is_valid(str(role.get("hex", ""))):
+			colours.append(Color.html(str(role["hex"])))
 	var refs: Array = []
 	for item: Variant in event.get("references", []):
 		if not item is Dictionary:
 			continue
 		var row := item as Dictionary
 		var file := str(row.get("file", ""))
+		var tint: Variant = (
+			colours[refs.size() % colours.size()] if not colours.is_empty() else null
+		)
 		(
 			refs
 			. append(
@@ -62,7 +68,8 @@ static func references(event: Dictionary) -> Array:
 					"image": ("res://" + file) if not file.is_empty() else "",
 					"take": str(row.get("take", "")),
 					"not": str(row.get("avoid", "")),
-					"icon": KIND_ICONS.get(str(row.get("kind", "")).to_lower(), "image"),
+					"kind": str(row.get("kind", "")).to_lower(),
+					"tint": tint,
 				}
 			)
 		)
@@ -244,30 +251,18 @@ static func empty_palette(choose: Callable) -> Container:
 	return stack
 
 
-## The dashed "Add reference" tile, the grid's last cell.
+## "+ Add reference" under the board: a small hairline pill, never the size of a real
+## reference.
 static func add_tile(add: Callable) -> Button:
-	var tile := UI.quiet("Add reference")
+	var tile := Button.new()
+	tile.text = "+  Add reference"
 	tile.name = "AddReference"
+	tile.theme_type_variation = "JoineryActionChip"
+	tile.accessibility_name = "Add reference"
 	tile.tooltip_text = "Photos, sketches or Krita boards"
-	tile.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	tile.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	tile.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	UI.bind_height(tile, "sm")
 	tile.pressed.connect(add)
-	STYLE.on_theme_overrides(
-		tile,
-		func() -> void:
-			for state: String in ["normal", "hover", "pressed", "focus"]:
-				var box := StyleBoxFlat.new()
-				box.draw_center = state in ["hover", "pressed"]
-				box.bg_color = tile.get_theme_color("surface_raised", "Joinery")
-				box.border_color = tile.get_theme_color(
-					"accent" if state == "focus" else "border_subtle", "Joinery"
-				)
-				box.set_border_width_all(maxi(1, roundi(UI_THEME.unit(tile))))
-				box.set_corner_radius_all(UI_THEME.radius(tile, "md"))
-				box.anti_aliasing = true
-				tile.add_theme_stylebox_override(state, box)
-	)
-	tile.resized.connect(func() -> void: tile.custom_minimum_size.y = roundf(tile.size.x * 0.75))
 	return tile
 
 

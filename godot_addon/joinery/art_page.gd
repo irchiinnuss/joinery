@@ -123,6 +123,8 @@ func _ready() -> void:
 	_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	add_child(_scroll)
 	UI_MOTION.rubber_band(_scroll)
+	# Text slides under the sticky footer through a fade, never cut on its hairline.
+	STYLE.scroll_fade(_scroll)
 	_body = VBoxContainer.new()
 	_body.theme_type_variation = "JoinerySections"
 	_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -536,18 +538,22 @@ func _swatch_popover(index: int, swatches: Control) -> void:
 	UI_MOTION.enter(card, swatches)
 
 
-## The reference pictures, a dashed "Add reference" tile last; a tile opens full width.
+## The reference pictures, a small "Add reference" pill under them; a tile opens full width.
 func _board(refs: Array) -> Control:
+	var board := VBoxContainer.new()
+	board.theme_type_variation = "JoineryRow"
 	var grid := UI.reference_grid(refs)
 	grid.name = "References"
+	board.add_child(grid)
 	for index: int in grid.get_child_count():
 		var tile := grid.get_child(index) as Control
 		tile.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 		tile.mouse_filter = Control.MOUSE_FILTER_STOP
 		tile.gui_input.connect(_tile_input.bind(refs[index], tile))
+	grid.visible = grid.get_child_count() > 0
 	if _can_ask():
-		grid.add_child(LOOK.add_tile(_ask.bind("Add a reference to the look: ")))
-	return grid
+		board.add_child(LOOK.add_tile(_ask.bind("Add a reference to the look: ")))
+	return board
 
 
 func _tile_input(input: InputEvent, ref: Dictionary, tile: Control) -> void:

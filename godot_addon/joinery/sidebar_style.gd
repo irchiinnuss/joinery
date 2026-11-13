@@ -229,6 +229,31 @@ static func set_glyph(picture: TextureRect, icon_name: String, role := "text_mut
 		picture.theme_changed.connect(_apply_glyph.bind(picture))
 
 
+## Fade [param scroller]'s content out at its bottom edge (and the top once scrolled) into the
+## dock's ground, SPACE.5 tall, so text slides under a sticky footer instead of being cut.
+static func scroll_fade(scroller: ScrollContainer) -> void:
+	if not "scroll_hint_mode" in scroller:
+		return
+	on_theme_overrides(
+		scroller,
+		func() -> void:
+			var gradient := Gradient.new()
+			gradient.set_color(0, Color.WHITE)
+			gradient.set_color(1, Color(1, 1, 1, 0))
+			var texture := GradientTexture2D.new()
+			texture.gradient = gradient
+			texture.fill_from = Vector2.ZERO
+			texture.fill_to = Vector2(0, 1)
+			texture.width = 4
+			texture.height = maxi(UI_THEME.space(scroller, 5), 1)
+			scroller.add_theme_icon_override("scroll_hint_vertical", texture)
+			scroller.add_theme_color_override(
+				"scroll_hint_vertical_color", scroller.get_theme_color("surface", "Joinery")
+			)
+			scroller.set("scroll_hint_mode", 1)
+	)
+
+
 ## Put [param scroller]'s always-reserved scrollbar in the sidebar's right gutter, SPACE.1 off
 ## the content: each time its column lays it out on the content edges, it grows by the room
 ## the bar takes (at most the gutter), so its content keeps the right edge every other row has.
