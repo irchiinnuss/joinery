@@ -130,16 +130,28 @@ func _run() -> void:
 	_check(online.state == "cancelled", "Cancel closes the plan")
 	_check(not DirAccess.dir_exists_absolute(ONLINE), "Cancel changes nothing")
 
-	# /brief opens the brief read-only, in the document view.
+	# /brief opens the brief read-only, on the sidebar's page.
 	chat._on_submit("/brief")
 	await process_frame
-	var dialogs := chat.find_children("*", "AcceptDialog", true, false)
-	_check(dialogs.size() == 1 and dialogs[0].title == "Game brief", "/brief opens the brief")
-	if dialogs.size() == 1:
-		var body := dialogs[0].find_child("Document", true, false) as RichTextLabel
-		_check(body != null and not body.text.is_empty(), "The brief is shown")
-		_check(not body.has_method("insert_text_at_caret"), "The brief is read-only")
-		dialogs[0].queue_free()
+	var page := chat.find_child("ArtDirection", true, false) as Control
+	_check(
+		(
+			page != null
+			and page.visible
+			and chat.find_children("*", "AcceptDialog", true, false).is_empty()
+		),
+		"/brief opens the brief on the sidebar page"
+	)
+	if page != null:
+		var title := page.find_child("Title", true, false) as Label
+		_check(title.text == "Game brief", "The page is titled Game brief")
+		var body := page.find_child("Document", true, false)
+		var shown := body.find_children("*", "RichTextLabel", true, false) if body != null else []
+		_check(not shown.is_empty(), "The brief is shown")
+		_check(
+			body.find_children("*", "TextEdit", true, false).is_empty(), "The brief is read-only"
+		)
+		page.call("set_open", false)
 
 	# Without a brief, /brief offers to write it.
 	DirAccess.rename_absolute("res://design/brief.md", "res://design/brief.moved")
