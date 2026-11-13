@@ -208,6 +208,24 @@ decided without opening the panel. A bigger one (several assets, many changed
 lines, or a reviewer's warning) offers **Review** instead, which brings the
 panel up.
 
+### Accepting changes automatically
+
+**Settings → Replies → Accept changes automatically** (off by default) keeps a
+change without asking when nothing about it needs you: every check passed with
+nothing to say, the reviewer agent raised no warning, any done-when items
+passed, and the change has no live scene edits and leaves the art bible, the
+game brief and the art references alone. No review opens for it. The
+request's card says **Accepted automatically** with **Undo**, which puts the
+whole change back like Revert does; the Timeline and the Review tab's Decided
+list show it like any accepted change.
+
+Everything else still waits for you as before, with the same Accept and
+Discard. A change to the art direction always waits: approving it stays your
+click. The choice is per project (`[agents] auto_accept = true` in
+`joinery.toml`, or `joinery auto-accept --project <path> --set on|off`), and
+it holds for every agent and every parallel task; a way among
+**Try other ways** is never kept on its own.
+
 ### The Review tab
 
 **Review** is always the first tab of the bottom bar (in Godot's classic view
