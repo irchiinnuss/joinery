@@ -599,7 +599,10 @@ class CodexSession:
             known = json.loads(prompt.editor_context.get("selection_instances", "{}"))
             allowed_targets = tuple(dict.fromkeys((*prompt.targets, *known.keys())))
             edit = validate_edit(
-                Path(prompt.project_dir), params.get("arguments"), allowed_targets
+                Path(prompt.project_dir),
+                params.get("arguments"),
+                allowed_targets,
+                prompt.editor_context,
             )
             if not prompt.editor_context.get("scene_instance"):
                 raise ValueError("Open a 3D scene before asking for a scene edit.")

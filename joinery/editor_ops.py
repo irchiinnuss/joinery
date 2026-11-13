@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -17,6 +18,7 @@ from pydantic import (
     model_validator,
 )
 
+from joinery import placement
 from joinery.hook import mcp_violation
 
 Vector = tuple[FiniteFloat, FiniteFloat, FiniteFloat]
@@ -230,13 +232,45 @@ class SceneEdit(BaseModel):
     operations: list[Operation] = Field(min_length=1, max_length=32)
 
 
+def _beside_instances(edit: SceneEdit, editor_context: Mapping[str, str]) -> None:
+    """Put what stands on an instanced scene beside it, never inside it.
+
+    A node added under an instance's root, or under a node inside it, is saved
+    as an override of that instance (``parent="Table/Top"``): it breaks or is
+    lost when the instanced scene changes or the scene is reopened. So on: an
+    instance (or a node inside one) makes the new node the instance's sibling,
+    under the instance's parent, as_child included. Its position is still worked
+    out on the instance's top, in the editor, in that parent's space.
+    """
+    for operation in edit.operations:
+        if not isinstance(operation, NodeOperation) or not operation.on:
+            continue
+        if operation.parent:
+            continue
+        parent = placement.beside_instance(operation.on, editor_context)
+        if parent:
+            operation.parent = parent
+            operation.as_child = False
+
+
 def validate_edit(
-    project: Path, arguments: object, targets: tuple[str, ...]
+    project: Path,
+    arguments: object,
+    targets: tuple[str, ...],
+    editor_context: Mapping[str, str] | None = None,
 ) -> SceneEdit:
+    """``arguments`` as a checked scene edit for the scene on screen.
+
+    ``editor_context`` is the editor's description of that scene; with it, a node
+    put on an instanced scene is placed beside the instance (see
+    :func:`_beside_instances`).
+    """
     edit = SceneEdit.model_validate(arguments)
     verdict = mcp_violation("godot", "scene_edit", project)
     if verdict:
         raise ValueError(verdict.reason)
+    if editor_context:
+        _beside_instances(edit, editor_context)
     for operation in edit.operations:
         if (
             isinstance(operation, (Transform, NodeOperation))
@@ -274,7 +308,9 @@ SCENE_TOOL = {
         "(it keeps the placeholder's parent and transform) and fit_size true to keep the placeholder's size. "
         "To put it on something (a mug on a table), pass on with that node's identity: it rests on the node's top, "
         "centred, beside it under the same parent; at [x, z] moves it that many metres from the centre and as_child "
-        "true puts it under the node. "
+        "true puts it under the node. On an instanced scene (a placed model or .tscn, or a node inside one) "
+        "it always goes beside the instance under the instance's parent, as_child or not, so the scene saves cleanly. "
+        "Node names use letters, digits and underscores; never '#', '.', ':', '@', '/', '\"' or '%'. "
         "Use this tool for requested live scene changes instead of manual steps. The user then accepts "
         "or rejects the preview in the Review panel below the viewport. Do not claim a preview is accepted or saved."
     ),

@@ -221,3 +221,50 @@ def test_the_last_attempt_turns_it_into_a_note(session: Session) -> None:
     session.turn.attempts = MAX_SUBMITS - 1
     result = session.run(lambda: session.turn.submit("A mug"))
     assert result.status == "in_review" and result.notes
+
+
+INSTANCED = {
+    "nodes": json.dumps(
+        [
+            {"id": "res://kitchen.tscn::.", "name": "Kitchen", "type": "Node3D"},
+            {"id": "res://kitchen.tscn::Room", "name": "Room", "type": "Node3D"},
+            {
+                "id": "res://kitchen.tscn::Room/Table",
+                "name": "Table",
+                "type": "Node3D",
+                "source": "res://art/table.tscn",
+            },
+            {
+                "id": "res://kitchen.tscn::Room/Table/Leg/Foot",
+                "name": "Foot",
+                "type": "MeshInstance3D",
+                "source": "res://art/leg.glb",
+            },
+            {"id": "res://kitchen.tscn::Room/Rug", "name": "Rug", "type": "Node3D"},
+        ]
+    )
+}
+
+
+@pytest.mark.parametrize(
+    ("identity", "root", "beside"),
+    [
+        ("Room/Table", "Room/Table", "Room"),
+        ("Room/Table/Leg/Foot", "Room/Table", "Room"),
+        ("Room/Rug", "", ""),
+        ("Room", "", ""),
+        (".", "", ""),
+    ],
+)
+def test_the_instance_a_node_belongs_to(identity: str, root: str, beside: str) -> None:
+    node = f"res://kitchen.tscn::{identity}"
+    found = placement.instance_root(node, INSTANCED)
+    assert found == (f"res://kitchen.tscn::{root}" if root else "")
+    parent = placement.beside_instance(node, INSTANCED)
+    assert parent == (f"res://kitchen.tscn::{beside}" if beside else "")
+
+
+def test_no_manifest_means_no_instance() -> None:
+    assert placement.instance_root("res://kitchen.tscn::Table", {}) == ""
+    assert placement.instance_root("res://kitchen.tscn::Table", {"nodes": "{"}) == ""
+    assert placement.beside_instance("no-scene-part", INSTANCED) == ""

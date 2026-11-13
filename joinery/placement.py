@@ -176,6 +176,50 @@ def scene_nodes(editor_context: Mapping[str, str]) -> list[tuple[str, str]]:
     return found
 
 
+def _rows(editor_context: Mapping[str, str]) -> dict[str, dict[str, object]]:
+    """The scene on screen's manifest rows by identity."""
+    try:
+        rows = json.loads(editor_context.get("nodes", "[]") or "[]")
+    except ValueError:
+        return {}
+    return {
+        str(row["id"]): row
+        for row in (rows if isinstance(rows, list) else [])
+        if isinstance(row, dict) and row.get("id")
+    }
+
+
+def instance_root(identity: str, editor_context: Mapping[str, str]) -> str:
+    """The outermost instanced scene ``identity`` is, or is inside; "" when none.
+
+    The manifest gives each node inside an instance (and the instance's root) the
+    ``source`` scene it comes from; walking down from the scene root, the first
+    node with one is the instance this scene placed.
+    """
+    scene, sep, path = identity.partition("::")
+    if not sep or path in {"", "."}:
+        return ""
+    rows = _rows(editor_context)
+    parts = path.split("/")
+    for depth in range(1, len(parts) + 1):
+        prefix = f"{scene}::{'/'.join(parts[:depth])}"
+        if rows.get(prefix, {}).get("source"):
+            return prefix
+    return ""
+
+
+def beside_instance(identity: str, editor_context: Mapping[str, str]) -> str:
+    """Where a node put on ``identity`` goes when that is an instanced scene: the
+    instance's parent, so the new node is its sibling and never a child inside it.
+    "" when ``identity`` isn't part of an instance."""
+    root = instance_root(identity, editor_context)
+    if not root:
+        return ""
+    scene, _, path = root.partition("::")
+    parent = path.rpartition("/")[0]
+    return f"{scene}::{parent or '.'}"
+
+
 def _place_name(name: str, kind: str = "") -> bool:
     """A name specific enough that saying it means that place."""
     spoken = _words(name)

@@ -1,3 +1,4 @@
+import json
 import re
 from pathlib import Path
 
@@ -113,6 +114,87 @@ def test_on_stands_a_new_instance_on_a_node(game: Path) -> None:
 def test_on_is_only_for_placing_an_instance(game: Path, op: dict) -> None:
     with pytest.raises(ValidationError):
         validate_edit(game, {"summary": "Bad", "operations": [op]}, ("@Table",))
+
+
+KITCHEN = "res://kitchen.tscn"
+
+
+def kitchen() -> dict[str, str]:
+    """The editor's context for a kitchen with a Table instanced from table.tscn
+    (its Top a node inside the instance) and a plain Shelf of the scene's own."""
+    rows = [
+        {"id": f"{KITCHEN}::.", "name": "Kitchen", "type": "Node3D"},
+        {"id": f"{KITCHEN}::Room", "name": "Room", "type": "Node3D"},
+        {
+            "id": f"{KITCHEN}::Room/Table",
+            "name": "Table",
+            "type": "Node3D",
+            "source": "res://art/table.tscn",
+        },
+        {
+            "id": f"{KITCHEN}::Room/Table/Top",
+            "name": "Top",
+            "type": "MeshInstance3D",
+            "source": "res://art/table.tscn",
+        },
+        {"id": f"{KITCHEN}::Shelf", "name": "Shelf", "type": "MeshInstance3D"},
+    ]
+    return {"nodes": json.dumps(rows)}
+
+
+def place_on(game: Path, on: str, **extra: object) -> NodeOperation:
+    context = kitchen()
+    known = tuple(row["id"] for row in json.loads(context["nodes"]))
+    edit = validate_edit(
+        game,
+        {"summary": "Mug on it", "operations": [{**MUG, "on": on, **extra}]},
+        known,
+        context,
+    )
+    (op,) = edit.operations
+    assert isinstance(op, NodeOperation)
+    return op
+
+
+@pytest.mark.parametrize("as_child", [False, True])
+@pytest.mark.parametrize("on", ["Room/Table", "Room/Table/Top"])
+def test_on_an_instanced_scene_goes_beside_the_instance(
+    game: Path, on: str, as_child: bool
+) -> None:
+    op = place_on(game, f"{KITCHEN}::{on}", as_child=as_child, at=[0.1, 0])
+    # Never a child inside the instance: a sibling under the instance's parent,
+    # still standing on the node it was put on.
+    assert op.parent == f"{KITCHEN}::Room"
+    assert not op.as_child
+    assert op.on == f"{KITCHEN}::{on}" and op.at == (0.1, 0)
+
+
+def test_on_a_top_level_instance_goes_under_the_scene_root(game: Path) -> None:
+    context = kitchen()
+    rows = json.loads(context["nodes"])
+    rows.append(
+        {"id": f"{KITCHEN}::Stool", "name": "Stool", "type": "Node3D", "source": "x"}
+    )
+    context["nodes"] = json.dumps(rows)
+    edit = validate_edit(
+        game,
+        {"summary": "Mug", "operations": [{**MUG, "on": f"{KITCHEN}::Stool"}]},
+        tuple(row["id"] for row in rows),
+        context,
+    )
+    op = edit.operations[0]
+    assert isinstance(op, NodeOperation) and op.parent == f"{KITCHEN}::."
+
+
+def test_on_a_plain_node_keeps_its_placement(game: Path) -> None:
+    op = place_on(game, f"{KITCHEN}::Shelf", as_child=True)
+    assert op.parent == "" and op.as_child
+    assert place_on(game, f"{KITCHEN}::Shelf").parent == ""
+
+
+def test_an_explicit_parent_is_kept_on_an_instance(game: Path) -> None:
+    op = place_on(game, f"{KITCHEN}::Room/Table", parent=f"{KITCHEN}::Shelf")
+    assert op.parent == f"{KITCHEN}::Shelf"
 
 
 @pytest.mark.parametrize(

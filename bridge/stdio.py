@@ -295,7 +295,7 @@ async def _serve(
         """One live edit of the scene on screen, by the chat's request or a task."""
         context = lane.editor_context
         known = json.loads(context.get("selection_instances", "{}"))
-        edit = validate_edit(project, payload, tuple(known))
+        edit = validate_edit(project, payload, tuple(known), context)
         if not owner and (active is None or active.done()):
             raise ValueError("Editor actions require an active user request.")
         scene = turn.admit_live_edit(context)
