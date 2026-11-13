@@ -760,7 +760,7 @@ func _check_history_policy() -> void:
 	page._policy = {"keep": 50, "max_mb": 2048, "preset": "keep-50", "label": "Last 50 changes"}
 	page._show_policy()
 	picker.disabled = false
-	_check(picker.get_item_text(picker.selected) == "Last 50 changes", "The saved choice shows")
+	_check(picker.get_item_text(picker.selected) == "Last 50", "The saved choice shows")
 	picker.select(2)
 	picker.item_selected.emit(2)
 	_check(page._history_action == "policy-check", "A new choice is checked first (a dry run)")

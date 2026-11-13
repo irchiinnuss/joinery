@@ -3,6 +3,11 @@ extends ScrollContainer
 ## Journeyman settings page, shown in place of the chat. Every row changes something real and
 ## applies at once (no Save button); preferences are saved for this user, across projects.
 ## A failed write puts the control back and says so under the title.
+##
+## One centred column (MAX_W.group) of grouped cards (settings_group.gd): Agent (who answers,
+## its model, reply mode, accepting changes automatically), Appearance and Project, then
+## "Advanced" folded: reply times, review details, the reviewer and other agents' behaviour,
+## the project's checks and tools, and troubleshooting. A value not known yet is a skeleton bar.
 
 signal closed
 
@@ -21,6 +26,8 @@ const COMPLEX_MODELS_SETTING := preload("complex_models_setting.gd")
 const FIX_ERRORS_SETTING := preload("fix_errors_setting.gd")
 const AGENT_SETTING := preload("agent_setting.gd")
 const AUTO_ACCEPT_SETTING := preload("auto_accept_setting.gd")
+const GROUP := preload("settings_group.gd")
+const BLOCKS := preload("ui_blocks.gd")
 const PATH := "Joinery/journeyman.cfg"
 const TEXT_SIZES := UI_THEME.TEXT_SIZES
 const MODES := ["Auto", "Fast", "Thorough"]
@@ -32,7 +39,7 @@ const MODE_HINTS := [
 ]
 const THEMES := {"match": "Match editor", "dark": "Dark", "light": "Light"}
 const PROJECT_COMMANDS := [
-	["Art direction", "/art"],
+	["The look", "/art"],
 	["Make it match", "/match"],
 	["Accessibility check", "/access"],
 	["Performance check", "/perf"],
@@ -190,12 +197,11 @@ func _ready() -> void:
 	_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	add_child(_body)
 	_build_title()
-	STYLE.page_edges(self, _body)
+	STYLE.page_edges(self, _body, "group")
+	_build_agent()
 	_build_appearance()
-	_build_replies()
 	_build_project()
-	_build_checks()
-	_build_troubleshooting()
+	_build_advanced()
 	_on_theme_rebuilt()
 	UI_THEME.bus().connect("changed", _on_pref_changed)
 
@@ -213,7 +219,7 @@ func _on_theme_rebuilt() -> void:
 	for index: int in UI_THEME.ACCENTS.size():
 		var key: String = UI_THEME.ACCENTS.keys()[index]
 		var swatch: Color = UI_THEME.ACCENTS[key][0 if dark else 1]
-		_accent_picker.set_item_icon(index, _swatch(swatch))
+		_accent_picker.set_item_icon(index, BLOCKS.swatch_dot(self, swatch))
 
 
 func _build_title() -> void:
@@ -250,7 +256,7 @@ func _build_appearance() -> void:
 		func(index: int) -> void: _choose_pref(_theme_picker, "theme", THEMES.keys(), index)
 	)
 	section.body.add_child(UI.setting_row("Theme", _theme_picker))
-	_theme_note = _inset(UI.label("Also changes the editor.", "JoineryCaption", true))
+	_theme_note = GROUP.attach(_inset(UI.label("Also changes the editor.", "JoineryCaption", true)))
 	_theme_note.visible = prefs["theme"] != "match"
 	section.body.add_child(_theme_note)
 	_accent_picker = UI.picker(UI_THEME.ACCENT_NAMES.values())
@@ -288,7 +294,7 @@ func _build_appearance() -> void:
 ## Editor layout: Joinery's or Godot's classic one. Saved in the editor settings, for this user;
 ## the editor builds its layout at startup, so a change applies after a restart. Hidden when
 ## no editor is running; on stock Godot it reads Classic Godot and cannot change.
-func _build_layout(section: UI.Section) -> void:
+func _build_layout(section: GROUP) -> void:
 	var settings := _editor_settings()
 	if settings == null:
 		return
@@ -302,9 +308,8 @@ func _build_layout(section: UI.Section) -> void:
 	_layout_picker.item_selected.connect(_choose_layout)
 	section.body.add_child(UI.setting_row("Layout", _layout_picker))
 	if not forked:
-		section.body.add_child(
-			_inset(UI.label("Joinery's layout needs the Joinery editor.", "JoineryCaption", true))
-		)
+		var why := UI.label("Joinery's layout needs the Joinery editor.", "JoineryCaption", true)
+		section.body.add_child(GROUP.attach(_inset(why)))
 		return
 	var row := HBoxContainer.new()
 	row.theme_type_variation = "JoineryRow"
@@ -312,12 +317,13 @@ func _build_layout(section: UI.Section) -> void:
 	note.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(note)
 	var restart := UI.secondary("Restart")
+	STYLE.on_card(restart)
 	restart.accessibility_name = "Restart the editor to change the layout"
 	restart.tooltip_text = "Saves open scenes, then restarts the editor"
 	restart.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	restart.pressed.connect(_restart_editor)
 	row.add_child(restart)
-	_layout_note = _inset(row)
+	_layout_note = GROUP.attach(_inset(row))
 	section.body.add_child(_layout_note)
 	_sync_layout_note()
 
@@ -369,14 +375,19 @@ static func _editor_settings() -> EditorSettings:
 	return editor.call("get_editor_settings") as EditorSettings if editor != null else null
 
 
-func _build_replies() -> void:
-	var section := _section("Replies")
-	# Which agent Journeyman runs (Codex, Claude Code, …). Switch opens the same Connect screen
-	# the banner opens, on the agent in use; choosing another restarts the chat with it.
+func _build_agent() -> void:
+	var section := _section("Agent")
+	# Which agent Journeyman runs (Codex, Claude Code, …). Change opens the same Connect screen
+	# the first-run view opens, on the agent in use; choosing another restarts the chat with it.
 	_agent = AGENT_SETTING.new()
 	_agent.dock = dock
 	_agent.run_requested.connect(_run)
 	_flush_picker(_agent.model_picker)
+	# Its rows join the group's own, one hairline apart.
+	for row: Control in [_agent.row, _agent.model_row, _agent.confirm]:
+		_agent.remove_child(row)
+		section.body.add_child(row)
+	_agent.hide()
 	section.body.add_child(_agent)
 	_mode_picker = UI.picker(MODES)
 	_flush_picker(_mode_picker)
@@ -392,8 +403,6 @@ func _build_replies() -> void:
 				_apply({"mode": MODES[index]})
 	)
 	section.body.add_child(UI.setting_row("Reply mode", _mode_picker))
-	_timings_switch = _switch_row(section, "Show reply times", "show_timings", true)
-	_details_switch = _switch_row(section, "Open review details", "details_open", false)
 	# Changes that pass every check kept without asking (`[agents] auto_accept`).
 	section.body.add_child(AUTO_ACCEPT_SETTING.new())
 
@@ -410,6 +419,29 @@ func _hint_mode() -> void:
 
 func _build_project() -> void:
 	var section := _section("Project")
+	# Each accepted change as a Timeline entry (`[timeline] auto_commit`), read when shown.
+	section.body.add_child(TIMELINE_SETTING.new())
+	_policy_picker = UI.picker()
+	POLICY.fill(_policy_picker)
+	# The row's title says what is counted: "Last 50", not "Last 50 changes".
+	for index: int in _policy_picker.item_count:
+		var choice := _policy_picker.get_item_text(index)
+		_policy_picker.set_item_text(index, choice.trim_suffix(" changes"))
+	_flush_picker(_policy_picker)
+	_policy_picker.accessibility_name = "Keep older versions"
+	_policy_picker.tooltip_text = POLICY.HINT
+	# Known once `history usage` answers; until then there is nothing true to show.
+	_policy_picker.disabled = true
+	_policy_picker.item_selected.connect(_choose_policy)
+	var policy_row := UI.setting_row("Keep versions", _policy_picker)
+	# A long choice goes under the title when the sidebar is narrow.
+	STYLE.stack_when_narrow(policy_row, policy_row.title, _policy_picker)
+	_policy_row = policy_row
+	section.body.add_child(_policy_row)
+	_policy_panel = POLICY.panel()
+	_policy_panel.applied.connect(_apply_policy)
+	_policy_panel.cancelled.connect(_close_policy)
+	section.body.add_child(GROUP.attach(_policy_panel))
 	var tools := HBoxContainer.new()
 	tools.theme_type_variation = "JoineryRow"
 	# The dots show only while Compact runs; they stay hidden otherwise.
@@ -418,38 +450,34 @@ func _build_project() -> void:
 	tools.add_child(_build_history_menu())
 	_history_row = UI.setting_row("History", tools)
 	section.body.add_child(_history_row)
-	section.body.add_child(_build_compact_confirm())
-	_policy_picker = UI.picker()
-	POLICY.fill(_policy_picker)
-	_flush_picker(_policy_picker)
-	_policy_picker.accessibility_name = "Keep older versions"
-	_policy_picker.tooltip_text = POLICY.HINT
-	# Known once `history usage` answers; until then there is nothing true to show.
-	_policy_picker.disabled = true
-	_policy_picker.item_selected.connect(_choose_policy)
-	var policy_row := UI.setting_row("Older versions", _policy_picker)
-	# A long choice ("Last 50 changes") goes under the title when the sidebar is narrow.
-	STYLE.stack_when_narrow(policy_row, policy_row.title, _policy_picker)
-	_policy_row = policy_row
-	section.body.add_child(_policy_row)
-	_policy_panel = POLICY.panel()
-	_policy_panel.applied.connect(_apply_policy)
-	_policy_panel.cancelled.connect(_close_policy)
-	section.body.add_child(_policy_panel)
-	# Each accepted change as a Timeline entry (`[timeline] auto_commit`), read when shown.
-	section.body.add_child(TIMELINE_SETTING.new())
+	section.body.add_child(GROUP.attach(_build_compact_confirm()))
 	# The shared remote and the teammates seen in the history (`joinery team status`).
 	section.body.add_child(TEAM_SETTING.new())
+
+
+## Folded under "Advanced": what few people change. Reply times and review details, how the
+## other agents behave, the project's checks and tools, and troubleshooting.
+func _build_advanced() -> void:
+	var advanced := UI.section("Advanced", true)
+	advanced.name = "Advanced"
+	advanced.body.theme_type_variation = "JoinerySections"
+	_body.add_child(advanced)
+	var chat := _section("Chat", advanced.body)
+	_timings_switch = _switch_row(chat, "Show reply times", "show_timings", true)
+	_details_switch = _switch_row(chat, "Open review details", "details_open", false)
+	var agents := _section("Agents", advanced.body)
 	# A second agent reads each change first (`[agents] reviewer`, `reviewer_model`).
-	section.body.add_child(REVIEWER_SETTING.new())
+	agents.body.add_child(REVIEWER_SETTING.new())
 	# Complex models made in Blender or with a kit (`[agents] complex_models`).
-	section.body.add_child(COMPLEX_MODELS_SETTING.new())
+	agents.body.add_child(COMPLEX_MODELS_SETTING.new())
 	# Console errors fixed on their own, or offered first (`[agents] fix_errors`).
-	section.body.add_child(FIX_ERRORS_SETTING.new())
+	agents.body.add_child(FIX_ERRORS_SETTING.new())
 	# The design check after every N accepted changes (`[agents] design_check_every`).
 	var design: Control = DESIGN_SETTING.new()
-	section.body.add_child(design)
+	agents.body.add_child(design)
 	_flush_picker(design.get("picker"))
+	_build_checks(advanced.body)
+	_build_troubleshooting(advanced.body)
 
 
 ## Compact asks first, in place: no dialog, and Cancel leaves everything as it was.
@@ -458,13 +486,17 @@ func _build_compact_confirm() -> Control:
 	inset.theme_type_variation = "JoineryInset"
 	inset.name = "CompactConfirm"
 	inset.hide()
+	# The question reads across the row; its buttons sit under it on the trailing edge.
+	var column := VBoxContainer.new()
+	column.theme_type_variation = "JoineryRow"
+	inset.add_child(column)
+	column.add_child(UI.label(COMPACT_ASK, "JoineryCaption", true))
 	var row := HBoxContainer.new()
 	row.theme_type_variation = "JoineryRow"
-	inset.add_child(row)
-	var ask := UI.label(COMPACT_ASK, "JoineryCaption", true)
-	ask.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(ask)
+	row.alignment = BoxContainer.ALIGNMENT_END
+	column.add_child(row)
 	var cancel := UI.secondary("Cancel")
+	STYLE.on_card(cancel)
 	cancel.accessibility_name = "Keep the history as it is"
 	cancel.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	cancel.pressed.connect(_ask_compact.bind(false))
@@ -567,8 +599,8 @@ func _policy_checked(data: Dictionary) -> void:
 
 ## The project's checks and tools, each a row that runs its command: after the preferences, so
 ## the switches and choices come first.
-func _build_checks() -> void:
-	var section := _section("Checks and tools")
+func _build_checks(parent: Control) -> void:
+	var section := _section("Checks and tools", parent)
 	for item: Array in PROJECT_COMMANDS:
 		var button := UI.row_button(str(item[0]))
 		button.pressed.connect(_run.bind(str(item[1])))
@@ -576,8 +608,8 @@ func _build_checks() -> void:
 		section.body.add_child(button)
 
 
-func _build_troubleshooting() -> void:
-	var section := _section("Troubleshooting", true)
+func _build_troubleshooting(parent: Control) -> void:
+	var section := _section("Troubleshooting", parent)
 	_reconnect = UI.row_button("Reconnect")
 	_reconnect.pressed.connect(func() -> void: _agent.request("reconnect", _reconnect))
 	_flush_row(_reconnect)
@@ -693,14 +725,11 @@ static func _ink(side: float, ratio: float) -> int:
 	return roundi(side * ratio)
 
 
-func _section(title: String, collapsible := false) -> UI.Section:
-	var section := UI.section(title, collapsible)
-	var header := section.header
-	section.remove_child(header)
-	var inset := _inset(header)
-	section.add_child(inset)
-	section.move_child(inset, 0)
-	_body.add_child(section)
+## A settings group (settings_group.gd) titled [param title], added to [param parent] (the
+## page's column when null).
+func _section(title: String, parent: Control = null) -> GROUP:
+	var section := GROUP.new(title)
+	(parent if parent != null else _body).add_child(section)
 	return section
 
 
@@ -711,7 +740,7 @@ func _inset(control: Control) -> MarginContainer:
 	return inset
 
 
-func _switch_row(section: UI.Section, title: String, key: String, fallback: bool) -> CheckButton:
+func _switch_row(section: GROUP, title: String, key: String, fallback: bool) -> CheckButton:
 	var check := UI.switch()
 	check.button_pressed = bool(get_value(key, fallback))
 	check.toggled.connect(
@@ -832,7 +861,8 @@ func _history(action: String, extra := PackedStringArray()) -> void:
 	if action == "compact":
 		_history_size.text = "Compacting…"
 	elif _history_size.text.is_empty():
-		_history_size.text = "Checking…"
+		# Not known yet: a skeleton bar holds the value's place, never "Checking…".
+		BLOCKS.wait_for(_history_button, true)
 	set_process(true)
 
 
@@ -846,6 +876,7 @@ func _process(_delta: float) -> void:
 	_history_job = null
 	set_process(false)
 	_history_indicator.set("running", false)
+	BLOCKS.wait_for(_history_button, false)
 	if _history_action.begins_with("policy"):
 		_policy_done(result)
 		return
@@ -866,7 +897,7 @@ func _process(_delta: float) -> void:
 			dock.call("refresh_revertible")
 		_history("usage")
 		return
-	var bytes := _usage_bytes(str(result.get("output", "")))
+	var bytes := POLICY.usage_bytes(str(result.get("output", "")))
 	if bytes < 0:
 		_history_unavailable()
 		return
@@ -915,6 +946,7 @@ func _policy_done(result: Dictionary) -> void:
 
 
 func _history_unavailable() -> void:
+	BLOCKS.wait_for(_history_button, false)
 	_policy_picker.disabled = true
 	_history_indicator.set("running", false)
 	_history_size.text = "Unavailable"
@@ -928,43 +960,12 @@ func _cancel_history() -> void:
 		_history_job.cancel()
 		_history_job = null
 		_history_indicator.set("running", false)
-
-
-## Total restore-data bytes from `joinery history usage --json` (the last JSON line), or -1.
-static func _usage_bytes(output: String) -> int:
-	var lines := output.split("\n", false)
-	lines.reverse()
-	for line: String in lines:
-		if not line.strip_edges().begins_with("{"):
-			continue
-		var data_json := JSON.new()
-		var data: Variant = data_json.data if data_json.parse(line) == OK else null
-		if not data is Dictionary:
-			continue
-		for key: String in ["total_bytes", "bytes", "size_bytes", "total"]:
-			var value: Variant = (data as Dictionary).get(key)
-			if value is Dictionary:
-				value = (value as Dictionary).get("bytes")
-			if value is float or value is int:
-				return int(value)
-	return -1
+		BLOCKS.wait_for(_history_button, false)
 
 
 ## Bytes for people: "0 B", "512 KB", "340 MB", "1.2 GB".
 static func _human_size(bytes: float) -> String:
 	return POLICY.human_size(bytes)
-
-
-func _swatch(color_value: Color) -> ImageTexture:
-	var side := maxi(4, roundi(12 * UI_THEME.unit(self)))
-	var image := Image.create(side, side, false, Image.FORMAT_RGBA8)
-	var half := side / 2.0
-	for y: int in side:
-		for x: int in side:
-			var distance := Vector2(x + 0.5 - half, y + 0.5 - half).length()
-			var cover := clampf(half - distance + 0.5, 0.0, 1.0)
-			image.set_pixel(x, y, Color(color_value, cover))
-	return ImageTexture.create_from_image(image)
 
 
 func _engine_dir() -> String:

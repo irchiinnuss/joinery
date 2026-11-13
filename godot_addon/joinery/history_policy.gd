@@ -159,6 +159,26 @@ static func fill(picker: OptionButton) -> void:
 		picker.set_item_tooltip(index, describe(index))
 
 
+## Total restore-data bytes from `joinery history usage --json` (the last JSON line), or -1.
+static func usage_bytes(output: String) -> int:
+	var lines := output.split("\n", false)
+	lines.reverse()
+	for line: String in lines:
+		if not line.strip_edges().begins_with("{"):
+			continue
+		var data_json := JSON.new()
+		var data: Variant = data_json.data if data_json.parse(line) == OK else null
+		if not data is Dictionary:
+			continue
+		for key: String in ["total_bytes", "bytes", "size_bytes", "total"]:
+			var value: Variant = (data as Dictionary).get(key)
+			if value is Dictionary:
+				value = (value as Dictionary).get("bytes")
+			if value is float or value is int:
+				return int(value)
+	return -1
+
+
 ## The picker index for a policy from the CLI ({keep, max_mb, preset}); Custom when no
 ## preset matches.
 static func index_of(policy: Dictionary) -> int:

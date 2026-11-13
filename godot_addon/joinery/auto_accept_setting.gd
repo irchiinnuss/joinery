@@ -1,6 +1,6 @@
 @tool
 extends VBoxContainer
-## The "Accept changes automatically" switch in Settings → Replies (ADR 0085): on, a change that
+## The "Accept changes automatically" switch in Settings → Agent (ADR 0085): on, a change that
 ## passes every check with nothing to say is kept without asking, and its card offers Undo
 ## (`[agents] auto_accept = true` in joinery.toml); off, the default, every change waits for
 ## Accept. Read with `joinery auto-accept` whenever the settings page shows it; a change applies
@@ -21,7 +21,9 @@ var _job_kind := ""
 func _init() -> void:
 	name = "AutoAcceptSetting"
 	theme_type_variation = "JoineryFlush"
-	row = UI.switch_row(TITLE, CAPTION, false)
+	# One line: what it does is the row's tooltip, not a paragraph under it.
+	row = UI.switch_row(TITLE, "", false)
+	row.tooltip_text = CAPTION
 	row.switch_button.accessibility_name = TITLE
 	# The whole name, on two lines in a narrow sidebar rather than cut short.
 	row.title.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING

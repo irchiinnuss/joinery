@@ -44,7 +44,11 @@ func _check_states() -> void:
 	var setting: SETTING = SETTING.new()
 	_check(setting.row.switch_button.disabled, "Unknown until the project answers")
 	_check(setting.row.title.text == "Accept changes automatically", "Its name")
-	_check(setting.row.description.text == SETTING.CAPTION, "Its caption says what on does")
+	_check(
+		setting.row.tooltip_text == SETTING.CAPTION and not setting.row.description.visible,
+		"One line: what on does is its tooltip"
+	)
+	_check(not setting.row.switch_button.visible, "A skeleton bar waits in the switch's place")
 	_check(SETTING.CAPTION.contains("Undo"), "And that Undo stays")
 	setting.apply_status({"enabled": true})
 	_check(setting.row.is_on() and not setting.row.switch_button.disabled, "On, changeable")

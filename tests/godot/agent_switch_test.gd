@@ -205,7 +205,7 @@ func _check_restart_question() -> void:
 	setting.connect("run_requested", func(command: String) -> void: runs.append(command))
 	var confirm: Control = setting.get("confirm")
 	setting.call("refresh")
-	_check(setting.get("row").title.text == "Agent: Claude Code", "The agent is named")
+	_check(setting.get("row").title.text == "Claude Code", "The agent is named")
 	setting.call("request", "connect")
 	_check(runs == ["connect"] and not confirm.visible, "Idle: Switch opens at once %s" % [runs])
 	runs.clear()

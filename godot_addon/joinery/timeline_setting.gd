@@ -19,7 +19,8 @@ var _job_kind := ""
 func _init() -> void:
 	name = "TimelineSetting"
 	theme_type_variation = "JoineryFlush"
-	row = UI.switch_row("Timeline", "Each accepted change becomes an entry.", true)
+	row = UI.switch_row("Timeline", "", true)
+	row.tooltip_text = "Each accepted change becomes an entry."
 	row.switch_button.accessibility_name = "Add accepted changes to the Timeline"
 	# Unknown until the project answers; the row says it is checking.
 	row.set_checking()

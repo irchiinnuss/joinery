@@ -1,7 +1,7 @@
 @tool
 extends VBoxContainer
-## Settings → Replies: which agent Journeyman runs ("Agent: Claude Code" with Switch), its
-## model (the composer's choice, with Refresh to read the provider's list again), and the
+## Settings → Agent: which agent Journeyman runs (its name with "Change ›", or "No agent" with
+## Connect), its model (the composer's choice, with ↻ to read the provider's list again), and the
 ## question asked in place before the chat restarts while Journeyman works. Restarting stops
 ## the current request and the parallel tasks; changes waiting in Review stay (the chat host
 ## keeps them, chat_bridge.gd close()).
@@ -33,11 +33,12 @@ var _command := ""
 func _init() -> void:
 	name = "AgentSetting"
 	theme_type_variation = "JoineryFlush"
-	switch_button = UI.secondary("Switch")
+	# A link, not a button: the one filled action belongs to the first-run screen.
+	switch_button = UI.link("Connect")
 	switch_button.accessibility_name = "Switch agent"
 	switch_button.tooltip_text = "Connect Journeyman to Codex, Claude Code, Gemini CLI or opencode"
 	switch_button.pressed.connect(func() -> void: request("connect"))
-	row = UI.setting_row("Agent", switch_button)
+	row = UI.setting_row("No agent", switch_button)
 	row.title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	row.title.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
 	add_child(row)
@@ -47,9 +48,8 @@ func _init() -> void:
 	model_picker.accessibility_name = "Model"
 	model_picker.item_selected.connect(_choose_model)
 	tools.add_child(model_picker)
-	refresh_button = UI.secondary("Refresh")
+	refresh_button = UI.icon_button("reload", "Read the agent's model list again")
 	refresh_button.accessibility_name = "Refresh the model list"
-	refresh_button.tooltip_text = "Read the agent's model list again"
 	refresh_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	refresh_button.pressed.connect(
 		func() -> void:
@@ -62,6 +62,8 @@ func _init() -> void:
 	confirm = MarginContainer.new()
 	confirm.theme_type_variation = "JoineryInset"
 	confirm.name = "RestartConfirm"
+	# Part of the row it asks about: no hairline above it in a settings group.
+	confirm.set_meta("joinery_attached", true)
 	confirm.hide()
 	var line := HBoxContainer.new()
 	line.theme_type_variation = "JoineryRow"
@@ -90,8 +92,10 @@ func _init() -> void:
 func refresh() -> void:
 	var agent: Variant = dock.get("_agent_name") if dock != null else null
 	var named: bool = agent is String and not agent in ["", "Journeyman"]
-	row.title.text = "Agent: " + str(agent) if named else "Agent: none connected"
-	switch_button.text = "Switch" if named else "Connect"
+	row.title.text = str(agent) if named else "No agent"
+	row.title.theme_type_variation = "" if named else "JoineryMuted"
+	switch_button.text = "Change ›" if named else "Connect"
+	switch_button.theme_type_variation = "JoineryQuietLink" if named else "JoineryLinkButton"
 	var options := _options()
 	if options != null and not options.is_connected("models_changed", refresh):
 		options.connect("models_changed", refresh)
