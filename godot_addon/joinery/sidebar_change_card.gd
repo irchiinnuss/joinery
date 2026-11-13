@@ -92,9 +92,11 @@ const IRREGULAR := {
 	"thinking": "thought",
 	"writing": "wrote",
 }
-## Outcome kind -> [icon, tint role].
+## Outcome kind -> [icon, tint role]. "auto" is a change Joinery kept without asking
+## (`[agents] auto_accept`): a quiet line, "Accepted automatically", with Undo.
 const OUTCOMES := {
 	"success": ["success", "success"],
+	"auto": ["success", "text_muted"],
 	"rejected": ["close", "text_muted"],
 	"stopped": ["stop", "text_muted"],
 	"reverted": ["reload", "text_muted"],
@@ -497,8 +499,9 @@ func review_row() -> REVIEW_ROW:
 	return _ready_row
 
 
-## Show the decision. [param kind]: "success", "rejected", "stopped", "error" or "info".
-## With [param optimistic], the previous look is kept so [method roll_back] can restore it.
+## Show the decision. [param kind]: "success", "auto", "rejected", "stopped", "error" or
+## "info". With [param optimistic], the previous look is kept so [method roll_back] can restore
+## it.
 func set_outcome(kind: String, text: String, optimistic := false) -> void:
 	set_sent()
 	_previous_outcome = [state, _ready_row.visible] if optimistic else []
@@ -506,15 +509,21 @@ func set_outcome(kind: String, text: String, optimistic := false) -> void:
 	_ready_row.waiting = false
 	_ready_row.hide()
 	_error.hide()
-	_tick_current("success" if kind == "success" else "stopped")
-	state = {"success": "accepted", "rejected": "rejected", "stopped": "stopped"}.get(kind, "done")
+	var kept := kind in ["success", "auto"]
+	_tick_current("success" if kept else "stopped")
+	state = "accepted" if kept else {"rejected": "rejected", "stopped": "stopped"}.get(kind, "done")
 	var spec: Array = OUTCOMES.get(kind, OUTCOMES["info"])
 	_outcome_icon.visible = not str(spec[0]).is_empty()
 	if _outcome_icon.visible:
 		STYLE.set_glyph(_outcome_icon, spec[0], spec[1])
 	_outcome_text.text = text
+	# Kept without asking, the one action reads Undo; it is the same revert.
+	_revert.text = "Undo" if kind == "auto" else "Revert"
+	_revert.accessibility_name = (
+		"Undo this change" if kind == "auto" else "Revert this accepted change"
+	)
 	# Revert only once the accept is confirmed: an accept still on its way may yet roll back.
-	_sync_revert(kind == "success" and not optimistic)
+	_sync_revert(kept and not optimistic)
 	_place_outcome()
 	_outcome.show()
 	_sync_activity()
@@ -555,13 +564,14 @@ func awaiting_decision() -> bool:
 ## (no second animation); otherwise the outcome is shown now. Returns false when the card is
 ## not waiting for a decision, or a stop arrives after the work finished.
 func decide(kind: String, text: String) -> bool:
-	var target: String = {"success": "accepted", "rejected": "rejected", "stopped": "stopped"}.get(
-		kind, "done"
+	var target: String = (
+		{"success": "accepted", "auto": "accepted", "rejected": "rejected", "stopped": "stopped"}
+		. get(kind, "done")
 	)
 	if not _previous_outcome.is_empty() and state == target:
 		_previous_outcome = []
 		_outcome_text.text = text
-		_sync_revert(kind == "success")
+		_sync_revert(kind in ["success", "auto"])
 		return true
 	# The card already says it ("Change accepted"): a second report of the same decision is
 	# not shown again as a notice under it.

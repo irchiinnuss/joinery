@@ -39,6 +39,8 @@ const STATES := {
 	"new": ["info", "Not reviewed"],
 	"gone": ["info", "This change is no longer on record"],
 }
+## The decision line of a change Joinery kept without asking (`[agents] auto_accept`).
+const AUTO := ["auto", "Accepted automatically"]
 
 var dock: Control
 var page: PAGE
@@ -304,7 +306,9 @@ func render(entries: Array) -> void:
 				var id := str(entry.get("transaction_id", ""))
 				if card != null and not id.is_empty():
 					card.set("transaction_id", id)
-					_changes[id] = [card, str(entry.get("state", "review"))]
+					_changes[id] = [
+						card, str(entry.get("state", "review")), bool(entry.get("auto", false))
+					]
 			"turn":
 				var outcome := str(entry.get("outcome", "done"))
 				var timing := {"outcome": outcome, "total_ms": int(entry.get("total_ms", 0))}
@@ -345,6 +349,8 @@ func _apply(id: String, state: String, revertible: bool) -> void:
 	if not is_instance_valid(card):
 		return
 	var spec: Array = STATES.get(state, ["error", "This change didn't finish"])
+	if state == "accepted" and _changes[id].size() > 2 and bool(_changes[id][2]):
+		spec = AUTO
 	card.call("set_outcome", spec[0], spec[1])
 	if state == "accepted":
 		card.call("set_revertible", revertible)
@@ -375,6 +381,8 @@ func show_states(report: Dictionary) -> void:
 		var entry: Dictionary = known.get(id, {"state": "gone", "revertible": false})
 		var state := str(entry.get("state", "gone"))
 		var revertible := bool(entry.get("revertible", true))
+		if bool(entry.get("auto_accepted", false)) and _changes[id].size() > 2:
+			_changes[id][2] = true
 		if state != str(_changes[id][1]):
 			_apply(id, state, revertible)
 		elif state == "accepted" and is_instance_valid(_changes[id][0]):

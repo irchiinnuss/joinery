@@ -69,7 +69,7 @@ func _fixtures() -> void:
 		[
 			{"type": "user", "text": "Make the lamps flicker"},
 			{"type": "agent", "text": "They flicker."},
-			{"type": "change", "transaction_id": PRUNED, "state": "accepted"},
+			{"type": "change", "transaction_id": PRUNED, "state": "accepted", "auto": true},
 			{"type": "turn", "outcome": "done", "total_ms": 3000},
 		],
 		3 * 86400
@@ -187,6 +187,12 @@ func _run() -> void:
 	)
 	_check(backend.get("chat_id") == LATEST, "Viewing doesn't change the open chat")
 	_check(transcript.get("_cards").size() == 1, "Its own transcript is shown")
+	var kept: Control = transcript.get("_cards")[0]
+	_check(
+		kept.get("_outcome_text").text == "Accepted automatically",
+		"A change kept without asking says so: " + str(kept.get("_outcome_text").text)
+	)
+	_check((kept.get("_revert") as Button).text == "Undo", "With Undo")
 	sessions.call("continue_chat")
 	_check(not bar.visible and composer.visible, "Continue brings the message box back")
 	_check(backend.get("chat_id") == OLDER, "The next prompt continues the older chat")

@@ -217,6 +217,8 @@ class ChatRecorder:
                 if event.get("accepted")
                 else "rejected",
             }
+            if event.get("auto_accepted"):
+                change["auto"] = True
             self._flush()
             self._save(lambda: chats.append(self.project, self.chat_id, change))
         elif kind == "done":

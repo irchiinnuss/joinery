@@ -2,6 +2,7 @@ extends SceneTree
 ## review_flow.gd: a live edit's review waits for Joinery's in_review, a dropped turn drops
 ## the preview, a file review opens on file_preview, and renders reach the panel and card. A
 ## parallel task's live edit follows that task's turn and never opens over the main request's.
+## A change kept without asking opens no review: its card says so, with Undo.
 
 const FLOW := preload("res://addons/joinery/review_flow.gd")
 const CARD := preload("res://addons/joinery/sidebar_change_card.gd")
@@ -17,6 +18,7 @@ class FakeChat:
 	signal review_media(event: Dictionary)
 	signal task_event(event: Dictionary)
 	signal task_review(transaction_id: String)
+	signal file_decision(event: Dictionary)
 	var live: Array[bool] = []
 
 	func finish_live_review(accepted := true) -> void:
@@ -41,6 +43,11 @@ class FakeCard:
 	var state := "ready"
 	var media: Array = []
 	var done: Array = []
+	var transaction_id := ""
+	var outcome: Array = []
+
+	func set_outcome(kind: String, text: String) -> void:
+		outcome = [kind, text]
 
 	func set_ready(items: Array) -> void:
 		media = items
@@ -53,9 +60,13 @@ class FakeCard:
 class FakeDock:
 	extends RefCounted
 	var card := FakeCard.new()
+	var revertible_asked := 0
 
 	func _card() -> Object:
 		return card
+
+	func refresh_revertible() -> void:
+		revertible_asked += 1
 
 
 ## The review panel (review_panel.gd).
@@ -97,6 +108,9 @@ class FakePlugin:
 
 	func _show_edit_review_panel() -> void:
 		calls.append(["panel"])
+
+	func _on_review_row_applied(id: String, paths: PackedStringArray, _changes: Array) -> void:
+		calls.append(["applied", id, paths])
 
 
 func _initialize() -> void:
@@ -197,8 +211,55 @@ func _run() -> void:
 	_check(chat.live == [false], "The host hears it was dropped")
 	_check(flow.owns_live(), "The scene is free again")
 
+	_check_auto_accepted(chat, plugin)
+
 	flow.queue_free()
 	chat.queue_free()
 	await process_frame
 	print("review flow: ", "FAILED" if _failed else "ok")
 	quit(1 if _failed else 0)
+
+
+## A change kept without asking (`[agents] auto_accept`): no review opens, the card takes the
+## quiet line with Undo, and the files are rescanned as after an Accept.
+func _check_auto_accepted(chat: FakeChat, plugin: FakePlugin) -> void:
+	plugin.calls.clear()
+	plugin._file_review = {}
+	chat.file_decision.emit({"transaction_id": "a1", "accepted": true, "changes": []})
+	_check(plugin.calls.is_empty(), "A user's own decision is the plugin's to show")
+	var decision := {
+		"transaction_id": "a1",
+		"accepted": true,
+		"auto_accepted": true,
+		"message": "Accepted automatically",
+		"changes": [{"path": "game/door.gd", "change": "modified"}],
+	}
+	chat.file_decision.emit(decision)
+	var card: FakeCard = plugin._dock.card
+	_check(card.transaction_id == "a1", "The card knows its change, for Undo")
+	_check(card.outcome == ["auto", "Accepted automatically"], "The card says it was kept")
+	_check(
+		plugin.calls == [["applied", "a1", PackedStringArray(["game/door.gd"])]],
+		"The files are picked up, and no review opens"
+	)
+	_check(plugin._dock.revertible_asked == 1, "Undo's availability is asked for")
+	plugin.calls.clear()
+	chat.file_decision.emit(decision.merged({"task_id": "t9"}))
+	_check(plugin.calls.is_empty(), "A task's change is its own card's")
+
+	var real: VBoxContainer = CARD.new("Make the door open")
+	root.add_child(real)
+	real.transaction_id = "a1"
+	real.set_outcome("auto", "Accepted automatically")
+	_check(real.state == "accepted", "Kept is accepted")
+	var undo: Button = real.get("_revert")
+	_check(undo.visible and undo.text == "Undo", "One action: Undo")
+	var asked: Array[String] = []
+	real.revert_requested.connect(func(id: String) -> void: asked.append(id))
+	undo.pressed.emit()
+	_check(asked == ["a1"], "Undo is the change's own revert")
+	real.revert_finished(true)
+	_check(real.state == "reverted", "And it reads Reverted after")
+	real.set_outcome("success", "Change accepted")
+	_check(undo.text == "Revert", "A change the user accepted keeps Revert")
+	real.queue_free()

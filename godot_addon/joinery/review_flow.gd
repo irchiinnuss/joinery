@@ -11,9 +11,14 @@ extends Node
 ## Once Journeyman's own request is idle, a parallel task may make the live edit (ADR 0036): its
 ## preview is followed through that task's turn instead, and its review never opens over a
 ## file review of the main request; it opens after it, or from the task card's Review link.
+##
+## A change Joinery kept without asking (`[agents] auto_accept`, ADR 0085) never opens a review:
+## its file_decision says auto_accepted, the request's card shows "Accepted automatically" with
+## Undo, and the files it wrote are rescanned like any accepted change's.
 
 ## Reasons a turn ends without its change ("idle" with one of these): the preview goes.
 const DROPPED := ["failed", "cancelled", "stopped", "needs_user"]
+const AUTO_ACCEPTED := "Accepted automatically"
 
 ## The plugin (plugin.gd): its review panel, sidebar and live preview.
 var _plugin: Object
@@ -35,6 +40,7 @@ func setup(plugin: Object, chat: Node) -> void:
 		"task_event": _on_task_event,
 		"task_review": _on_task_review,
 		"review_notes": _on_review_notes,
+		"file_decision": _on_file_decision,
 	}
 	for signal_name: String in links:
 		if chat.has_signal(signal_name):
@@ -169,6 +175,26 @@ func _on_revise(path: String) -> void:
 	var prompt: Variant = (dock as Object).get("_prompt")
 	if prompt is Control and (prompt as Control).is_visible_in_tree():
 		(prompt as Control).grab_focus()
+
+
+## Journeyman's own change was kept without asking: no review opened for it, so the card takes
+## the quiet outcome line and the editor picks up the files, as after an Accept.
+func _on_file_decision(event: Dictionary) -> void:
+	if not bool(event.get("auto_accepted", false)) or event.has("task_id"):
+		return
+	var id := str(event.get("transaction_id", ""))
+	var dock: Variant = _plugin.get("_dock")
+	var card: Variant = (dock as Object).call("_card") if dock is Object else null
+	if card is Object:
+		(card as Object).set("transaction_id", id)
+		(card as Object).call("set_outcome", "auto", str(event.get("message", AUTO_ACCEPTED)))
+	var paths := PackedStringArray()
+	for change: Variant in event.get("changes", []):
+		paths.append(str((change as Dictionary).get("path", "")))
+	if _plugin.has_method("_on_review_row_applied"):
+		_plugin.call("_on_review_row_applied", id, paths, event.get("changes", []))
+	if dock is Object and (dock as Object).has_method("refresh_revertible"):
+		(dock as Object).call("refresh_revertible")
 
 
 ## The reviewer's notes arrived after the review opened.

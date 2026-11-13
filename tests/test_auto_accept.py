@@ -293,6 +293,29 @@ def test_a_variant_task_waits_for_the_users_pick(project: Path) -> None:
     run(go)
 
 
+def test_a_saved_chat_remembers_the_change_was_kept_without_asking(
+    tmp_path: Path,
+) -> None:
+    from bridge.chat_record import ChatRecorder
+    from joinery import chats
+
+    recorder = ChatRecorder(tmp_path, "codex")
+    recorder.begin({"text": "Add a script"}, ())
+    recorder.observe(
+        {
+            "kind": "file_decision",
+            "transaction_id": "a" * 32,
+            "accepted": True,
+            "auto_accepted": True,
+            "summary": "A script",
+        }
+    )
+    _, entries = chats.read(tmp_path, recorder.chat_id)
+    (change,) = [e for e in entries if e["type"] == "change"]
+    assert change["state"] == "accepted" and change["auto"] is True
+    assert change["summary"] == "A script"
+
+
 def test_metrics_record_an_automatic_accept(tmp_path: Path) -> None:
     from joinery import metrics
 
