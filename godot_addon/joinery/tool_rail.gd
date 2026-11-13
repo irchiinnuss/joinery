@@ -368,7 +368,9 @@ func set_panels(panels: Array[Dictionary]) -> void:
 		var id := str(panel["id"])
 		var button := _button("Panel" + id.replace(" ", ""), str(panel["title"]))
 		button.pressed.connect(func() -> void: panel_toggled.emit(id))
-		var source := {"editor": str(panel["icon"])}
+		# A dock without a Godot icon (Joinery's Review) gets Joinery's own glyph.
+		var icon := str(panel["icon"])
+		var source := {"editor": icon} if not icon.is_empty() else {"ui": "check"}
 		var item := _item(button, source, false)
 		(_own_box if bool(panel["own"]) else _panel_box).add_child(item)
 		_panel_items[id] = item

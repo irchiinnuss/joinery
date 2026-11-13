@@ -24,6 +24,20 @@ const TOLERANCE := 1.0
 ## of an ancestor the control must sit in ("inside").
 const ALLOWED := [
 	{
+		"kind": "target",
+		"class": "VSlider",
+		"text": "",
+		"inside": "EditorAudioBus",
+		"reason": "Stock Godot Audio panel, opened from the rail: a bus fader is a thin slider",
+	},
+	{
+		"kind": "overflow",
+		"class": "ScrollContainer",
+		"text": "",
+		"inside": "EditorAudioBuses",
+		"reason": "Stock Godot Audio panel: its bus strip scrolls into the panel margin",
+	},
+	{
 		"kind": "contrast",
 		"class": "Label",
 		"text": "Aa",
@@ -162,7 +176,7 @@ static func _check(
 	if not overflow.is_empty() and not _allowed("overflow", control):
 		found.append(_line(screen, "overflow", path, overflow))
 	var target := _target(control)
-	if not target.is_empty():
+	if not target.is_empty() and not _allowed("target", control):
 		found.append(_line(screen, "target", path, target))
 
 

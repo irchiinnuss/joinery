@@ -83,19 +83,8 @@ func apply(base: Control, settings: EditorSettings) -> void:
 	_settings = settings
 	for node: Node in base.find_children("*", "EditorBottomPanel", true, false):
 		_bottom = node as TabContainer
-	var wanted: PackedStringArray = (
-		settings.get_setting(SIDE_SETTING) if settings.has_setting(SIDE_SETTING) else []
-	)
-	for dock: Control in _side_docks():
-		if not wanted.has(_key(dock)):
-			dock.call("close")
-	for id: String in wanted:
-		var dock := _dock(id)
-		if dock != null and not _is_open(dock):
-			dock.call("open")
+	reapply()
 	if _bottom != null:
-		_bottom.set_meta(ONE_TAB, true)
-		_bottom.current_tab = -1
 		_bottom.tab_changed.connect(_on_bottom_changed)
 		_bottom.child_order_changed.connect(_on_docks_moved)
 		_add_close_button()
@@ -110,11 +99,38 @@ func apply(base: Control, settings: EditorSettings) -> void:
 	set_process_shortcut_input(true)
 
 
+## Open the side docks the preference names, close the rest and collapse the bottom panel.
+## Again whenever the editor loads a saved layout (EditorPlugin._set_window_layout), which
+## reopens the docks it lists.
+func reapply() -> void:
+	if _base == null:
+		return
+	var wanted: PackedStringArray = (
+		_settings.get_setting(SIDE_SETTING) if _settings.has_setting(SIDE_SETTING) else []
+	)
+	for dock: Control in _side_docks():
+		if not wanted.has(_key(dock)):
+			dock.call("close")
+	for id: String in wanted:
+		var dock := _dock(id)
+		if dock != null and not _is_open(dock):
+			dock.call("open")
+	if _bottom != null:
+		_bottom.set_meta(ONE_TAB, true)
+		_bottom.current_tab = -1
+		_on_bottom_changed(-1)
+
+
 ## Wire the panels to [param rail] (null without the rail), the 2D view's menu and the
 ## Joinery menu on [param plugin], and apply the saved preference.
 func attach(plugin: EditorPlugin, rail: Control) -> void:
 	plugin.add_child(self)
 	apply(EditorInterface.get_base_control(), EditorInterface.get_editor_settings())
+	# The editor loads the saved layout (or Joinery's default) after its first file scan,
+	# which reopens the docks it lists: apply the preference again then.
+	EditorInterface.get_resource_filesystem().sources_changed.connect(
+		func(_exist: bool) -> void: reapply.call_deferred(), CONNECT_ONE_SHOT
+	)
 	add_inspect_menu(plugin)
 	plugin.call("add_command", "Show or Hide Scene and Inspector", toggle_column)
 	_rail = rail
@@ -279,6 +295,13 @@ func _process(delta: float) -> void:
 
 
 func _update_rail() -> void:
+	# A dock Godot moved or retitled can bring its tab back; show one tab again.
+	if is_instance_valid(_bottom) and _bottom.has_meta(ONE_TAB):
+		var bar := _bottom.get_tab_bar()
+		for index: int in bar.tab_count:
+			if bar.is_tab_hidden(index) == (index == _bottom.current_tab):
+				_on_bottom_changed(-1)
+				return
 	if not is_instance_valid(_rail):
 		return
 	_docks = _all_docks()

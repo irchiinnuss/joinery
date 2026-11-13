@@ -25,8 +25,7 @@ const FLOW_SCRIPT := preload("res://addons/joinery/review_flow.gd")
 const EDITOR_CONTEXT := preload("res://addons/joinery/editor_context.gd")
 const PANELS_SCRIPT := preload("res://addons/joinery/godot_panels.gd")
 
-## Focus mode is remembered, so a user who wants the stripped-back layout gets
-## it on every launch instead of re-toggling it each session.
+## Focus mode is remembered, so it comes back on every launch.
 const FOCUS_SETTING := "joinery/focus_mode"
 ## The main screen this plugin adds: the asset workspace and the rail pages.
 const SCREEN := "Assets"
@@ -414,6 +413,11 @@ func _on_review_row_applied(id: String, paths: PackedStringArray, changes: Array
 
 
 # --- Main screen and selection ---------------------------------------------------------------
+
+
+func _set_window_layout(_layout: ConfigFile) -> void:
+	if _panels != null:
+		_panels.reapply.call_deferred()
 
 
 func _has_main_screen() -> bool:
