@@ -47,8 +47,9 @@ static func entries() -> Array:
 	]
 
 
-## A one-line request's bubble hugs it: SPACE.3 on every side, as tall as the menu button
-## (CONTROL_H.xs, not the icon button's md square), and the text's centre on the glyph's.
+## A one-line request (a rule, not a card) hugs it: SPACE.3 after the rule and before the
+## trailing edge, SPACE.1 above and below, as tall as the menu button (CONTROL_H.xs, not the
+## icon button's md square), and the text's centre on the glyph's.
 func _hugs(card: Control, menu: MenuButton) -> void:
 	await process_frame
 	await process_frame
@@ -56,14 +57,15 @@ func _hugs(card: Control, menu: MenuButton) -> void:
 	var bubble: Control = card.get("_bubble")
 	var label: RichTextLabel = card.get("text_label")
 	var pad := float(theme.space(bubble, 3))
+	var lead := float(theme.space(bubble, 1))
 	var side := float(theme.control_h(menu, "xs"))
 	var outer := bubble.get_global_rect()
 	var text := label.get_global_rect()
 	var button := menu.get_global_rect()
 	_check(button.size.y == side, "The menu is CONTROL_H.xs tall: %s" % button.size.y)
 	_check(text.position.x - outer.position.x == pad, "SPACE.3 left of the text: %s" % text)
-	_check(button.position.y - outer.position.y == pad, "SPACE.3 over the row: %s" % button)
-	_check(outer.end.y - button.end.y == pad, "SPACE.3 under it: %s / %s" % [outer, button])
+	_check(button.position.y - outer.position.y == lead, "SPACE.1 over the row: %s" % button)
+	_check(outer.end.y - button.end.y == lead, "SPACE.1 under it: %s / %s" % [outer, button])
 	_check(outer.end.x - button.end.x == pad, "SPACE.3 right of the menu: %s" % button)
 	_check(
 		absf(text.get_center().y - button.get_center().y) <= 1.0,

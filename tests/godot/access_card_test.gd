@@ -93,8 +93,11 @@ func _run() -> void:
 	_check(words[0] == "Contrast 2 off" and words[5] == "Screen readers 1 off", ", ".join(words))
 	_check(card.call("step_text").is_empty(), "The glyphs say how serious, not a counts line")
 	var first: Control = (card.call("finding_rows") as Array)[0]
-	var parts := first.find_children("", "Label", true, false)
-	# The file in the text colour, then the finding in its own words.
+	var parts := first.find_children("", "Label", true, false).filter(
+		func(label: Label) -> bool: return label.text != "Aa"
+	)
+	# The evidence ("Aa" in the failing colours), the file in the text colour, then the
+	# finding in its own words.
 	var row_text := "%s: %s" % [(parts[0] as Label).text, (parts[1] as Label).text]
 	_check(
 		row_text.begins_with('main.tscn: "Score: 12" (#777777 on #888888)'),
