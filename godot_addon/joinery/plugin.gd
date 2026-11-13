@@ -188,7 +188,7 @@ func _restore_focus() -> void:
 		_workspace.use_rail_navigation()
 		_shell.hide_screen_button(get_editor_interface().get_base_control(), SCREEN)
 		_rail = RAIL_SCRIPT.new()
-		navigation.add_child(_rail)
+		navigation.add_child(_rail.in_scroll())
 		_workspace.catalog_changed.connect(_rail.update_tools)
 		_workspace.creator_changed.connect(_on_creator_changed)
 		_rail.tool_selected.connect(_on_tool_selected)
@@ -324,7 +324,7 @@ func _exit_tree() -> void:
 	if _shell != null:
 		_shell.restore()
 	if _rail != null:
-		_rail.queue_free()
+		(_rail.get_parent() if _rail.get_parent() is ScrollContainer else _rail).queue_free()
 	if _focus != null:
 		_focus.restore()
 	if _panels != null:

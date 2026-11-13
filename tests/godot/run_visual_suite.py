@@ -138,6 +138,7 @@ EDITOR_SCREENS = (
     "layout",
     "title-bar",
     "title-bar-narrow",
+    "rail-short",
     "scene-column-open",
     "panels-audio",
     "commands",
