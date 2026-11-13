@@ -560,10 +560,11 @@ static func _panels(t: Theme, c: Dictionary, m: Dictionary) -> void:
 		[c["accent_tint"], c["accent"], roundf(2 * float(m["u"])), "lg", _sp(m, 3), _sp(m, 3)],
 		"JoineryBanner": [c["danger_tint"], Color.TRANSPARENT, 0.0, "md", _sp(m, 3), _sp(m, 3)],
 		# Half a step vertically, so a 24 px remove target still fits CONTROL_H.sm. Chips are
-		# fully round: decisions take lg, controls md, chips full.
+		# fully round: decisions take lg, controls md, chips full. Neutral, so the view's one
+		# accent stays its decision.
 		"JoineryChip":
 		[
-			c["accent_tint"],
+			c["surface_raised"],
 			Color.TRANSPARENT,
 			0.0,
 			"full",
@@ -575,10 +576,12 @@ static func _panels(t: Theme, c: Dictionary, m: Dictionary) -> void:
 		# A card that explains something beside its trigger (the rail's readiness card).
 		"JoineryHoverCard":
 		[c["surface_raised"], c["border_subtle"], hairline, "lg", _sp(m, 3), _sp(m, 3)],
+		# The message box: a hairline at rest that firms up while typing; neutral either way,
+		# so the view's one accent stays its decision (Accept, Send).
 		"JoineryComposer":
-		[c["surface_sunken"], c["border_strong"], hairline, "xl", _sp(m, 2), _sp(m, 2)],
+		[c["surface_sunken"], c["border_subtle"], hairline, "xl", _sp(m, 2), _sp(m, 2)],
 		"JoineryComposerFocused":
-		[c["surface_sunken"], c["accent"], hairline, "xl", _sp(m, 2), _sp(m, 2)],
+		[c["surface_sunken"], c["border_strong"], hairline, "xl", _sp(m, 2), _sp(m, 2)],
 		"JoineryBubble": [c["surface_raised"], Color.TRANSPARENT, 0.0, "xl", _sp(m, 3), _sp(m, 3)],
 		# The decision card (a change waiting, the art gate, a check with its fix, a settings
 		# group): the one lifted surface, a hairline and a soft shadow, so the thing awaiting

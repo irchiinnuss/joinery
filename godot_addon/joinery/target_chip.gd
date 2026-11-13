@@ -355,7 +355,8 @@ static func _hover(chip: PanelContainer, inside: bool) -> void:
 	var source := chip.get_theme_stylebox("panel", "JoineryChip")
 	if source is StyleBoxFlat:
 		var box := source.duplicate() as StyleBoxFlat
-		box.bg_color = chip.get_theme_color("surface_raised", "Joinery")
+		var raised := chip.get_theme_color("surface_raised", "Joinery")
+		box.bg_color = raised.lerp(chip.get_theme_color("text", "Joinery"), 0.07)
 		chip.add_theme_stylebox_override("panel", box)
 
 

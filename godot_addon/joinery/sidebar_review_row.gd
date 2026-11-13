@@ -120,6 +120,14 @@ func _init() -> void:
 	ways.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	ways.clip_text = true
 	STYLE.hug_left(ways)
+	# Full text colour: a real option beside the decision, not a faded one.
+	STYLE.on_theme_overrides(
+		ways,
+		func() -> void:
+			var ink := ways.get_theme_color("text", "Joinery")
+			for key: String in ["font_color", "font_focus_color"]:
+				ways.add_theme_color_override(key, ink)
+	)
 	_decision.add_child(ways)
 	_actions = HBoxContainer.new()
 	_actions.name = "Actions"
