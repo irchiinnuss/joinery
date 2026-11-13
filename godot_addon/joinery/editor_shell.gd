@@ -8,22 +8,17 @@ extends RefCounted
 
 const TOOLBAR_SETTING := "joinery/show_viewport_toolbar"
 const UI_THEME := preload("ui_theme.gd")
-const SWITCH_SCRIPT := preload("screen_switch.gd")
 const FOCUS_HINT := preload("focus_hint.gd")
-## Godot's main screens by the class of the editor each shows.
-const SCREEN_CLASSES := {
-	"CanvasItemEditor": "2D",
-	"Node3DEditor": "3D",
-	"ScriptEditor": "Script",
-	"GameView": "Game",
-}
 ## Longest log line quoted in the Output tab's tooltip.
 const OUTPUT_TIP_CHARS := 120
 
 var _toolbars: Array[Control] = []
 var _styled_menus: Array[MenuButton] = []
-## The 2D | 3D | Script switch in the scene tab row, in Joinery's layout (screen_switch.gd).
-var _switch: Control
+## Joinery's own main screen button, moved out of Godot's screen buttons in the title bar
+## into a hidden holder beside them (hide_screen_button), and that row.
+var _screen_button: Button
+var _screen_row: Control
+var _screen_holder: Control
 ## The ⤢ Focus toggle that stands in for Godot's distraction-free button, and that button.
 var _focus_button: Button
 var _distraction_free: Button
@@ -60,13 +55,6 @@ func apply(base: Control, settings: EditorSettings, joinery_layout := true) -> v
 			control.visible = _shown
 			if joinery_layout:
 				_compact(control)
-	if joinery_layout and _switch == null:
-		_switch = SWITCH_SCRIPT.new()
-		if _switch.place(base):
-			_switch.select(current_screen())
-		else:
-			_switch.free()
-			_switch = null
 	if joinery_layout:
 		for viewport: Node in base.find_children("*", "Node3DEditorViewport", true, false):
 			for menu: Node in viewport.find_children("*", "MenuButton", true, false):
@@ -128,15 +116,34 @@ func _style_view_menu(menu: MenuButton) -> void:
 	_styled_menus.append(menu)
 
 
-## The Godot main screen showing now ("2D", "3D", "Script", "Game"), or "" when another one
-## (the asset workspace) is.
-static func current_screen() -> String:
-	for child: Node in EditorInterface.get_editor_main_screen().get_children():
-		if child is Control and (child as Control).visible:
-			for type: String in SCREEN_CLASSES:
-				if child.is_class(type):
-					return SCREEN_CLASSES[type]
-	return ""
+## Godot's screen buttons sit in the title bar in Joinery's layout (the fork); the rail
+## already opens Joinery's own main screen [param screen] (Assets), so its button moves to a
+## hidden holder beside them. Godot still opens that screen, since the button stays visible
+## itself. Does nothing in an editor without that row or that button.
+func hide_screen_button(base: Control, screen: String) -> void:
+	if is_instance_valid(_screen_button):
+		return
+	_screen_row = base.find_child("EditorMainScreenButtons", true, false) as Control
+	if _screen_row == null:
+		return
+	_screen_button = _screen_row.get_node_or_null(NodePath(screen)) as Button
+	if _screen_button == null:
+		return
+	_screen_holder = Control.new()
+	_screen_holder.name = "JoineryRailScreens"
+	_screen_holder.visible = false
+	_screen_row.add_sibling(_screen_holder)
+	_screen_button.reparent(_screen_holder, false)
+
+
+func _show_screen_button() -> void:
+	if is_instance_valid(_screen_button) and is_instance_valid(_screen_row):
+		_screen_button.reparent(_screen_row, false)
+	if is_instance_valid(_screen_holder):
+		_screen_holder.queue_free()
+	_screen_button = null
+	_screen_row = null
+	_screen_holder = null
 
 
 ## The view the Godot rail button opens: 2D for a Node2D or Control scene, 3D for a Node3D
@@ -210,12 +217,6 @@ func has_focus_toggle() -> bool:
 func set_focus_shown(on: bool) -> void:
 	if is_instance_valid(_focus_button):
 		_focus_button.set_pressed_no_signal(on)
-
-
-## The main screen changed to [param screen]: highlight it on the switch.
-func screen_changed(screen: String) -> void:
-	if is_instance_valid(_switch):
-		_switch.select(screen)
 
 
 ## True when [param base] (the editor's base control) runs Joinery's layout. Godot's classic
@@ -338,9 +339,7 @@ func restore() -> void:
 			for state: String in ["normal", "hover", "pressed", "focus"]:
 				menu.remove_theme_stylebox_override(state)
 	_styled_menus.clear()
-	if is_instance_valid(_switch):
-		_switch.queue_free()
-	_switch = null
+	_show_screen_button()
 	if is_instance_valid(_focus_button):
 		_focus_button.queue_free()
 	_focus_button = null

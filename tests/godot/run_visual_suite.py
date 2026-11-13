@@ -136,6 +136,8 @@ SIDEBAR_NARROW = (
 EDITOR_SCREENS = (
     "disconnected",
     "layout",
+    "title-bar",
+    "title-bar-narrow",
     "scene-column-open",
     "panels-audio",
     "commands",

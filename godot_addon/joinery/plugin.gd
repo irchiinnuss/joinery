@@ -186,6 +186,7 @@ func _restore_focus() -> void:
 	)
 	if navigation != null:
 		_workspace.use_rail_navigation()
+		_shell.hide_screen_button(get_editor_interface().get_base_control(), SCREEN)
 		_rail = RAIL_SCRIPT.new()
 		navigation.add_child(_rail)
 		_workspace.catalog_changed.connect(_rail.update_tools)
@@ -603,7 +604,6 @@ func _on_tool_selected(tool: String) -> void:
 func _on_main_screen_changed(screen: String) -> void:
 	if screen in ["2D", "3D"]:
 		_last_view = screen
-	_shell.screen_changed(screen)
 	if _rail != null and screen != SCREEN:
 		_rail.select_tool("godot")
 

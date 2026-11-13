@@ -48,12 +48,24 @@ func _run() -> void:
 	var chat_before: String = plugin._dock._transcript.get_parsed_text()
 	var navigation := base.find_child("JoineryNavigation", true, false) as Control
 	_check(navigation != null, "Icon navigation must exist")
-	var switches := base.find_child("EditorMainScreenButtons", true, false)
-	_check(switches is VBoxContainer, "Workspace selectors must be vertical")
-	_check(not switches.visible, "Native workspace selectors must not appear in the app rail")
+	var switches := base.find_child("EditorMainScreenButtons", true, false) as Control
+	_check(switches is HBoxContainer, "Godot's screen buttons sit in a row")
+	_check(switches.is_visible_in_tree(), "Godot's screen buttons show")
+	_check(switches.get_parent().is_class("EditorTitleBar"), "They sit in the title bar")
+	_check(not navigation.is_ancestor_of(switches), "They are not on the app rail")
+	var shown: Array[String] = []
 	for button: Node in switches.get_children():
-		if button is Button:
-			_check(button.text.is_empty(), "Native workspace selectors must be icon-only")
+		if button is Button and (button as Button).visible:
+			shown.append(button.name)
+			_check(button.text.is_empty(), "Godot's screen buttons are icon-only")
+			_check(button.icon != null, "%s shows Godot's icon" % button.name)
+			_check(button.tooltip_text == button.name, "%s's tooltip names it" % button.name)
+	for screen: String in ["2D", "3D", "Script"]:
+		_check(screen in shown, screen + " is in the title bar: %s" % [shown])
+	for screen: String in shown:
+		# No Asset Store (Joinery fetches no assets), no Assets (it opens from the rail).
+		_check(screen in ["2D", "3D", "Script", "Game"], screen + " must not be in the title bar")
+	_check(base.find_child("JoineryScreenSwitch", true, false) == null, "No text switch")
 	await _godot_panels(plugin, base)
 	_check(plugin._shell._toolbars.size() >= 1, "The viewport toolbar must be discovered")
 	for control: Control in plugin._shell._toolbars:
@@ -215,8 +227,15 @@ func _rail_states(plugin: EditorPlugin) -> void:
 	plugin._rail._buttons["godot"].pressed.emit()
 	await get_tree().process_frame
 	_check(_screens.has("3D"), "Godot opens 3D for a 3D scene")
-	var switch := EditorInterface.get_base_control().find_child("JoineryScreenSwitch", true, false)
-	_check(switch != null and switch.get_node("3D").button_pressed, "The switch highlights 3D")
+	var row := EditorInterface.get_base_control().find_child("EditorMainScreenButtons", true, false)
+	_check(row != null and row.get_node("3D").button_pressed, "Godot's 3D button shows it is open")
+	# Assets opens from the rail and still reaches its screen, though it has no title bar button.
+	EditorInterface.set_main_screen_editor("Assets")
+	await get_tree().process_frame
+	_check(_screens.has("Assets"), "Godot still opens Joinery's Assets screen")
+	_check(not row.get_node("3D").button_pressed, "No screen button is raised over Assets")
+	plugin._rail._buttons["godot"].pressed.emit()
+	await get_tree().process_frame
 	_check(plugin._rail._buttons["godot"].button_pressed, "Godot is the selected rail item")
 	var deadline := Time.get_ticks_msec() + 30000
 	while plugin._rail._job != null and Time.get_ticks_msec() < deadline:

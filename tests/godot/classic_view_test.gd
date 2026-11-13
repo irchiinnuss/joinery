@@ -194,17 +194,44 @@ func _check_chrome(base: Control, classic: bool) -> void:
 	var buttons := base.find_child("EditorMainScreenButtons", true, false) as Control
 	_check(buttons != null, "The 2D, 3D and Script buttons exist")
 	if buttons != null:
-		_check(
-			buttons.is_visible_in_tree() == classic,
-			"The 2D, 3D and Script buttons show only in the classic view"
-		)
+		_check(buttons.is_visible_in_tree(), "The 2D, 3D and Script buttons show")
+		_check(buttons is HBoxContainer, "The 2D, 3D and Script buttons sit in a row")
+		_check(buttons.get_parent().is_class("EditorTitleBar"), "They sit in the title bar")
+		var texts: Array[String] = []
+		var names: Array[String] = []
+		for child: Node in buttons.get_children():
+			if child is Button and (child as Button).visible:
+				texts.append((child as Button).text)
+				names.append(child.name)
+		_check("3D" in names and "Script" in names, "The buttons are " + ", ".join(names))
 		if classic:
-			_check(buttons is HBoxContainer, "The 2D, 3D and Script buttons sit in a row")
-			var texts: Array[String] = []
-			for child: Node in buttons.get_children():
-				if child is Button:
-					texts.append((child as Button).text)
+			# Stock Godot: named buttons in the middle of the title bar, the Asset Library too.
 			_check("3D" in texts and "Script" in texts, "The buttons read " + ", ".join(texts))
+		else:
+			# Joinery's: Godot's icons alone at the right end, no Asset Library, no Assets.
+			_check(texts.all(func(text: String) -> bool: return text.is_empty()), "Icon-only")
+			_check(
+				names.all(func(name: String) -> bool: return name in ["2D", "3D", "Script", "Game"]),
+				"Only Godot's own screens, no Asset Store or Assets: " + ", ".join(names)
+			)
+			var bar := buttons.get_parent() as Control
+			var right := buttons.get_global_rect().end.x
+			var run_bars := base.find_children("*", "EditorRunBar", true, false)
+			if not run_bars.is_empty():
+				var run_end := (run_bars[0] as Control).get_global_rect().end.x
+				_check(buttons.get_global_rect().position.x >= run_end, "Right of Play")
+			# Only the spacer that keeps clear of the window buttons may follow them.
+			var gap := float(bar.get_theme_constant("separation"))
+			var trailing := 0.0
+			for index: int in range(buttons.get_index() + 1, bar.get_child_count()):
+				var after := bar.get_child(index) as Control
+				if after != null and after.visible:
+					trailing += after.size.x + gap
+			var end := bar.get_global_rect().end.x
+			_check(
+				absf(end - (right + trailing)) <= 1.0,
+				"Right-aligned at the title bar's end (%d of %d)" % [right + trailing, end]
+			)
 	var toolbars := 0
 	var shown := 0
 	for node: Node in base.find_children("*", "MarginContainer", true, false):

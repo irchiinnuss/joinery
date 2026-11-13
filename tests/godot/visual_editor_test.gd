@@ -72,7 +72,6 @@ func _run() -> void:
 	await _shot("disconnected", [dock])
 	_converse(dock)
 	await _shot("layout", [base])
-	_check(base.find_child("JoineryScreenSwitch", true, false) != null, "2D | 3D | Script switch")
 	_check(base.find_child("JoineryFocus", true, false) != null, "⤢ is the Focus toggle")
 	await load(get_script().resource_path.get_base_dir().path_join("visual_panels.gd")).screens(
 		self
