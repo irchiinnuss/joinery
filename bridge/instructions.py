@@ -424,6 +424,8 @@ REVIEW_GUIDE = (
     "every problem it returns and submit again. "
     "Only after it returns status in_review say the change is open for review; never "
     "ask the user to accept before that, and make no more changes this turn. "
+    "If it returns accepted, the project keeps passing changes without asking: say "
+    "what you made and that it was kept, never ask the user to accept it. "
     "Tell the user plainly what you made and where you placed it (the scene and the "
     "node), in their terms. Don't narrate Joinery's own steps (staging, importing, "
     "workers, stages, the live editor), and never call something blocked or say a "
@@ -441,7 +443,8 @@ REVIEW_GUIDE = (
 CONTINUE_AFTER_FAILED_SUBMIT = (
     "Joinery checked the change you left and it did not pass:\n{problems}\n"
     "Fix every problem, then call submit_for_review with one short line naming the "
-    "change. Don't ask the user to accept anything before it returns in_review."
+    "change. Don't ask the user to accept anything before it returns in_review, "
+    "nor after it returns accepted."
 )
 
 #: Joinery's request for a session summary before a fresh provider session.

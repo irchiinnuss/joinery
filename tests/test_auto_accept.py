@@ -316,6 +316,15 @@ def test_a_saved_chat_remembers_the_change_was_kept_without_asking(
     assert change["summary"] == "A script"
 
 
+def test_the_agent_says_it_was_kept_and_never_asks_for_an_accept() -> None:
+    from bridge.instructions import CONTINUE_AFTER_FAILED_SUBMIT, REVIEW_GUIDE
+
+    assert "If it returns accepted" in REVIEW_GUIDE
+    assert "that it was kept, never ask the user to accept it" in REVIEW_GUIDE
+    assert "nor after it returns accepted" in CONTINUE_AFTER_FAILED_SUBMIT
+    assert "Don't ask the user to accept it" in NEXT_AUTO
+
+
 def test_metrics_record_an_automatic_accept(tmp_path: Path) -> None:
     from joinery import metrics
 
