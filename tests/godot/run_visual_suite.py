@@ -50,6 +50,8 @@ SIDEBAR_STATES = (
     "connecting",
     "no-agent",
     "empty",
+    "empty-selected",
+    "empty-scene",
     "chips",
     "shared-view",
     "attachments",

@@ -642,6 +642,9 @@ func _on_connect_requested() -> void:
 	view.set("engine_home", _engine_dir())
 	view.set("initial_agent", str(_chat.get("_agent")) if _chat != null else "")
 	view.set("confirm_choice", true)
+	# An agent row pressed in the empty chat: its sign-in starts at once (sidebar_empty.gd).
+	view.set("choose_on_open", str(Engine.get_meta("joinery_chosen_agent", "")))
+	Engine.set_meta("joinery_chosen_agent", null)
 	dialog.add_child(view)
 	view.connect("connected", _on_agent_connected.bind(view))
 	dialog.canceled.connect(dialog.queue_free)

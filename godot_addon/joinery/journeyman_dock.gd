@@ -743,6 +743,7 @@ func target_snapshot() -> Array[Dictionary]:
 
 func _set_targets(targets: Array[Dictionary]) -> void:
 	_composer.set_targets(targets)
+	_transcript.set_start_context(targets, CHIP_SCRIPT.open_scene())
 
 
 # --- Connection state --------------------------------------------------------------------------

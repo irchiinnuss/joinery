@@ -769,8 +769,15 @@ func _check_blocks() -> void:
 		_texts(empty.get("start")).has("Select something, then say what to change."),
 		"One caption line, no Type / hint"
 	)
+	empty.call("set_context", [{"label": "Door", "kind": "Object", "node_type": "MeshInstance3D"}])
+	var asks: Array[String] = []
+	for chip: Button in empty.get("examples"):
+		asks.append(chip.text)
+	_check(asks.has("Make it taller") and asks.has("Change its material"), str(asks))
+	_check(_texts(empty.get("start")).has("Door"), "The start names what is selected")
 	empty.call("set_connection", "none")
-	_check(_accents(empty) == 1, "Without an agent, Connect is the one accent action")
+	_check(_accents(empty) == 0, "Without an agent the agents are the choices, no extra button")
+	_check((empty.get("agent_rows") as Array).size() == 4, "One row per agent")
 	_check(not (empty.get("start") as Control).visible, "The examples step aside")
 	var long_name := "door_with_long_descriptive_name.glb"
 	var font := _host.get_theme_default_font()

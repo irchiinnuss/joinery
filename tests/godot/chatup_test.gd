@@ -568,14 +568,16 @@ func _run() -> void:
 	_check(connects[0] == 1, "The line's Connect asks the editor to connect")
 	_check(chat._prompt.placeholder_text == "Ask Journeyman…", "The composer rests")
 	_check(not _visible_text(chat).to_lower().contains("assistant"), "No copy says assistant")
-	var connect: Button = null
-	for button: Node in empty.blank.find_children("*", "Button", true, false):
-		if (button as Button).text == "Connect":
-			connect = button
-	_check(connect != null and connect.theme_type_variation == "JoineryPrimaryButton", "Connect")
-	if connect != null:
-		connect.pressed.emit()
-	_check(connects[0] == 2, "Connect asks the editor to connect")
+	var rows: Array = empty.agent_rows
+	_check(rows.size() == 4, "The agents are the choices, one row each")
+	if not rows.is_empty():
+		(rows[1] as Button).pressed.emit()
+	_check(connects[0] == 2, "An agent row asks the editor to connect")
+	_check(
+		str(Engine.get_meta("joinery_chosen_agent", "")) == "codex",
+		"…naming the agent to sign in to"
+	)
+	Engine.set_meta("joinery_chosen_agent", null)
 	chat.set_chat_state("connecting", "")
 	_check(empty.blank.visible and empty._connecting.visible, "Connecting… takes the buttons")
 	var undone := [0]

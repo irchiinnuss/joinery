@@ -373,6 +373,18 @@ static func _buttons(t: Theme, c: Dictionary, m: Dictionary) -> void:
 			"icon_hover": c["text"],
 		},
 		"JoineryRowButton": {"pad_h": _sp(m, 2)},
+		# A request offered as a round chip (the empty chat's "Make it taller"): a hairline
+		# pill on the surface, filled on hover; chips are fully round.
+		"JoineryActionChip":
+		{
+			"border": c["border_subtle"],
+			"width": maxf(1.0, roundf(m["u"])),
+			"radius": _rad(m, "full"),
+			"pad_h": _sp(m, 3),
+			"pad_v": _pad_v(m, "sm"),
+			"hover": c["surface_raised"],
+			"pressed": c["surface_raised"].lerp(c["text"], 0.07),
+		},
 		"JoineryIconButton": {"pad_h": square, "pad_v": square, "icon": c["text_muted"]},
 		"JoinerySendButton":
 		{

@@ -154,6 +154,11 @@ func set_connection(state: String) -> void:
 		show_caption("")
 
 
+## What the empty chat starts from: the message [param targets] in the open [param scene].
+func set_start_context(targets: Array, scene := "") -> void:
+	_empty.set_context(targets, scene)
+
+
 func _on_scroll(value: float) -> void:
 	var bar := get_v_scroll_bar()
 	_follow = value >= bar.max_value - bar.page - UI_THEME.space(self, 6)

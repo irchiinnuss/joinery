@@ -46,6 +46,9 @@ var initial_agent := ""
 var confirm_choice := false
 ## In the editor, after a row continues, test the chosen agent in the background ([method _verify]).
 var verify_after_continue := true
+## An agent to choose as soon as the list is known, as if its row were pressed (the
+## sidebar's inline agent rows): one click there signs in.
+var choose_on_open := ""
 var initial_profile := ""
 var selected_profile := ""
 var _selected := ""
@@ -565,6 +568,10 @@ func _apply_status(payload: Dictionary) -> void:
 			_select(initial_profile, false)
 		elif not initial_profile.is_empty() and not _agents.has(initial_profile):
 			_show_message(PROFILE_MISSING, true)
+	if not choose_on_open.is_empty() and _buttons.has(choose_on_open):
+		var id := choose_on_open
+		choose_on_open = ""
+		_choose(id)
 
 
 ## Ready assistants first, then installed ones, then the rest; the first status only, so

@@ -192,6 +192,17 @@ func _states(light: bool, width: int) -> void:
 	_check(str(header.get("_name").text).is_empty(), "A healthy header shows no name")
 	_check(not str(footer.call("text")).contains("Ready"), "The sidebar never says Ready")
 	await _shot("empty", light, width, chat)
+	# Something selected: the start names it and offers requests for its kind.
+	var door := {
+		"label": "Door",
+		"kind": "Object",
+		"node_type": "MeshInstance3D",
+		"scene_file": "visual.tscn",
+	}
+	chat.get("_transcript").call("set_start_context", [door], "visual.tscn")
+	await _shot("empty-selected", light, width, chat)
+	chat.get("_transcript").call("set_start_context", [], "visual.tscn")
+	await _shot("empty-scene", light, width, chat)
 
 	chat.set_resource_target("res://art/props/door_with_long_descriptive_name.glb", "PackedScene")
 	await _shot("chips", light, width, chat)

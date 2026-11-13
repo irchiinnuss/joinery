@@ -188,9 +188,19 @@ static func from_selection() -> Array[Dictionary]:
 			"resource": resource,
 			"source": node.scene_file_path,
 			"crumbs": parts,
+			"node_type": node.get_class(),
+			"scene_file": scene.scene_file_path.get_file() if scene != null else "",
 		}
 		targets.append(target)
 	return targets
+
+
+## The open scene's file name ("visual.tscn"), or "" outside the editor or with none open.
+static func open_scene() -> String:
+	if not Engine.is_editor_hint():
+		return ""
+	var scene := EditorInterface.get_edited_scene_root()
+	return scene.scene_file_path.get_file() if scene != null else ""
 
 
 ## The target for a file (or a "file::sub-resource" path) of editor type [param type].
