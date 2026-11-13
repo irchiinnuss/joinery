@@ -1,0 +1,126 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ninjacornix <milanvrankic@gmail.com>
+Date: Fri, 13 Nov 2026 14:03:07 +0100
+Subject: [PATCH] fix(editor): one look for the brief and art direction step
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Joinery-only, not for upstream. Reference images is a section headed and spaced like References and Starting rules; References spaces its heading, field and caption like the other sections; an empty file list no longer doubles the gap above Add images… and Add documents…, which are filled like the sidebar's quiet buttons (no edge at rest). What Create will do moves from above the footer rule into the footer row beside Back and the primary action, wrapping rather than cut, so it no longer reads as the caption of the last field and the page keeps the room for its picker.
+---
+ editor/project_manager/project_dialog.cpp | 56 +++++++++++++++++------
+ 1 file changed, 42 insertions(+), 14 deletions(-)
+
+diff --git a/editor/project_manager/project_dialog.cpp b/editor/project_manager/project_dialog.cpp
+index 294113d..b3d8245 100644
+--- a/editor/project_manager/project_dialog.cpp
++++ b/editor/project_manager/project_dialog.cpp
+@@ -801,9 +801,22 @@ void ProjectDialog::_joinery_apply_sizes() {
+ 			c->set_custom_minimum_size(control);
+ 		}
+ 	}
+-	for (Control *c : { (Control *)joinery_ref_add, (Control *)joinery_doc_add }) {
+-		if (c) {
+-			c->set_custom_minimum_size(control);
++	// Add images… and Add documents… are filled like the sidebar's quiet
++	// buttons: the raised fill with no edge at rest, the hairline only on hover,
++	// so they read as part of the page rather than as footer actions.
++	for (Button *b : { joinery_ref_add, joinery_doc_add }) {
++		if (!b) {
++			continue;
++		}
++		b->set_custom_minimum_size(control);
++		for (const StringName &state : { CoreStringName(normal), SNAME("disabled") }) {
++			b->remove_theme_style_override(state);
++			const Ref<StyleBoxFlat> source = b->get_theme_stylebox(state);
++			if (source.is_valid()) {
++				Ref<StyleBoxFlat> box = source->duplicate();
++				box->set_border_color(state == CoreStringName(normal) ? box->get_bg_color() : Color(0, 0, 0, 0));
++				b->add_theme_style_override(state, box);
++			}
+ 		}
+ 	}
+ 	_joinery_fit_scroll();
+@@ -1886,6 +1899,8 @@ void ProjectDialog::_joinery_build_questions(const Array &p_pages) {
+ 	if (heading) {
+ 		heading->set_theme_type_variation(SNAME("JoinerySection"));
+ 	}
++	// Spaced like every other section: heading, field and caption SPACE.3 apart.
++	Object::cast_to<Control>(joinery_references_box->get_child(0))->add_theme_constant_override(SNAME("separation"), _joinery_space(3));
+ }
+ 
+ // The game brief's questions from `joinery brief --questions`: the pitch and
+@@ -1934,12 +1949,15 @@ static bool _joinery_is_document(const String &p_path) {
+ }
+ 
+ void ProjectDialog::_joinery_build_imports(VBoxContainer *p_brief_section) {
++	// A block inside a section reads as one of its fields; a block of its own
++	// on the page is a section, headed and spaced like every other one.
+ 	const auto block = [this](VBoxContainer *p_parent, const String &p_label, const String &p_caption) {
++		const bool own_section = p_parent == joinery_look_page;
+ 		VBoxContainer *box = memnew(VBoxContainer);
+-		box->add_theme_constant_override(SNAME("separation"), _joinery_space(2));
++		box->add_theme_constant_override(SNAME("separation"), _joinery_space(own_section ? 3 : 2));
+ 		p_parent->add_child(box);
+ 		Label *label = memnew(Label);
+-		label->set_theme_type_variation(SNAME("JoineryLabel"));
++		label->set_theme_type_variation(own_section ? SNAME("JoinerySection") : SNAME("JoineryLabel"));
+ 		label->set_text(p_label);
+ 		box->add_child(label);
+ 		box->add_child(_joinery_caption(p_caption));
+@@ -1949,6 +1967,7 @@ void ProjectDialog::_joinery_build_imports(VBoxContainer *p_brief_section) {
+ 		VBoxContainer *rows = memnew(VBoxContainer);
+ 		rows->add_theme_constant_override(SNAME("separation"), _joinery_space(2));
+ 		p_box->add_child(rows);
++		rows->hide();
+ 		Button *button = memnew(Button);
+ 		button->set_theme_type_variation(SNAME("JoinerySecondaryButton"));
+ 		button->set_text(p_text);
+@@ -2168,6 +2187,10 @@ void ProjectDialog::_joinery_remove_document(const String &p_path) {
+ void ProjectDialog::_joinery_update_import_buttons() {
+ 	joinery_ref_add->set_disabled(joinery_ref_paths.size() >= JOINERY_MAX_REFERENCES);
+ 	joinery_doc_add->set_disabled(joinery_doc_paths.size() >= JOINERY_MAX_DOCUMENTS);
++	// An empty file list takes no room, so the caption and its Add button keep
++	// the block's one gap instead of two.
++	joinery_ref_rows->set_visible(!joinery_ref_paths.is_empty());
++	joinery_doc_rows->set_visible(!joinery_doc_paths.is_empty());
+ }
+ 
+ void ProjectDialog::_joinery_clear_imports() {
+@@ -5125,15 +5148,6 @@ ProjectDialog::ProjectDialog() {
+ 	VBoxContainer *footer_block = memnew(VBoxContainer);
+ 	footer_block->add_theme_constant_override(SNAME("separation"), _joinery_space(4));
+ 	joinery_footer_frame->add_child(footer_block);
+-	// What Create will do, on the steps that decide it.
+-	joinery_summary = memnew(Label);
+-	joinery_summary->set_theme_type_variation(SNAME("JoineryCaption"));
+-	joinery_summary->set_text_overrun_behavior(TextServer::OVERRUN_TRIM_ELLIPSIS);
+-	joinery_summary->set_clip_text(true);
+-	joinery_summary->set_mouse_filter(Control::MOUSE_FILTER_PASS);
+-	joinery_summary->set_auto_translate_mode(AUTO_TRANSLATE_MODE_DISABLED);
+-	joinery_summary->hide();
+-	footer_block->add_child(joinery_summary);
+ 	joinery_footer_rule = memnew(HSeparator);
+ 	footer_block->add_child(joinery_footer_rule);
+ 	joinery_footer = memnew(HBoxContainer);
+@@ -5147,6 +5161,20 @@ ProjectDialog::ProjectDialog() {
+ 	Control *footer_spacer = memnew(Control);
+ 	footer_spacer->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+ 	joinery_footer->add_child(footer_spacer);
++	// What Create will do, on the steps that decide it: in the footer row,
++	// ending beside Back and the primary action it describes, so it never
++	// reads as a caption of the page's last field.
++	joinery_summary = memnew(Label);
++	joinery_summary->set_theme_type_variation(SNAME("JoineryCaption"));
++	joinery_summary->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
++	joinery_summary->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_RIGHT);
++	joinery_summary->set_v_size_flags(Control::SIZE_SHRINK_CENTER);
++	joinery_summary->set_h_size_flags(Control::SIZE_EXPAND_FILL);
++	joinery_summary->set_stretch_ratio(8);
++	joinery_summary->set_mouse_filter(Control::MOUSE_FILTER_PASS);
++	joinery_summary->set_auto_translate_mode(AUTO_TRANSLATE_MODE_DISABLED);
++	joinery_summary->hide();
++	joinery_footer->add_child(joinery_summary);
+ 	joinery_back = memnew(Button);
+ 	joinery_back->set_text(TTRC("Back"));
+ 	joinery_back->set_theme_type_variation(SNAME("JoinerySecondaryButton"));
