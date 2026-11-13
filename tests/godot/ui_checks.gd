@@ -125,6 +125,12 @@ static func _walk(
 			_check(screen, root, control, window, clip, findings)
 		if control.clip_contents or control is ScrollContainer:
 			inner = clip.intersection(rect)
+			# A scroll's edge fade (scroll_hint_mode) hides what passes under it on purpose.
+			if control is ScrollContainer and int(control.get("scroll_hint_mode")) != 0:
+				var hint := control.get_theme_icon("scroll_hint_vertical")
+				var fade := float(hint.get_height()) if hint != null else 0.0
+				var top := fade if (control as ScrollContainer).scroll_vertical > 0 else 0.0
+				inner = inner.grow_individual(0.0, -top, 0.0, -fade)
 	for child: Node in node.get_children():
 		_walk(screen, root, child, window, inner, findings)
 

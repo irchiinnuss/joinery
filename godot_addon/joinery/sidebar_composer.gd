@@ -91,6 +91,7 @@ var _targets: Array[Dictionary] = []
 var _waiting := ""
 ## The status line in the field (set_status), or null.
 var _status_line: Control
+var _field: MarginContainer
 var _dialog: FileDialog
 ## The editor's own handlers of the window's file drops, while the composer takes them first.
 var _editor_drops: Array[Callable] = []
@@ -129,7 +130,14 @@ func _init() -> void:
 	prompt.image_pasted.connect(func(image: Image) -> void: attach_image(image, "Pasted image"))
 	prompt.files_pasted.connect(attach_files)
 	prompt.resized.connect(_apply_placeholder)
-	body.add_child(prompt)
+	# The field and, over its first line, the status line (set_status): stacked in one slot.
+	_field = MarginContainer.new()
+	_field.name = "Field"
+	_field.size_flags_vertical = prompt.size_flags_vertical
+	for side: String in ["left", "right", "top", "bottom"]:
+		_field.add_theme_constant_override("margin_" + side, 0)
+	body.add_child(_field)
+	_field.add_child(prompt)
 	var controls := HBoxContainer.new()
 	controls.theme_type_variation = "JoineryRowTight"
 	controls.resized.connect(_fit_controls, CONNECT_DEFERRED)
@@ -282,15 +290,15 @@ func set_status(line: Control) -> void:
 	_status_line = line
 	line.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	for child: Node in line.find_children("*", "Control", true, false):
-		(child as Control).mouse_filter = Control.MOUSE_FILTER_IGNORE
-	prompt.add_child(line)
-	line.set_anchors_preset(Control.PRESET_TOP_WIDE)
+		if not child is Button:
+			(child as Control).mouse_filter = Control.MOUSE_FILTER_IGNORE
+	line.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	_field.add_child(line)
 	prompt.theme_changed.connect(_place_status)
-	prompt.resized.connect(_place_status)
-	line.minimum_size_changed.connect(_place_status)
 	line.visibility_changed.connect(_place_status)
 	line.visibility_changed.connect(_apply_placeholder)
 	prompt.text_changed.connect(_apply_placeholder)
+	prompt.text_set.connect(_apply_placeholder)
 	_place_status()
 
 
@@ -300,11 +308,13 @@ func _place_status() -> void:
 		return
 	var box := prompt.get_theme_stylebox("normal")
 	var line_h := float(prompt.get_line_height())
-	var tall := maxf(_status_line.get_combined_minimum_size().y, line_h)
-	_status_line.offset_left = box.get_margin(SIDE_LEFT)
-	_status_line.offset_right = -box.get_margin(SIDE_RIGHT)
-	_status_line.offset_top = box.get_margin(SIDE_TOP) + roundf((line_h - tall) / 2.0)
-	_status_line.offset_bottom = _status_line.offset_top + tall
+	var row := _status_line.get_child(0) as Control
+	var tall := row.get_combined_minimum_size().y if row != null else line_h
+	_status_line.add_theme_constant_override("margin_left", roundi(box.get_margin(SIDE_LEFT)))
+	_status_line.add_theme_constant_override("margin_right", roundi(box.get_margin(SIDE_RIGHT)))
+	_status_line.add_theme_constant_override(
+		"margin_top", roundi(box.get_margin(SIDE_TOP) + maxf(0.0, (line_h - tall) / 2.0))
+	)
 
 
 ## Mark Stop as pressed and waiting for the reply to end.
