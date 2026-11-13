@@ -90,6 +90,9 @@ class Finding(_Model):
     fix: Fix | None = None
     #: Why Joinery can't fix it itself (an imported file, a tool with no typed op).
     needs_you: str = ""
+    #: The evidence as colours, for a palette finding: the most common colour that is off
+    #: the look, then the nearest colour the look allows ("#a83ac2", "#8a5a3b").
+    swatches: list[str] = []
 
 
 class AreaScore(_Model):
@@ -264,6 +267,7 @@ class _Audit:
         subject: str = "",
         fix: Fix | None = None,
         needs_you: str = "",
+        swatches: list[str] | None = None,
     ) -> None:
         if fix is None and not needs_you:
             needs_you = "Joinery has no typed operation for this yet."
@@ -280,6 +284,7 @@ class _Audit:
                 message=message,
                 fix=fix,
                 needs_you="" if fix is not None else needs_you,
+                swatches=swatches or [],
             )
         )
 

@@ -90,4 +90,9 @@ static func _finding(
 		"needs_you":
 		"" if fix else "It has no recipe (you imported it), so Joinery won't change it.",
 	}
+	# A palette finding carries its evidence: the colour off the look, the nearest allowed.
+	if area == "palette":
+		item["swatches"] = (
+			["#b63fc4", "#8a5a3b"] if path.ends_with("wall.png") else ["#5f9e3a", "#2e86ab"]
+		)
 	return item

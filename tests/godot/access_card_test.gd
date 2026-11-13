@@ -90,7 +90,7 @@ func _run() -> void:
 	var title := (card.get("title_label") as Label).text
 	_check(title == "8 accessibility problems", "The headline counts the problems: " + title)
 	var words: PackedStringArray = card.call("area_words")
-	_check(words[0] == "Contrast 0%" and words[5] == "Screen readers 75%", ", ".join(words))
+	_check(words[0] == "Contrast 2 off" and words[5] == "Screen readers 1 off", ", ".join(words))
 	_check(card.call("step_text").is_empty(), "The glyphs say how serious, not a counts line")
 	var first: Control = (card.call("finding_rows") as Array)[0]
 	var parts := first.find_children("", "Label", true, false)
@@ -132,7 +132,7 @@ func _run() -> void:
 		shown.has('main.tscn: "Score: 12" (#777777 on #888888) has contrast 1.3:1.'), "%s" % shown
 	)
 	(guide.get("toggle") as Button).button_pressed = false
-	_check((card.get("_areas") as Control).visible, "Closing brings the scores back")
+	_check((card.get("_findings") as Control).visible, "Closing brings the findings back")
 	_check((card.get("_more") as Control).visible, "and Show all")
 
 	# A feature-only area: its Fix opens the feature's plan; nothing goes to the host.

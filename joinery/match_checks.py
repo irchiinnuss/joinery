@@ -60,6 +60,31 @@ def _off_share(
     return far / len(pixels) if pixels else 0.0
 
 
+def _worst_colour(
+    pixels: list[tuple[int, int, int]],
+    palette: list[str],
+    labs: list[tuple[float, float, float]],
+    limit: float,
+) -> list[str]:
+    """[the most common colour off the palette, the nearest palette colour] as hex, or []."""
+    counts: dict[tuple[int, int, int], int] = {}
+    seen: dict[tuple[int, int, int], tuple[int, int, int]] = {}
+    for rgb in pixels:
+        # Neighbouring shades count as one colour (16 steps a channel), shown as the first
+        # real pixel of that shade.
+        key = (rgb[0] >> 4, rgb[1] >> 4, rgb[2] >> 4)
+        counts[key] = counts.get(key, 0) + 1
+        seen.setdefault(key, rgb)
+    for key, _count in sorted(counts.items(), key=lambda item: -item[1]):
+        rgb = seen[key]
+        lab = _lab(rgb)
+        distances = [delta_e_2000(lab, p) for p in labs]
+        if min(distances) > limit:
+            nearest = palette[distances.index(min(distances))]
+            return [f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}", nearest.lower()]
+    return []
+
+
 def _pow2_at_most(value: int) -> int:
     return 1 << max(0, math.floor(math.log2(max(value, 1))))
 
@@ -197,6 +222,9 @@ async def images(audit: _Audit, paths: list[str]) -> None:
             f"from the palette (allowed {allowed:.0%})",
             fix=fix,
             needs_you=why,
+            swatches=_worst_colour(
+                sampled[path], palette, labs, rules.palette.max_delta_e
+            ),
         )
 
 

@@ -82,7 +82,7 @@ func _run() -> void:
 	var picker: OptionButton = card.get("target_picker")
 	_check(picker != null and picker.get_item_text(picker.selected) == "Web browser", "Picker")
 	var words: PackedStringArray = card.call("area_words")
-	_check(words[0] == "Frame time 0%" and words[2] == "Lights 0%", ", ".join(words))
+	_check(words[0] == "Frame time 2 off" and words[2] == "Lights 1 off", ", ".join(words))
 	var first: Control = (card.call("finding_rows") as Array)[0]
 	var parts := first.find_children("", "Label", true, false)
 	# The file in the text colour, then the finding in its own words.

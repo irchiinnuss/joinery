@@ -25,6 +25,12 @@ const TOLERANCE := 1.0
 const ALLOWED := [
 	{
 		"kind": "contrast",
+		"class": "Label",
+		"text": "Aa",
+		"reason": "An accessibility finding's evidence: text drawn in the very colours that fail",
+	},
+	{
+		"kind": "contrast",
 		"class": "Button",
 		"text": "Perspective",
 		"reason": "Stock Godot 3D viewport menu; Joinery does not restyle the viewport chrome",

@@ -242,6 +242,9 @@ def test_audit_measures_every_area_with_known_values(planted: Path) -> None:
         "≤ 5%",
         "high",
     )
+    # The evidence: the magenta itself, then the nearest colour the look allows.
+    assert palette.swatches[0] == "#ff00ff"
+    assert len(palette.swatches) == 2 and palette.swatches[1].startswith("#")
     assert palette.fix is not None and palette.fix.tool == "edit_image"
     assert palette.fix.arguments["source"] == "art/textures/wall.kra"
     assert palette.fix.arguments["ops"][0]["op"] == "palette_map"

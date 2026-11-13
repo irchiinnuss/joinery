@@ -92,11 +92,18 @@ func _run() -> void:
 		(
 			words
 			== PackedStringArray(
-				["Palette 72%", "Textures 80%", "Models 100%", "Lighting 0%", "Sound 70%"]
+				[
+					"Palette 7 off",
+					"Textures 2 off",
+					"Models all match",
+					"Lighting 1 off",
+					"Sound 3 off"
+				]
 			)
 		),
-		"One score per area: " + ", ".join(words)
+		"Each area counts what is off, not a score: " + ", ".join(words)
 	)
+	_check(not (card.get("_areas") as Control).visible, "The areas wait behind Show all")
 	_check(
 		card.call("step_text").is_empty() and not (card.get("_line") as Control).visible,
 		"The severity glyphs say how serious; no counts line repeats them"
@@ -104,7 +111,10 @@ func _run() -> void:
 	_check((card.get("_again") as Button).text.is_empty(), "Check again is the ↻ icon")
 	_check((card.call("finding_rows") as Array).size() == 3, "The top three findings show")
 	var first: Control = (card.call("finding_rows") as Array)[0]
-	var parts := first.find_children("", "Label", true, false)
+	var parts: Array = []
+	for label: Node in first.find_children("", "Label", true, false):
+		if (label as Label).text != "→":
+			parts.append(label)
 	_check(
 		(
 			(parts[0] as Label).text == "wall.png"
@@ -112,10 +122,16 @@ func _run() -> void:
 		),
 		"A finding names the file, then what was measured and what the look asks"
 	)
+	var swatches := first.find_children("", "Panel", true, false)
+	_check(
+		swatches.size() == 2 and (swatches[0] as Control).tooltip_text.contains("#b63fc4"),
+		"A colour off the look shows as itself, beside the nearest allowed one"
+	)
 	var more := _button(card, "Show all 9")
 	_check(more != null, "The rest wait behind Show all")
 	more.pressed.emit()
 	_check((card.call("finding_rows") as Array).size() == 9, "Show all shows every finding")
+	_check((card.get("_areas") as Control).visible, "…and the areas with their own Fix")
 	var fix_all: Button = card.get("fix_all")
 	_check(fix_all.visible and fix_all.text == "Fix 8", "Fix all names how many: " + fix_all.text)
 	_check(_button(card, "Fix") != null, "Each area that can be fixed has Fix")
@@ -185,8 +201,8 @@ func _run() -> void:
 	_check(_audits == 2, "It measured again after the accept")
 	words = card.call("area_words")
 	_check(
-		words[0] == "Palette 100%" and words[3] == "Lighting 100%",
-		"Scores rose: " + ", ".join(words)
+		words[0] == "Palette all match" and words[3] == "Lighting all match",
+		"What was off is gone: " + ", ".join(words)
 	)
 	_check(
 		(card.get("title_label") as Label).text == "1 thing off the look", "The headline follows"

@@ -1,10 +1,12 @@
 @tool
 extends PanelContainer
 ## "Make it match" (ADR 0045): the project against its look (the art bible), at a glance. One
-## headline that says how much is off ("9 things off the look"), one row per area with its
-## score ("Palette 72%", "—" when an area had nothing to check), the top findings (a severity
-## glyph and colour, the file, what was measured and what the look asks for), and the call to
-## action on the right of the last line: "Fix 8", or Fix on one area. Check again is the ↻
+## headline that says how much is off ("9 things off the look"), then the evidence itself, not
+## scores: the top findings, each a severity glyph and colour, what is off shown as itself (the
+## offending colour beside the nearest one the look allows, or the picture), the file, and what
+## was measured against what the look asks. The call to action sits on the right of the last
+## line: "Fix 8". Show all opens every finding and the areas, each with how many things are off
+## ("Palette 7 off", "—" when it had nothing to check) and its own Fix. Check again is the ↻
 ## beside the title. The fixes run as parallel tasks with their own cards; each change is
 ## reviewed in the Review tab. While they run the card counts what is ready to review, and
 ## after each accept the project is checked again so the scores rise in place.
@@ -30,8 +32,6 @@ const UI := preload("ui_components.gd")
 const STYLE := preload("sidebar_style.gd")
 const INDICATOR := preload("activity_indicator.gd")
 const GUIDELINES := preload("access_guidelines.gd")
-## A score bar's width in logical px × unit: one length for every area, so they compare.
-const BAR_W := 120.0
 ## Findings shown before "Show all".
 const FIRST_FINDINGS := 3
 ## Below this card width, in em, it shows one finding fewer.
@@ -52,41 +52,6 @@ const TARGETS := {
 	"steam-deck": "Steam Deck",
 	"web": "Web browser",
 }
-
-
-## A thin score bar: the share that matches, filled in the accent colour (success at 100%).
-class ScoreBar:
-	extends Control
-	var shown := 0.0:
-		set(value):
-			shown = value
-			queue_redraw()
-
-	func _init() -> void:
-		mouse_filter = Control.MOUSE_FILTER_IGNORE
-		size_flags_vertical = Control.SIZE_SHRINK_CENTER
-		STYLE.on_theme(
-			self,
-			func() -> void:
-				var unit := UI_THEME.unit(self)
-				custom_minimum_size = Vector2(roundf(unit * BAR_W), maxf(3.0, roundf(unit * 4.0)))
-		)
-
-	func set_score(value: float) -> void:
-		UI_MOTION.tween_to(self, self, "shown", clampf(value / 100.0, 0.0, 1.0), "base")
-
-	func _draw() -> void:
-		var height := size.y
-		var radius := height / 2.0
-		var track := UI_THEME.color(self, "border_subtle")
-		draw_rect(Rect2(Vector2.ZERO, size), track)
-		if shown <= 0.0:
-			return
-		var role := "success" if shown >= 0.999 else "accent"
-		draw_rect(
-			Rect2(0, 0, maxf(radius * 2.0, size.x * shown), height), UI_THEME.color(self, role)
-		)
-
 
 ## "match", "access" or "perf".
 var kind := "match"
@@ -320,7 +285,7 @@ func apply_run(event: Dictionary) -> void:
 			_sync_line()
 			_again.visible = true
 			_findings.visible = _findings.get_child_count() > 0
-			_areas.visible = not _area_rows.is_empty()
+			_areas.visible = _all_shown and not _area_rows.is_empty()
 			if guidelines != null:
 				var xag: Dictionary = (audit.get("facts", {}) as Dictionary).get("xag", {})
 				(guidelines.get("head") as Control).visible = not xag.is_empty()
@@ -459,13 +424,14 @@ func _fill_areas(areas: Array, before: Dictionary) -> void:
 			added.append(_area_rows[id]["row"])
 		var row: Dictionary = _area_rows[id]
 		var score := int(entry.get("score", 0))
+		var failing := int(entry.get("failing", 0))
 		if int(entry.get("checked", 1)) == 0:
-			# Nothing in this area to check: a dash, not a 0% that reads as a failure.
+			# Nothing in this area to check: a dash, not a count that reads as a result.
 			(row["number"] as Label).text = "—"
-			(row["bar"] as ScoreBar).set_score(0.0)
+		elif failing == 0:
+			(row["number"] as Label).text = "all match"
 		else:
-			UI_MOTION.roll_number(row["number"] as Label, score, "%d%%")
-			(row["bar"] as ScoreBar).set_score(score)
+			UI_MOTION.roll_number(row["number"] as Label, failing, "%d off")
 		_show_fix(row["fix"] as Button, int(entry.get("fixable", 0)) > 0)
 		(row["row"] as Control).tooltip_text = (
 			(
@@ -478,13 +444,13 @@ func _fill_areas(areas: Array, before: Dictionary) -> void:
 			if int(entry.get("checked", 1)) > 0
 			else "Nothing to check here yet"
 		)
-		if before.has(id) and score > int(before[id]):
+		if before.has(id) and score > int(before[id]) and _all_shown:
 			UI_MOTION.flash(row["number"] as Label)
 	for id: String in _area_rows.keys():
 		if not seen.has(id):
 			(_area_rows[id]["row"] as Control).queue_free()
 			_area_rows.erase(id)
-	_areas.visible = not _area_rows.is_empty()
+	_areas.visible = _all_shown and not _area_rows.is_empty()
 	UI_MOTION.stagger(added)
 
 
@@ -497,14 +463,12 @@ func _area_row(entry: Dictionary) -> Dictionary:
 	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(label)
-	var bar := ScoreBar.new()
-	row.add_child(bar)
 	var number := UI.label("", "JoineryNumeric")
 	number.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	number.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	number.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
 	STYLE.on_theme(
-		number, func() -> void: number.custom_minimum_size.x = roundf(UI_THEME.unit(number) * 38.0)
+		number, func() -> void: number.custom_minimum_size.x = roundf(UI_THEME.unit(number) * 64.0)
 	)
 	row.add_child(number)
 	# A quiet link as tall as a caption line (UI.quiet_link is a full control height), never
@@ -535,13 +499,14 @@ func _area_row(entry: Dictionary) -> Dictionary:
 	row.add_child(fix)
 	# Fix all is the card's one call to action; an area's own Fix shows when its row is pointed at.
 	STYLE.reveal_on_hover(row, fix)
-	return {"row": row, "label": label, "bar": bar, "number": number, "fix": fix}
+	return {"row": row, "label": label, "number": number, "fix": fix}
 
 
 func _fill_findings(findings: Array) -> void:
 	for child: Node in _findings.get_children():
 		child.queue_free()
 	_all_shown = false
+	_areas.hide()
 	var shown: Array = []
 	var first := _first_findings()
 	for index: int in findings.size():
@@ -552,7 +517,9 @@ func _fill_findings(findings: Array) -> void:
 			shown.append(row)
 	_findings.visible = not findings.is_empty()
 	_more.text = "Show all %d" % findings.size()
-	_more.visible = findings.size() > first
+	_more.visible = (
+		findings.size() > first or (not findings.is_empty() and not _area_rows.is_empty())
+	)
 	UI_MOTION.stagger(shown)
 
 
@@ -570,6 +537,10 @@ func _finding_row(item: Dictionary) -> HBoxContainer:
 	var severity := str(item.get("severity", "low"))
 	# Glyph and colour, so severity reads without colour too.
 	row.add_child(BLOCKS.severity_glyph(severity))
+	# What is off, shown as itself: the colour beside the nearest allowed one, or the picture.
+	var evidence := _evidence(item)
+	if evidence != null:
+		row.add_child(evidence)
 	var name := str(item.get("path", "")).get_file()
 	var shown := "%s → %s" % [str(item.get("measured", "")), str(item.get("target", ""))]
 	if kind != "match":
@@ -606,9 +577,99 @@ func _finding_row(item: Dictionary) -> HBoxContainer:
 	return row
 
 
+## A finding's evidence: for a colour off the look, its swatch, an arrow and the nearest
+## colour the look allows; for text that is hard to read ("#777777 on #888888"), "Aa" in those
+## colours; for a picture, its thumbnail; otherwise null.
+func _evidence(item: Dictionary) -> Control:
+	var pairing := RegEx.create_from_string("(#[0-9a-fA-F]{6}) on (#[0-9a-fA-F]{6})")
+	var seen := pairing.search(str(item.get("message", "")))
+	if seen != null:
+		return _sample(Color.html(seen.get_string(1)), Color.html(seen.get_string(2)))
+	var colours: Array = item.get("swatches", [])
+	if (
+		colours.size() >= 2
+		and Color.html_is_valid(str(colours[0]))
+		and Color.html_is_valid(str(colours[1]))
+	):
+		var pair := HBoxContainer.new()
+		pair.theme_type_variation = "JoineryRowTight"
+		pair.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		pair.tooltip_text = "%s → nearest in the look %s" % [colours[0], colours[1]]
+		pair.add_child(_swatch(Color.html(str(colours[0])), "Off the look: %s" % colours[0]))
+		var arrow := UI.label("→", "JoineryCaption")
+		arrow.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		pair.add_child(arrow)
+		pair.add_child(_swatch(Color.html(str(colours[1])), "Nearest allowed: %s" % colours[1]))
+		return pair
+	var path := str(item.get("path", ""))
+	if path.get_extension().to_lower() in ["png", "jpg", "jpeg", "webp", "kra"]:
+		var texture := BLOCKS.picture("res://" + path.trim_prefix("res://"), self)
+		if texture != null:
+			var thumb := TextureRect.new()
+			thumb.texture = texture
+			thumb.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			thumb.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+			thumb.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			thumb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			STYLE.on_theme(
+				thumb,
+				func() -> void:
+					var side := float(UI_THEME.icon_px(thumb, "md"))
+					thumb.custom_minimum_size = Vector2(side, side)
+			)
+			return thumb
+	return null
+
+
+## "Aa" in [param ink] on [param ground], caption size, RADIUS.xs: the text as it reads.
+func _sample(ink: Color, ground: Color) -> PanelContainer:
+	var tile := PanelContainer.new()
+	tile.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	tile.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var text := UI.label("Aa", "JoineryCaption")
+	text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	tile.add_child(text)
+	STYLE.on_theme_overrides(
+		tile,
+		func() -> void:
+			var box := StyleBoxFlat.new()
+			box.bg_color = ground
+			box.border_color = tile.get_theme_color("border_subtle", "Joinery")
+			box.set_border_width_all(maxi(1, roundi(UI_THEME.unit(tile))))
+			box.set_corner_radius_all(UI_THEME.radius(tile, "xs"))
+			box.content_margin_left = UI_THEME.space(tile, 1)
+			box.content_margin_right = UI_THEME.space(tile, 1)
+			tile.add_theme_stylebox_override("panel", box)
+			text.add_theme_color_override("font_color", ink)
+	)
+	return tile
+
+
+## A small colour swatch: the colour at ICON.sm, RADIUS.xs, a hairline so a pale one shows.
+func _swatch(colour: Color, tip: String) -> Panel:
+	var chip := Panel.new()
+	chip.tooltip_text = tip
+	chip.mouse_filter = Control.MOUSE_FILTER_PASS
+	chip.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	STYLE.on_theme_overrides(
+		chip,
+		func() -> void:
+			var side := float(UI_THEME.icon_px(chip, "sm"))
+			chip.custom_minimum_size = Vector2(side, side)
+			var box := StyleBoxFlat.new()
+			box.bg_color = colour
+			box.border_color = chip.get_theme_color("border_subtle", "Joinery")
+			box.set_border_width_all(maxi(1, roundi(UI_THEME.unit(chip))))
+			box.set_corner_radius_all(UI_THEME.radius(chip, "xs"))
+			box.anti_aliasing = true
+			chip.add_theme_stylebox_override("panel", box)
+	)
+	return chip
+
+
 ## The guidelines open in place of the scores and findings, and close back to them.
 func _by_guideline(open: bool) -> void:
-	_areas.visible = not open and not _area_rows.is_empty()
+	_areas.visible = not open and _all_shown and not _area_rows.is_empty()
 	_findings.visible = not open and _findings.get_child_count() > 0
 	var hidden_rows := false
 	for child: Node in _findings.get_children():
@@ -638,6 +699,9 @@ func _fit_first() -> void:
 func _show_all() -> void:
 	_all_shown = true
 	var shown: Array = []
+	if not _area_rows.is_empty() and (guidelines == null or not guidelines.visible):
+		_areas.show()
+		shown.append(_areas)
 	for child: Node in _findings.get_children():
 		if child is Control and not (child as Control).visible:
 			(child as Control).show()
