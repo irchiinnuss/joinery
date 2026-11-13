@@ -221,7 +221,8 @@ class ChatRow:
 		lines.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		inset.add_child(lines)
 		if marked and AGENT_ICON.FILES.has(provider):
-			# Chats with different agents: a 16 px mark says which, at the leading edge.
+			# Chats with different agents: a 16 px mark says which, at the leading edge, in
+			# grey: it tells the agents apart without three brand colours in one list.
 			var mark := TextureRect.new()
 			mark.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			mark.stretch_mode = TextureRect.STRETCH_KEEP_CENTERED
@@ -232,13 +233,19 @@ class ChatRow:
 				mark,
 				func() -> void:
 					var side := UI_THEME.icon_px(mark, "sm")
-					mark.texture = AGENT_ICON.texture(provider, side, directory)
+					mark.texture = AGENT_ICON.monochrome(
+						AGENT_ICON.texture(provider, side, directory)
+					)
+					mark.self_modulate = UI_THEME.color(mark, "text_muted")
 					mark.custom_minimum_size = Vector2(side, side)
 			)
 			lines.add_child(mark)
-		title = UI.label(str(chat.get("title", "")), "")
+		title = UI.label(str(chat.get("title", "")), "", true)
 		title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		title.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		# A long title takes a second line rather than losing its end; past two, an ellipsis.
+		title.max_lines_visible = 2
+		title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		lines.add_child(title)
 		_field = LineEdit.new()
 		_field.accessibility_name = "Chat name"

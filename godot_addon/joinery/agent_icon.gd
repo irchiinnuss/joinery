@@ -39,6 +39,24 @@ static func texture(id: String, pixels: int, directory: String) -> Texture2D:
 	return ImageTexture.create_from_image(rendered)
 
 
+## [param mark] in grey: its lightness kept, its colour dropped, white enough to be tinted
+## with a text colour. Null stays null.
+static func monochrome(mark: Texture2D) -> Texture2D:
+	if mark == null:
+		return null
+	var image := mark.get_image()
+	if image == null or image.is_empty():
+		return mark
+	image.decompress()
+	image.convert(Image.FORMAT_RGBA8)
+	for y: int in image.get_height():
+		for x: int in image.get_width():
+			var pixel := image.get_pixel(x, y)
+			var grey := clampf(pixel.get_luminance() * 0.6 + 0.4, 0.0, 1.0)
+			image.set_pixel(x, y, Color(grey, grey, grey, pixel.a))
+	return ImageTexture.create_from_image(image)
+
+
 ## A provider tile for [param id]: the mark on a JoineryIconTile, re-rendered at the editor
 ## scale on every theme change. Unknown ids show the first letter of [param fallback] instead.
 static func tile(id: String, fallback := "") -> PanelContainer:
