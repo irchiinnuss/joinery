@@ -1453,7 +1453,7 @@ class ProjectGateway:
             and not approved(self.project)
         ):
             event["message"] = (
-                "Art direction draft saved. Review it and click Approve these rules "
+                "Draft of the look saved. Review it and click Approve look "
                 "to allow asset work."
             )
             event["art_review"] = review(self.project)

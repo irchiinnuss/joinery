@@ -114,7 +114,7 @@ def test_accepting_art_draft_opens_review_without_silently_approving(
             gateway.transaction = tx
             decision = await gateway.decide(tx.id, True)
             assert decision["accepted"] is True
-            assert "click Approve these rules" in decision["message"]
+            assert "click Approve look" in decision["message"]
             assert decision["art_review"]["text"] == "Technical fixture direction."
             assert decision["art_review"]["sha256"] == fingerprint(tmp_path)
             assert not approved(tmp_path)

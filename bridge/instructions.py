@@ -435,7 +435,7 @@ REVIEW_GUIDE = (
     "itself tells the user when a change failed. "
     "The scene on screen and scenes with unsaved edits change live with edit_scene; "
     "other scenes change through the staged Godot tools. "
-    "To approve art direction the user types /art and clicks Approve these rules; "
+    "To approve art direction the user types /art and clicks Approve look; "
     "accepting a saved draft alone is not approval."
 )
 

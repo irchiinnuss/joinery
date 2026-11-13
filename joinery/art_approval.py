@@ -10,6 +10,7 @@ tool: the gateway and registry have no approval operation.
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 import json
 from pathlib import Path
@@ -20,7 +21,7 @@ from joinery.transactions import atomic_json
 def fingerprint(project: Path) -> str:
     path = project / "art/bible.md"
     if not path.is_file():
-        raise ValueError("The project has no art bible.")
+        raise ValueError("The project has no look.")
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
@@ -86,6 +87,15 @@ def review(project: Path) -> dict[str, str | bool]:
     }
 
 
+def approved_on(project: Path) -> str:
+    """The day the bible was last approved (ISO date, local time), or "" when unknown."""
+    try:
+        stamp = (project / ".joinery/art-approval.json").stat().st_mtime
+    except OSError:
+        return ""
+    return datetime.date.fromtimestamp(stamp).isoformat()
+
+
 def approve(
     project: Path,
     approved_by: str,
@@ -104,7 +114,7 @@ def approve(
     digest = hashlib.sha256(content).hexdigest()
     if expected_sha256 and expected_sha256 != digest:
         raise ValueError(
-            "The art bible changed while being reviewed. Open its current version before approving."
+            "The look changed while being reviewed. Open its current version before approving."
         )
     text = content.decode()
     if not allow_open and ("Not set yet" in text or "{{" in text):
@@ -127,7 +137,7 @@ def approve(
 AT_CREATION = "user (at project creation)"
 #: What the user is told when that happens.
 APPROVED_AT_CREATION = (
-    "Wrote the art bible from your answers. It counts as approved, so art and "
+    "Wrote the look from your answers. It counts as approved, so art and "
     "audio work can start. Fill in any open sections in /art; if it changes later, "
     "approve it again there."
 )

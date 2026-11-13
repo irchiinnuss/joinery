@@ -203,7 +203,7 @@ def test_instructions_read_the_game_brief(game: Path) -> None:
         assert "Read game_brief and game_setup with art_direction" in text
         assert "game_setup.extension_points" in text
         assert "suggest /feature add, never apply it" in text
-        assert "Approve these rules" in text
+        assert "Approve look" in text
         assert "Reject" not in text
 
     asyncio.run(run())

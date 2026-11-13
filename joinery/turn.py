@@ -17,7 +17,7 @@ from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal
 
-from joinery import auto_accept, done_when, metrics, reasons
+from joinery import auto_accept, done_when, look_preview, metrics, reasons
 from joinery.claims import LEAD_BUSY, MAIN, live_refusal
 from joinery.peer_review import PeerReview, Reviewer, ReviewPlan, request_for
 from joinery.reasons import Reason
@@ -1408,7 +1408,8 @@ class TurnController:
             await self.gateway.cancel()  # a stage with no changes
         gate, self.gateway.art_gate = self.gateway.art_gate, None
         if gate is not None:
-            self.emit(gate)
+            # The sidebar's gate shows a miniature of the look (palette, references).
+            self.emit({**gate, "look": look_preview.gate_preview(self.gateway.project)})
         self._to(TurnState.IDLE)
         return None
 

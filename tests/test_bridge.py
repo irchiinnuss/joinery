@@ -71,7 +71,7 @@ def test_every_agent_prompt_reads_the_game_brief() -> None:
         assert "Read game_brief and game_setup with art_direction" in prompt
         assert "extend the game through game_setup.extension_points" in prompt
         assert "suggest /feature add, never apply it" in prompt
-        assert "Approve these rules" in prompt
+        assert "Approve look" in prompt
     assert "one at a time" in GAME_GUIDE and "never act on" in GAME_GUIDE
 
 
@@ -96,6 +96,29 @@ def test_art_review_event_carries_the_board_and_offers(tmp_path: Path) -> None:
     assert event["suggestions"] and all(
         isinstance(s, str) for s in event["suggestions"]
     )
+    # The look's hero: the palette as colours, and the open sections by name.
+    assert event["palette"] == []
+    assert all({"section", "heading", "required"} <= set(g) for g in event["gaps"])
+    assert event["approved_on"] == ""
+
+
+def test_art_review_event_carries_the_palette_roles(tmp_path: Path) -> None:
+    from bridge.stdio import art_review_event
+
+    (tmp_path / "art").mkdir()
+    (tmp_path / "art/bible.md").write_text(
+        "# Art Bible — Quarry\n<!-- joinery-bible: 2 -->\n\n"
+        "## 7. Palette (checked)\n| Role | Hex | Use |\n|---|---|---|\n"
+        "| Primary | #8A5A3B | walls |\n| Accent (interactables only) | #2E86AB | |\n"
+        "| UI text | #EDF2F4 | |\n| Shadow tint | #…… | |\n"
+    )
+    event = art_review_event(tmp_path)
+    assert event["palette"] == [
+        {"role": "Primary", "hex": "#8a5a3b", "use": "walls"},
+        {"role": "Accent", "hex": "#2e86ab", "use": "interactables only"},
+        {"role": "Shadow tint", "hex": "", "use": ""},
+        {"role": "UI text", "hex": "#edf2f4", "use": ""},
+    ]
 
 
 def test_game_suggestions_offer_missing_features_only(

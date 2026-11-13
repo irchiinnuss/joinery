@@ -44,6 +44,7 @@ from bridge.steps import StepRun
 from bridge.turn_runner import run_turn, settle_compaction
 from bridge.variants import Variants, parse_command
 from joinery import (
+    art_approval,
     bible_lint,
     blueprints,
     brief,
@@ -52,6 +53,7 @@ from joinery import (
     complex_models,
     done_when,
     idle_runs,
+    look_preview,
     playtest,
     session_summary,
 )
@@ -109,26 +111,28 @@ def game_suggestions(project: Path) -> dict[str, Any]:
 
 
 def art_review_event(project: Path) -> dict[str, Any]:
-    """The art direction for the review dialog: the bible's exact bytes and hash, plus
-    its format version, reference board and the one-line suggestions from the lint."""
+    """The art direction for the review page: the bible's exact bytes and hash, plus
+    its format version, palette roles (hex), reference board, open sections, the
+    one-line suggestions from the lint, and the day it was approved."""
     event: dict[str, Any] = dict(review(project))
     try:
         report = bible_lint.summary(project)
     except (OSError, ValueError):
         report = {}
     event["version"] = int(report.get("version", 0) or 0)
-    event["references"] = [
+    event.update(look_preview.look(project, report))
+    event["gaps"] = [
         {
-            "id": str(row.get("id", "")),
-            "reference": str(row.get("reference", "")),
-            "kind": str(row.get("kind", "")),
-            "take": str(row.get("take", "")),
-            "avoid": str(row.get("avoid", "")),
-            "file": str(row.get("file", "")) if row.get("file_exists") else "",
+            "section": str(gap.get("section", "")),
+            "heading": str(gap.get("heading", "")),
+            "required": bool(gap.get("required", False)),
         }
-        for row in report.get("references", [])
+        for gap in report.get("gaps", [])
     ]
     event["suggestions"] = [str(line) for line in report.get("suggestions", [])]
+    event["approved_on"] = (
+        art_approval.approved_on(project) if event["approved"] else ""
+    )
     return event
 
 
