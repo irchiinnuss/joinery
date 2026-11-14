@@ -64,8 +64,9 @@ MAX_MESSAGE = 300
 MAX_PATTERNS = 40
 STATE = ".joinery/errors.json"
 
-#: Joinery's own lines: listed as a Joinery bug, never sent to the fixer.
-OWN = ("addons/joinery", "[Joinery]")
+#: Joinery's own lines (its addon, the playtest bot): listed as a Joinery bug, never
+#: sent to the fixer.
+OWN = ("addons/joinery", "joinery/playtest_bot/", "[Joinery]")
 #: Engine noise every run prints: never listed. The project adds its own with
 #: ``[agents] ignore_errors``.
 NOISE = (

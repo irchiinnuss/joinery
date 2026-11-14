@@ -54,6 +54,7 @@ _KIND_SEVERITY = {
     "text": "low",
     "balance": "note",
     "coverage": "note",
+    "joinery": "low",
 }
 
 _TITLES = {
@@ -75,7 +76,10 @@ _TITLES = {
     "text": "Text doesn't fit",
     "balance": "Balance",
     "coverage": "Parts of the level unreached",
+    "joinery": "Joinery bug",
 }
+#: What a Joinery bug's item adds: it is never the game's to fix.
+JOINERY_DETAIL = " (in Joinery's own playtest code, not your game; report it to Joinery)"
 
 
 def console_entries(output: str) -> list[dict[str, Any]]:
@@ -426,11 +430,15 @@ def build(
     for entry in _merge_logs((bot or {}).get("log", []), console_entries(output), fps, output):
         count = int(entry["count"])
         detail = entry["message"] + (f" (×{count})" if count > 1 else "")
+        kind = entry["kind"] if entry["kind"] in _KIND_SEVERITY else "error"
+        where = str(entry.get("where", "") or "")
+        if console_errors.triage(entry["message"], where) == console_errors.JOINERY:
+            kind, where, detail = "joinery", joinery_where(where), detail + JOINERY_DETAIL
         raw.append(
             {
-                "kind": entry["kind"] if entry["kind"] in _KIND_SEVERITY else "error",
+                "kind": kind,
                 "detail": detail,
-                "where": entry.get("where", ""),
+                "where": where,
                 "t": entry.get("t"),
                 "count": count,
             }
@@ -500,12 +508,26 @@ def _states(raw: object) -> dict[str, Any]:
     return {str(path): state for path, state in raw.items() if isinstance(state, dict)}
 
 
+def joinery_where(where: str) -> str:
+    """A place in Joinery's own code, from its package or addon folder on:
+    "/…/joinery/playtest_bot/bot_drive.gd:300" → "joinery/playtest_bot/bot_drive.gd:300"."""
+    text = where.replace("\\", "/")
+    for marker in ("joinery/playtest_bot/", "addons/joinery/"):
+        at = text.find(marker)
+        if at >= 0:
+            prefix = "res://" if marker.startswith("addons") and "res://" in text else ""
+            return prefix + text[at:]
+    return text
+
+
 def _item(index: int, entry: dict[str, Any], options: dict[str, Any]) -> dict[str, Any]:
     kind = str(entry.get("kind", "error"))
     t = entry.get("t")
     t_value = float(t) if isinstance(t, (int, float)) else None
     where = str(entry.get("where", "") or "")
-    if "res://" not in where and "user://" not in where:
+    if kind == "joinery":
+        pass  # Joinery's own file: the place to report, not one in the game.
+    elif "res://" not in where and "user://" not in where:
         # An engine source file means nothing to the user.
         where = ""
     frame = entry.get("frame")
