@@ -164,8 +164,10 @@ class _Merge:
         copy = source.copy()
         copy.attrs["id"] = f'"{fresh}"'
         pool[fresh] = copy
-        self.extra[kind].append(copy)
+        # What it refers to is brought first: Godot reads a scene top down and
+        # cannot use a sub-resource before it is defined.
         copy.lines = [self.rewrite(line) for line in copy.lines]
+        self.extra[kind].append(copy)
         return fresh
 
     def rewrite(self, text: str) -> str:

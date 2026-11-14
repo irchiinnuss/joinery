@@ -377,6 +377,34 @@ def test_without_the_old_layout_placed_and_scripted_nodes_still_survive() -> Non
     assert '[connection signal="ready" from="Door"' in merged.text
 
 
+def test_a_kept_mesh_comes_after_the_material_it_uses() -> None:
+    # A kept look that refers to another kept sub-resource (a placed mesh and
+    # its material) must list that one first, or Godot cannot load the scene.
+    new = (
+        '[gd_scene load_steps=2 format=3]\n\n[sub_resource type="CylinderMesh" '
+        'id="CylinderMesh_1"]\n\n'
+        '[node name="Blockout" type="Node3D"]\n\n'
+        '[node name="Pillar" type="MeshInstance3D" parent="."]\n'
+        'mesh = SubResource("CylinderMesh_1")\n'
+    )
+    old = (
+        "[gd_scene load_steps=3 format=3]\n\n"
+        '[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_7"]\n'
+        "albedo_color = Color(0.2, 0.1, 0.1, 1)\n\n"
+        '[sub_resource type="CylinderMesh" id="CylinderMesh_1"]\n'
+        'material = SubResource("StandardMaterial3D_7")\n\n'
+        '[node name="Blockout" type="Node3D"]\n\n'
+        '[node name="Pillar" type="MeshInstance3D" parent="."]\n'
+        'mesh = SubResource("CylinderMesh_1")\n'
+    )
+    text = merge(old, new).text
+    used = text.index('material = SubResource("StandardMaterial3D_7")')
+    assert text.index('id="StandardMaterial3D_7"]') < used
+    assert text.index('id="kept_CylinderMesh_1"]') > text.index(
+        'id="StandardMaterial3D_7"]'
+    )
+
+
 # --- The real player ------------------------------------------------------------------
 
 
