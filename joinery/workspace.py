@@ -21,6 +21,7 @@ from joinery.lockfile import (
     NOT_ASSETS,
     AssetEntry,
     asset_files,
+    entry_matches,
 )
 from joinery.recipe import IMAGE_SUFFIXES, Recipe, load_recipe, recipe_paths
 from joinery.transactions import DIRECTORY, TRANSACTIONS, list_transactions
@@ -352,9 +353,7 @@ def index(project: Path) -> dict[str, Any]:
         if not path.is_file():
             asset.integrity = "missing"
         elif entry:
-            with path.open("rb") as handle:
-                digest = hashlib.file_digest(handle, "sha256").hexdigest()
-            asset.integrity = "in sync" if digest == entry.sha256 else "changed"
+            asset.integrity = "in sync" if entry_matches(path, entry) else "changed"
         if recipe_rel and recipe is None:
             asset.verification = "Recipe missing or unreadable"
         elif recipe:

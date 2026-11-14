@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import struct
 import tomllib
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Literal
@@ -39,6 +40,8 @@ NOT_EXTENSION_SUFFIXES = {".import", ".uid"}
 #: The repo's pinned code downloads. An `[[extensions]]` entry must match one.
 PINNED_RELEASES = (ROOT / "policy" / "godotsteam.toml",)
 
+GLTF_PREFIX = "glb:"
+GLTF_SUFFIXES = frozenset({".glb", ".gltf"})
 Sha256 = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 
 
@@ -47,6 +50,25 @@ class _Entry(BaseModel):
 
     path: str
     sha256: str
+    #: A content fingerprint for formats whose bytes vary between identical
+    #: exports (``glb:`` for glTF models). A file whose bytes changed still
+    #: matches its entry when this is unchanged. Older entries have none and
+    #: are checked by bytes alone.
+    signature: str = ""
+
+
+def entry_matches(file: Path, entry: _Entry) -> bool:
+    """Whether a file on disk is still what its lock entry recorded."""
+    if _file_sha256(file) == entry.sha256:
+        return True
+    if entry.signature.startswith(GLTF_PREFIX) and file.suffix.lower() in GLTF_SUFFIXES:
+        from joinery import gltf_signature
+
+        try:
+            return gltf_signature.signature(file) == entry.signature
+        except (ValueError, KeyError, IndexError, OSError, struct.error):
+            return False
+    return False
 
 
 class ToolCreated(_Entry):
@@ -184,7 +206,7 @@ def _entry_errors(
     file = project / entry.path
     if not file.is_file():
         return [f"{entry.path}: in {LOCK_NAME} but missing on disk"]
-    if hashlib.sha256(file.read_bytes()).hexdigest() != entry.sha256:
+    if not entry_matches(file, entry):
         errors.append(f"{entry.path}: sha256 differs from {LOCK_NAME}")
     recipe = entry.recipe if isinstance(entry, KitAsset) else None
     if recipe and not (project / recipe).is_file():

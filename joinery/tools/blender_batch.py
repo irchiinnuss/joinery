@@ -18,9 +18,19 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
+from joinery import gltf_signature
 from joinery.recipe import _BLEND_SIGNATURE_FN
+
+#: The glTF signature, run inside Blender in its own namespace (stdlib only).
+_GLTF_SIGNATURE = (
+    "_GLTF = {'__name__': 'joinery_gltf_signature'}\n"
+    "exec(compile("
+    + repr(Path(gltf_signature.__file__).read_text(encoding="utf-8"))
+    + ", 'gltf_signature.py', 'exec'), _GLTF)\n"
+)
 
 #: Prefix of the driver's progress lines.
 PREFIX = "JOINERY_BATCH:"
@@ -28,6 +38,7 @@ PREFIX = "JOINERY_BATCH:"
 DRIVER = (
     "import bpy, hashlib, json, os, shutil, sys, traceback\n"
     + _BLEND_SIGNATURE_FN
+    + _GLTF_SIGNATURE
     + r"""
 os.chdir('/work')
 with open(sys.argv[sys.argv.index('--') + 1]) as _handle:
@@ -100,7 +111,11 @@ for _index, _step in enumerate(_steps):
     if _index < len(_steps) - 1:
         # The next step overwrites these files, so measure them now.
         for _output in [*_exports, *_written]:
-            _expect[_output] = 'sha256:' + _sha(_output)
+            if os.path.splitext(_output)[1].lower() in ('.glb', '.gltf'):
+                # As joinery.recipe.fingerprint does: the exporter's bytes vary.
+                _expect[_output] = _GLTF['signature'](_GLTF['Path'](_output))
+            else:
+                _expect[_output] = 'sha256:' + _sha(_output)
         bpy.ops.wm.open_mainfile(filepath=os.path.abspath(_source), load_ui=False)
         _expect[_source] = 'blend:' + joinery_signature()
     _report('done', step=_index, textures=_written, expect=_expect)

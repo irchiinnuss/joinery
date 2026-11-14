@@ -16,6 +16,10 @@ way that is actually stable for its format:
 * `blend:`  a semantic signature taken by asking Blender what is in the file:
   object names and types, mesh topology counts, materials, modifiers and rounded
   transforms. Byte noise is ignored, a changed model is not.
+* `glb:`    a semantic signature of a glTF model (`joinery.gltf_signature`):
+  meshes, materials, texture pixels, nodes, skins and animations, decoded
+  from the buffers with floats rounded. Blender's exporter is not byte-stable
+  (generator string, float noise, buffer layout), the model it writes is.
 * `img:`    a coarse signature for *camera renders*, which are not bit-exact.
   Cycles renders in Blender 5.2 differ slightly between runs whatever you fix:
   seed, thread count, adaptive sampling, sun disc and pixel filter all pinned,
@@ -33,6 +37,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+import struct
 import tempfile
 import tomllib
 import zipfile
@@ -43,7 +48,7 @@ from xml.etree import ElementTree
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from joinery import tools
+from joinery import gltf_signature, tools
 from joinery.runner import DEFAULT_TIMEOUT, Result, Runner
 
 RECIPE_DIR = "recipes"
@@ -58,6 +63,8 @@ EXACT_SUFFIXES = frozenset(
 #: Raster formats. Exact when baked, coarse when rendered through a camera;
 #: which one applies is recorded per output in the recipe's expectations.
 IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".exr"})
+#: Models fingerprinted by content (`glb:`), not bytes.
+GLTF_SUFFIXES = frozenset({".glb", ".gltf"})
 #: Downsample size and bit depth for a render signature. 32x16 averages ~1000
 #: source pixels into each cell, and 4 bits per channel then ignores the last
 #: of the path-tracing noise while keeping real changes visible.
@@ -298,6 +305,11 @@ def fingerprint(
         return image_signature(rel, project, runner)
     if suffix == ".blend":
         return blend_signature(path, project, runner)
+    if suffix in GLTF_SUFFIXES:
+        try:
+            return gltf_signature.signature(path)
+        except (ValueError, KeyError, IndexError, struct.error) as exc:
+            raise RuntimeError(f"{rel}: unreadable glTF: {exc}") from exc
     if suffix == ".kra":
         digest = hashlib.sha256()
         with zipfile.ZipFile(path) as archive:
@@ -415,9 +427,64 @@ def rebuild_one(
                         f"{relative}: recipe outputs must be regular files"
                     )
                 output.unlink(missing_ok=True)
-            return _verify_rebuilt(name, recipe, scratch, runner, timeout)
+            return _verify_rebuilt(
+                name, _upgraded(recipe, project), scratch, runner, timeout
+            )
     except (OSError, ValueError) as exc:
         return Rebuilt(name, False, 0.0, (str(exc),))
+
+
+def _legacy_model(rel: str, wanted: str, project: Path) -> str | None:
+    """The ``glb:`` fingerprint for a model recorded by bytes, when it can be proved.
+
+    Recipes written before models were fingerprinted by content expect a
+    ``sha256:``. Exported bytes are never reproduced, so that can't be compared
+    with a rebuild. The file in the project is what the recipe measured,
+    though: when its bytes still match, its content fingerprint is the honest
+    expectation. A file that changed since proves nothing and stays as it was.
+    """
+    if Path(rel).suffix.lower() not in GLTF_SUFFIXES or not wanted.startswith(
+        "sha256:"
+    ):
+        return None
+    path = project / rel
+    try:
+        if not path.is_file() or _exact(path) != wanted:
+            return None
+        return gltf_signature.signature(path)
+    except (OSError, ValueError, KeyError, IndexError, struct.error):
+        return None
+
+
+def _upgraded(recipe: Recipe, project: Path) -> Recipe:
+    """The recipe with any byte-recorded model expectation read by content."""
+    expect = dict(recipe.expect)
+    for rel, wanted in recipe.expect.items():
+        better = _legacy_model(rel, wanted, project)
+        if better:
+            expect[rel] = better
+    if expect == recipe.expect:
+        return recipe
+    return recipe.model_copy(update={"expect": expect})
+
+
+def migrate_model_expectations(project: Path) -> list[str]:
+    """Rewrite recipes that expect a model's bytes to expect its content.
+
+    Only where the file on disk still has the recorded bytes, so nothing
+    unverified is written. Returns the recipes changed.
+    """
+    changed: list[str] = []
+    for path in recipe_paths(project):
+        try:
+            recipe = load_recipe(path)
+        except (OSError, ValueError, tomllib.TOMLDecodeError):
+            continue
+        upgraded = _upgraded(recipe, project)
+        if upgraded is not recipe:
+            path.write_text(recipe_text(upgraded))
+            changed.append(path.relative_to(project).as_posix())
+    return changed
 
 
 def _verify_rebuilt(

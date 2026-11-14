@@ -1028,8 +1028,12 @@ class Blender(ToolModule):
                 raise ValueError(
                     "The automatic Blender export uses GLB. Render images explicitly in the operation script."
                 )
+            # Every setting that changes the written model is pinned here, so
+            # the exporter's defaults (which move between Blender versions)
+            # can't change a replay: no Draco (its encoder is not stable),
+            # images kept in their own format, no scene cameras or lights.
             lines.append(
-                f"bpy.ops.export_scene.gltf(filepath=os.path.abspath({export!r}), export_format='GLB', export_yup=True, export_apply=True, export_extras=True, export_def_bones=_joinery_deform_only)"
+                f"bpy.ops.export_scene.gltf(filepath=os.path.abspath({export!r}), export_format='GLB', export_yup=True, export_apply=True, export_extras=True, export_def_bones=_joinery_deform_only, export_draco_mesh_compression_enable=False, export_image_format='AUTO', export_cameras=False, export_lights=False)"
             )
         return "\n".join(lines) + "\n"
 

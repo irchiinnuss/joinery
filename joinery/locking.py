@@ -17,16 +17,28 @@ from __future__ import annotations
 
 import hashlib
 import json
+import struct
 import tomllib
 from pathlib import Path
 from typing import Any
 
-from joinery.lockfile import LOCK_NAME, asset_files
-from joinery.recipe import load_recipe, recipe_paths
+from joinery import gltf_signature
+from joinery.lockfile import GLTF_SUFFIXES, LOCK_NAME, asset_files
+from joinery.recipe import load_recipe, migrate_model_expectations, recipe_paths
 
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _signature_line(path: Path) -> list[str]:
+    """The ``signature`` line for a model, whose exported bytes vary run to run."""
+    if path.suffix.lower() not in GLTF_SUFFIXES:
+        return []
+    try:
+        return [f'signature = "{gltf_signature.signature(path)}"']
+    except (ValueError, KeyError, IndexError, struct.error):
+        return []  # not a readable model: the byte hash alone still guards it
 
 
 def claimed_outputs(project: Path) -> dict[str, tuple[str, str]]:
@@ -101,6 +113,7 @@ def record_lock(project: Path) -> tuple[str, list[str]]:
             "[[asset]]",
             f'path = "{rel}"',
             f'sha256 = "{_sha256(project / rel)}"',
+            *_signature_line(project / rel),
             'origin = "tool-created"',
             f'tool = "{tool}"',
             f'recipe = "{recipe}"',
@@ -145,6 +158,7 @@ def write_model_imports(project: Path) -> list[str]:
 
 def write_lock(project: Path) -> list[str]:
     write_model_imports(project)
+    migrate_model_expectations(project)
     text, problems = record_lock(project)
     if not problems:
         (project / LOCK_NAME).write_text(text)
