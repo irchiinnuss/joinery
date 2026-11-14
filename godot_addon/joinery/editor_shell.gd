@@ -3,9 +3,10 @@ extends RefCounted
 ## Viewport controls have their own preference, independent of Focus mode, in Joinery's layout
 ## (Godot's classic layout always shows them); they stay hidden until the user shows them with
 ## /toolbar or Joinery › Show or Hide Viewport Toolbar.
-## The 3D view's "Perspective" menus wear the Joinery theme. Scene tabs always show. Also keeps the
-## FileSystem tree scrolled to its first row when the Files panel opens, and explains the
-## Output tab's status mark (the engine's error or warning icon) in the tab's tooltip.
+## The 3D view's "Perspective" menus wear the Joinery theme. Scene tabs always show. Also opens
+## the Files panel with its folder tree on top and its files below (Godot's own vertical split),
+## keeps that tree scrolled to its first row, and explains the Output tab's status mark (the
+## engine's error or warning icon) in the tab's tooltip.
 
 const TOOLBAR_SETTING := "joinery/show_viewport_toolbar"
 const UI_THEME := preload("ui_theme.gd")
@@ -31,6 +32,7 @@ var _compacted: Array[Control] = []
 var _previous: Array[bool] = []
 var _shown := false
 var _file_tree: Tree
+var _file_dock: Control
 var _output: Control
 var _output_bar: TabBar
 
@@ -228,11 +230,13 @@ static func is_joinery_layout(base: Control) -> bool:
 
 ## Show the file tree from its first row ("Favorites") whenever [param dock] (the FileSystem
 ## dock) opens. The dock centres its selection in the tree, which leaves the first row cut in
-## half under the path bar when the panel is short.
+## half under the path bar when the panel is short. In a side column it also opens stacked
+## (stack_files).
 func watch_file_tree(dock: Control) -> void:
 	var trees := dock.find_children("*", "Tree", true, false)
 	if trees.is_empty():
 		return
+	_file_dock = dock
 	_file_tree = trees[0] as Tree
 	if not _file_tree.visibility_changed.is_connected(_on_file_tree_shown):
 		_file_tree.visibility_changed.connect(_on_file_tree_shown)
@@ -241,7 +245,63 @@ func watch_file_tree(dock: Control) -> void:
 
 func _on_file_tree_shown() -> void:
 	if is_instance_valid(_file_tree) and _file_tree.is_visible_in_tree():
+		stack_files()
 		_scroll_file_tree_top.call_deferred()
+
+
+## In a side column, show the Files panel in Godot's vertical split: folders on top, files
+## below, each the column's full width. Side by side (or the tree alone) the file names are cut
+## short in a narrow column. Uses the dock's own Change Split Mode button, which steps through
+## tree only, vertical and horizontal, so the dock and its saved layout stay Godot's. The
+## button still changes it while the panel is open; the next time it opens, it is stacked.
+## The bottom panel's wide layout is left as Godot has it.
+func stack_files() -> void:
+	if not is_instance_valid(_file_dock) or _file_dock.get_parent() == null:
+		return
+	if _file_dock.get_parent().is_class("EditorBottomPanel"):
+		return
+	var toggle: Button = null
+	for node: Node in _file_dock.find_children("*", "Button", true, false):
+		if (node as Button).tooltip_text == "Change Split Mode":
+			toggle = node as Button
+			break
+	if toggle == null:
+		return
+	for step: int in 3:
+		if files_split() == "vertical":
+			return
+		toggle.pressed.emit()
+
+
+## How the Files panel shows its files: "vertical" (tree on top), "horizontal" (side by side),
+## "tree" (the tree alone, files inside it) or "" when it can't tell.
+func files_split() -> String:
+	if not is_instance_valid(_file_tree):
+		return ""
+	var split := _file_tree.get_parent()
+	while split != null and not split is SplitContainer:
+		split = split.get_parent()
+		if split == _file_dock:
+			return ""
+	if split == null:
+		return ""
+	var list_shown := false
+	for node: Node in split.find_children("*", "ItemList", true, false):
+		if _shown_in(node as Control, split):
+			list_shown = true
+	if not list_shown:
+		return "tree"
+	return "vertical" if (split as SplitContainer).vertical else "horizontal"
+
+
+## True when [param control] and every parent up to [param top] are visible.
+static func _shown_in(control: Control, top: Node) -> bool:
+	var node: Node = control
+	while node != null and node != top:
+		if node is CanvasItem and not (node as CanvasItem).visible:
+			return false
+		node = node.get_parent()
+	return true
 
 
 func _scroll_file_tree_top() -> void:
@@ -330,6 +390,7 @@ func restore() -> void:
 	):
 		_file_tree.visibility_changed.disconnect(_on_file_tree_shown)
 	_file_tree = null
+	_file_dock = null
 	for index: int in _toolbars.size():
 		if is_instance_valid(_toolbars[index]):
 			_toolbars[index].visible = _previous[index]
