@@ -50,7 +50,7 @@ NOT_REVERTIBLE = (
 #: of the stage and the review, but adding or removing a game feature in the
 #: stage rewrites the game manifest there. Accept carries it into the project,
 #: reject drops it with the stage, and revert puts the earlier one back.
-CARRIED = (".joinery/game-manifest.json",)
+CARRIED = (".joinery/game-manifest.json", ".joinery/core-files.json")
 #: Where a transaction keeps the CARRIED records as they were when it began, so
 #: a record changed by another accepted change meanwhile is merged, not replaced.
 CARRIED_BASE = "carried-base"

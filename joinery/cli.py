@@ -1180,6 +1180,22 @@ def _parser() -> argparse.ArgumentParser:
             "verify", help="check a release archive's SHA-256 and Sigstore signature"
         )
     )
+    core_cmd = commands.add_parser(
+        "update-core",
+        help="update Joinery's own game files (core, blockout script) as one reviewed change",
+    )
+    core_cmd.add_argument("--project", type=Path, required=True)
+    core_cmd.add_argument(
+        "--check",
+        action="store_true",
+        help="only list what would change; stage nothing",
+    )
+    core_cmd.add_argument(
+        "--force",
+        action="store_true",
+        help="also replace files edited since Joinery installed them",
+    )
+    core_cmd.add_argument("--json", action="store_true")
     tidy_cmd = commands.add_parser(
         "tidy", help="find what the game never uses; remove it as one reviewed change"
     )
@@ -1735,6 +1751,10 @@ def main(argv: list[str] | None = None) -> int:
         return design_cli.main(args)
     if args.command == "tidy":
         return tidy_cli.main(args)
+    if args.command == "update-core":
+        from joinery import core_update
+
+        return core_update.main(args)
     if args.command == "update":
         return update_cli.update(args)
     if args.command == "verify":

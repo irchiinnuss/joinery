@@ -324,7 +324,27 @@ def update_addon(project: Path) -> dict[str, str]:
     finally:
         if staging.exists():
             shutil.rmtree(staging)
-    return {"version": version, "state": "updated", "backup": str(backup)}
+    done = {"version": version, "state": "updated", "backup": str(backup)}
+    if backup.exists():
+        # An existing game whose add-on was just refreshed: its Joinery-owned
+        # game files get the same update, as one change the user reviews.
+        done.update(_offer_core(project))
+    return done
+
+
+def _offer_core(project: Path) -> dict[str, str]:
+    """`core_update.offer` in the add-on update's string-valued outcome."""
+    from joinery import core_update
+
+    offered = core_update.offer(project)
+    out = {"core": str(offered["state"])}
+    if offered.get("transaction_id"):
+        out["core_transaction"] = str(offered["transaction_id"])
+    if offered.get("edited"):
+        out["core_kept"] = ", ".join(offered["edited"])
+    if offered.get("message"):
+        out["core_error"] = str(offered["message"])
+    return out
 
 
 PLUGIN = "res://addons/joinery/plugin.cfg"

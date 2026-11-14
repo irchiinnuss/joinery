@@ -25,7 +25,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from joinery import blockout, playtest
+from joinery import blockout, core_update, playtest
 from joinery.blockout import build as scene_build
 from joinery.blockout import grow
 from joinery.blockout.grow import GrowError
@@ -174,6 +174,9 @@ def main(args: argparse.Namespace) -> int:
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(content)
+            if relative == blockout.SCRIPT_FILE:
+                # Joinery owns it: `joinery update-core` updates it while unedited.
+                core_update.remember(project, project, {relative: content})
         data["written"] = sorted(files)
         data["kept"] = kept
     if built.ok and args.action == "walk":

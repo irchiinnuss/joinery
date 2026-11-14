@@ -1270,6 +1270,13 @@ having a desktop application installed does not establish MCP readiness.
 
 `update-addon --project ...` keeps an addon backup and updates only managed gate
 commands; it refuses to hot-replace the addon in a running project editor.
+When it refreshes an existing game's addon, it also stages
+`update-core --project ... [--check] [--force]`: the game's own copies of
+Joinery's files (the game core under `core/`, `game/blockout/blockout_level.gd`)
+brought to the current versions as one change in the Review tab. A file edited
+since Joinery installed it (by you or an agent; installed hashes are in the game
+manifest and `.joinery/core-files.json`, else the file's first git commit) is
+listed and kept unless `--force`.
 `transactions list|accept|reject|recover|revert --project ... [--id ...]`
 decides a waiting change and provides durable file recovery/revert. Native scene edits remain in Godot's undo history and must be
 saved normally. A new authoring connection recovers interrupted file commits and

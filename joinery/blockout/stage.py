@@ -17,7 +17,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from joinery import blockout, chat_attachments, playtest
+from joinery import blockout, chat_attachments, core_update, playtest
 from joinery.blockout import plan as plan_picture
 from joinery.blockout.layout import LayoutError
 
@@ -210,6 +210,9 @@ async def stage(
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
+            if relative == blockout.SCRIPT_FILE:
+                # Joinery owns it: `joinery update-core` updates it while unedited.
+                core_update.remember(tx.stage, gateway.project, {relative: data})
         if gateway.claims.contended():
             gateway.claim_stage(strict=True)
         previews = tx.stage / PREVIEWS
