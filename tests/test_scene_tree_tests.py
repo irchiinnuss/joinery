@@ -66,7 +66,7 @@ def test_each_scene_tree_test_runs_after_the_import(
 
     async def offline(argv: list[str], _root: Path, *_a: Any, **_k: Any) -> Result:
         runs.append(argv)
-        if argv[-1] == "res://tests/unit/test_lever.gd":
+        if "res://tests/unit/test_lever.gd" in argv:
             return Result(False, "FAIL: the lever didn't move", "", 0.1)
         return Result(True, "", "", 0.1)
 
@@ -81,11 +81,62 @@ def test_each_scene_tree_test_runs_after_the_import(
         )
     )
     assert "--import" in runs[0]
-    assert [r[-1] for r in runs[1:]] == [
-        "res://tests/test_door.gd",
-        "res://tests/unit/test_lever.gd",
-    ]
-    assert all(r[-2] == "-s" for r in runs[1:])
+    scripts = [r[r.index("-s") + 1] for r in runs[1:]]
+    assert scripts == ["res://tests/test_door.gd", "res://tests/unit/test_lever.gd"]
     (problem,) = problems
     assert problem.check == "tests" and problem.paths == ["tests/unit/test_lever.gd"]
     assert "the lever didn't move" in problem.message
+
+
+HARNESS_TEST = """extends SceneTree
+## The door opens.
+##
+## Run: godot --headless --fixed-fps 60 --script res://tests/test_door.gd
+##        -- --autostart --settings-path=<file> [--door-phase=verify]
+
+const TEST_NAME := "door"
+"""
+
+
+def test_a_scene_tree_test_runs_as_its_run_line_says(tmp_path: Path) -> None:
+    # Run bare, the harness tests time out or fail for want of a fixed frame
+    # rate, --autostart and a settings file of their own.
+    tx = _stage(tmp_path)
+    (tx.stage / "tests/test_door.gd").write_text(HARNESS_TEST)
+    argv = submission.scene_test_argv(tx.stage, "tests/test_door.gd", "/tmp/s.cfg")
+    assert argv == [
+        "godot", "--headless", "--path", "/work", "--fixed-fps", "60",
+        "-s", "res://tests/test_door.gd", "--", "--autostart", "--settings-path=/tmp/s.cfg",
+    ]  # fmt: skip
+    # No Run line: the same harness convention.
+    lever = submission.scene_test_argv(
+        tx.stage, "tests/unit/test_lever.gd", "/tmp/l.cfg"
+    )
+    assert lever[-3:] == ["--", "--autostart", "--settings-path=/tmp/l.cfg"]
+    assert "--fixed-fps" in lever
+    # A VR project runs its tests on the desktop, as the blueprints' own runs do.
+    (tx.stage / "project.godot").write_text("[xr]\n\nopenxr/enabled=true\n")
+    vr = submission.scene_test_argv(tx.stage, "tests/test_door.gd", "/tmp/s.cfg")
+    assert vr[2:4] == ["--xr-mode", "off"]
+
+
+def test_tests_that_cannot_run_alone_are_left_out_and_the_games_come_first(
+    tmp_path: Path,
+) -> None:
+    tx = _stage(tmp_path)
+    features = tx.stage / "tests/features/online"
+    features.mkdir(parents=True)
+    (features / "pair_test.gd").write_text(
+        "extends SceneTree\n## Host:   --host --port=N\n## Client: --join=127.0.0.1:N\n"
+    )
+    (features / "lobby_test.gd").write_text(
+        "extends SceneTree\n## Run: godot --script x.gd -- --port=<n>\n"
+    )
+    (features / "a_test.gd").write_text("extends SceneTree\n")
+    (tx.stage / "tests/test_zeta.gd").write_text("extends SceneTree\n")
+    assert submission.scene_tree_tests(tx.stage) == [
+        "tests/test_door.gd",
+        "tests/test_zeta.gd",
+        "tests/unit/test_lever.gd",
+        "tests/features/online/a_test.gd",
+    ]

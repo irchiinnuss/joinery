@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import secrets
 from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
@@ -105,6 +106,15 @@ _SCENE_TREE = re.compile(
 )
 #: A SceneTree test's own failure line ("FAIL: the door stayed shut").
 _FAIL_LINE = re.compile(r"^\s*FAIL(?:ED)?\b", re.MULTILINE)
+#: How a SceneTree test without a ``## Run:`` line runs: the blueprints' test
+#: harness convention (fixed 60 fps, the game started, a settings file of its own).
+SCENE_TEST_FPS = "60"
+SCENE_TEST_ARGS = ("--autostart", "--settings-path=<file>")
+#: The ``## Run: godot ... -- <args>`` line a test names its own command with.
+_RUN_LINE = re.compile(r"^##\s*Run:\s*(.*)$")
+#: One half of a test that needs a second game process (``## Client: --join=...``).
+_PAIR_LINE = re.compile(r"^##\s*(?:Host|Client|Server):", re.MULTILINE)
+_OPENXR_ON = re.compile(r"^openxr/enabled=true$", re.MULTILINE)
 
 
 def is_reference(path: str) -> bool:
@@ -164,16 +174,91 @@ def is_scene_tree_test(path: Path) -> bool:
 def scene_tree_tests(stage: Path) -> list[str]:
     """The project's SceneTree tests: scripts under ``tests/`` (or ``test/``) that
     extend SceneTree, by project path. Each runs headless on its own and passes
-    when it quits with 0 and prints no ``FAIL`` line and no script error."""
+    when it quits with 0 and prints no ``FAIL`` line and no script error.
+
+    The game's own tests (``tests/test_door.gd``) come before those in deeper
+    folders (a feature's ``tests/features/...``), so the limit never drops them.
+    A test that is one half of two game processes (``## Client: --join=...``)
+    cannot run on its own and is left out."""
     found: list[str] = []
     for name in TEST_DIRS:
         folder = stage / name
         if not folder.is_dir():
             continue
-        for path in sorted(folder.rglob("*.gd")):
+        for path in folder.rglob("*.gd"):
             if path.is_file() and is_scene_tree_test(path):
+                if scene_test_args(stage, path.relative_to(stage).as_posix()) is None:
+                    continue
                 found.append(path.relative_to(stage).as_posix())
+    found.sort(key=lambda rel: (rel.count("/"), rel))
     return found[:SCENE_TESTS_MAX]
+
+
+def _header(path: Path) -> list[str]:
+    """The ``##`` comment lines at the top of a script."""
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()[:60]
+    except OSError:
+        return []
+    return [line for line in lines if line.startswith("##")]
+
+
+def scene_test_args(stage: Path, script: str) -> list[str] | None:
+    """Godot's arguments for one SceneTree test, as its own ``## Run:`` line names
+    them (``--fixed-fps 60 ... -- --autostart --settings-path=<file>``; optional
+    ``[...]`` parts left out), else the harness convention. ``<file>`` stays for
+    the runner to fill. None for a test that needs a second process or a value
+    the check cannot know (``--port=<n>`` in the Run line)."""
+    header = _header(stage / script)
+    command = ""
+    for index, line in enumerate(header):
+        match = _RUN_LINE.match(line)
+        if match is None:
+            continue
+        parts = [match.group(1)]
+        for more in header[index + 1 :]:
+            text = more.lstrip("#").strip()
+            if not text or not more.startswith("##  "):
+                break
+            parts.append(text)
+        command = " ".join(parts)
+        break
+    if not command:
+        if _PAIR_LINE.search("\n".join(header)):
+            return None
+        return ["--fixed-fps", SCENE_TEST_FPS, "--", *SCENE_TEST_ARGS]
+    tokens = re.sub(r"\[[^\]]*\]", " ", command).split()
+    args: list[str] = []
+    if "--fixed-fps" in tokens:
+        at = tokens.index("--fixed-fps")
+        args += ["--fixed-fps", tokens[at + 1] if at + 1 < len(tokens) else "60"]
+    if "--" in tokens:
+        extra = tokens[tokens.index("--") + 1 :]
+        if any(re.search(r"<(?!file>)[^>]*>", arg) for arg in extra):
+            return None
+        args += ["--", *extra]
+    return args
+
+
+def scene_test_argv(stage: Path, script: str, settings: str) -> list[str]:
+    """The whole Godot command for one SceneTree test in the offline worker."""
+    args = scene_test_args(stage, script) or []
+    project = stage / "project.godot"
+    xr_off = (
+        ["--xr-mode", "off"]
+        if project.is_file() and _OPENXR_ON.search(project.read_text(errors="replace"))
+        else []
+    )
+    filled = [arg.replace("<file>", settings) for arg in args]
+    if "--" in filled:
+        at = filled.index("--")
+        before, after = filled[:at], filled[at:]
+    else:
+        before, after = filled, []
+    return [
+        "godot", "--headless", *xr_off, "--path", "/work", *before,
+        "-s", "res://" + script, *after,
+    ]  # fmt: skip
 
 
 @dataclass
@@ -559,8 +644,11 @@ async def run_scene_tests(
     problems: list[Problem] = []
     with timed("review_scene_tests") if timed is not None else nullcontext():
         for script in scripts:
+            # A settings file of its own: no test sees another's (a warm worker
+            # keeps its /tmp between runs).
+            settings = f"/tmp/joinery-test-{secrets.token_hex(6)}.cfg"
             got = await run_offline(
-                ["godot", "--headless", "--path", "/work", "-s", "res://" + script],
+                scene_test_argv(stage, script, settings),
                 stage,
                 SCENE_TEST_SECONDS,
             )
