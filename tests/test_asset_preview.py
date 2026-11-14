@@ -106,3 +106,42 @@ def test_the_registry_tool_returns_the_picture(
     assert result.content[1].type == "image"
     assert result.content[1].mime_type == "image/png"
     assert read_only("joinery-registry", "preview_asset")
+
+
+def test_a_krita_document_is_drawn_from_its_flattened_picture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import zipfile
+
+    project = _project(tmp_path)
+    with zipfile.ZipFile(project / "art/textures/brick.kra", "w") as kra:
+        kra.writestr("mimetype", "application/x-krita")
+        kra.writestr("mergedimage.png", PNG)
+    (project / "art/textures/broken.kra").write_bytes(b"not a zip")
+    seen: list[bytes] = []
+    blender = FakeBlender()
+
+    async def run(argv: list[str], folder: Path, timeout: int = 600) -> Result:
+        script = (folder / argv[-1]).read_text()
+        src = next(
+            line.split("=", 1)[1].strip().strip("'")
+            for line in script.splitlines()
+            if line.startswith("SRC = ")
+        )
+        seen.append((folder / src).read_bytes())
+        return await blender(argv, folder, timeout)
+
+    monkeypatch.setattr(asset_preview, "run_offline", run)
+    made = asyncio.run(asset_preview.preview(project, "art/textures/brick.kra"))
+    assert made["kind"] == "image" and seen == [PNG]
+    with pytest.raises(ValueError, match="not a Krita document"):
+        asyncio.run(asset_preview.preview(project, "art/textures/broken.kra"))
+
+
+def test_a_blend_model_is_drawn_in_its_node_colours() -> None:
+    # Workbench draws untextured materials in their viewport colour, which a
+    # node material leaves white; the script copies the Principled colour over.
+    script = asset_preview._SCRIPT
+    model = script[script.index("def _model") :]
+    assert "_viewport_colour(material)" in model
+    assert "material.diffuse_color = tuple(colour.default_value)" in script

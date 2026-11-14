@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,8 @@ from joinery.tools.blender import FAIL_ON_ERROR
 
 PREVIEW_DIR = ".joinery/previews"
 IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".tga", ".exr"})
+#: Krita documents: drawn from the flattened picture Krita stores inside.
+KRITA_SUFFIXES = frozenset({".kra"})
 MODEL_SUFFIXES = frozenset({".glb", ".gltf", ".blend"})
 SIZES = (64, 1024)
 DEFAULT_SIZE = 384
@@ -58,6 +61,23 @@ def _image():
     out.save()
     return {'source_size': [width, height], 'size': list(out.size)}
 
+def _viewport_colour(material):
+    # Workbench draws an untextured material in its viewport colour, which a
+    # material built in nodes leaves white; take it from the Principled BSDF.
+    if not material.use_nodes or material.node_tree is None:
+        return
+    for node in material.node_tree.nodes:
+        if node.type != 'BSDF_PRINCIPLED':
+            continue
+        colour = node.inputs['Base Color']
+        if not colour.is_linked:
+            material.diffuse_color = tuple(colour.default_value)
+        for name in ('Metallic', 'Roughness'):
+            socket = node.inputs[name]
+            if not socket.is_linked:
+                setattr(material, name.lower(), float(socket.default_value))
+        return
+
 def _model():
     bpy.ops.wm.read_factory_settings(use_empty=True)
     if SRC.lower().endswith('.blend'):
@@ -65,6 +85,8 @@ def _model():
     else:
         bpy.ops.import_scene.gltf(filepath=os.path.abspath(SRC))
     scene = bpy.context.scene
+    for material in bpy.data.materials:
+        _viewport_colour(material)
     meshes = [o for o in scene.objects if o.type == 'MESH' and o.visible_get()]
     if not meshes:
         raise RuntimeError(SRC + ' has no visible mesh to draw.')
@@ -99,12 +121,13 @@ print('JOINERY_PREVIEW:' + json.dumps(_image() if KIND == 'image' else _model())
 
 def kind_of(rel: str) -> str:
     suffix = Path(rel).suffix.lower()
-    if suffix in IMAGE_SUFFIXES:
+    if suffix in IMAGE_SUFFIXES or suffix in KRITA_SUFFIXES:
         return "image"
     if suffix in MODEL_SUFFIXES:
         return "model"
     raise ValueError(
-        "Preview a texture (PNG, JPEG, WebP, TGA, EXR) or a model (.glb, .gltf, .blend)."
+        "Preview a texture (PNG, JPEG, WebP, TGA, EXR, a Krita .kra) "
+        "or a model (.glb, .gltf, .blend)."
     )
 
 
@@ -130,6 +153,8 @@ async def preview(project: Path, rel: str, size: int = DEFAULT_SIZE) -> dict[str
         for block in iter(lambda: handle.read(1 << 20), b""):
             digest.update(block)
     digest.update(f"{kind}:{size}".encode())
+    # A new drawing script draws again rather than reusing old pictures.
+    digest.update(_SCRIPT.encode())
     key = digest.hexdigest()[:24]
     folder = project / PREVIEW_DIR
     folder.mkdir(parents=True, exist_ok=True)
@@ -138,8 +163,12 @@ async def preview(project: Path, rel: str, size: int = DEFAULT_SIZE) -> dict[str
     facts = folder / f"{key}.json"
     if image.is_file() and facts.is_file():
         return {**json.loads(facts.read_text()), "image": str(image), "cached": True}
-    copy = folder / f"{key}-source{source.suffix.lower()}"
-    shutil.copyfile(source, copy)
+    if source.suffix.lower() in KRITA_SUFFIXES:
+        copy = folder / f"{key}-source.png"
+        copy.write_bytes(_krita_picture(source, rel))
+    else:
+        copy = folder / f"{key}-source{source.suffix.lower()}"
+        shutil.copyfile(source, copy)
     work = folder / f"{key}.py"
     work.write_text(
         "\n".join(
@@ -181,6 +210,17 @@ async def preview(project: Path, rel: str, size: int = DEFAULT_SIZE) -> dict[str
     facts.write_text(json.dumps(data))
     _prune(folder)
     return {**data, "image": str(image), "cached": False}
+
+
+def _krita_picture(source: Path, rel: str) -> bytes:
+    """The flattened PNG Krita saves in every .kra (a zip)."""
+    try:
+        with zipfile.ZipFile(source) as archive:
+            return archive.read("mergedimage.png")
+    except (zipfile.BadZipFile, KeyError) as error:
+        raise ValueError(
+            f"{rel} is not a Krita document with a saved picture."
+        ) from error
 
 
 def _prune(folder: Path) -> None:

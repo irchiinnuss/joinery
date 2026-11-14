@@ -338,7 +338,7 @@ def make_server(project: Path) -> MCPServer[Any]:
     @server.tool(annotations=ToolAnnotations(read_only_hint=True))
     @tool_errors
     async def preview_asset(path: str, size: int = 384) -> CallToolResult:
-        """Look at a texture or model you made (or any in the project, including files staged in this change): returns a small PNG. A texture is scaled to fit size px (64-1024); a small pixel-art one is enlarged with nearest-neighbour so its pixels stay crisp. A model (.glb, .gltf, .blend) is rendered with its textures and a studio light from the front three-quarter, with its bounds in metres and triangle count. Use it to check your own work before you submit; it changes nothing."""
+        """Look at a texture or model you made (or any in the project, including files staged in this change): returns a small PNG. A texture (or a Krita .kra) is scaled to fit size px (64-1024); a small pixel-art one is enlarged with nearest-neighbour so its pixels stay crisp. A model (.glb, .gltf, .blend) is rendered with its textures and a studio light from the front three-quarter, with its bounds in metres and triangle count. Use it to check your own work before you submit; it changes nothing."""
         from joinery import asset_preview
 
         made = await asset_preview.preview(project, path, size)
