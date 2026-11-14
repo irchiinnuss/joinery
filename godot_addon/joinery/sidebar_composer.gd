@@ -55,7 +55,6 @@ const ATTACHMENT_ROW := preload("sidebar_attachments.gd")
 const EDITOR_VIEW := preload("editor_view.gd")
 const RECALL := preload("composer_recall.gd")
 ## The eye's label: what "Share my view" sends.
-const VIEW_LABEL := "Scene"
 ## The message box at rest, saying how to reach the commands (the old "Type /" hint).
 const ASK := "Ask Journeyman, or / for commands"
 
@@ -152,8 +151,8 @@ func _init() -> void:
 	UI_MOTION.press_feedback(attach)
 	attach.pressed.connect(open_file_dialog)
 	controls.add_child(attach)
-	# Labelled, so the eye says what it sends: the scene view you are looking at.
-	view = UI.quiet(VIEW_LABEL)
+	# The eye alone; its tooltip says what it sends: the scene view you are looking at.
+	view = UI.quiet("")
 	UI.bind_icon(view, "view")
 	view.tooltip_text = "Share my view: Journeyman sees this viewport with your message"
 	view.accessibility_name = "Share my view"
@@ -473,8 +472,7 @@ func _sync_send() -> void:
 
 ## In a narrow sidebar Run alongside takes the model picker's place while it is offered; the
 ## picker is disabled while Journeyman works, and it comes back with the room or the offer's
-## end. Then the eye keeps its "Scene" label only while the row has room for it; without, it is
-## the icon alone (its tooltip still says what it does). Strictly less than the row's width: a
+## end. Strictly less than the row's width: a
 ## row that pushed the composer wider measures exactly its own width, so it gives up rather
 ## than keeping the overflow.
 func _fit_controls() -> void:
@@ -490,18 +488,9 @@ func _fit_controls() -> void:
 			need += part.get_combined_minimum_size().x
 			count += 1
 	need += gap * maxf(0.0, count - 1.0)
-	if view.text.is_empty():
-		var font := view.get_theme_font("font")
-		var wide := font.get_string_size(VIEW_LABEL, 0, -1, view.get_theme_font_size("font_size"))
-		need += wide.x + view.get_theme_constant("h_separation")
 	var keep := not alongside_button.visible or need + 0.5 < room
-	if not keep:
-		need -= options.get_combined_minimum_size().x + gap
 	if options.visible != keep:
 		options.visible = keep
-	var text := VIEW_LABEL if need + 0.5 < room else ""
-	if view.text != text:
-		view.text = text
 
 
 func _set_focus(on: bool) -> void:
