@@ -337,6 +337,8 @@ func _glance_reviews(
 	# The changed node is in the open scene, so the review offers to show it there.
 	var crate: Node = _animation.mark_changed("Crate")
 	panel.call("show_scene_review", "Warm up the workshop light", 2, frames)
+	# Called on the panel directly, so bring it into view as the sidebar's opener would.
+	panel.emit_signal("show_requested")
 	await _shot("review-scene", [panel, dock])
 	_check(crate == null or panel.get("_open_link").is_visible_in_tree(), "Open in editor shows")
 	_animation.mark_changed("")
