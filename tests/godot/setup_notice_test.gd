@@ -3,7 +3,9 @@ extends SceneTree
 ## `joinery` that answers in JSON as the real one does: an out-of-date add-on is offered as
 ## Update and restart, which schedules the update after this editor exits and asks the editor to
 ## close; the connection banner holds the notice back (one notice at a time). Refresh tools
-## runs in place with its step, a bar, Cancel and Show log, and a failure says why plainly.
+## runs in place with its step, a bar, Cancel and Show log, then asks readiness afresh itself: the
+## notice leaves once the apps are ready, and a failure (or an app still not working) says why
+## plainly with Check again. While it names a problem it looks again by itself.
 
 const NOTICE := preload("res://addons/joinery/setup_notice.gd")
 const HEADER := preload("res://addons/joinery/sidebar_header.gd")
@@ -19,6 +21,11 @@ if a[0] == "update-addon" and "--check" in a:
     print(json.dumps({"state": os.environ.get("ADDON", "stale")}))
 elif a[0] == "update-addon":
     print(json.dumps({"state": "scheduled", "helper": 7, "project": "p"}))
+elif a[0] == "status" and os.environ.get("STATUS"):
+    needs = os.environ["STATUS"] == "needs"
+    print(json.dumps({"docker": "ok", "tools": [{"id": "blender"}], "notice": {
+        "state": "needs_image", "text": "Blender and Krita need a refresh before they can work.",
+        "action": {"id": "rebuild", "label": "Refresh tools"}} if needs else None}))
 elif a[0] == "status":
     seen = os.environ["CALLS"] + ".status"
     count = int(open(seen).read()) + 1 if os.path.exists(seen) else 1
@@ -105,6 +112,7 @@ func _run() -> void:
 	await _check_banner_wins()
 	_check_doctor()
 	await _check_refresh()
+	await _check_recheck()
 	await _check_docker()
 	await _check_join()
 	print("setup notice: ok" if not _failed else "setup notice: FAILED")
@@ -183,13 +191,12 @@ func _check_doctor() -> void:
 	_check(not text.contains("couldn't finish"), "A found problem is not a crash: " + text)
 
 
-## Refresh tools runs right here: step and bar while it runs, then a fresh check; a failure says
-## why in plain words and keeps Show log.
+## Refresh tools runs right here: step and bar while it runs, then the notice asks afresh itself
+## (past the cached answer) and leaves once the apps are ready; a failure says why in plain words
+## with Check again and Show log, and so does a refresh that ran but left an app not working.
 func _check_refresh() -> void:
 	var notice := _notice()
 	root.add_child(notice)
-	var asked: Array[bool] = []
-	notice.check_requested.connect(func() -> void: asked.append(true))
 	var needs := {
 		"state": "needs_image",
 		"text": "Blender and Krita need a refresh after the Joinery update.",
@@ -199,6 +206,7 @@ func _check_refresh() -> void:
 	_check(notice.text() == needs["text"], "The apps' sentence shows: " + notice.text())
 	_check(notice.action_text() == "Refresh tools", "With one button")
 	OS.set_environment("FAIL", "0")
+	OS.set_environment("STATUS", "ready")
 	notice.press()
 	_check(notice.refreshing(), "Refresh tools starts at once")
 	_check(
@@ -209,22 +217,82 @@ func _check_refresh() -> void:
 	_check(bar.visible and is_equal_approx(bar.value, 0.5), "The bar follows: %s" % bar.value)
 	_check((notice.get("_cancel") as Button).visible, "Cancel is there while it runs")
 	_check((notice.get("_show_log") as Button).visible, "So is Show log")
-	_check(await _until(func() -> bool: return not asked.is_empty()), "Done: ask again")
+	_check(
+		await _until(func() -> bool: return notice.text().is_empty()),
+		"Done and the apps are ready: the notice leaves: " + notice.text()
+	)
 	_check(not bar.visible, "The bar leaves when it is done")
-	_check(_logged()[-1].has("--progress"), "It asks for progress lines")
+	var calls := _logged()
+	_check(calls[-2].has("--progress"), "It asks for progress lines")
+	_check(
+		calls[-1][0] == "status" and not calls[-1].has("--background"),
+		"Then asks readiness afresh, never the answer from before the refresh: %s" % [calls[-1]]
+	)
+	# The refresh ran, yet an app still can't work: said, not offered as the same button again.
+	notice.show_readiness({"notice": needs})
+	OS.set_environment("STATUS", "needs")
+	notice.press()
+	var still := NOTICE.STILL_NEEDS % "Blender and Krita"
+	_check(
+		await _until(func() -> bool: return notice.text() == still),
+		"A refresh that didn't fix it says so: " + notice.text()
+	)
+	_check(notice.action_text() == NOTICE.CHECK_AGAIN, "With Check again")
+	OS.set_environment("STATUS", "ready")
+	notice.press()
+	_check(
+		await _until(func() -> bool: return notice.text().is_empty()),
+		"Check again finds the apps ready and the notice leaves: " + notice.text()
+	)
+	notice.show_readiness({"notice": needs})
 	OS.set_environment("FAIL", "1")
+	OS.set_environment("STATUS", "needs")
 	notice.press()
 	_check(
 		await _until(func() -> bool: return notice.text() == "Docker ran out of disk space."),
 		"A failure says why in plain words: " + notice.text()
 	)
-	_check(notice.action_text() == "Try again", "And offers to try again")
+	await _until(func() -> bool: return not notice.is_processing())
+	_check(notice.text() == "Docker ran out of disk space.", "And stays: " + notice.text())
+	_check(notice.action_text() == NOTICE.CHECK_AGAIN, "And offers Check again")
 	_check((notice.get("_show_log") as Button).visible, "Show log stays for the failure")
+	OS.set_environment("FAIL", "0")
+	notice.queue_free()
+
+
+## While the notice names a problem it looks again by itself: a fix made elsewhere clears it.
+func _check_recheck() -> void:
+	var notice := _notice()
+	notice.recheck_seconds = 0.3
+	root.add_child(notice)
+	OS.set_environment("STATUS", "needs")
+	(
+		notice
+		. show_readiness(
+			{
+				"notice":
+				{
+					"state": "needs_image",
+					"text": "Blender needs a refresh before it can work.",
+					"action": {"id": "rebuild", "label": "Refresh tools"},
+				}
+			}
+		)
+	)
+	_check(not notice.text().is_empty(), "The problem shows")
+	OS.set_environment("STATUS", "ready")
+	_check(
+		await _until(func() -> bool: return notice.text().is_empty(), 10.0),
+		"Fixed elsewhere, the notice leaves without a click: " + notice.text()
+	)
+	_check(_logged()[-1].has("--background"), "Looking again is the cheap, cached question")
+	OS.set_environment("STATUS", "")
 	notice.queue_free()
 
 
 ## Start Docker opens it and asks Docker again by itself until it answers: no Check again.
 func _check_docker() -> void:
+	var before := _logged().size()
 	var notice := _notice()
 	notice.start_docker_argv = PackedStringArray()
 	root.add_child(notice)
@@ -244,7 +312,9 @@ func _check_docker() -> void:
 		"Once Docker answers, the apps are checked again without a click"
 	)
 	_check(notice.text().is_empty(), "And the notice leaves: " + notice.text())
-	var polls := _logged().filter(func(call: Array) -> bool: return call[0] == "status")
+	var polls := _logged().slice(before).filter(
+		func(call: Array) -> bool: return call[0] == "status"
+	)
 	_check(polls.size() >= 2, "Docker was asked more than once (%d)" % polls.size())
 	_check(
 		polls.all(func(call: Array) -> bool: return not call.has("--background")),
@@ -265,13 +335,14 @@ func _check_join() -> void:
 	notice.watch_refreshes = true
 	notice.refresh_state_path = state_path
 	root.add_child(notice)
-	var asked: Array[bool] = []
-	notice.check_requested.connect(func() -> void: asked.append(true))
+	OS.set_environment("STATUS", "ready")
 	_check(
 		await _until(func() -> bool: return notice.text().contains("creative apps")),
 		"The running refresh is followed: " + notice.text()
 	)
 	_check(_logged()[-1].has("--join"), "By joining it, never by starting a second")
 	DirAccess.remove_absolute(state_path)
-	_check(await _until(func() -> bool: return not asked.is_empty()), "Its end asks again")
+	_check(await _until(func() -> bool: return _logged()[-1][0] == "status"), "Its end asks again")
+	_check(await _until(func() -> bool: return notice.text().is_empty()), "And the notice leaves")
+	OS.set_environment("STATUS", "")
 	notice.queue_free()

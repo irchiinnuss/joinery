@@ -16,7 +16,11 @@ extends MarginContainer
 ##   for 2 minutes (no Check again needed), Check again asks again.
 ##
 ## A refresh stays on show while it runs (`joinery bootstrap --progress`): which step, a bar,
-## Cancel and Show log. If it fails, the notice says why in plain words and keeps Show log.
+## Cancel and Show log. When it ends the notice asks readiness afresh itself (never the cached
+## answer from before the refresh): it leaves once the apps are ready. If the refresh failed, or
+## finished and an app still can't work, it says so in plain words with Check again and Show log.
+## While it names a problem it looks again every [member recheck_seconds], so a fix made
+## elsewhere (a terminal, doctor, another editor) clears it too.
 ## Only one refresh runs at a time: one started anywhere else (the app rail, Project setup, a
 ## terminal, another editor) is followed here too, through `joinery bootstrap --join`
 ## ([member watch_refreshes]), and pressing Refresh tools while one runs joins it.
@@ -26,7 +30,7 @@ extends MarginContainer
 
 ## The helper is waiting: close the editor so it can update the add-on.
 signal restart_requested
-## Ask about the apps again (Check again, or a refresh finished).
+## Ask about the apps again (a broken app's Check again, or Docker started).
 signal check_requested
 ## A licence is added in Project setup.
 signal setup_requested
@@ -44,6 +48,10 @@ const DOCKER_OPENING := "Opening Docker Desktop. Joinery checks again by itself 
 ## After Start Docker: ask Docker every 3 s, 40 times (2 minutes).
 const DOCKER_INTERVAL := 3.0
 const DOCKER_POLLS := 40
+## A refresh that ran to the end, yet an app still can't work.
+const STILL_NEEDS := "The refresh finished, but %s still can't work."
+const CHECK_FAILED := "Joinery couldn't check the apps just now."
+const CHECK_AGAIN := "Check again"
 
 ## The command that runs the Joinery CLI and its leading arguments. Empty: the engine
 ## checkout's `uv run … joinery`. Tests point it at a fixture.
@@ -60,6 +68,8 @@ var start_docker_argv := PackedStringArray(
 var watch_refreshes := Engine.is_editor_hint()
 ## Where a running refresh says how far it is (empty: Joinery's readiness cache).
 var refresh_state_path := ""
+## Seconds between looks while the notice names a problem (0: never; on in the editor).
+var recheck_seconds := 30.0 if Engine.is_editor_hint() else 0.0
 
 var _panel: PanelContainer
 var _glyph: TextureRect
@@ -85,8 +95,11 @@ var _addon := {}
 var _tools := {}
 ## A sentence that replaces the apps' notice until the next report (a failed refresh).
 var _said := ""
-## Running CLI jobs by kind ("addon_check", "addon_update", "refresh", "cancel", "docker").
+## Running CLI jobs by kind ("addon_check", "addon_update", "refresh", "cancel", "docker",
+## "check").
 var _jobs := {}
+## Why the running "check" asks: "refreshed", "failed" (a refresh ended), "again", "look".
+var _check_why := ""
 ## Questions left to ask Docker after Start Docker, and seconds to the next one.
 var _docker_polls := 0
 var _docker_in := 0.0
@@ -175,6 +188,30 @@ func _ready() -> void:
 		add_child(timer)
 		timer.start()
 		_look_for_refresh.call_deferred()
+	if recheck_seconds > 0.0:
+		var again := Timer.new()
+		again.wait_time = recheck_seconds
+		again.timeout.connect(_look_again)
+		add_child(again)
+		again.start()
+
+
+## While the notice names a problem, look again (cheap: cached for 30 s), so a fix made
+## elsewhere clears it.
+func _look_again() -> void:
+	if not _tools.is_empty() and _said.is_empty() and not refreshing():
+		_check("look")
+
+
+## Ask readiness now. After a refresh and on Check again it is asked afresh, past the snapshot.
+func _check(why: String) -> void:
+	if _jobs.has("check"):
+		return
+	_check_why = why
+	var args := ["status", "--project", _project(), "--json"]
+	if why == "look":
+		args.append("--background")
+	_run("check", args)
 
 
 ## A refresh another process runs (refresh.json says so, and its process is alive): follow it.
@@ -317,7 +354,7 @@ func _refresh() -> void:
 	elif not _said.is_empty():
 		kind = "tools"
 		words = _said
-		action = "Try again"
+		action = CHECK_AGAIN
 	elif not _tools.is_empty():
 		kind = "tools"
 		words = str(_tools.get("text", ""))
@@ -337,7 +374,7 @@ func _refresh() -> void:
 	_action.text = action
 	_action.accessibility_name = action
 	_action.visible = not action.is_empty()
-	_action.disabled = _jobs.has("addon_update")
+	_action.disabled = _jobs.has("addon_update") or (kind == "tools" and _jobs.has("check"))
 	_bar.visible = kind == "tools" and refreshing()
 	_bar.value = progress()
 	_cancel.visible = _bar.visible
@@ -374,7 +411,7 @@ func _on_action() -> void:
 		args += ["--after-exit", str(OS.get_process_id()), "--editor", editor]
 		_run("addon_update", args)
 	elif _kind == "tools" and not _said.is_empty():
-		start_refresh()
+		_check("again")
 	elif _kind == "tools":
 		var found: Variant = _tools.get("action")
 		match str((found as Dictionary).get("id", "")) if found is Dictionary else "":
@@ -461,8 +498,26 @@ func _finished(kind: String, code: int, data: Dictionary, raw: Dictionary) -> vo
 				print("[Joinery] refresh\n", raw.get("output", ""), "\n", raw.get("error", ""))
 				var why := str(data.get("error", ""))
 				_said = why if not why.is_empty() else "The refresh didn't finish."
-			check_requested.emit()
+			# The notice asks itself: a /tools check can be refused while another one runs.
+			_check("refreshed" if code == 0 else "failed")
+		"check":
+			_checked(code, data)
 	_refresh()
+
+
+## A readiness answer for the notice: shown, and after a refresh, what is still wrong is said.
+func _checked(code: int, data: Dictionary) -> void:
+	var why := _check_why
+	_check_why = ""
+	if code != 0 or not data.has("tools"):
+		if why == "again" or why == "refreshed":
+			_said = CHECK_FAILED
+		return
+	if why == "again":
+		_said = ""
+	show_readiness(data)
+	if why == "refreshed" and str(_tools.get("state", "")) == "needs_image":
+		_said = STILL_NEEDS % _apps()
 
 
 ## A line of a running refresh: progress (true when it moved the notice on) or its result.
