@@ -446,3 +446,22 @@ def test_the_agent_gets_coverage_and_reach() -> None:
         playtest.reach_line({"found": True, "reached": False, "closest": 3.25})
         == "not reached (closest 3.25)"
     )
+
+
+def test_a_media_replay_keeps_the_framer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The store screenshots replay a media run in a window; without --media the
+    # replay looks around at random and the pictures show floors and ceilings.
+    seen: list[list[str]] = []
+    monkeypatch.setattr(
+        playtest, "_play", lambda command, *_args, **_kw: seen.append(command)
+    )
+    options = playtest.Options(project=tmp_path, seconds=10, seed=7, media=True)
+    playtest.replay_shots(
+        options, [60, 120], tmp_path / "shots", (Path("godot"), {}), full_size=True
+    )
+    assert "--media" in seen[0]
+    plain = playtest.Options(project=tmp_path, seconds=10, seed=7)
+    playtest.replay_shots(plain, [60], tmp_path / "shots", (Path("godot"), {}))
+    assert "--media" not in seen[1]

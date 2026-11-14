@@ -431,6 +431,9 @@ def replay_shots(
         focus=options.focus,
         softlock=options.softlock,
         reach=list(options.reach),
+        # A media run's view is aimed by the framer; without it the replay
+        # taps random look keys and the pictures show floors and ceilings.
+        media=options.media,
     )
     command = [
         str(binary),
