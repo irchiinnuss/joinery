@@ -90,7 +90,10 @@ def feature_guides(project: Path, game: Mapping[str, Any] | None) -> dict[str, A
         text = path.read_text(encoding="utf-8", errors="replace")
         paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
         intro = next((p for p in paragraphs if not p.startswith("#")), "")
-        guides[str(feature_id)] = {"path": f"res://{rel}", "summary": " ".join(intro.split())}
+        guides[str(feature_id)] = {
+            "path": f"res://{rel}",
+            "summary": " ".join(intro.split()),
+        }
     return guides
 
 
@@ -258,9 +261,7 @@ def reference_images(project: Path) -> tuple[list[dict[str, Any]], list[ImageCon
             except (OSError, ValueError):
                 continue
             shown.append(ImageContent(type="image", data=encoded, mime_type=media))
-        listed.append(
-            {"path": f"{REFERENCE_DIR}/{path.name}", "shown": send}
-        )
+        listed.append({"path": f"{REFERENCE_DIR}/{path.name}", "shown": send})
     return listed, shown
 
 
@@ -333,6 +334,23 @@ def make_server(project: Path) -> MCPServer[Any]:
             result["can_add"] = addable(catalogue, game)
             result["presets"] = list(catalogue.get("presets", []))
         return cast(dict[str, Any], _json_safe(result))
+
+    @server.tool(annotations=ToolAnnotations(read_only_hint=True))
+    @tool_errors
+    async def preview_asset(path: str, size: int = 384) -> CallToolResult:
+        """Look at a texture or model you made (or any in the project, including files staged in this change): returns a small PNG. A texture is scaled to fit size px (64-1024); a small pixel-art one is enlarged with nearest-neighbour so its pixels stay crisp. A model (.glb, .gltf, .blend) is rendered with its textures and a studio light from the front three-quarter, with its bounds in metres and triangle count. Use it to check your own work before you submit; it changes nothing."""
+        from joinery import asset_preview
+
+        made = await asset_preview.preview(project, path, size)
+        picture = Path(made.pop("image"))
+        media, encoded = chat_attachments.encoded(picture)
+        return CallToolResult(
+            content=[
+                TextContent(type="text", text=json.dumps(made)),
+                ImageContent(type="image", data=encoded, mime_type=media),
+            ],
+            structured_content=made,
+        )
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True))
     @tool_errors

@@ -44,6 +44,7 @@ def read_only(server: str, tool: str) -> bool:
                 "game_brief",
                 "game_setup",
                 "list_assets",
+                "preview_asset",
                 "resolve_source",
                 "kit_list",
             }
