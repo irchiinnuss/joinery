@@ -559,7 +559,11 @@ async def _mcp_probe(project: Path, probe: McpProbe) -> ProbeResult:
         # Not configured (not selected, or not installed, which InstallCheck
         # reports): nothing to probe.
         return ProbeResult(False, False)
-    connection = MCPConnection(spec, project)
+    # The server's banners, hints and ads go to a log, never into doctor's report.
+    log_path = cache_dir() / "logs" / f"mcp-{probe.server}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log = log_path.open("w", encoding="utf-8")
+    connection = MCPConnection(spec, project, errlog=log)
     arguments = {
         key: str(project.resolve()) if value == "{project}" else value
         for key, value in probe.arguments().items()
@@ -577,6 +581,7 @@ async def _mcp_probe(project: Path, probe: McpProbe) -> ProbeResult:
         return ProbeResult(True, False, str(exc) or type(exc).__name__)
     finally:
         await connection.close()
+        log.close()
 
 
 # --- Evaluating one tool -----------------------------------------------------

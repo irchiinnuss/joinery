@@ -134,3 +134,30 @@ def test_probe_problem_wording() -> None:
     assert "missing" in probe_problem("x.t", _result(missing))
     some = '{"tools": [{"id": "gimp", "application_installed": false}, {"id": "krita"}]}'
     assert probe_problem("x.t", _result(some)) == ""
+
+
+def test_a_servers_banner_goes_to_its_log_not_our_output(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "joinery.toml").write_text('[tools]\nenabled=["godot"]\n')
+    script = tmp_path / "noisy.py"
+    script.write_text(
+        "import sys\nfrom mcp.server import MCPServer\n"
+        "print('FastMCP banner and an ad', file=sys.stderr, flush=True)\n"
+        "m=MCPServer('noisy')\n@m.tool()\ndef ping() -> str:\n return 'pong'\nm.run()\n"
+    )
+    log = (tmp_path / "server.log").open("w", encoding="utf-8")
+    connection = MCPConnection(
+        ServerSpec(name="godot", command=sys.executable, args=[str(script)]),
+        tmp_path,
+        errlog=log,
+    )
+
+    async def run() -> None:
+        await connection.connect()
+        await connection.close()
+
+    asyncio.run(run())
+    log.close()
+    assert "banner" not in capfd.readouterr().err
+    assert "FastMCP banner and an ad" in (tmp_path / "server.log").read_text()

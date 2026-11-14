@@ -9,12 +9,14 @@ import json
 import ntpath
 import os
 import re
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
-from typing import Any
+from typing import Any, TextIO
 
 from jsonschema import Draft202012Validator
 from mcp import Client, StdioServerParameters
+from mcp.client.stdio import stdio_client
 from mcp.types import CallToolResult, TextContent, Tool
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -308,6 +310,10 @@ async def _image_present(image: str) -> int:
 class MCPConnection:
     spec: ServerSpec
     project: Path
+    #: Where the server's own stderr goes (its banners and logs). None: this
+    #: process's stderr; a readiness probe passes a log file so `joinery doctor`
+    #: prints only its own report.
+    errlog: TextIO | None = None
     readiness: Readiness = field(init=False)
     tools: dict[str, Tool] = field(default_factory=dict, init=False)
     _task: asyncio.Task[None] | None = field(default=None, init=False)
@@ -369,7 +375,8 @@ class MCPConnection:
         active: _Request | None = None
         try:
             mode = "legacy" if self.spec.name in {"godot", "blender", "inkscape", "audacity", "claude-collider"} else "auto"
-            async with Client(parameters, read_timeout_seconds=30, mode=mode) as client:
+            transport = stdio_client(parameters, errlog=self.errlog or sys.stderr)
+            async with Client(transport, read_timeout_seconds=30, mode=mode) as client:
                 self.readiness.state = "connected"
                 self.readiness.connected = True
                 self.readiness.protocol = client.protocol_version
