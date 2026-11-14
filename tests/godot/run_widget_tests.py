@@ -55,6 +55,7 @@ CASES = {
     "agent_switch_test.gd": "agent switch: ok",
     "connection_banner_test.gd": "connection banner: ok",
     "parallel_tasks_test.gd": "parallel tasks: ok",
+    "chat_activity_test.gd": "chat activity: ok",
     "agent_roles_test.gd": "agent roles: ok",
     "playtest_card_test.gd": "playtest card: ok",
     "todo_card_test.gd": "todo card: ok",

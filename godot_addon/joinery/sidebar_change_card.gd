@@ -30,6 +30,10 @@ extends VBoxContainer
 ## A turn keeps one rhythm: the bubble, the progress (status line and steps), the thumbnail and
 ## the error are SPACE.3 apart (JoineryStack); rows inside the progress stay SPACE.1 apart.
 ##
+## While the turn works only its latest step shows, under the status line's timer: each new
+## step replaces the one before (one live activity line, not a growing list). Opening the
+## folded line shows them all.
+##
 ## When the turn ends the steps fold away behind the reply's timing line ("Completed in 1:12"),
 ## which the transcript moves into the card's status line ([method adopt_timing]); opening it
 ## shows the steps again with the timing details.
@@ -246,6 +250,7 @@ func _init(text := "", context: Array = []) -> void:
 	UI.bind_height(_fold, "xs")
 	_fold.toggled.connect(
 		func(open: bool) -> void:
+			_show_all_steps(open)
 			_steps.visible = open and _steps.get_child_count() > 0
 			if _steps.visible:
 				UI_MOTION.fade_in(_steps)
@@ -371,9 +376,10 @@ func set_sending() -> void:
 	_set_sending_look(true)
 
 
-## A progress line from the assistant: the previous step gets its tick, this one is current.
-## Apps named in the text join the status line.
-func add_step(text: String) -> void:
+## A progress line from the assistant: the previous step gets its tick and steps aside, this
+## one is the live line. Apps named in the text join the status line. [param detail] is the
+## whole text on hover (a reply folded into a step keeps its words there).
+func add_step(text: String, detail := "") -> void:
 	set_sent()
 	var line := text.strip_edges()
 	for app: String in APPS:
@@ -398,12 +404,31 @@ func add_step(text: String) -> void:
 	cell.add_child(UI.status_dot("working"))
 	row.add_child(cell)
 	var label := UI.label(line, "JoineryCaption")
-	label.tooltip_text = line
+	label.tooltip_text = detail if not detail.is_empty() else line
+	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	label.mouse_filter = Control.MOUSE_FILTER_PASS
 	row.add_child(label)
+	_show_all_steps(false)
 	_steps.show()
 	_sync_activity()
 	UI_MOTION.stagger([row])
+
+
+## All the steps ([param all], when the folded line is opened), or only the latest one.
+func _show_all_steps(all: bool) -> void:
+	var count := _steps.get_child_count()
+	for index: int in count:
+		(_steps.get_child(index) as Control).visible = all or index == count - 1
+
+
+## The steps on show, for tests.
+func visible_steps() -> PackedStringArray:
+	var shown := PackedStringArray()
+	for row: Node in _steps.get_children():
+		if (row as Control).visible and _steps.visible:
+			shown.append(str((row.get_child(-1) as Label).text))
+	return shown
 
 
 ## True while [param text] is the live step on this card, so nothing else needs to repeat it.
@@ -430,6 +455,7 @@ func adopt_timing(summary: Button, details: Label) -> void:
 ## Show or fold the finished steps and timing details under the summary; [param animate]
 ## fades the steps in.
 func set_details_open(open: bool, animate := false) -> void:
+	_show_all_steps(open)
 	_steps.visible = open and _steps.get_child_count() > 0
 	if _steps.visible and animate:
 		UI_MOTION.fade_in(_steps)

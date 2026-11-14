@@ -169,6 +169,7 @@ func add_message(who: String, text: String) -> void:
 	if who == "You":
 		add_request(text)
 		return
+	_fold_interim(who)
 	_hide_empty()
 	var inset := _inset(_current_turn())
 	var column := VBoxContainer.new()
@@ -209,6 +210,21 @@ func add_message(who: String, text: String) -> void:
 		)
 	)
 	_dirty = true
+
+
+## A reply another follows while the turn still works was a step, not the answer: it becomes
+## the card's live activity line (its words on hover), so only the last reply stays as text.
+func _fold_interim(who: String) -> void:
+	var card := current_card()
+	if _messages.is_empty() or _messages[-1]["who"] != who or card == null:
+		return
+	if card.state != "working" or _messages[-1]["panel"] != null:
+		return
+	var record: Dictionary = _messages.pop_back()
+	(record["label"] as Control).get_parent().queue_free()
+	var words := str(record["text"]).replace("**", "").replace("`", "").strip_edges()
+	if not words.is_empty():
+		card.add_step(words.get_slice("\n", 0), words)
 
 
 ## Start a turn with the user's request and return its change card.
