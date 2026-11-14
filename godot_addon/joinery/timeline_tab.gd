@@ -413,7 +413,7 @@ func _build_offer() -> void:
 	_offer_button.tooltip_text = "Sets up git in this project and makes the first entry"
 	_offer_button.pressed.connect(_start_timeline)
 	UI_MOTION.press_feedback(_offer_button)
-	_offer = BLOCKS.blankslate("chats", OFFER_TITLE, _offer_button, null, OFFER_TEXT)
+	_offer = BLOCKS.blankslate("reload", OFFER_TITLE, _offer_button, null, OFFER_TEXT)
 	_offer.name = "Offer"
 	_offer.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	_offer_title = _offer.find_child("Heading", true, false)
