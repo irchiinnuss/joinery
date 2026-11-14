@@ -8,6 +8,11 @@ message and place are one :class:`Group` with a count. Joinery's own lines and
 known engine noise are never listed; ``[agents] ignore_errors`` in joinery.toml
 adds the project's own.
 
+Before any agent sees an error it is triaged (:func:`triage`): a line printed by the
+engine's or editor's own C++ source with no project script in its trace is an editor
+message, not a game error, and one from Joinery's addon is a Joinery bug. Neither is
+offered or sent to the debugger; both are listed with what they are.
+
 ``[agents] fix_errors`` says what happens to a new group: ``"ask"`` (the default)
 offers to fix it, ``"auto"`` starts the debugger and a worker as a background task
 at once, and ``"off"`` leaves the console alone. A fix is always a normal reviewed
@@ -59,9 +64,10 @@ MAX_MESSAGE = 300
 MAX_PATTERNS = 40
 STATE = ".joinery/errors.json"
 
-#: Lines that are never the project's problem: Joinery's own, and engine noise every
-#: run prints. The project adds its own with ``[agents] ignore_errors``.
+#: Joinery's own lines: listed as a Joinery bug, never sent to the fixer.
 OWN = ("addons/joinery", "[Joinery]")
+#: Engine noise every run prints: never listed. The project adds its own with
+#: ``[agents] ignore_errors``.
 NOISE = (
     "ObjectDB instances leaked at exit",
     "resources still in use at exit",
@@ -74,11 +80,21 @@ NOISE = (
 #: Group states. ``open`` waits for a fix; ``queued`` waits for a free agent;
 #: ``fixing`` and ``in_review`` follow its task; ``fixed`` was accepted; ``ignored``
 #: the user set aside; ``stopped`` failed twice; ``from_change`` came with a change
-#: still waiting for review, so it is that change's, not a new one to fix.
+#: still waiting for review, so it is that change's, not a new one to fix. ``editor``
+#: is the engine's or editor's own message, ``joinery`` a Joinery bug (both triaged
+#: before any agent), and ``explained`` a debugger found the cause and nothing in the
+#: project to change.
 OPEN, QUEUED, FIXING, IN_REVIEW = "open", "queued", "fixing", "in_review"
 FIXED, IGNORED, STOPPED, FROM_CHANGE = "fixed", "ignored", "stopped", "from_change"
+EDITOR, JOINERY, EXPLAINED = "editor", "joinery", "explained"
+#: Settled states: listed for a while after they settle, then history.
+SETTLED = (FIXED, EXPLAINED, EDITOR, JOINERY)
+SETTLED_SHOWN = 600.0
 #: States the Errors list shows; the rest are history.
-LISTED = (FIXING, QUEUED, IN_REVIEW, OPEN, STOPPED, FROM_CHANGE, IGNORED)
+LISTED = (FIXING, QUEUED, IN_REVIEW, OPEN, STOPPED, FROM_CHANGE, *SETTLED, IGNORED)
+#: Why a triaged group is never sent to the fixer.
+EDITOR_NOTE = "Editor message, not a game error."
+JOINERY_NOTE = "A Joinery bug, not your game's. Report it to Joinery."
 
 # "SCRIPT ERROR: …", "ERROR: …", "WARNING: …" and the user's push_error/push_warning.
 _CONSOLE = re.compile(
@@ -97,6 +113,16 @@ _REMOTE_PLACE = re.compile(
 _AT = re.compile(r"^\s+at:\s*(?:[^(]*?)\s*\((?P<where>[^)]*)\)\s*$")
 _SOURCE_LINE = re.compile(r"<GDScript Source>\s*(?P<where>[\w./ -]+?\.\w+:\d+)")
 _RES_LINE = re.compile(r"(res://[^\s:()]+):(\d+)")
+# The engine's and editor's own source: "scene/main/window.cpp:2138".
+_ENGINE_EXT = r"(?:cpp|cc|c|h|hpp|mm|m|inc)"
+_ENGINE_FILE = re.compile(rf"\.{_ENGINE_EXT}:\d+$")
+_ENGINE_SOURCE = re.compile(
+    r"(?:^|[\s(\[])(?:res://)?(?P<path>(?:core|scene|servers|platform|editor|drivers"
+    rf"|modules|main|thirdparty)/[\w./+-]+\.{_ENGINE_EXT}):(?P<line>\d+)"
+)
+# "Condition "!is_inside_tree()" is true", "Parameter "mesh" is null".
+_CONDITION = re.compile(r'^Condition "(?P<what>.+)" is true\.?(?:\s.*)?$')
+_PARAMETER = re.compile(r'^Parameter "(?P<what>.+)" is null\.?(?:\s.*)?$')
 # GUT: the script, the test, "[Failed]: …" and "at line N".
 _GUT_SCRIPT = re.compile(r"^\s*(?P<script>res://\S+\.gd)\s*$")
 _GUT_TEST = re.compile(r"^\s*[*-]\s+(?P<test>test_\w+)")
@@ -200,6 +226,9 @@ class Entry:
 
 def _where(text: str) -> str:
     where = text.strip().replace("\\", "/")
+    if _ENGINE_FILE.search(where) and not where.startswith(("res://", "user://")):
+        # The engine's own C++ source, not a file in the project.
+        return ""
     if where and "://" not in where and re.search(r"\.\w+:\d+$", where):
         where = "res://" + where.lstrip("/")
     return where if where.startswith(("res://", "user://")) else ""
@@ -336,10 +365,11 @@ def group_id(entry: Entry) -> str:
 
 
 def ignored(entry: Entry, patterns: Iterable[str] = ()) -> bool:
-    """Joinery's own lines, engine noise, and the project's ``ignore_errors``: each
-    pattern matches anywhere in the message or place, case aside, ``*`` for any text."""
+    """Engine noise and the project's ``ignore_errors``: each pattern matches anywhere
+    in the message or place, case aside, ``*`` for any text. Joinery's own lines are
+    not ignored: :func:`triage` lists them as a Joinery bug."""
     text = f"{entry.message} {entry.where} {entry.line}"
-    if any(own in text for own in OWN) or any(noise in text for noise in NOISE):
+    if any(noise in text for noise in NOISE):
         return True
     lower = text.lower()
     for pattern in patterns:
@@ -360,6 +390,75 @@ def where_file(where: str) -> str:
     """ "res://scripts/player.gd:42" → "scripts/player.gd" (project-relative)."""
     path = re.sub(r":\d+$", "", where)
     return path.removeprefix("res://") if path.startswith("res://") else ""
+
+
+def _project_where(where: str) -> bool:
+    """A place in the project's own files (not an engine source a path was put on)."""
+    return where.startswith(("res://", "user://")) and not _ENGINE_FILE.search(where)
+
+
+def _trace(line: str, context: str) -> str:
+    """The lines from the error to the next error: its own trace, nothing before it."""
+    lines = context.splitlines()
+    start = next((i for i, text in enumerate(lines) if text.strip() == line.strip()), 0)
+    trace = [lines[start]] if lines else []
+    for text in lines[start + 1 :]:
+        if _CONSOLE.match(text) or _REMOTE.match(text) or _PARSE.match(text):
+            break
+        trace.append(text)
+    return "\n".join(trace)
+
+
+def engine_place(message: str, line: str = "", context: str = "") -> str:
+    """The engine source an error was printed from ("window.cpp:2138"), or ""."""
+    for text in (message, line, _trace(line, context) if line else ""):
+        found = _ENGINE_SOURCE.search(text)
+        if found is not None:
+            return f"{found.group('path').rsplit('/', 1)[-1]}:{found.group('line')}"
+    return ""
+
+
+def triage(
+    message: str,
+    where: str = "",
+    line: str = "",
+    context: str = "",
+    sources: Iterable[str] = ("output",),
+) -> str:
+    """What an error is before any agent looks at it: "joinery" (from Joinery's own
+    addon), "editor" (printed by the engine's or editor's C++ source, seen only in the
+    editor's Output, with no project script in its trace), or "" (the game's, to fix).
+
+    Anything the running game, a playtest or a test printed is the game's."""
+    trace = _trace(line, context) if line else ""
+    if any(own in f"{message} {where} {line} {trace}" for own in OWN):
+        return JOINERY
+    if _project_where(where) or set(sources) - {"output"}:
+        return ""
+    if _REMOTE.match(line) or _RES_LINE.search(f"{message}\n{trace}"):
+        return ""
+    return EDITOR if engine_place(message, line, context) else ""
+
+
+def triage_entry(entry: Entry) -> str:
+    if entry.kind == "test":
+        return ""
+    return triage(
+        entry.message, entry.where, entry.line, entry.context, (entry.source,)
+    )
+
+
+def short_message(message: str) -> str:
+    """The error's words without the place Godot put in front: "!is_inside_tree()" for
+    'scene/main/window.cpp:2138 - Condition "!is_inside_tree()" is true.'."""
+    text = " ".join(message.split())
+    text = re.sub(r"^\S+\.\w+:\d+\s+-\s+", "", text)
+    for pattern, shape in ((_CONDITION, "{}"), (_PARAMETER, "{} is null")):
+        found = pattern.match(text)
+        if found is not None:
+            return shape.format(found.group("what"))
+    text = text.rstrip(".")
+    return text if len(text) <= 60 else text[:59] + "…"
 
 
 # --- groups ----------------------------------------------------------------------------
@@ -390,6 +489,10 @@ class Group:
     note: str = ""
     line: str = ""
     context: str = ""
+    #: The cause the debugger found, shown behind the row's disclosure.
+    cause: str = ""
+    #: When it reached a settled state (fixed, explained, editor, joinery).
+    settled: float = 0.0
 
     @property
     def count(self) -> int:
@@ -400,6 +503,19 @@ class Group:
         place = short_where(self.where)
         text = self.message if len(self.message) <= 90 else self.message[:89] + "…"
         return text + (f" ({place})" if place else "")
+
+    def title(self) -> str:
+        """The row's short name: "window.cpp:2138 — !is_inside_tree()"."""
+        place = short_where(self.where) if _project_where(self.where) else ""
+        place = place or engine_place(self.message, self.line, self.context)
+        words = short_message(self.message)
+        return f"{place} — {words}" if place else words
+
+    def triage(self) -> str:
+        return triage(self.message, self.where, self.line, self.context, self.counts)
+
+    def settle(self, status: str, now: float, note: str = "") -> None:
+        self.status, self.note, self.settled = status, note, now
 
     def fixing_title(self) -> str:
         return "Fixing: " + self.label()
@@ -418,6 +534,8 @@ class Group:
             "where": self.where,
             "place": short_where(self.where),
             "label": self.label(),
+            "title": self.title(),
+            "cause": self.cause,
             "count": self.count,
             "sources": [SOURCES.get(s, s) for s in self.counts],
             "status": self.status,
@@ -441,6 +559,7 @@ def _empty_totals() -> dict[str, int]:
         "discarded": 0,
         "failed": 0,
         "stopped": 0,
+        "triaged": 0,
     }
 
 
@@ -529,10 +648,20 @@ class Book:
         self.totals["seen"] += 1
         return group, fresh
 
-    def listed(self, limit: int = 30) -> list[Group]:
-        """The groups the Errors list shows: being fixed first, then waiting, newest
+    def listed(self, limit: int = 30, now: float | None = None) -> list[Group]:
+        """The groups the Errors list shows: being fixed first, then waiting, then
+        the recently settled (fixed, explained, editor messages, Joinery bugs), newest
         first within each, ignored last."""
-        shown = [g for g in self.groups.values() if g.status in LISTED]
+        stamp = time.time() if now is None else now
+        shown = [
+            g
+            for g in self.groups.values()
+            if g.status in LISTED
+            and (
+                g.status not in SETTLED
+                or stamp - max(g.settled, g.last_seen) <= SETTLED_SHOWN
+            )
+        ]
         shown.sort(key=lambda g: (LISTED.index(g.status), -g.last_seen))
         return shown[:limit]
 
@@ -550,7 +679,9 @@ def render_totals(counts: Mapping[str, int]) -> str:
         f"Fixes started: {counts['fixes']}, ready for review: {counts['ready']}, "
         f"accepted: {counts['accepted']}, discarded: {counts['discarded']}\n"
         f"Failed tries: {counts['failed']}; given up after {MAX_FAILURES} tries: "
-        f"{counts['stopped']}"
+        f"{counts['stopped']}\n"
+        f"Editor messages and Joinery bugs set aside before any agent: "
+        f"{counts.get('triaged', 0)}"
     )
 
 

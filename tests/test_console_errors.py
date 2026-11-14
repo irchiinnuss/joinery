@@ -50,7 +50,11 @@ def run(step: Callable[[], Any]) -> Any:
 
 def test_console_text_is_read_into_errors_warnings_and_failed_tests() -> None:
     found = ce.parse(OUTPUT + GUT)
-    shown = [(e.kind, e.message, e.where) for e in found if not ce.ignored(e)]
+    shown = [
+        (e.kind, e.message, e.where)
+        for e in found
+        if not ce.ignored(e) and not ce.triage_entry(e)
+    ]
     assert shown == [
         (
             "error",
@@ -78,8 +82,11 @@ def test_console_text_is_read_into_errors_warnings_and_failed_tests() -> None:
             "res://test/unit/test_player.gd:18",
         ),
     ]
-    # Joinery's own lines and engine noise are read but never listed.
-    assert sum(1 for e in found if ce.ignored(e)) == 2
+    # Engine noise is read but never listed; Joinery's own line is a Joinery bug.
+    assert sum(1 for e in found if ce.ignored(e)) == 1
+    assert [ce.triage_entry(e) for e in found if "addons/joinery" in e.where] == [
+        "joinery"
+    ]
     assert all(e.context for e in found)
 
 
@@ -123,7 +130,11 @@ def test_the_ignore_list_and_warnings_come_from_joinery_toml(tmp_path: Path) -> 
     )
     settings = ce.settings(tmp_path)
     assert settings.mode == "auto" and settings.warnings and settings.at_once == 3
-    kept = [e.message for e in ce.parse(OUTPUT) if not ce.ignored(e, settings.ignore)]
+    kept = [
+        e.message
+        for e in ce.parse(OUTPUT)
+        if not ce.ignored(e, settings.ignore) and not ce.triage_entry(e)
+    ]
     assert kept == [
         'Parse Error: Identifier "speed" not declared in the current scope.',
         "Invalid get index 'health' (on base: 'null instance').",
@@ -167,6 +178,7 @@ class FakeTask:
     transaction_id: str = ""
     message: str = ""
     review_title: str = ""
+    cause: str = ""
 
 
 @dataclass
@@ -190,7 +202,9 @@ class FakeCrew:
         *,
         title: str = "",
         at_once: int = 1,
+        console: bool = False,
     ) -> FakeTask:
+        assert console, "A console error fix is followed in the Errors list"
         if len(self.working()) >= at_once:
             raise ValueError("Journeyman is already debugging an error; wait for it.")
         task = FakeTask(f"t{len(self.started) + 1}", title)
@@ -322,7 +336,10 @@ def test_a_fix_reaches_review_and_only_the_user_accepts_it(tmp_path: Path) -> No
 
     run(go)
     group = desk.group("player.gd:42")
-    assert group.status == "fixed" and desk.last()["groups"] == []
+    # Fixed: the row says so for a while, then it is history.
+    assert group.status == "fixed"
+    assert [g["status"] for g in desk.last()["groups"]] == ["fixed"]
+    assert ce.Book.load(tmp_path).listed(now=group.settled + 601) == []
     totals = ce.Book.load(tmp_path).totals
     assert (totals["fixes"], totals["ready"], totals["accepted"]) == (1, 1, 1)
 
@@ -413,26 +430,28 @@ def test_errors_a_pending_change_brought_are_never_fixed(tmp_path: Path) -> None
 
 
 def test_fix_all_and_ignore_in_ask_mode(tmp_path: Path) -> None:
-    desk = Desk(tmp_path, "fix_errors_at_once = 2\n")
+    desk = Desk(tmp_path, "fix_errors_at_once = 1\n")
+    places = [f"{name}.gd:{line}" for line, name in enumerate("abcdefghi", 1)]
 
     async def go() -> None:
-        for place in ("a.gd:1", "b.gd:2", "c.gd:3", "d.gd:4"):
+        for place in places:
             await desk.fixer.take_text("output", error_at(place))
-        desk.fixer.ignore(desk.group("d.gd:4").id)
+        desk.fixer.ignore(desk.group("i.gd:9").id)
         assert not desk.crew.started
         await desk.fixer.fix()
-        # Two at once; the third waits its turn and starts when one is done.
-        assert len(desk.crew.started) == 2
-        assert desk.group("c.gd:3").status == "queued"
+        # One turn takes BATCH of them; the rest wait for it and go together next.
+        assert len(desk.crew.started) == 1
+        assert desk.group("g.gd:7").status == "queued"
         _, first = desk.crew.started[0]
         desk.crew.tell(first, "in_review", "tx1")
         await asyncio.sleep(0)
         await asyncio.sleep(0)
-        assert len(desk.crew.started) == 3
+        assert len(desk.crew.started) == 2
+        assert desk.crew.started[1][1].title.startswith("Fixing 2 errors: g.gd:7")
 
     run(go)
     statuses = [g["status"] for g in desk.last()["groups"]]
-    assert statuses == ["fixing", "fixing", "in_review", "ignored"]
+    assert statuses == ["fixing"] * 2 + ["in_review"] * 6 + ["ignored"]
 
 
 def test_off_watches_nothing_and_warnings_wait_for_opt_in(tmp_path: Path) -> None:
@@ -464,6 +483,128 @@ def test_always_fix_errors_like_this_switches_on_auto_and_fixes_it(
 
     run(go)
     assert ce.settings(tmp_path).mode == "auto" and len(desk.crew.started) == 1
+
+
+# Godot's two ways of printing an engine error in the editor's Output.
+ENGINE = 'ERROR: scene/main/window.cpp:2138 - Condition "!is_inside_tree()" is true.\n'
+ENGINE_AT = (
+    'ERROR: Condition "!windows.has(p_window)" is true. Returning: Rect2i()\n'
+    "   at: window_get_position (platform/macos/display_server_macos.mm:1858)\n"
+)
+
+
+def test_editor_messages_and_joinery_bugs_are_triaged_before_any_agent() -> None:
+    (window,) = ce.parse(ENGINE)
+    (macos,) = ce.parse(ENGINE_AT)
+    assert ce.triage_entry(window) == ce.triage_entry(macos) == "editor"
+    # The engine's source is no place in the project.
+    assert macos.where == ""
+    book = ce.Book(Path("/nowhere"))
+    group, _ = book.add(window)
+    assert group.title() == "window.cpp:2138 — !is_inside_tree()"
+    assert (
+        book.add(macos)[0].title()
+        == "display_server_macos.mm:1858 — !windows.has(p_window)"
+    )
+    # A project script in its trace, the running game, a playtest: the game's.
+    with_frame = ENGINE_AT + "   at: GDScript backtrace (res://player.gd:12)\n"
+    assert ce.parse(with_frame)[0].where == "res://player.gd:12"
+    assert ce.triage_entry(ce.parse(with_frame)[0]) == ""
+    assert ce.triage_entry(ce.parse(ENGINE, "game")[0]) == ""
+    remote = "E 0:00:02:0100   node.cpp:1580 @ add_child(): Parent node is busy.\n"
+    assert ce.triage_entry(ce.parse(remote)[0]) == ""
+    assert ce.triage_entry(ce.parse(NULL_AT)[0]) == ""
+    # Joinery's own addon: a Joinery bug, wherever it showed.
+    own = "SCRIPT ERROR: Invalid call\n   at: f (res://addons/joinery/plugin.gd:3)\n"
+    assert ce.triage_entry(ce.parse(own, "game")[0]) == "joinery"
+    # A script's own error keeps its words and its file.
+    group, _ = book.add(ce.parse(NULL_AT)[0])
+    assert group.title() == (
+        "player.gd:42 — Invalid get index 'health' (on base: 'null instance')"
+    )
+
+
+def test_editor_messages_are_listed_without_an_agent_turn(tmp_path: Path) -> None:
+    desk = Desk(tmp_path, 'fix_errors = "auto"\n')
+
+    async def go() -> None:
+        await desk.fixer.take_text("output", ENGINE + ENGINE_AT)
+        own = "SCRIPT ERROR: x\n   at: f (res://addons/joinery/plugin.gd:3)\n"
+        await desk.fixer.take_text("output", own)
+
+    run(go)
+    assert not desk.crew.started
+    rows = {g["title"]: (g["status"], g["note"]) for g in desk.last()["groups"]}
+    assert rows == {
+        "window.cpp:2138 — !is_inside_tree()": ("editor", ce.EDITOR_NOTE),
+        "display_server_macos.mm:1858 — !windows.has(p_window)": (
+            "editor",
+            ce.EDITOR_NOTE,
+        ),
+        "plugin.gd:3 — x": ("joinery", ce.JOINERY_NOTE),
+    }
+    assert desk.last()["totals"]["triaged"] == 3
+
+    # In "ask" nothing about them is offered either.
+    (tmp_path / "ask").mkdir()
+    ask = Desk(tmp_path / "ask", "")
+    run(lambda: ask.fixer.take_text("output", ENGINE))
+    assert not [e for e in ask.lists() if "offer" in e]
+
+
+def test_groups_an_earlier_session_left_open_are_triaged_on_load(
+    tmp_path: Path,
+) -> None:
+    book = ce.Book(tmp_path)
+    book.add(ce.parse(ENGINE)[0])
+    book.save()
+    desk = Desk(tmp_path, 'fix_errors = "auto"\n')
+    run(desk.fixer.pump)
+    assert not desk.crew.started
+    assert [g.status for g in desk.fixer.book.groups.values()] == ["editor"]
+
+
+def test_errors_that_show_together_share_one_debugger_turn(tmp_path: Path) -> None:
+    desk = Desk(tmp_path, 'fix_errors = "auto"\nfix_errors_cooldown = 0\n')
+
+    async def go() -> None:
+        await desk.fixer.take_text(
+            "output",
+            error_at("player.gd:42") + error_at("enemy.gd:7") + error_at("hud.gd:3"),
+        )
+        ((request, task),) = desk.crew.started
+        assert task.title.startswith("Fixing 3 errors: player.gd:42 — Invalid get")
+        assert request.error.startswith("3 errors that showed together")
+        for place in ("player.gd:42", "enemy.gd:7", "hud.gd:3"):
+            assert f"res://{place}" in request.output
+        assert desk.fixer.running() == 1
+        desk.crew.tell(task, "in_review", "tx1")
+
+    run(go)
+    assert {g["status"] for g in desk.last()["groups"]} == {"in_review"}
+    assert {g["transaction_id"] for g in desk.last()["groups"]} == {"tx1"}
+    assert ce.Book.load(tmp_path).totals["fixes"] == 1
+
+
+def test_a_cause_with_nothing_to_change_is_explained_not_retried(
+    tmp_path: Path,
+) -> None:
+    desk = Desk(tmp_path, 'fix_errors = "auto"\nfix_errors_cooldown = 0\n')
+
+    async def go() -> None:
+        await desk.fixer.take_text("output", error_at("player.gd:42"))
+        ((_, task),) = desk.crew.started
+        task.cause = "The GPU driver crashed; nothing in the project causes it."
+        task.message = "Cause: " + task.cause
+        desk.crew.tell(task, "done")
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+    run(go)
+    assert len(desk.crew.started) == 1
+    (row,) = desk.last()["groups"]
+    assert row["status"] == "explained" and row["cause"].startswith("The GPU driver")
+    assert desk.group("player.gd:42").failures == 0
 
 
 # --- end to end, with the real crew and a fake agent --------------------------------------
@@ -507,7 +648,8 @@ def test_an_automatic_fix_is_a_reviewed_change_titled_with_the_error(
         await crew.close()
         await test.gateway.close()
         rows = [e for e in events if e["kind"] == "errors"]
-        assert rows[-1]["groups"] == [] and rows[-1]["totals"]["accepted"] == 1
+        assert [g["status"] for g in rows[-1]["groups"]] == ["fixed"]
+        assert rows[-1]["totals"]["accepted"] == 1
 
     run(go)
     assert (project / "notes/shared.txt").read_text() == "fixed\n"

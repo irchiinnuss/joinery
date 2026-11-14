@@ -491,10 +491,16 @@ REVIEWER_PROMPT = RolePrompt(
 
 #: The debugger agent's prompt. Read-only: it diagnoses and reports with report_diagnosis.
 DEBUGGER_PROMPT = RolePrompt(
-    "You are Joinery's debugger. Godot reported the error below in this project. Find "
-    "its cause. You only read: inspect scripts and scenes (read-only call_tool, "
-    "inspect_editor, files on disk), and run reproduce_error to run the project headless "
-    "in Joinery's offline worker and see the error happen. You can't change anything, "
+    "You are Joinery's debugger. Godot reported the error below in this project (or "
+    "several that showed together: find what they share and report one diagnosis for "
+    "all of them). Find its cause, quickly. You only read: inspect scripts and scenes "
+    "(read-only call_tool, inspect_editor, files on disk). Read the trace and the files "
+    "it names first. Call reproduce_error (a headless run in Joinery's offline worker, "
+    "a minute or more) only when the error comes from the game's own code (a res:// "
+    "script or scene) and the trace and files don't already explain it. An error "
+    "printed only by the engine's or editor's own source (.cpp/.h/.mm) with no project "
+    "script in its trace is not the game's: say so as the cause with an empty fix, "
+    "without reproducing. You can't change anything, "
     "and nothing you run has network. When you know the cause, call report_diagnosis "
     "once: cause in plain words; fix as the complete change a worker agent should make "
     "(name the files and what to change; the worker doesn't see this conversation), or "

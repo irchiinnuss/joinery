@@ -79,6 +79,36 @@ shared, agent-agnostic core (bridge + `joinery/`), not in one provider.
    `joinery metrics --errors` prints them; `joinery fix-errors --json`
    includes them.
 
+## Amendment (2026-11-14): triage, one turn for many, a compact list
+
+Engine and editor messages (`scene/main/window.cpp:2138 - Condition
+"!is_inside_tree()" is true.`) took a full debugger turn each, only for it to
+conclude "not a game error", and the feed showed each error three times.
+
+1. **Triage before any agent** (`console_errors.triage`). An error whose only
+   place is the engine's or editor's own source (`core/`, `scene/`,
+   `servers/`, `platform/`, `editor/`, `drivers/`, `modules/`, `main/` with
+   `.cpp/.h/.mm/…`), seen only in the editor's Output, with no `res://` frame
+   in its own trace, is listed at once as "Editor message, not a game error"
+   (state `editor`). Anything the running game, a playtest or a test printed
+   is the game's. Lines from `addons/joinery` are no longer silently dropped:
+   they are listed as a Joinery bug (state `joinery`). Neither is offered or
+   sent to the fixer, and groups a past session left open are triaged again
+   on load. An engine source is never made into a `res://` place.
+2. **One turn for many.** The groups waiting together (one `errors_seen`, or
+   all queued) go to one debugger turn, up to six; `fix_errors_at_once` now
+   counts turns, not groups.
+3. **A faster turn.** The debugger reads the trace first and reproduces only
+   for game code the trace doesn't explain; an engine-only message is
+   reported with an empty fix at once.
+4. **A cause with nothing to change** is `explained`, not a failed try: it is
+   not retried, and its cause is kept for the list.
+5. **The list is the one place.** A console fix task (`console: true` on its
+   task events) has no card of its own and leaves no transcript lines: its
+   row shows a short title ("window.cpp:2138 — !is_inside_tree()"), the state,
+   its current step and timer while fixing, and the cause behind a
+   disclosure. Fixed, explained and triaged rows stay listed for ten minutes.
+
 ## Consequences
 
 - With the default nothing changes for a user who never touches the setting,

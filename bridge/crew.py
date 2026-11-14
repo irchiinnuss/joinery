@@ -96,6 +96,9 @@ class Task:
     cause: str = ""
     #: The title its card takes once its change waits for review ("Fixed: …").
     review_title: str = ""
+    #: A console error fix (ADR 0075): the sidebar's Errors list shows its progress,
+    #: so it has no card of its own.
+    console: bool = False
     state: str = WORKING
     step: str = ""
     #: Joinery's or the agent's last line, shown on the task's card.
@@ -126,6 +129,7 @@ class Task:
             "role": self.role,
             "error": self.error,
             "cause": self.cause,
+            **({"console": True} if self.console else {}),
             "state": self.state,
             "step": self.step,
             "message": self.message,
@@ -450,9 +454,11 @@ class Crew:
         targets: list[str] | tuple[str, ...] = (),
         *,
         error: str = "",
+        console: bool = False,
     ) -> Task:
         """A new task, on its card at once."""
         task = self._prepare(title, request, origin, prompt, targets, error=error)
+        task.console = console
         self.tasks[task.id] = task
         self.emit(task.event())
         return task
@@ -524,17 +530,24 @@ class Crew:
         *,
         title: str = "",
         at_once: int = 1,
+        console: bool = False,
     ) -> Task:
         """Debug one error: a debugger finds the cause, then a worker makes the fix
         as a normal staged change, checked and reviewed like any other. One card
         follows both ("Debugging: <error>", or ``title``). ``at_once`` debug tasks may
-        work together (console error fixes, ADR 0075); one by default."""
+        work together (console error fixes, ADR 0075); one by default. A ``console``
+        fix is followed in the sidebar's Errors list instead of a card."""
         if self._debugger is None:
             raise ValueError("Debugging isn't available with this agent.")
         if sum(1 for t in self.working() if t.origin == "debug") >= max(1, at_once):
             raise ValueError("Journeyman is already debugging an error; wait for it.")
         task = self._open(
-            title or request.title, request.error, "debug", prompt, error=request.error
+            title or request.title,
+            request.error,
+            "debug",
+            prompt,
+            error=request.error,
+            console=console,
         )
         task.job = asyncio.create_task(self._debug(task, request, prompt))
         return task

@@ -8,9 +8,14 @@ up to date.
 
 ``[agents] fix_errors = "ask"`` offers each new group once ("Godot reported an
 error: … Debug / Always fix errors like this / Dismiss"), and Fix or Fix all on the
-list starts fixes. ``"auto"`` starts one at once. Either way a fix is a debug task
+list starts fixes. ``"auto"`` starts them at once. Either way a fix is a debug task
 (bridge.crew): the debugger finds the cause and a worker stages the fix, which the
 user accepts or discards like any other change. Nothing is ever accepted here.
+
+No agent turn is spent on what isn't the game's: each new group is triaged first
+(:func:`joinery.console_errors.triage`), and an editor message or a Joinery bug is
+listed as such at once. Errors that wait together go to one debugger turn (up to
+``BATCH``), not one turn each in series.
 
 The automatic mode keeps to its limits: ``fix_errors_at_once`` fixes at a time and
 never more than the project's free turns, ``fix_errors_cooldown`` seconds between
@@ -45,6 +50,10 @@ GAVE_UP = (
 HELD = "Waits: its file is in a change waiting for review."
 CAME_WITH = "Came with a change waiting for review; decide that change first."
 FINAL = frozenset({"accepted", "discarded", "done", "failed", "stopped"})
+#: Errors one debugger turn takes at most.
+BATCH = 6
+#: What the list says when the debugger found nothing in the project to change.
+EXPLAINED = "No project change fixes it."
 
 
 class FixCrew(Protocol):
@@ -63,6 +72,7 @@ class FixCrew(Protocol):
         *,
         title: str = "",
         at_once: int = 1,
+        console: bool = False,
     ) -> Any: ...
 
 
@@ -88,8 +98,8 @@ class ErrorFixer:
         self._clock = clock
         self._wall = wall
         self.book = ce.Book.load(project)
-        #: Fix tasks: {task id: group id}, and the state each was last seen in.
-        self._tasks: dict[str, str] = {}
+        #: Fix tasks: {task id: its group ids}, and the state each was last seen in.
+        self._tasks: dict[str, list[str]] = {}
         self._states: dict[str, str] = {}
         self._task_of: dict[str, Any] = {}
         self._last_start: float | None = None
@@ -98,6 +108,17 @@ class ErrorFixer:
         self._settings_stamp: float = -1.0
         self._pumping = False
         crew.observers.append(self._observe)
+        self._retriage()
+
+    def _retriage(self) -> None:
+        """Groups an earlier session left waiting that triage now sets aside."""
+        now = self._wall()
+        for group in self.book.groups.values():
+            if group.status not in (ce.OPEN, ce.STOPPED):
+                continue
+            verdict = group.triage()
+            if verdict:
+                self._set_aside(group, verdict, now)
 
     # --- settings -----------------------------------------------------------------------
 
@@ -152,11 +173,21 @@ class ErrorFixer:
                 continue
             group, fresh = self.book.add(entry, now)
             changed = True
+            verdict = ce.triage_entry(entry)
+            if fresh and verdict:
+                # Not the game's: listed for what it is, never offered or fixed.
+                self._set_aside(group, verdict, now)
+                continue
+            if group.status in (ce.EDITOR, ce.JOINERY):
+                if verdict or group.status == ce.JOINERY:
+                    continue
+                # The game printed it too: it is the game's after all.
+                group.status, group.note, fresh = ce.OPEN, "", True
             fixing = self._task_of.get(group.task_id)
             if group.status == ce.FIXING and fixing is not None:
                 # Its change, once ready, says how often the error showed.
                 with contextlib.suppress(AttributeError):
-                    fixing.review_title = group.fixed_title()
+                    fixing.review_title = _fixed_title(self._fixed_by(group.task_id))
             reopened = self._recurred(group)
             if not (fresh or reopened):
                 continue
@@ -180,6 +211,11 @@ class ErrorFixer:
             self._offered.add(offer.id)
         self._save()
         self.publish(offer if settings.mode == "ask" else None)
+
+    def _set_aside(self, group: ce.Group, verdict: str, now: float) -> None:
+        note = ce.JOINERY_NOTE if verdict == ce.JOINERY else ce.EDITOR_NOTE
+        group.settle(verdict, now, note)
+        self.book.totals["triaged"] += 1
 
     def _recurred(self, group: ce.Group) -> bool:
         """An accepted fix's error came back: that fix failed; it is open again."""
@@ -219,12 +255,15 @@ class ErrorFixer:
         group = self.book.groups.get(group_id)
         if group is None:
             return
-        self._link(group, task)
+        self._link([group], task)
         self._save()
         self.publish()
 
     def running(self) -> int:
-        return sum(1 for g in self.book.groups.values() if g.status == ce.FIXING)
+        """Fix tasks working now (one task may fix several groups)."""
+        return len(
+            {g.task_id for g in self.book.groups.values() if g.status == ce.FIXING}
+        )
 
     async def pump(self, manual: bool = False) -> None:
         """Start what may start now: queued groups first, then, in "auto", open ones
@@ -249,16 +288,21 @@ class ErrorFixer:
             ),
             key=lambda g: (g.status != ce.QUEUED, g.first_seen),
         )
+        waiting: list[ce.Group] = []
         for group in candidates:
-            if self.running() >= settings.at_once or self.crew.capacity() <= 0:
-                return
-            automatic = group.status == ce.OPEN
-            if automatic and not manual and self._cooling(settings):
-                return
             if ce.where_file(group.where) in held:
                 group.note = HELD
                 continue
-            await self._start(group, settings)
+            waiting.append(group)
+        if not manual and self._cooling(settings):
+            # Between two automatic starts only what the user asked for goes.
+            waiting = [g for g in waiting if g.status == ce.QUEUED]
+        # The errors waiting together share one debugger turn.
+        while waiting:
+            if self.running() >= settings.at_once or self.crew.capacity() <= 0:
+                return
+            batch, waiting = waiting[:BATCH], waiting[BATCH:]
+            await self._start(batch, settings)
 
     def _cooling(self, settings: ce.Settings) -> bool:
         if self._last_start is None:
@@ -271,80 +315,90 @@ class ErrorFixer:
             return 0.0
         return max(0.0, self.settings().cooldown - (self._clock() - self._last_start))
 
-    async def _start(self, group: ce.Group, settings: ce.Settings) -> None:
-        request = DebugRequest(
-            error=(group.line or group.message)[:300],
-            output=(
-                group.context
-                + f"\n\nSeen {group.count} time(s), in: "
-                + ", ".join(ce.SOURCES.get(s, s) for s in group.counts)
-                + (f"\nWhere: {group.where}" if group.where else "")
-            )[-12_000:],
-        )
+    async def _start(self, groups: list[ce.Group], settings: ce.Settings) -> None:
         try:
             task = await self.crew.debug(
-                request,
+                _request(groups),
                 self._prompt(),
-                title=group.fixing_title(),
+                title=_fixing_title(groups),
                 at_once=settings.at_once,
+                console=True,
             )
         except ValueError as exc:
-            group.note = str(exc)[:200]
+            for group in groups:
+                group.note = str(exc)[:200]
             return
         self._last_start = self._clock()
         self.book.totals["fixes"] += 1
-        self._link(group, task)
+        self._link(groups, task)
 
-    def _link(self, group: ce.Group, task: Any) -> None:
-        group.status, group.task_id, group.note = ce.FIXING, str(task.id), ""
-        group.transaction_id = ""
+    def _link(self, groups: list[ce.Group], task: Any) -> None:
+        for group in groups:
+            group.status, group.task_id, group.note = ce.FIXING, str(task.id), ""
+            group.transaction_id, group.cause = "", ""
         with contextlib.suppress(AttributeError):
-            task.review_title = group.fixed_title()
-        self._tasks[str(task.id)] = group.id
+            task.review_title = _fixed_title(groups)
+        self._tasks[str(task.id)] = [g.id for g in groups]
         self._task_of[str(task.id)] = task
         self._states[str(task.id)] = "working"
 
     # --- following fix tasks ------------------------------------------------------------
 
+    def _fixed_by(self, task_id: str) -> list[ce.Group]:
+        ids = self._tasks.get(task_id, [])
+        return [self.book.groups[i] for i in ids if i in self.book.groups]
+
     def _observe(self, task: Any) -> None:
-        group_id = self._tasks.get(str(task.id))
-        if group_id is None:
+        if str(task.id) not in self._tasks:
             return
         state = str(task.state)
+        cause = " ".join(str(getattr(task, "cause", "") or "").split())
+        groups = self._fixed_by(str(task.id))
+        for group in groups:
+            group.cause = cause or group.cause
         if self._states.get(str(task.id)) == state:
             return
         self._states[str(task.id)] = state
-        group = self.book.groups.get(group_id)
-        if group is None:
+        if not groups or state not in FINAL | {"in_review"}:
             return
         if state == "in_review":
-            group.status, group.transaction_id = ce.IN_REVIEW, str(task.transaction_id)
             self.book.totals["ready"] += 1
         elif state == "accepted":
-            group.status, group.note = ce.FIXED, ""
             self.book.totals["accepted"] += 1
+        elif state == "discarded":
+            self.book.totals["discarded"] += 1
+        for group in groups:
+            self._moved(group, task, state)
+        if state in FINAL:
+            self._tasks.pop(str(task.id), None)
+            self._states.pop(str(task.id), None)
+            self._task_of.pop(str(task.id), None)
+            for group in groups:
+                group.task_id = "" if state != "accepted" else group.task_id
+        self._save()
+        self.publish()
+        with contextlib.suppress(RuntimeError):
+            asyncio.get_running_loop().call_soon(self._repump)
+
+    def _moved(self, group: ce.Group, task: Any, state: str) -> None:
+        """One group follows its fix task to ``state``."""
+        if state == "in_review":
+            group.status, group.transaction_id = ce.IN_REVIEW, str(task.transaction_id)
+        elif state == "accepted":
+            group.settle(ce.FIXED, self._wall())
         elif state in ("discarded", "stopped"):
             # The user said no: it stays listed, and only the user starts it again.
             group.status, group.declined = ce.OPEN, True
             group.note = (
                 "Its fix was discarded." if state == "discarded" else "Stopped."
             )
-            if state == "discarded":
-                self.book.totals["discarded"] += 1
-        elif state in ("failed", "done"):
+        elif state == "done" and group.cause:
+            # The debugger found the cause and nothing in the project to change: no
+            # second try; the cause is behind the row's disclosure.
+            group.settle(ce.EXPLAINED, self._wall(), EXPLAINED)
+        else:
             reason = str(getattr(task, "message", "") or "The fix didn't finish.")
             self._failed(group, reason[:200])
-        else:
-            return
-        if state in FINAL:
-            self._tasks.pop(str(task.id), None)
-            self._states.pop(str(task.id), None)
-            self._task_of.pop(str(task.id), None)
-            group.task_id = "" if state != "accepted" else group.task_id
-        self._save()
-        self.publish()
-        with contextlib.suppress(RuntimeError):
-            asyncio.get_running_loop().call_soon(self._repump)
 
     def _repump(self) -> None:
         with contextlib.suppress(RuntimeError):
@@ -412,7 +466,7 @@ class ErrorFixer:
             "kind": "errors",
             "mode": settings.mode,
             "warnings": settings.warnings,
-            "groups": [g.view() for g in self.book.listed()]
+            "groups": [g.view() for g in self.book.listed(now=self._wall())]
             if settings.mode != "off"
             else [],
             "totals": dict(self.book.totals),
@@ -427,3 +481,51 @@ class ErrorFixer:
     def _save(self) -> None:
         with contextlib.suppress(OSError):
             self.book.save()
+
+
+# --- one request for the errors that wait together -------------------------------------
+
+
+def _fixing_title(groups: list[ce.Group]) -> str:
+    if len(groups) == 1:
+        return groups[0].fixing_title()
+    return f"Fixing {len(groups)} errors: " + "; ".join(g.title() for g in groups)[:120]
+
+
+def _fixed_title(groups: list[ce.Group]) -> str:
+    if len(groups) == 1:
+        return groups[0].fixed_title()
+    return f"Fixed {len(groups)} errors: " + "; ".join(g.title() for g in groups)[:120]
+
+
+def _request(groups: list[ce.Group]) -> DebugRequest:
+    """One debugger request for ``groups``: the first error's line, and each error's
+    own lines, place and count, so the debugger reads them together."""
+
+    def detail(group: ce.Group) -> str:
+        return (
+            group.context
+            + f"\n\nSeen {group.count} time(s), in: "
+            + ", ".join(ce.SOURCES.get(s, s) for s in group.counts)
+            + (f"\nWhere: {group.where}" if group.where else "")
+        )
+
+    if len(groups) == 1:
+        group = groups[0]
+        return DebugRequest(
+            error=(group.line or group.message)[:300],
+            output=detail(group)[-12_000:],
+        )
+    share = 12_000 // len(groups)
+    parts = [
+        f"--- Error {index} of {len(groups)}: {group.line or group.message}\n"
+        + detail(group)[-share:]
+        for index, group in enumerate(groups, 1)
+    ]
+    return DebugRequest(
+        error=(
+            f"{len(groups)} errors that showed together: "
+            + "; ".join(g.title() for g in groups)
+        )[:300],
+        output="\n\n".join(parts),
+    )
