@@ -26,6 +26,7 @@ const COMPLEX_MODELS_SETTING := preload("complex_models_setting.gd")
 const FIX_ERRORS_SETTING := preload("fix_errors_setting.gd")
 const AGENT_SETTING := preload("agent_setting.gd")
 const AUTO_ACCEPT_SETTING := preload("auto_accept_setting.gd")
+const TODO_GO_SETTING := preload("todo_go_setting.gd")
 const GROUP := preload("settings_group.gd")
 const BLOCKS := preload("ui_blocks.gd")
 const PATH := "Joinery/journeyman.cfg"
@@ -405,6 +406,10 @@ func _build_agent() -> void:
 	section.body.add_child(UI.setting_row("Reply mode", _mode_picker))
 	# Changes that pass every check kept without asking (`[agents] auto_accept`).
 	section.body.add_child(AUTO_ACCEPT_SETTING.new())
+	# When a to-do waits for Go (`[agents] todo_go`).
+	var todo_go: TODO_GO_SETTING = TODO_GO_SETTING.new()
+	_flush_picker(todo_go.picker)
+	section.body.add_child(todo_go)
 
 
 ## The closed picker says what the chosen reply mode does.
