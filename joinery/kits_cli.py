@@ -70,17 +70,44 @@ def _object(text: str, what: str) -> dict[str, Any]:
     return value
 
 
+def listing(data: dict[str, Any]) -> str:
+    """`kits list` for a person: one kit per paragraph (``--json`` for the data)."""
+    rows = data.get("kits", [])
+    if not rows:
+        return "No kits."
+    lines = [f"{len(rows)} kit{'s' if len(rows) != 1 else ''}:"]
+    for kit in rows:
+        lines.append("")
+        lines.append(f"{kit['id']}: {kit.get('label') or kit['id']}")
+        if kit.get("summary"):
+            lines.append(f"  {kit['summary']}")
+        names = [str(p.get("name", "")) for p in kit.get("params", []) if p.get("name")]
+        if names:
+            lines.append("  Parameters: " + ", ".join(names))
+        where = f"  Makes models in {kit.get('folder', '')}/"
+        if kit.get("budget"):
+            where += f", up to {kit['budget']} triangles"
+        lines.append(where + f", pivot {kit.get('pivot', 'bottom-centre')}")
+        if kit.get("from"):
+            lines.append(f"  Shared kit from {kit['from']}")
+    lines += ["", "Preview one: joinery kits preview --kit <id>. Data: --json."]
+    return "\n".join(lines)
+
+
 def main(args: argparse.Namespace) -> int:
     try:
         data = _run(args)
     except (OSError, ValueError, RuntimeError) as exc:
-        if args.json or args.action in {"list", "preview"}:
+        if args.json or args.action == "preview":
             print(json.dumps({"error": str(exc)}))
         else:
             print(f"kits: {exc}", file=sys.stderr)
         return 1
-    if args.json or args.action in {"list", "preview"}:
+    if args.json or args.action == "preview":
+        # The editor's preview reads JSON; a person asks for it with --json.
         print(json.dumps(data))
+    elif args.action == "list":
+        print(listing(data))
     else:
         print(data.get("summary", ""))
         if data.get("group"):

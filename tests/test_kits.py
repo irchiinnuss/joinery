@@ -411,3 +411,22 @@ def test_object_names() -> None:
     assert kits.object_name("rock") == "Rock"
     assert kits.object_name("mossy_rock_03") == "MossyRock_03"
     assert kits.material_name("MossyRock", "leaf_card") == "MossyRock_LeafCard"
+
+
+def test_kits_list_reads_as_text_and_gives_json_on_request(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import argparse
+    import json
+
+    from joinery import kits_cli
+
+    parser = argparse.ArgumentParser()
+    kits_cli.add_arguments(parser)
+    assert kits_cli.main(parser.parse_args(["list", "--project", str(tmp_path)])) == 0
+    text = capsys.readouterr().out
+    assert not text.lstrip().startswith("{")
+    assert "crate: " in text and "Parameters: " in text and "--json" in text
+    args = parser.parse_args(["list", "--project", str(tmp_path), "--json"])
+    assert kits_cli.main(args) == 0
+    assert any(k["id"] == "crate" for k in json.loads(capsys.readouterr().out)["kits"])
