@@ -146,23 +146,27 @@ func _check_builds(tab: TAB, cache: String) -> void:
 	_check(tab._templates.visible, "Missing templates offer the download, with its size")
 	var notice := tab._templates.find_child("Text", true, false) as Label
 	_check("1.3 GB" in notice.text, "The offer says how big the download is: " + notice.text)
-	_check(tab._build_button.disabled, "Build waits for the templates")
-	_check(tab._gallery.get_child_count() == 4, "Four screenshots on the shelf")
+	_check(
+		tab._build_button.text == "Download and build" and not tab._build_button.disabled,
+		"Without templates the one action downloads them and builds"
+	)
+	_check(not tab._publish_button.visible, "Before a build, Build is the only action")
+	_check(tab.screenshots().size() == 4, "Four screenshots on the shelf")
 	_check(tab._cover.visible and tab._cover.texture != null, "The cover shows")
 	_check(not tab._trailer_box.visible, "No trailer preview without the file")
 	_check(tab._media_button.text == "Remake", "Media can be remade")
 	_check(tab._steam_grid.get_child_count() == 2, "Each Steam image that exists shows")
-	_check("verify against Steamworks" in tab._steam_note.text, "Steam sizes say to verify them")
+	_check("verify against Steamworks" in tab._steam_button.tooltip_text, "Steam sizes: verify")
 	_check(tab._steam_problems.get_child_count() == 1, "A Steam check's problem is spelled out")
-	_check(tab._steam_button.text == "Remake Steam art", "Steam art can be remade")
+	_check(tab._steam_button.text == "Remake", "Steam art can be remade")
 	tab._steam_button.pressed.emit()
 	_check(tab.commands[-1].slice(0, 2) == ["share", "steam-art"], "Steam art runs its command")
 	tab.finish_job("steam", {"error": "Docker isn't running."})
 	_check(tab._steam_note.text == "Docker isn't running.", "A failed run says why")
 	_check("Roll." in tab._page_text.text and not "<!--" in tab._page_text.text, "Page preview")
-	_check(tab._page_note.text == "1 part still to write.", "Gaps are counted")
+	_check(tab._page_note.text == "1 part still to write", "Gaps are counted")
 	_check(tab._publish_button.disabled, "Nothing to publish before a build")
-	(tab._templates.find_child("Action", true, false) as Button).pressed.emit()
+	tab._build_button.pressed.emit()
 	var started: Array = tab.commands[-1]
 	_check("--download-templates" in started, "Only the user's click downloads the templates")
 	var expected := ["share", "build", "--targets", "web,windows,macos,linux"]
@@ -200,7 +204,21 @@ func _check_builds(tab: TAB, cache: String) -> void:
 	tab.finish_job("status", status)
 	tab.apply_status(status)
 	await _frames()
-	_check(tab._results.get_child_count() == 3, "One row per target built")
+	var built := tab._results.get_children().filter(
+		func(row: Node) -> bool:
+			return (
+				row.get_node_or_null("Result") != null
+				and (row.get_node("Result") as Control).visible
+			)
+	)
+	_check(built.size() == 3, "One result per target built")
+	_check(
+		(
+			tab._publish_button.visible
+			and tab._build_button.theme_type_variation == "JoinerySecondaryButton"
+		),
+		"Built: Publish is the one accent, Rebuild beside it"
+	)
 	var mac := tab._results.get_node("macos").get_node("Line") as Label
 	_check(mac.text == "57.8 MB · starts · nothing to report.", "macOS row: " + mac.text)
 	var linux := tab._results.get_node("linux").get_node("Line") as Label

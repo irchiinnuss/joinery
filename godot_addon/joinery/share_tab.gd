@@ -1,17 +1,19 @@
 @tool
 extends VBoxContainer
-## The Share tab in the editor's bottom panel: build the game for players, see the store media,
-## read the page text, and publish to itch.io.
+## The Share page: build the game for players, see the store media, read the page text, and
+## publish to itch.io.
 ##
-## Four groups, top to bottom, each glanceable on its own:
-## - Builds: a checkbox per target and Build. While it runs, one line says what is happening;
-##   after, one row per target with its size, whether it started, and the playtest's verdict.
-## - Store media: the screenshots, the trailer (an Ogg preview Godot can play) and the cover,
-##   with Remake (a new seeded run).
+## One centred column (ui_blocks.page_scroll) of quiet groups, each glanceable on its own:
+## - Builds: one card row per target, its checkbox, and after a build its one line (size,
+##   whether it started, the playtest's verdict) with its check.
+## - Store media: the trailer (an Ogg preview Godot can play), the cover and the screenshots,
+##   with Make or Remake (a new seeded run) on the caption's trailing edge.
 ## - Steam art: every store capsule and library image, composed in Krita from the
-##   screenshots, each with its size and its check (size, safe area, title readability).
-## - Page: the drafted share/page.md, with Edit (opens it in the user's own editor).
-## - Publish to itch.io…: share_publish.gd, which names the target and channels before pushing.
+##   screenshots, each with its check (size, safe area, title readability).
+## - Page text: the drafted share/page.md, with Edit (opens it in the user's own editor).
+## A sticky foot holds the state ("Not built yet", "Web and macOS ready", or what is running)
+## and the page's one accent action: Build until a build exists, then Publish to itch.io…
+## (share_publish.gd, which names the target and channels before pushing), with Rebuild beside.
 ##
 ## Everything comes from `joinery share … --json` (command_job.gd); nothing polls. Downloads
 ## (export templates, butler) happen only behind a button that says what is downloaded.
@@ -22,6 +24,13 @@ const UI := preload("ui_components.gd")
 const INDICATOR := preload("activity_indicator.gd")
 const COMMAND := preload("command_job.gd")
 const PUBLISH := preload("share_publish.gd")
+const BLOCKS := preload("ui_blocks.gd")
+const STYLE := preload("sidebar_style.gd")
+const GROUP := preload("settings_group.gd")
+## The page text shows this many lines; Edit opens the whole.
+const PAGE_LINES := 8
+## Marks a screenshot on the media shelf (the trailer and the cover share it).
+const SHOT := "joinery_shot"
 const SELF_PATH := "res://addons/joinery/share_tab.gd"
 const THUMB := Vector2(176, 99)
 const COVER := Vector2(126, 100)
@@ -40,11 +49,12 @@ var commands: Array = []
 var _status: Dictionary = {}
 var _checks: Dictionary = {}
 var _jobs: Dictionary = {}
+var _scroll: ScrollContainer
 var _content: VBoxContainer
-var _loading: HBoxContainer
+var _loading: VBoxContainer
 var _load_error: Label
 var _build_button: Button
-var _templates: PanelContainer
+var _templates: HBoxContainer
 var _progress: HBoxContainer
 var _progress_text: Label
 var _results: VBoxContainer
@@ -95,38 +105,25 @@ static func install(plugin: EditorPlugin) -> Control:
 
 func _init() -> void:
 	name = "Share"
-	theme_type_variation = "JoineryStack"
+	theme_type_variation = "JoineryFlush"
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	size_flags_vertical = Control.SIZE_EXPAND_FILL
 	accessibility_name = "Share your game: builds, store media, page text and publishing"
-	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	UI_MOTION.rubber_band(scroll)
-	add_child(scroll)
-	var gutter := MarginContainer.new()
-	gutter.theme_type_variation = "JoineryGutter"
-	gutter.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.add_child(gutter)
-	_content = VBoxContainer.new()
-	_content.theme_type_variation = "JoineryStack"
-	_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	gutter.add_child(_content)
-	_loading = HBoxContainer.new()
-	_loading.theme_type_variation = "JoineryRowTight"
-	var dots := INDICATOR.new()
-	dots.running = true
-	_loading.add_child(dots)
-	_loading.add_child(UI.label("Reading what's built…", "JoineryCaption"))
-	_content.add_child(_loading)
+	_scroll = BLOCKS.page_scroll()
+	add_child(_scroll)
+	_content = _scroll.get_meta("body")
+	_content.add_child(BLOCKS.page_title("Share"))
+	_loading = BLOCKS.skeleton(3)
+	_loading.name = "Loading"
+	_content.add_child(BLOCKS.spaced(_loading, 5))
 	_load_error = UI.label("", "JoineryError", true)
 	_load_error.hide()
-	_content.add_child(_load_error)
+	_content.add_child(BLOCKS.spaced(_load_error, 3))
 	_build_builds()
 	_build_media()
 	_build_steam()
 	_build_page()
-	_build_publish()
+	_build_foot()
 	_dialog = PUBLISH.new()
 	_dialog.publish_requested.connect(_publish)
 	_dialog.dry_run_requested.connect(_dry_run)
@@ -174,9 +171,15 @@ func apply_status(data: Dictionary) -> void:
 ## One progress line from a running command ("Exporting Web").
 func apply_progress(text: String) -> void:
 	_progress_text.text = text + "…"
+	_publish_note.hide()
 	if not _progress.visible:
 		_progress.show()
 		UI_MOTION.fade_in(_progress)
+
+
+## The screenshots on the media shelf, in order.
+func screenshots() -> Array[Node]:
+	return _gallery.get_children().filter(func(child: Node) -> bool: return child.has_meta(SHOT))
 
 
 ## The publish dialog, for tests and the visual suite.
@@ -212,77 +215,99 @@ static func result_line(result: Dictionary) -> String:
 # --- Building ----------------------------------------------------------------------------------
 
 
-func _group(title: String) -> VBoxContainer:
+## A group: its caption (with [param trailing], a quiet link, on its trailing edge), then, when
+## [param carded], a settings card whose rows go in the returned group's body.
+func _group(title: String, trailing: Control = null, carded := true) -> VBoxContainer:
 	var group := VBoxContainer.new()
-	group.theme_type_variation = "JoineryTight"
-	group.add_child(UI.label(title, "JoinerySection"))
+	group.theme_type_variation = "JoineryFlush"
 	_content.add_child(group)
+	if trailing != null:
+		STYLE.hug_right(trailing as Button)
+	group.add_child(BLOCKS.group_caption(title, true, trailing))
+	if carded:
+		var card: VBoxContainer = GROUP.new(title)
+		card.name = "Card"
+		card.header.hide()
+		group.add_child(card)
+		group.set_meta("body", card.body)
 	return group
 
 
 func _build_builds() -> void:
 	var group := _group("Builds")
 	group.name = "Builds"
-	var row := HFlowContainer.new()
-	row.name = "Targets"
-	row.theme_type_variation = "JoineryRow"
-	group.add_child(row)
+	_results = group.get_meta("body")
+	_results.name = "Results"
 	for target: Array in [
 		["web", "Web"], ["windows", "Windows"], ["macos", "macOS"], ["linux", "Linux"]
 	]:
-		var check := CheckBox.new()
-		check.text = str(target[1])
-		check.button_pressed = true
-		check.name = str(target[0])
-		check.toggled.connect(func(_on: bool) -> void: _render())
-		_checks[str(target[0])] = check
-		row.add_child(check)
-	_build_button = UI.primary("Build")
-	_build_button.name = "Build"
-	_build_button.pressed.connect(_build.bind(false))
-	UI_MOTION.press_feedback(_build_button)
-	row.add_child(_build_button)
-	_templates = UI.notice(
-		"Godot's export templates aren't on this computer.", "Download", "JoineryCard"
-	)
+		_results.add_child(_target_row(str(target[0]), str(target[1])))
+	_templates = HBoxContainer.new()
 	_templates.name = "Templates"
-	(_templates.find_child("Action", true, false) as Button).pressed.connect(_build.bind(true))
+	_templates.theme_type_variation = "JoineryRow"
+	UI.bind_height(_templates, "md", false)
+	_templates.add_child(UI.status_icon("warning"))
+	var words := UI.label("", "JoineryCaption")
+	words.name = "Text"
+	words.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	words.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_templates.add_child(words)
 	_templates.hide()
-	group.add_child(_templates)
-	_progress = HBoxContainer.new()
-	_progress.name = "Progress"
-	_progress.theme_type_variation = "JoineryRowTight"
-	var dots := INDICATOR.new()
-	dots.running = true
-	_progress.add_child(dots)
-	_progress_text = UI.label("", "JoineryCaption")
-	_progress.add_child(_progress_text)
-	_progress.hide()
-	group.add_child(_progress)
-	_results = VBoxContainer.new()
-	_results.name = "Results"
-	_results.theme_type_variation = "JoineryFlush"
-	group.add_child(_results)
-	_changes = UI.label("", "JoineryCaption", true)
+	_results.add_child(_templates)
+	_changes = UI.label("", "JoineryFaint", true)
 	_changes.name = "Changes"
 	_changes.hide()
-	group.add_child(_changes)
+	group.add_child(BLOCKS.spaced(_changes, 2))
+
+
+## One target on the builds card: its checkbox, then after a build its one line and its check.
+func _target_row(id: String, label: String) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.name = id
+	row.theme_type_variation = "JoineryRow"
+	UI.bind_height(row, "md", false)
+	var check := CheckBox.new()
+	check.text = label
+	check.name = "Check"
+	check.button_pressed = true
+	check.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	check.toggled.connect(func(_on: bool) -> void: _render())
+	_checks[id] = check
+	row.add_child(check)
+	var line := UI.label("", "JoineryNumeric")
+	line.name = "Line"
+	line.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	line.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	line.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	row.add_child(line)
+	var icon := UI.status_icon("done")
+	icon.name = "Result"
+	icon.hide()
+	row.add_child(icon)
+	return row
 
 
 func _build_media() -> void:
-	var group := _group("Store media")
+	_media_button = UI.quiet_link("Make")
+	_media_button.name = "Remake"
+	_media_button.tooltip_text = "Plays a new seeded run for screenshots, a trailer and a cover"
+	_media_button.pressed.connect(_make_media)
+	var group := _group("Store media", _media_button, false)
 	group.name = "Media"
 	_media_note = UI.label("", "JoineryCaption", true)
 	group.add_child(_media_note)
-	var shelf := HFlowContainer.new()
-	shelf.theme_type_variation = "JoineryRow"
-	group.add_child(shelf)
+	# One shelf: the trailer and the cover lead, the screenshots follow at the same height.
+	_gallery = HFlowContainer.new()
+	_gallery.name = "Screenshots"
+	_gaps(_gallery)
+	group.add_child(_gallery)
+	var shelf := _gallery
 	_trailer_box = VBoxContainer.new()
-	_trailer_box.theme_type_variation = "JoineryFlush"
+	_trailer_box.theme_type_variation = "JoineryTight"
 	_trailer_box.name = "Trailer"
 	shelf.add_child(_trailer_box)
 	_trailer = VideoStreamPlayer.new()
-	_trailer.custom_minimum_size = THUMB * 1.5
+	_trailer.custom_minimum_size = THUMB
 	_trailer.expand = true
 	_trailer.loop = true
 	_trailer.volume_db = -80.0
@@ -292,78 +317,107 @@ func _build_media() -> void:
 	_trailer_box.add_child(_trailer_text)
 	_cover = TextureRect.new()
 	_cover.name = "Cover"
-	_cover.custom_minimum_size = COVER * 1.5
+	_cover.custom_minimum_size = Vector2(THUMB.y * COVER.x / COVER.y, THUMB.y)
 	_cover.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	_cover.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	_cover.tooltip_text = "Cover, 630 × 500"
 	shelf.add_child(_cover)
-	_gallery = HFlowContainer.new()
-	_gallery.name = "Screenshots"
-	_gallery.theme_type_variation = "JoineryRowTight"
-	group.add_child(_gallery)
-	_media_button = UI.secondary("Make media")
-	_media_button.name = "Remake"
-	_media_button.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	_media_button.tooltip_text = "Plays a new seeded run for screenshots, a trailer and a cover"
-	_media_button.pressed.connect(_make_media)
-	UI_MOTION.press_feedback(_media_button)
-	group.add_child(_media_button)
 
 
 func _build_steam() -> void:
-	var group := _group("Steam art")
+	_steam_button = UI.quiet_link("Make")
+	_steam_button.name = "SteamMake"
+	_steam_button.tooltip_text = "Composes every capsule and library image in Krita"
+	_steam_button.pressed.connect(_make_steam)
+	var group := _group("Steam art", _steam_button, false)
 	group.name = "Steam"
 	_steam_note = UI.label("", "JoineryCaption", true)
 	group.add_child(_steam_note)
 	_steam_grid = HFlowContainer.new()
 	_steam_grid.name = "SteamImages"
-	_steam_grid.theme_type_variation = "JoineryRow"
+	_gaps(_steam_grid)
 	group.add_child(_steam_grid)
 	_steam_problems = VBoxContainer.new()
 	_steam_problems.name = "SteamProblems"
 	_steam_problems.theme_type_variation = "JoineryFlush"
-	group.add_child(_steam_problems)
-	_steam_button = UI.secondary("Make Steam art")
-	_steam_button.name = "SteamMake"
-	_steam_button.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	_steam_button.tooltip_text = "Composes every capsule and library image in Krita"
-	_steam_button.pressed.connect(_make_steam)
-	UI_MOTION.press_feedback(_steam_button)
-	group.add_child(_steam_button)
+	group.add_child(BLOCKS.spaced(_steam_problems, 2))
 
 
 func _build_page() -> void:
-	var group := _group("Page text")
+	_page_button = UI.quiet_link("Edit")
+	_page_button.name = "Edit"
+	_page_button.pressed.connect(_edit_page)
+	var group := _group("Page text", _page_button)
 	group.name = "Page"
-	var card := UI.card()
-	group.add_child(card)
+	var body: VBoxContainer = group.get_meta("body")
+	var inset := MarginContainer.new()
+	STYLE.on_theme_overrides(
+		inset,
+		func() -> void:
+			var pad := UI_THEME.space(inset, 3)
+			inset.add_theme_constant_override("margin_top", pad)
+			inset.add_theme_constant_override("margin_bottom", pad)
+	)
+	body.add_child(inset)
 	_page_text = UI.label("", "", true)
 	_page_text.name = "Text"
-	_page_text.max_lines_visible = 14
+	_page_text.max_lines_visible = PAGE_LINES
 	_page_text.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	card.add_child(_page_text)
+	inset.add_child(_page_text)
 	_page_note = UI.label("", "JoineryCaption", true)
 	_page_note.hide()
-	group.add_child(_page_note)
-	_page_button = UI.secondary("Edit")
-	_page_button.name = "Edit"
-	_page_button.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	_page_button.pressed.connect(_edit_page)
-	UI_MOTION.press_feedback(_page_button)
-	group.add_child(_page_button)
+	group.add_child(BLOCKS.spaced(_page_note, 2))
 
 
-func _build_publish() -> void:
-	var group := _group("Publish")
-	group.name = "Publish"
-	_publish_note = UI.label("", "JoineryCaption", true)
-	group.add_child(_publish_note)
+## The sticky foot: what is happening or what is ready on the leading edge, then Build and
+## Publish. Exactly one of them is the accent button: Build until something is built, Publish
+## after (Build becomes Rebuild beside it).
+func _build_foot() -> void:
+	var foot := BLOCKS.page_foot(_scroll)
+	add_child(foot)
+	var row: HBoxContainer = foot.get_meta("row")
+	_progress = HBoxContainer.new()
+	_progress.name = "Progress"
+	_progress.theme_type_variation = "JoineryRowTight"
+	_progress.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var dots := INDICATOR.new()
+	dots.running = true
+	dots.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_progress.add_child(dots)
+	_progress_text = UI.label("", "JoineryCaption")
+	_progress_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_progress_text.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_progress.add_child(_progress_text)
+	_progress.hide()
+	row.add_child(_progress)
+	_publish_note = UI.label("", "JoineryCaption")
+	_publish_note.name = "State"
+	_publish_note.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_publish_note.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(_publish_note)
+	_build_button = UI.primary("Build")
+	_build_button.name = "Build"
+	_build_button.pressed.connect(func() -> void: _build(_needs_templates()))
+	UI.bind_height(_build_button, "md")
+	UI_MOTION.press_feedback(_build_button)
+	row.add_child(_build_button)
 	_publish_button = UI.primary("Publish to itch.io…")
 	_publish_button.name = "PublishButton"
-	_publish_button.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	_publish_button.pressed.connect(_open_publish)
+	UI.bind_height(_publish_button, "md")
 	UI_MOTION.press_feedback(_publish_button)
-	group.add_child(_publish_button)
+	row.add_child(_publish_button)
+
+
+## SPACE.2 between the pictures of a shelf, both ways.
+static func _gaps(flow: HFlowContainer) -> void:
+	STYLE.on_theme_overrides(
+		flow,
+		func() -> void:
+			var gap := UI_THEME.space(flow, 2)
+			flow.add_theme_constant_override("h_separation", gap)
+			flow.add_theme_constant_override("v_separation", gap)
+	)
 
 
 # --- Rendering ---------------------------------------------------------------------------------
@@ -376,48 +430,80 @@ func _render() -> void:
 	_render_media()
 	_render_steam()
 	_render_page()
+	_render_foot()
+
+
+## The foot's state and its one accent: Build (or Download and build) until a build exists,
+## then Publish, with Rebuild as the quiet second button.
+func _render_foot() -> void:
 	var built := _built()
+	var busy := _jobs.has("build")
+	var templates: Dictionary = _status.get("templates", {})
+	_publish_button.visible = not built.is_empty()
 	_publish_button.disabled = built.is_empty() or _jobs.has("itch")
-	_publish_note.text = (
-		"Build the game first; then publish the builds to your itch.io page."
-		if built.is_empty()
-		else "Pushes %s with butler, using your own itch.io login." % _names(built)
+	_build_button.disabled = busy or _chosen().is_empty() or _status.is_empty()
+	if busy:
+		_build_button.text = "Building…"
+	elif _needs_templates():
+		_build_button.text = "Download and build"
+	else:
+		_build_button.text = "Rebuild" if not built.is_empty() else "Build"
+	_build_button.tooltip_text = (
+		(
+			"Downloads Godot's export templates (%s GB), then builds"
+			% str(templates.get("download_gb", "1.3"))
+		)
+		if _needs_templates()
+		else "Exports every checked target"
 	)
+	var variation := "JoinerySecondaryButton" if not built.is_empty() else "JoineryPrimaryButton"
+	if _build_button.theme_type_variation != variation:
+		_build_button.theme_type_variation = variation
+	if built.is_empty():
+		_publish_note.text = "Not built yet"
+	else:
+		_publish_note.text = "%s ready" % _names(built)
+	_publish_note.tooltip_text = (
+		"" if built.is_empty() else "Publish pushes them with butler, using your own itch.io login"
+	)
+	_publish_note.visible = not _progress.visible
+
+
+func _needs_templates() -> bool:
+	var templates: Dictionary = _status.get("templates", {})
+	return not _status.is_empty() and not bool(templates.get("ready", true))
 
 
 func _render_builds() -> void:
 	var busy := _jobs.has("build")
 	var templates: Dictionary = _status.get("templates", {})
-	_templates.visible = (
-		not _status.is_empty() and not bool(templates.get("ready", true)) and not busy
+	_templates.visible = _needs_templates() and not busy
+	(_templates.find_child("Text", true, false) as Label).text = (
+		"Export templates needed · %s GB" % str(templates.get("download_gb", "1.3"))
 	)
-	var notice := _templates.find_child("Text", true, false) as Label
-	notice.text = (
-		"Godot's export templates aren't on this computer. Download them (%s GB) to build."
-		% str(templates.get("download_gb", "1.3"))
-	)
-	(_templates.find_child("Action", true, false) as Button).text = "Download and build"
-	_build_button.disabled = busy or _chosen().is_empty() or _templates.visible
-	_build_button.text = "Building…" if busy else "Build"
-	if not busy:
-		_progress.hide()
-	for child: Node in _results.get_children():
-		_results.remove_child(child)
-		child.queue_free()
+	if not _jobs.has("build") and not _jobs.has("media") and not _jobs.has("steam"):
+		if not _jobs.has("itch") and not _jobs.has("page"):
+			_progress.hide()
 	var report: Dictionary = _status.get("build", {}) if _status.get("build") is Dictionary else {}
 	var targets: Dictionary = report.get("targets", {})
-	for id: String in targets:
-		_results.add_child(_result_row(id, targets[id]))
+	for id: String in _checks:
+		var row := _results.get_node(id) as HBoxContainer
+		var result: Dictionary = targets.get(id, {})
+		_show_result(row, result)
 	var changes: Array = report.get("changes", [])
 	_changes.text = "Joinery set up: " + "; ".join(changes) + "." if not changes.is_empty() else ""
 	_changes.visible = not changes.is_empty()
 
 
-func _result_row(id: String, result: Dictionary) -> HBoxContainer:
-	var row := HBoxContainer.new()
-	row.name = id
-	row.theme_type_variation = "JoineryRow"
-	UI.bind_height(row, "md", false)
+## A target row after a build: its one line ("9.8 MB · starts") and its check, or nothing.
+func _show_result(row: HBoxContainer, result: Dictionary) -> void:
+	var line := row.get_node("Line") as Label
+	var icon := row.get_node("Result") as TextureRect
+	icon.visible = not result.is_empty()
+	line.visible = not result.is_empty()
+	if result.is_empty():
+		line.text = ""
+		return
 	var ok := bool(result.get("ok", false))
 	var warnings: Array = result.get("warnings", [])
 	var played: Dictionary = result.get("playtest", {})
@@ -426,21 +512,15 @@ func _result_row(id: String, result: Dictionary) -> HBoxContainer:
 		kind = "failed"
 	elif not warnings.is_empty() or str(played.get("status", "played")) != "played":
 		kind = "warning"
-	row.add_child(UI.status_icon(kind))
-	var title := UI.label(str(result.get("label", id)))
-	title.custom_minimum_size.x = UI_THEME.space(self, 6) * 2
-	row.add_child(title)
-	var line := UI.label(result_line(result), "JoineryNumeric" if ok else "JoineryError")
-	line.name = "Line"
-	line.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	line.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	UI.set_status_icon(icon, kind)
+	line.text = result_line(result)
+	line.theme_type_variation = "JoineryNumeric" if ok else "JoineryError"
 	var why: Array[String] = []
 	why.append(str(result.get("boot", {}).get("detail", "")))
 	for warning: Variant in warnings:
 		why.append(str(warning))
 	line.tooltip_text = "\n".join(why.filter(func(t: String) -> bool: return not t.is_empty()))
-	row.add_child(line)
-	return row
+	icon.tooltip_text = line.tooltip_text
 
 
 func _render_media() -> void:
@@ -450,19 +530,22 @@ func _render_media() -> void:
 	var cover := str(media.get("cover", "")) if media.get("cover") != null else ""
 	var busy := _jobs.has("media")
 	var has_any := not shots.is_empty() or not cover.is_empty() or trailer.get("mp4") != null
-	_media_button.text = "Making…" if busy else ("Remake" if has_any else "Make media")
+	_media_button.text = "Making…" if busy else ("Remake" if has_any else "Make")
 	_media_button.disabled = busy or _status.is_empty()
-	_media_note.text = (
-		"Screenshots, a trailer and a cover, all from a seeded run of the game."
-		if not has_any
-		else "Seed %s. Files are in share/media." % str(media.get("seed", ""))
+	_media_note.text = "No media yet"
+	_media_note.visible = not has_any
+	_media_button.tooltip_text = (
+		"Seed %s, in share/media. Plays a new seeded run" % str(media.get("seed", ""))
+		if has_any
+		else "Plays a seeded run for screenshots, a trailer and a cover"
 	)
-	for child: Node in _gallery.get_children():
+	for child: Node in screenshots():
 		_gallery.remove_child(child)
 		child.queue_free()
 	for path: Variant in shots:
 		var picture := _picture(_absolute(str(path)), THUMB)
 		if picture != null:
+			picture.set_meta(SHOT, true)
 			_gallery.add_child(picture)
 	_cover.texture = _texture(_absolute(cover)) if not cover.is_empty() else null
 	_cover.visible = _cover.texture != null
@@ -478,6 +561,7 @@ func _render_media() -> void:
 	var seconds := float(trailer.get("seconds", 0.0)) if trailer.get("seconds") != null else 0.0
 	var sound := "with sound" if str(trailer.get("sound", "")).begins_with("With") else "silent"
 	_trailer_text.text = "Trailer · %d s · %s" % [roundi(seconds), sound]
+	_gallery.visible = _cover.visible or _trailer_box.visible or not screenshots().is_empty()
 
 
 func _render_steam() -> void:
@@ -488,22 +572,25 @@ func _render_steam() -> void:
 			made.append(item)
 	var busy := _jobs.has("steam")
 	var ready := bool(steam.get("ready", false))
-	_steam_button.text = (
-		"Making…" if busy else ("Remake Steam art" if not made.is_empty() else "Make Steam art")
-	)
+	_steam_button.text = "Making…" if busy else ("Remake" if not made.is_empty() else "Make")
 	_steam_button.disabled = busy or not ready
+	_steam_button.tooltip_text = (
+		(
+			"Composes every capsule and library image in Krita. Sizes as Steamworks documented "
+			+ "them on %s; verify against Steamworks before uploading."
+		)
+		% str(steam.get("checked", ""))
+	)
 	if not _steam_error.is_empty():
 		_steam_note.text = _steam_error
 	elif not ready:
-		_steam_note.text = "Make the screenshots first: every Steam image is composed from them."
+		_steam_note.text = "Needs screenshots first"
 	else:
-		_steam_note.text = (
-			"Every capsule and library image, composed in Krita from the screenshots. Sizes as "
-			+ (
-				"Steamworks documented them on %s; verify against Steamworks before uploading."
-				% str(steam.get("checked", ""))
-			)
-		)
+		_steam_note.text = "" if not made.is_empty() else "No Steam art yet"
+	_steam_note.theme_type_variation = (
+		"JoineryError" if not _steam_error.is_empty() else "JoineryCaption"
+	)
+	_steam_note.visible = not _steam_note.text.is_empty()
 	for child: Node in _steam_grid.get_children() + _steam_problems.get_children():
 		child.get_parent().remove_child(child)
 		child.queue_free()
@@ -513,26 +600,28 @@ func _render_steam() -> void:
 		_steam_grid.add_child(_steam_tile(entry))
 		var status := str(entry.get("status", ""))
 		for problem: Variant in entry.get("problems", []):
-			var row := HBoxContainer.new()
-			row.theme_type_variation = "JoineryRowTight"
-			row.add_child(UI.status_icon(str(STEAM_ICONS.get(status, "warning"))))
-			row.add_child(
-				UI.label("%s: %s" % [entry.get("label", ""), problem], "JoineryCaption", true)
-			)
-			_steam_problems.add_child(row)
+			var words := "%s: %s" % [entry.get("label", ""), problem]
+			_steam_problems.add_child(_problem(str(STEAM_ICONS.get(status, "warning")), words))
 	# Steam asks for store screenshots of at least 1920 × 1080.
 	var small_shots := str(steam.get("screenshots_warning", ""))
 	if ready and not small_shots.is_empty():
-		var shots_row := HBoxContainer.new()
-		shots_row.theme_type_variation = "JoineryRowTight"
-		shots_row.add_child(UI.status_icon("warning"))
-		shots_row.add_child(UI.label("Screenshots: " + small_shots, "JoineryCaption", true))
-		_steam_problems.add_child(shots_row)
+		_steam_problems.add_child(_problem("warning", "Screenshots: " + small_shots))
 	_steam_problems.visible = _steam_problems.get_child_count() > 0
 
 
+## One check's problem on its own line, after its status icon.
+static func _problem(kind: String, text: String) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.theme_type_variation = "JoineryRowTight"
+	var icon := UI.status_icon(kind)
+	icon.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	row.add_child(icon)
+	row.add_child(UI.label(text, "JoineryCaption", true))
+	return row
+
+
 ## One Steam image: the picture at a shared height on the sunken media ground (the logo is
-## transparent), then its check and name, then its size.
+## transparent), then its name with its check; its size in the tooltip.
 func _steam_tile(entry: Dictionary) -> VBoxContainer:
 	var tile := VBoxContainer.new()
 	tile.name = str(entry.get("id", "image"))
@@ -548,7 +637,8 @@ func _steam_tile(entry: Dictionary) -> VBoxContainer:
 	picture.custom_minimum_size = Vector2(minf(STEAM_WIDEST, STEAM_HEIGHT * aspect), STEAM_HEIGHT)
 	picture.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	picture.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	picture.tooltip_text = "%s, %d × %d" % [entry.get("label", ""), int(size[0]), int(size[1])]
+	var dims := "%d × %d" % [int(size[0]), int(size[1])]
+	picture.tooltip_text = "%s, %s" % [entry.get("label", ""), dims]
 	frame.add_child(picture)
 	var line := HBoxContainer.new()
 	line.theme_type_variation = "JoineryRowTight"
@@ -559,20 +649,24 @@ func _steam_tile(entry: Dictionary) -> VBoxContainer:
 		var problems: Array = entry.get("problems", [])
 		icon.tooltip_text = "Passes its checks" if problems.is_empty() else "\n".join(problems)
 		line.add_child(icon)
-	line.add_child(UI.label(str(entry.get("label", "")), "JoineryCaption"))
-	# The size on its own line keeps each tile about as wide as its picture.
-	tile.add_child(UI.label("%d × %d" % [int(size[0]), int(size[1])], "JoineryNumeric"))
+	var name_label := UI.label(str(entry.get("label", "")), "JoineryCaption")
+	name_label.tooltip_text = dims
+	line.add_child(name_label)
+	# The tile is as wide as its picture: a long name ends in an ellipsis, not a wider tile.
+	line.custom_minimum_size.x = 0
+	tile.custom_minimum_size.x = picture.custom_minimum_size.x
 	return tile
 
 
 func _render_page() -> void:
 	var page := str(_status.get("page", "")) if _status.get("page") != null else ""
-	_page_text.text = _plain(page) if not page.is_empty() else "No page text yet."
+	_page_text.text = _plain(page) if not page.is_empty() else "No page text yet"
+	_page_text.theme_type_variation = "" if not page.is_empty() else "JoineryMuted"
 	_page_button.text = "Edit" if not page.is_empty() else "Draft page text"
 	_page_button.disabled = _jobs.has("page") or _status.is_empty()
 	var gaps := page.count("_Write this part._")
 	_page_note.text = (
-		"%d part%s still to write." % [gaps, "" if gaps == 1 else "s"] if gaps > 0 else ""
+		"%d part%s still to write" % [gaps, "" if gaps == 1 else "s"] if gaps > 0 else ""
 	)
 	_page_note.visible = gaps > 0
 
@@ -682,6 +776,7 @@ func _make_media() -> void:
 func _after_media(data: Dictionary) -> void:
 	if data.has("error"):
 		_media_note.text = _why(data, "Couldn't make the media.")
+		_media_note.show()
 		return
 	refresh()
 	UI_MOTION.pulse(_gallery)
