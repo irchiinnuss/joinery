@@ -80,6 +80,9 @@ class Options:
     reach: list[str] = field(default_factory=list)
     #: Have the game core record the run as a replay (``<out>/play.replay``, ADR 0059).
     record: bool = False
+    #: Play for store media: the bot aims the view at goals, enemies or open space
+    #: (bot_frame.gd) instead of looking about at random.
+    media: bool = False
 
     def public(self) -> dict[str, Any]:
         data = asdict(self)
@@ -217,6 +220,8 @@ def _bot_args(
         args.append(f"--probe={options.probe}")
     if options.luma:
         args.append("--luma")
+    if options.media:
+        args.append("--media")
     return args
 
 
@@ -352,7 +357,9 @@ def run(
     if options.record and (out / REPLAY_NAME).is_file():
         report["replay"] = str(out / REPLAY_NAME)
     # Saves the run made through the game's save system (ADR 0066): samples to keep.
-    slots = sorted((out / "saves").glob("slot_*.json")) if (out / "saves").is_dir() else []
+    slots = (
+        sorted((out / "saves").glob("slot_*.json")) if (out / "saves").is_dir() else []
+    )
     if slots:
         report["saves"] = [str(slot) for slot in slots]
     if options.screenshots and bot is not None and not (stop and stop.is_set()):

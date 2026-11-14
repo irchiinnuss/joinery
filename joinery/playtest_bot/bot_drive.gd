@@ -57,6 +57,8 @@ var cover: RefCounted
 ## {target, found, reached, t, closest, node}.
 var reach: PackedStringArray = PackedStringArray()
 var reach_results: Array[Dictionary] = []
+## Playing for store media: bot_frame.gd aims the view, so no random look keys.
+var media: bool = false
 
 var _player: Node = null
 var _held: Dictionary = {}
@@ -162,7 +164,8 @@ func _new_segment(frame: int) -> void:
 				tap(&"jump", frame, rng.randi_range(3, 18))
 			if rng.randf() < 0.3:
 				_hold(&"sprint")
-			if style == "3d" and rng.randf() < 0.2:
+			# The number is drawn as before, so a media run keeps the same random sequence.
+			if style == "3d" and rng.randf() < 0.2 and not media:
 				_hold(LOOKS[rng.randi_range(0, LOOKS.size() - 1)])
 		"platformer":
 			_walk(frame)

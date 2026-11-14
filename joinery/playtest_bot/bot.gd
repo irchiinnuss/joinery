@@ -6,6 +6,7 @@ extends SceneTree
 ##   [--scene=res://…] [--softlock=<seconds>] [--focus=word,word] [--shots=f,f,…]
 ##   [--shot-width=<px>]
 ##   [--route=<file>] [--probe=perf|access] [--luma] [--reach=word,word]
+##   [--media]
 ##   --settings-path=<file>
 ##
 ## It loads the game's main scene (or --scene), starts the level the way the game core's
@@ -28,7 +29,13 @@ extends SceneTree
 ## game's user:// is wherever the caller's HOME points.
 
 const SCRIPTS := [
-	"bot_logger.gd", "bot_watch.gd", "bot_drive.gd", "bot_route.gd", "bot_probe.gd", "bot_cover.gd"
+	"bot_logger.gd",
+	"bot_watch.gd",
+	"bot_drive.gd",
+	"bot_route.gd",
+	"bot_probe.gd",
+	"bot_cover.gd",
+	"bot_frame.gd",
 ]
 const SAVE_SLOT := 2
 const SHOT_WIDTH := 480
@@ -55,6 +62,9 @@ var walker: RefCounted
 var probe_kind: String = ""
 var luma: bool = false
 var probe: RefCounted
+## --media: play for store media, the view aimed at what is worth seeing (bot_frame.gd).
+var media: bool = false
+var framer: RefCounted
 var fps: int = 60
 var frame: int = 0
 var rng: RandomNumberGenerator = RandomNumberGenerator.new()
@@ -104,6 +114,9 @@ func _initialize() -> void:
 	drive.set(&"reach", reach)
 	cover = (load(base.path_join(SCRIPTS[5])) as GDScript).new(self)
 	drive.set(&"cover", cover)
+	if media:
+		drive.set(&"media", true)
+		framer = (load(base.path_join(SCRIPTS[6])) as GDScript).new(self)
 	if not route.is_empty():
 		walker = (load(base.path_join(SCRIPTS[3])) as GDScript).new(self, route, fps)
 	process_frame.connect(func() -> void: watch.call(&"tick_process"))
@@ -185,6 +198,8 @@ func _tick(play: bool) -> void:
 		if not _busy:
 			_handle_menus()
 		drive.call(&"step", frame)
+		if framer != null and player is Node3D:
+			framer.call(&"step", frame, player)
 	var found: Array = watch.call(
 		&"observe", frame, drive.call(&"moving"), paused, _state(), drive.get(&"interactive")
 	)
@@ -762,6 +777,8 @@ func _parse_args() -> void:
 			probe_kind = value
 		elif arg == "--luma":
 			luma = true
+		elif arg == "--media":
+			media = true
 		elif arg.begins_with("--shot-width="):
 			shot_width = maxi(value.to_int(), 0)
 		elif arg.begins_with("--shots="):

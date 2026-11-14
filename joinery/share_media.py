@@ -1,7 +1,9 @@
 """`joinery share media`: screenshots, a trailer and a cover, all from the game itself.
 
 Nothing is generated. Every picture is a frame of the game, played by the
-seeded playtester bot (ADR 0038):
+seeded playtester bot (ADR 0038), in media mode: it aims the view at goals and
+enemies it can see, or down the most open direction, never at walls or ceilings
+(``playtest_bot/bot_frame.gd``):
 
 * **Screenshots** (4 to 8): a headless run finds the notable moments; a
   windowed replay of the same seed (``JOINERY_BACKGROUND=1``, never takes
@@ -246,7 +248,7 @@ async def screenshots(project: Path, seed: int, say: Progress) -> dict[str, Any]
     run_dir = project / WORK / "shots-run"
     shutil.rmtree(run_dir, ignore_errors=True)
     options = playtest.Options(
-        project=project, seconds=SHOT_SECONDS, seed=seed, out=run_dir
+        project=project, seconds=SHOT_SECONDS, seed=seed, out=run_dir, media=True
     )
     report = await asyncio.to_thread(playtest.run, options)
     frames = candidates(report)
@@ -310,9 +312,16 @@ def game_audio(project: Path) -> tuple[bool, str]:
     return True, "With the game's own sound (all tool-made)."
 
 
-def filter_graph(game_seconds: float, audio: bool, font: str) -> str:
-    """The ffmpeg graph: title card, the game, end card; split into three encodes."""
+def filter_graph(
+    game_seconds: float, audio: bool, font: str, sharp: bool = False
+) -> str:
+    """The ffmpeg graph: title card, the game, end card; split into three encodes.
+
+    ``sharp`` scales the game with nearest-neighbour: a game drawn at a small base
+    size (viewport stretch, pixel art) stays crisp instead of turning soft.
+    """
     g = f"{game_seconds:g}"
+    flags = ":flags=neighbor" if sharp else ""
     width, height = STORE_SIZE
     small_w, small_h = PREVIEW_SIZE
     card = (
@@ -326,7 +335,7 @@ def filter_graph(game_seconds: float, audio: bool, font: str) -> str:
             "format=yuv420p,setsar=1[t]"
         ),
         (
-            f"[0:v]trim=start=1:duration={g},setpts=PTS-STARTPTS,scale={width}:{height},"
+            f"[0:v]trim=start=1:duration={g},setpts=PTS-STARTPTS,scale={width}:{height}{flags},"
             f"fps={TRAILER_FPS},format=yuv420p,setsar=1,fade=t=in:st=0:d=0.5,"
             f"fade=t=out:st={game_seconds - 0.5:g}:d=0.5[g]"
         ),
@@ -354,7 +363,9 @@ def filter_graph(game_seconds: float, audio: bool, font: str) -> str:
     return ";".join(parts)
 
 
-def encode_argv(game_seconds: float, audio: bool, font: str) -> list[str]:
+def encode_argv(
+    game_seconds: float, audio: bool, font: str, sharp: bool = False
+) -> list[str]:
     movie = (WORK / "trailer.avi").as_posix()
     argv = ["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", movie]
     for seconds in (TITLE_SECONDS, END_SECONDS):
@@ -367,7 +378,7 @@ def encode_argv(game_seconds: float, audio: bool, font: str) -> list[str]:
     if audio:
         for seconds in (TITLE_SECONDS, END_SECONDS):
             argv += ["-f", "lavfi", "-i", f"anullsrc=r=48000:cl=stereo:d={seconds:g}"]
-    argv += ["-filter_complex", filter_graph(game_seconds, audio, font)]
+    argv += ["-filter_complex", filter_graph(game_seconds, audio, font, sharp)]
     outputs = [
         ("1", ["-c:v", "libvpx-vp9", "-crf", "34", "-b:v", "0", "-deadline", "good",
                "-cpu-used", "5", "-row-mt", "1"], ["-c:a", "libopus", "-b:a", "96k"],
@@ -394,6 +405,42 @@ def _quote(argv: list[str]) -> str:
     return " ".join("'" + a.replace("'", "'\\''") + "'" for a in argv)
 
 
+def stretch_mode(project: Path) -> str:
+    """The project's ``display/window/stretch/mode`` ("disabled" when unset)."""
+    section = ""
+    path = project / "project.godot"
+    text = path.read_text(encoding="utf-8", errors="replace") if path.is_file() else ""
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("["):
+            section = stripped
+        elif section == "[display]" and stripped.startswith("window/stretch/mode="):
+            return stripped.partition("=")[2].strip().strip('"')
+    return "disabled"
+
+
+#: Godot reads this beside project.godot at start-up, over the project's settings.
+OVERRIDE = "override.cfg"
+
+
+def movie_override(project: Path) -> str | None:
+    """Settings that make Movie Maker record at the store size, or None to keep the game's.
+
+    Movie Maker records at the project's viewport size (often 1280x720) whatever
+    the window is, so the trailer was enlarged and soft. Unless the game draws at a
+    fixed base size (viewport stretch: pixel art, scaled sharp instead), a window
+    size override makes it render and record at 1920x1080 itself.
+    """
+    if stretch_mode(project) == "viewport":
+        return None
+    width, height = STORE_SIZE
+    return (
+        "[display]\n\n"
+        f"window/size/window_width_override={width}\n"
+        f"window/size/window_height_override={height}\n"
+    )
+
+
 async def trailer(project: Path, seed: int, say: Progress) -> dict[str, Any]:
     binary, extra = _window()
     work = project / WORK
@@ -404,7 +451,7 @@ async def trailer(project: Path, seed: int, say: Progress) -> dict[str, Any]:
     shutil.rmtree(run_dir, ignore_errors=True)
     run_dir.mkdir()
     options = playtest.Options(
-        project=project, seconds=TRAILER_GAME_SECONDS + 1, seed=seed
+        project=project, seconds=TRAILER_GAME_SECONDS + 1, seed=seed, media=True
     )
     playtest._ensure_imported(playtest.godot_binary(), project, playtest._env(run_dir, {}))
     say("Recording a seeded run with Movie Maker")
@@ -414,15 +461,25 @@ async def trailer(project: Path, seed: int, say: Progress) -> dict[str, Any]:
         "--script", str(playtest.BOT), "--", *playtest._bot_args(options, run_dir),
     ]  # fmt: skip
     env = playtest._env(run_dir, extra)
-    await asyncio.to_thread(
-        playtest._play,
-        command,
-        env,
-        options.seconds * 8 + 120,
-        None,
-        options.seconds,
-        None,
-    )
+    settings = movie_override(project)
+    override = project / OVERRIDE
+    # Only for this run, and never over a file of the user's own.
+    placed = settings is not None and not override.exists()
+    if placed:
+        override.write_text(settings or "", encoding="utf-8")
+    try:
+        await asyncio.to_thread(
+            playtest._play,
+            command,
+            env,
+            options.seconds * 8 + 120,
+            None,
+            options.seconds,
+            None,
+        )
+    finally:
+        if placed:
+            override.unlink(missing_ok=True)
     if not movie.is_file() or movie.stat().st_size < 1024:
         raise MediaError("Movie Maker recorded nothing. Does the game start?")
     frames = _avi_frames(movie)
@@ -435,7 +492,8 @@ async def trailer(project: Path, seed: int, say: Progress) -> dict[str, Any]:
     (work / "end.txt").write_text(name, encoding="utf-8")
     audio, sound = game_audio(project)
     tools = pins()
-    argv = encode_argv(game_seconds, audio, tools["font"])
+    sharp = recorded[0] < STORE_SIZE[0] and stretch_mode(project) == "viewport"
+    argv = encode_argv(game_seconds, audio, tools["font"], sharp)
     (project / MEDIA).mkdir(parents=True, exist_ok=True)
     say("Encoding the trailer in the worker")
     await _worker(
@@ -455,11 +513,21 @@ async def trailer(project: Path, seed: int, say: Progress) -> dict[str, Any]:
         "files": [(MEDIA / n).as_posix() for n in ("trailer.webm", "trailer.mp4")],
         "preview": (MEDIA / "trailer.ogv").as_posix(),
     }
-    if recorded[0] < STORE_SIZE[0] or recorded[1] < STORE_SIZE[1]:
+    if sharp:
+        result["note"] = (
+            f"The game draws at {recorded[0]}×{recorded[1]} (viewport stretch); it was "
+            "enlarged with nearest-neighbour so its pixels stay sharp."
+        )
+    elif recorded[0] < STORE_SIZE[0] or recorded[1] < STORE_SIZE[1]:
         result["warning"] = (
             f"The run was recorded at {recorded[0]}×{recorded[1]} and enlarged to "
-            f"{STORE_SIZE[0]}×{STORE_SIZE[1]}, so it looks soft. Make it again on a "
-            f"screen that fits a {STORE_SIZE[0]}×{STORE_SIZE[1]} window."
+            f"{STORE_SIZE[0]}×{STORE_SIZE[1]}, so it looks soft."
+            + (
+                f" The project's own {OVERRIDE} sets the window size; without it the "
+                "trailer is recorded at full size."
+                if override.exists()
+                else ""
+            )
         )
         say(result["warning"])
     return result
