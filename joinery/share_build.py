@@ -2,7 +2,9 @@
 
 Each target is exported by stock Godot 4.7 with an export preset Joinery keeps
 in the project's ordinary `export_presets.cfg` (added when missing, repaired
-when a setting the build needs is missing), using the pinned export templates
+when a setting the build needs is missing; that edit, and any to project.godot,
+is a change held for the user's review, in place only while the build runs),
+using the pinned export templates
 (`joinery.export_templates`). The web build uses the Compatibility renderer
 and no threads, which is what itch.io serves without special headers.
 
@@ -27,7 +29,8 @@ import sys
 import tempfile
 import time
 import zipfile
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -44,6 +47,7 @@ from joinery.brief import (
 from joinery.catalog import ROOT
 from joinery.godot_config import GodotConfig, parse_string, to_variant
 from joinery.lockfile import read_assets, read_extensions
+from joinery.transactions import FileTransaction, list_transactions
 
 SHARE = Path("share")
 BUILDS = SHARE / "builds"
@@ -693,17 +697,110 @@ def build(
         raise ValueError(f"{project} is not a Godot project.")
     ensure_share_dir(project)
     name = game_name(project)
-    presets_path = project / "export_presets.cfg"
+    presets_path = project / PRESETS
     old = presets_path.read_text(encoding="utf-8") if presets_path.is_file() else ""
     new, changes = ensure_presets(old, targets, name)
-    if new != old:
-        presets_path.write_text(new, encoding="utf-8")
     settings_path = project / "project.godot"
     old_settings = settings_path.read_text(encoding="utf-8")
     new_settings, setting_changes = ensure_settings(old_settings, targets)
-    if new_settings != old_settings:
-        settings_path.write_text(new_settings, encoding="utf-8")
     changes += setting_changes
+    edits = {
+        rel: text
+        for rel, text, before in (
+            (PRESETS, new, old),
+            ("project.godot", new_settings, old_settings),
+        )
+        if text != before
+    }
+    staged = stage_export_settings(project, edits) if edits else None
+    with applied(project, edits):
+        report = _build(
+            project, targets, name, new, changes, download_templates, play, say
+        )
+    if staged is not None:
+        report["change"] = {
+            "id": staged.id,
+            "summary": staged.summary,
+            "files": sorted(edits),
+            "note": EXPORT_NOTE,
+        }
+        say(EXPORT_NOTE)
+    (project / REPORT).parent.mkdir(parents=True, exist_ok=True)
+    (project / REPORT).write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    return report
+
+
+#: The change that keeps the export settings a build needed.
+EXPORT_CHANGE = "Export settings for the shared builds"
+EXPORT_NOTE = (
+    "The builds needed export settings the project doesn't have yet; they are "
+    "waiting for your review as a change (accept it to keep them). The project "
+    "itself is unchanged."
+)
+PRESETS = "export_presets.cfg"
+
+
+def stage_export_settings(project: Path, edits: Mapping[str, str]) -> FileTransaction:
+    """The export settings as a change held for the user's review.
+
+    An earlier one with the same files is reused; a different one is replaced, so
+    there is only ever one waiting.
+    """
+    for tx in list_transactions(project):
+        if tx.state != "review" or tx.summary != EXPORT_CHANGE:
+            continue
+        same = all(
+            (tx.stage / rel).is_file()
+            and (tx.stage / rel).read_text(encoding="utf-8") == text
+            for rel, text in edits.items()
+        )
+        if same:
+            return tx
+        tx.reject()
+    tx = FileTransaction(project)
+    tx.note_tool("joinery")
+    tx.begin(EXPORT_CHANGE)
+    try:
+        for rel, text in edits.items():
+            (tx.stage / rel).write_text(text, encoding="utf-8")
+        tx.review()
+        tx.hold("joinery share build")
+    except BaseException:
+        if tx.state in {"staging", "review"}:
+            tx.reject()
+        raise
+    return tx
+
+
+@contextmanager
+def applied(project: Path, edits: Mapping[str, str]) -> Iterator[None]:
+    """The edits in place for the export only; the files are put back byte for byte."""
+    before = {
+        rel: (project / rel).read_bytes() if (project / rel).is_file() else None
+        for rel in edits
+    }
+    try:
+        for rel, text in edits.items():
+            (project / rel).write_text(text, encoding="utf-8")
+        yield
+    finally:
+        for rel, data in before.items():
+            if data is None:
+                (project / rel).unlink(missing_ok=True)
+            else:
+                (project / rel).write_bytes(data)
+
+
+def _build(
+    project: Path,
+    targets: list[str],
+    name: str,
+    new: str,
+    changes: list[str],
+    download_templates: bool,
+    play: bool,
+    say: Callable[[str], None],
+) -> dict[str, Any]:
     needed = [f for t in targets for f in TARGETS[t].templates(threads_on(new))]
     say("Checking the export templates")
     export_templates.prepare(needed, allow_download=download_templates)
@@ -748,7 +845,6 @@ def build(
         finally:
             shutil.rmtree(staging, ignore_errors=True)
         report["targets"][target_id] = result
-    (project / REPORT).write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     return report
 
 
