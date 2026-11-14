@@ -1,5 +1,6 @@
 extends RefCounted
-## The visual suite's Godot panel screens: the title bar with Godot's screen buttons, Scene
+## The visual suite's Godot panel screens: the title bar with Godot's screen buttons, the rail
+## in a short window, the sidebar's header and its show or hide toggle, Files stacked, Scene
 ## above Inspector open beside the viewport, and Audio open alone in the bottom panel, each
 ## opened from its rail icon (godot_panels.gd). The suite's "layout" screen is the default,
 ## with every panel hidden. Copied beside visual_editor_test.gd by run_visual_suite.py;
@@ -32,8 +33,8 @@ static func screens(suite: Variant) -> void:
 
 
 ## The rail in a short window: its icons overflow and scroll up and down, the wheel over the
-## icons scrolls them, and the last one comes into view. At the editor's own height a rail that
-## fits shows no bar, and the bar never widens the column.
+## icons scrolls them, and the last one comes into view. The column never shows a scroll bar,
+## at the editor's own height or in a short window, and its width never changes.
 static func rail_short(suite: Variant) -> void:
 	var rail: Control = (suite._plugin as EditorPlugin).get("_rail")
 	var scroll := rail.get_parent() as ScrollContainer if rail != null else null
@@ -43,10 +44,7 @@ static func rail_short(suite: Variant) -> void:
 	var bar := scroll.get_v_scroll_bar()
 	var column := scroll.get_parent() as Control
 	var width := column.size.x
-	suite._check(
-		bar.visible == (rail.get_combined_minimum_size().y > scroll.size.y),
-		"The rail's bar shows only while its icons overflow"
-	)
+	suite._check(not bar.visible, "The rail shows no scroll bar")
 	var window := scroll.get_window()
 	var was := window.size
 	window.size = Vector2i(was.x, 420)
@@ -55,10 +53,8 @@ static func rail_short(suite: Variant) -> void:
 	suite._check(
 		tall > scroll.size.y, "The rail overflows a short window (%d in %d)" % [tall, scroll.size.y]
 	)
-	suite._check(bar.visible, "The rail shows its bar while it overflows")
-	var unit: float = load("res://addons/joinery/ui_theme.gd").unit(rail)
-	suite._check(bar.size.x <= 8.0 * unit, "The rail's bar is thin (%d)" % bar.size.x)
-	suite._check(is_equal_approx(column.size.x, width), "The bar never widens the rail")
+	suite._check(not bar.visible, "The rail shows no scroll bar while it overflows")
+	suite._check(is_equal_approx(column.size.x, width), "Overflow never widens the rail")
 	var last := _last_icon(rail)
 	suite._check(last != null, "The rail has icons")
 	if last == null:
@@ -80,7 +76,17 @@ static func rail_short(suite: Variant) -> void:
 	suite._check(
 		view.encloses(last.get_global_rect().grow(-0.5)), "The wheel brings the last icon into view"
 	)
+	suite._check(not bar.visible, "The rail shows no scroll bar while scrolled")
 	await suite._shot("rail-short", [scroll])
+	scroll.scroll_vertical = 0
+	await suite._frames(2)
+	last.grab_focus()
+	await suite._frames(4)
+	suite._check(
+		view.encloses(last.get_global_rect().grow(-0.5)),
+		"Keyboard focus brings the last icon into view"
+	)
+	last.release_focus()
 	scroll.scroll_vertical = 0
 	window.size = was
 	await suite._frames(8)

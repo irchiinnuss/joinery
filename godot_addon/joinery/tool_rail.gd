@@ -182,35 +182,23 @@ class RailItem:
 
 
 ## The rail in its scroll column, the one to add to JoineryNavigation. In a short window the
-## icons scroll up and down (wheel, drag, or keyboard focus), so the last one stays reachable;
-## the rail's thin bar shows only while they overflow, so a rail that fits looks as before.
+## icons scroll up and down (wheel, touchpad, drag, or keyboard focus), so the last one stays
+## reachable; the column never shows a scroll bar, so the rail always looks the same.
 func in_scroll() -> ScrollContainer:
 	var scroll := ScrollContainer.new()
 	scroll.name = "RailScroll"
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
 	scroll.follow_focus = true
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
-	scroll.add_theme_constant_override("scrollbar_h_separation", 0)
-	# No padding beside the thumb: the bar fits in the column's spare width.
-	for side: String in ["left", "right"]:
-		scroll.get_v_scroll_bar().add_theme_constant_override("padding_" + side, 0)
 	scroll.add_child(self)
 	return scroll
-
-
-## The scroll column's bar wears the rail's theme: thin, on a clear track.
-func _theme_scroll_bar() -> void:
-	var scroll := get_parent() as ScrollContainer
-	if scroll != null:
-		scroll.get_v_scroll_bar().theme = theme
 
 
 func _ready() -> void:
 	size_flags_vertical = Control.SIZE_EXPAND_FILL
 	UI_THEME.watch(self)
-	_theme_scroll_bar()
 	_tools = VBoxContainer.new()
 	_tools.theme_type_variation = "JoineryTight"
 	add_child(_tools)
@@ -347,7 +335,6 @@ func select_tool(tool: String) -> void:
 
 
 func _on_theme_rebuilt() -> void:
-	_theme_scroll_bar()
 	_restyle()
 
 
