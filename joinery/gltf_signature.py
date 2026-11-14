@@ -32,10 +32,17 @@ from pathlib import Path
 from typing import Any
 
 PREFIX = "glb:"
-#: Decimal places kept for float data. The exporter's noise sits in the last
-#: bits of a 32-bit float (about 7 significant digits); 5 places is a tenth of
-#: a millimetre in model units, far below anything a person would see change.
-PLACES = 5
+#: Float data is snapped to a grid of 1/STEPS units: 1/16384 is 0.06 mm in
+#: model units, or a quarter texel of a 4096 px texture in UV space, far below
+#: anything a person would see change. The exporter's noise sits in the last
+#: bits of a 32-bit float (a few 1e-8 here) and stays inside one grid cell.
+#:
+#: The grid is binary, not decimal places, on purpose. Modelled values are
+#: very often dyadic or a decimal plus a dyadic step (UVs of 17/64, or 0.6 +
+#: 1/64 = 0.615625): rounded to 5 decimal places those land exactly on the
+#: halfway point, so one ulp of noise rounded them up in one export and down
+#: in the next. On a power-of-two grid such values sit on a grid point.
+STEPS = 1 << 14
 _COMPONENTS = {
     5120: ("b", 1),
     5121: ("B", 1),
@@ -59,8 +66,8 @@ _FILE_KEYS = {"generator", "copyright", "extras", "minVersion"}
 
 
 def _round(value: float) -> float:
-    rounded = round(value, PLACES)
-    return 0.0 if rounded == 0 else rounded  # -0.0 and 0.0 are the same
+    # round() gives an int, so -0.0 and 0.0 become the same point.
+    return round(value * STEPS) / STEPS
 
 
 def _clean(value: Any) -> Any:

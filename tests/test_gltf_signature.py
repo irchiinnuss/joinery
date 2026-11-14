@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import struct
@@ -140,6 +141,34 @@ def test_a_changed_model_changes_the_signature(tmp_path: Path) -> None:
     assert sign(tmp_path, glb(colour=0.2)) != base  # a material
     assert sign(tmp_path, glb(pixels=b"\x10\x20\x31")) != base  # a texture
     assert sign(tmp_path, glb(keyframe=2.0)) != base  # an animation
+
+
+FIXTURES = Path(__file__).parent / "fixtures" / "gltf"
+
+
+def test_two_real_exports_of_one_model_have_one_signature(tmp_path: Path) -> None:
+    # One mesh cut from a committed export and from its rebuild: four UVs of
+    # 0.265625 (17/64) came back one ulp apart, which decimal rounding split.
+    committed = FIXTURES / "stock_committed.gltf"
+    rebuilt = FIXTURES / "stock_rebuilt.gltf"
+    assert committed.read_bytes() != rebuilt.read_bytes()
+    base = gltf_signature.signature(committed)
+    assert gltf_signature.signature(rebuilt) == base
+
+    # A real edit to the same mesh, a UV moved by a texel of a 1024 px
+    # texture, still changes it.
+    doc = json.loads(committed.read_text())
+    buffer = doc["buffers"][0]
+    head, _, data = buffer["uri"].partition(",")
+    raw = bytearray(base64.b64decode(data))
+    uv = doc["accessors"][doc["meshes"][0]["primitives"][0]["attributes"]["TEXCOORD_0"]]
+    start = doc["bufferViews"][uv["bufferView"]].get("byteOffset", 0)
+    (u,) = struct.unpack_from("<f", raw, start)
+    struct.pack_into("<f", raw, start, u + 1 / 1024)
+    buffer["uri"] = head + "," + base64.b64encode(bytes(raw)).decode()
+    edited = tmp_path / "edited.gltf"
+    edited.write_text(json.dumps(doc))
+    assert gltf_signature.signature(edited) != base
 
 
 def test_recipes_fingerprint_models_by_content(tmp_path: Path) -> None:
