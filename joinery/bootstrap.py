@@ -212,6 +212,10 @@ def _setup(project: Path, emit: tool_refresh.Emit | None) -> dict[str, Any]:
                 subprocess.SubprocessError,
             ) as exc:
                 unavailable.append({"tool": tool, "reason": str(exc)})
+        if unavailable:
+            # Every image may be built, but an app that couldn't be set up still
+            # can't work: the refresh failed, and it says which app and why.
+            raise tool_refresh.RefreshFailed(_failed_apps(unavailable))
     except tool_refresh.RefreshCancelled:
         progress.finish("cancelled")
         raise
@@ -220,6 +224,8 @@ def _setup(project: Path, emit: tool_refresh.Emit | None) -> dict[str, Any]:
         raise
     finally:
         readiness.clear_setup()
+        # The last answer describes the tools before this refresh: never show it again.
+        readiness.expire_snapshot()
         # Check the images now, in the background, so screens update by themselves.
         refreshing = readiness.spawn_refresh(project, full=True, catalog=True)
     progress.finish("done")
@@ -232,6 +238,15 @@ def _setup(project: Path, emit: tool_refresh.Emit | None) -> dict[str, Any]:
         "log": str(tool_refresh.log_path()),
         "note": "Run joinery mcp status --probe for actual connected operation readiness.",
     }
+
+
+def _failed_apps(unavailable: list[dict[str, str]]) -> str:
+    """ "Couldn't set up Godot and Krita: <the first reason>"."""
+    catalog = load_catalog()
+    apps = [catalog.get(item["tool"]).name for item in unavailable]
+    reason = next((item["reason"] for item in unavailable if item["reason"]), "")
+    words = f"Couldn't set up {readiness.names(apps)}"
+    return f"{words}: {reason}" if reason else words + "."
 
 
 #: Files Godot writes next to the add-on's own in a project; never part of its version.

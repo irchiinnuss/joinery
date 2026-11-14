@@ -1229,12 +1229,33 @@ def _save_snapshot(
         snapshot["tools"][str(entry["id"])] = {**kept, "at": now}
     snapshot["docker"] = docker
     snapshot["at"] = now
+    _write_snapshot(snapshot)
+
+
+def _write_snapshot(snapshot: Mapping[str, Any]) -> None:
     path = cache_dir() / "status.json"
     with contextlib.suppress(OSError):
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix(f".{os.getpid()}.tmp")
         temporary.write_text(json.dumps(snapshot, indent=1, sort_keys=True) + "\n")
         os.replace(temporary, path)
+
+
+def expire_snapshot() -> None:
+    """Age the snapshot out: a refresh just changed what it describes.
+
+    Otherwise a screen asking within `SNAPSHOT_TTL_SECONDS` of the refresh
+    would get the answer from before it, and keep showing Refresh tools.
+    The entries stay for `cached_tools()`; `current()` asks again.
+    """
+    snapshot = load_snapshot()
+    if not snapshot:
+        return
+    for entry in snapshot["tools"].values():
+        if isinstance(entry, dict):
+            entry["at"] = 0.0
+    snapshot["at"] = 0.0
+    _write_snapshot(snapshot)
 
 
 def cached_tools() -> dict[str, dict[str, Any]]:
