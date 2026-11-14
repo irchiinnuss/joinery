@@ -1,9 +1,19 @@
 """Accept changes automatically (ADR 0085): the project's opt-in, and the rule.
 
 ``[agents] auto_accept = true`` in joinery.toml keeps a submitted change without
-asking when nothing about it needs the user: every check passed with nothing to
-say, the reviewer agent raised no warning, and the change leaves the art
-direction alone. Anything else waits in review as it always has. Off by default.
+asking when nothing about it needs the user: every check passed, the reviewer
+agent left nothing that holds it, and the change leaves the art direction and
+the game brief's direction alone. Anything else waits in review as it always
+has. Off by default.
+
+The reviewer's findings come in three levels. A ``block`` always holds the
+change. A ``warn`` holds it when ``[agents] auto_accept_hold = "warn"`` asks
+for that, and always when it says the game breaks or work is lost (rule
+``broken`` or ``work_lost``); with the default, ``"block"``, other warnings are
+shown with the kept change. A note (``info``) never holds it and is shown with
+it. A routine edit of ``design/brief.md`` (controls, verbs, a renamed action)
+is kept with a note; one that changes its direction (pitch, genre, audience,
+fantasy, core loop, scope, monetisation, or those facts) waits.
 
 The rule lives here and is applied by the turn (``joinery.turn``), so every agent
 (Claude Code, Codex, Gemini CLI, opencode) and every parallel task is judged the
@@ -22,14 +32,23 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from joinery.brief import BRIEF_PATH
 from joinery.done_when import Result
-from joinery.peer_review import PeerReview
+from joinery.peer_review import PeerReview, ReviewNote
 from joinery.roles import set_agents_values
 
 KEY = "auto_accept"
-#: The art direction and the game brief: their approval is the user's alone
-#: (art_approval, team.SHARED_DOCUMENTS), so a change to one always waits.
-DIRECTION_FILES = frozenset({"art/bible.md", "design/brief.md"})
+#: ``[agents] auto_accept_hold``: the reviewer level that holds a change.
+HOLD_KEY = "auto_accept_hold"
+HOLD_LEVELS = ("block", "warn")
+DEFAULT_HOLD = "block"
+#: A warning of these kinds holds the change whatever the setting says.
+ALWAYS_HOLD_RULES = frozenset({"broken", "work_lost"})
+#: The art direction: its approval is the user's alone (art_approval), so a change
+#: to it always waits.
+DIRECTION_FILES = frozenset({"art/bible.md"})
+#: The game brief: it waits only when its direction changes (``brief.direction_changes``).
+BRIEF = BRIEF_PATH.as_posix()
 #: The art references beside the bible, and Joinery's own state (approvals).
 DIRECTION_DIRS = ("art/reference/", ".joinery/")
 #: The words the sidebar and the agent use.
@@ -44,6 +63,26 @@ def enabled(project: Path) -> bool:
         return False
     table = raw.get("agents", {})
     return isinstance(table, dict) and table.get(KEY, False) is True
+
+
+def hold_level(project: Path) -> str:
+    """``[agents] auto_accept_hold``: "block" (the default) or "warn"."""
+    try:
+        raw = tomllib.loads((project / "joinery.toml").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return DEFAULT_HOLD
+    table = raw.get("agents", {})
+    value = table.get(HOLD_KEY, DEFAULT_HOLD) if isinstance(table, dict) else ""
+    return value if value in HOLD_LEVELS else DEFAULT_HOLD
+
+
+def set_hold_level(project: Path, level: str) -> None:
+    """Save which reviewer level holds a change, keeping the rest of joinery.toml."""
+    if level not in HOLD_LEVELS:
+        raise ValueError("The hold level is block or warn.")
+    set_agents_values(project, {HOLD_KEY: f'"{level}"'})
+    if hold_level(project) != level:
+        raise ValueError("joinery.toml keeps [agents] in a form Joinery can't edit.")
 
 
 def set_enabled(project: Path, on: bool) -> None:
@@ -63,6 +102,38 @@ def direction_paths(paths: Iterable[str]) -> list[str]:
     return found
 
 
+def holds(note: ReviewNote, hold_on: str = DEFAULT_HOLD) -> bool:
+    """Whether a reviewer note keeps the change waiting for the user."""
+    if note.severity == "block":
+        return True
+    if note.severity == "warn":
+        return hold_on == "warn" or note.rule in ALWAYS_HOLD_RULES
+    return False
+
+
+def shown_notes(
+    peer: PeerReview | None,
+    hold_on: str = DEFAULT_HOLD,
+    brief_sections: Sequence[str] = (),
+) -> list[str]:
+    """What a kept change says beside "Accepted automatically": the reviewer notes
+    that didn't hold it, and the brief sections a routine edit touched."""
+    lines = [
+        ("Warning: " if note.severity == "warn" else "Note: ")
+        + note.text
+        + (f" ({note.file})" if note.file and note.file not in note.text else "")
+        for note in (peer.notes if peer is not None else [])
+        if not holds(note, hold_on)
+    ]
+    if brief_sections:
+        lines.append(
+            "Note: updated the game brief ("
+            + ", ".join(brief_sections)
+            + "); its direction is unchanged."
+        )
+    return lines
+
+
 def held(
     *,
     changes: Sequence[Mapping[str, str]],
@@ -76,6 +147,8 @@ def held(
     art_gate: bool = False,
     last_chance: bool = False,
     unsaved: Iterable[str] = (),
+    hold_on: str = DEFAULT_HOLD,
+    brief_direction: Sequence[str] | None = None,
 ) -> list[str]:
     """Why a change that reached review waits for the user; empty when it may be
     kept without asking. Each reason is a short plain line, for logs and metrics.
@@ -89,17 +162,35 @@ def held(
     ``art_gate`` an art gate riding on the review; ``last_chance`` Joinery's own
     submit of a change the agent left; ``unsaved`` the scenes that had unsaved
     edits in the editor when the request was sent ("res://…"): the user's own
-    work, which an accept must never write over or save.
+    work, which an accept must never write over or save. ``hold_on`` is the
+    reviewer level that holds (``hold_level``); ``brief_direction`` the parts of
+    the brief's direction the change alters (``brief.direction_changes``), None
+    when nobody looked, which holds a change to the brief.
     """
     reasons: list[str] = []
     paths = [str(c.get("path", "")) for c in changes]
     if not paths and not live_edits:
         reasons.append("no file changes")
     if direction_paths(paths):
-        reasons.append("it changes the art direction or the game brief")
+        reasons.append("it changes the art direction")
+    if any(p.removeprefix("res://") == BRIEF for p in paths):
+        if brief_direction is None:
+            reasons.append("it changes the game brief")
+        elif brief_direction:
+            reasons.append(
+                "it changes the game brief's direction ("
+                + ", ".join(brief_direction)
+                + ")"
+            )
     if notes:
         reasons.append("it has notes for the user")
-    if peer is not None and any(n.severity in {"warn", "block"} for n in peer.notes):
+    found = peer.notes if peer is not None else []
+    if any(n.severity == "block" for n in found):
+        reasons.append("the reviewer found a problem that wasn't fixed")
+    warnings = [n for n in found if n.severity == "warn" and holds(n, hold_on)]
+    if any(n.rule in ALWAYS_HOLD_RULES for n in warnings):
+        reasons.append("the reviewer warned the game may break or work be lost")
+    elif warnings:
         reasons.append("the reviewer raised a warning")
     if reviewer_on and (peer is None or peer.status in {"timeout", "error"}):
         reasons.append("the reviewer didn't finish")
@@ -135,28 +226,42 @@ def unsaved_scenes(editor_context: Mapping[str, str]) -> list[str]:
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--project", type=Path, default=Path.cwd())
     parser.add_argument("--set", choices=["on", "off"], default=None)
+    parser.add_argument(
+        "--hold-on",
+        choices=list(HOLD_LEVELS),
+        default=None,
+        help="the reviewer level that keeps a change waiting: block (default) or warn",
+    )
     parser.add_argument("--json", action="store_true")
 
 
 def main(args: argparse.Namespace) -> int:
-    """The Settings page's "Accept changes automatically" switch."""
+    """The Settings page's "Accept changes automatically" switch and its hold level."""
     project = args.project.resolve()
     try:
         if args.set is not None:
             set_enabled(project, args.set == "on")
+        if getattr(args, "hold_on", None) is not None:
+            set_hold_level(project, args.hold_on)
         on = enabled(project)
+        level = hold_level(project)
     except (OSError, ValueError) as exc:
         if args.json:
             print(json.dumps({"error": str(exc)}))
         else:
             print(str(exc), file=sys.stderr)
         return 1
-    data: dict[str, Any] = {"enabled": on}
+    data: dict[str, Any] = {"enabled": on, "hold_on": level}
     if args.json:
         print(json.dumps(data))
     else:
         print(
-            "Changes that pass every check are kept without asking."
+            "Changes that pass every check are kept without asking. "
+            + (
+                "Reviewer warnings keep a change waiting."
+                if level == "warn"
+                else "Only the reviewer's blocking findings keep a change waiting."
+            )
             if on
             else "Every change waits for your Accept."
         )

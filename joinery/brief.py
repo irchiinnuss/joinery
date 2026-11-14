@@ -1107,6 +1107,68 @@ def parse(text: str) -> Brief:
     )
 
 
+#: The sections that say what the game is: a change to one changes the brief's
+#: direction (``direction_changes``). The rest (controls, verbs, camera, saving, …)
+#: follow the game as it is built and change routinely.
+DIRECTION_SECTIONS = (
+    "Pitch",
+    "Genre and references",
+    "Audience and content",
+    "Player fantasy",
+    "Core loop",
+    "Monetisation",
+    "Scope and milestones",
+)
+#: The facts that say the same: genre, players, scope of the game.
+DIRECTION_FACTS = (
+    "genre",
+    "dimension",
+    "online",
+    "max_players",
+    "monetisation",
+    "rating_target",
+)
+
+
+def _bodies(text: str) -> dict[str, str]:
+    found = {heading: " ".join(body.split()) for heading, body in sections(text)}
+    first = _SECTION.search(text)
+    found["Title"] = " ".join(text[: first.start() if first else len(text)].split())
+    return found
+
+
+def direction_changes(before: str | None, after: str | None) -> list[str]:
+    """The parts of the brief's direction that differ between two versions of it
+    (headings and fact names); empty for a routine edit such as the controls list
+    or a renamed action. A brief added, removed or whose facts no longer read
+    counts as a change of direction."""
+    if before is None or after is None:
+        return ["the whole brief"]
+    old, new = _bodies(before), _bodies(after)
+    changed = [
+        heading
+        for heading in ("Title", *DIRECTION_SECTIONS)
+        if old.get(heading) != new.get(heading)
+    ]
+    old_facts, _ = parse_facts(before)
+    new_facts, _ = parse_facts(after)
+    if old_facts is not None and new_facts is not None:
+        changed += [
+            f"facts.{name}"
+            for name in DIRECTION_FACTS
+            if getattr(old_facts, name) != getattr(new_facts, name)
+        ]
+    elif (old_facts is None) != (new_facts is None):
+        changed.append("facts")
+    return changed
+
+
+def edited_sections(before: str | None, after: str | None) -> list[str]:
+    """The headings whose text differs between two versions of the brief."""
+    old, new = _bodies(before or ""), _bodies(after or "")
+    return [h for h in dict.fromkeys([*old, *new]) if old.get(h) != new.get(h)]
+
+
 def load_brief(project: Path) -> Brief:
     """Read `design/brief.md`. Raises FileNotFoundError when there is none."""
     path = project / BRIEF_PATH

@@ -15,9 +15,10 @@ import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from joinery import auto_accept, done_when, look_preview, metrics, reasons
+from joinery import auto_accept, brief, done_when, look_preview, metrics, reasons
 from joinery.claims import LEAD_BUSY, MAIN, live_refusal
 from joinery.peer_review import PeerReview, Reviewer, ReviewPlan, request_for
 from joinery.reasons import Reason
@@ -458,7 +459,8 @@ class TurnController:
         """The agent's to-do for a request with several steps (``propose_todo``).
 
         It shows in the sidebar at once. When the project's ``[agents] todo_go`` asks for
-        the user's Go (by default, two steps or more) and nothing has changed yet, the
+        the user's Go (by default, two steps or more while someone is there to press it:
+        not with auto-accept on or in ``joinery run``) and nothing has changed yet, the
         agent ends its turn and Go starts the work as a new request; otherwise it carries
         on and the done-when items are checked after it submits.
         """
@@ -472,7 +474,7 @@ class TurnController:
             )
         todo = done_when.proposal(params, self.request)
         wait = done_when.waits_for_go(
-            todo, done_when.go_mode(self.gateway.project)
+            todo, done_when.go_mode(self.gateway.project), unattended=self._unattended()
         ) and not (self._staged() or self.live_edits)
         together = (
             []
@@ -510,6 +512,14 @@ class TurnController:
                 "done-when item after the change passes its checks."
             ),
         }
+
+    def _unattended(self) -> bool:
+        """Nobody waits to press Go: the project keeps changes automatically (ADR
+        0085), or the request came from ``joinery run``, which can't give one."""
+        project = getattr(self.gateway, "project", None)
+        if bool(getattr(self.gateway, "headless", False)):
+            return True
+        return project is not None and auto_accept.enabled(project)
 
     def drop_todo(self, todo_id: str) -> bool:
         """The user cancelled the to-do waiting for Go."""
@@ -1067,8 +1077,11 @@ class TurnController:
         project = getattr(self.gateway, "project", None)
         if not self.auto_accepts or project is None or not auto_accept.enabled(project):
             return ""
+        changes = list(preview.get("changes") or []) if preview is not None else []
+        hold_on = auto_accept.hold_level(project)
+        direction, sections = self._brief_edit(changes)
         held = auto_accept.held(
-            changes=list(preview.get("changes") or []) if preview is not None else [],
+            changes=changes,
             notes=notes,
             peer=peer,
             reviewer_on=self.reviewer is not None,
@@ -1081,11 +1094,45 @@ class TurnController:
             else self.gateway.art_gate is not None,
             last_chance=self._last_chance,
             unsaved=auto_accept.unsaved_scenes(self.gateway.editor_context),
+            hold_on=hold_on,
+            brief_direction=direction,
         )
         if held:
             self.emit({"kind": "auto_accept_held", "reasons": held})
             return ""
+        tx = self.gateway.transaction
+        if tx is not None:
+            # Shown with the kept change: what didn't hold it but is worth knowing.
+            tx.auto_notes = auto_accept.shown_notes(peer, hold_on, sections)
         return "editor" if self.live_edits else "core"
+
+    def _brief_edit(
+        self, changes: list[dict[str, Any]]
+    ) -> tuple[list[str] | None, list[str]]:
+        """For a change to the game brief: the parts of its direction it alters
+        (None when it can't be read) and the sections it edits."""
+        tx = self.gateway.transaction
+        if tx is None or not any(
+            str(c.get("path", "")).removeprefix("res://") == auto_accept.BRIEF
+            for c in changes
+        ):
+            return [], []
+
+        def read(path: Path) -> str | None:
+            try:
+                return path.read_text(encoding="utf-8")
+            except OSError:
+                return None
+
+        try:
+            before = read(tx.original / auto_accept.BRIEF)
+            after = read(tx.stage / auto_accept.BRIEF)
+            return (
+                brief.direction_changes(before, after),
+                brief.edited_sections(before, after),
+            )
+        except (OSError, ValueError):
+            return None, []
 
     async def _auto_accept(self) -> bool:
         """Accept the change in review through the user's own Accept path. False

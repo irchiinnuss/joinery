@@ -4,8 +4,10 @@ For a request with several steps the agent proposes a short to-do with ``propose
 (ADR 0060): the steps it will take and what "done" means, each "done when" item written so
 something other than the agent can check it. The sidebar shows the list before the work
 starts; the user edits or removes items and presses Go when the project asks for that
-(``[agents] todo_go``: ``"multi"`` waits for Go when there are two steps or more, the
-default; ``"always"``; ``"never"``). After the change passes Joinery's checks every item is
+(``[agents] todo_go``: ``"auto"``, the default, waits for Go when there are two steps or
+more, unless nobody is there to press it: the project keeps changes automatically
+(ADR 0085) or the request came from ``joinery run``; ``"multi"`` waits for two steps or
+more whatever; ``"always"``; ``"never"``). After the change passes Joinery's checks every item is
 checked and the review shows Pass, Fail or Inconclusive with the evidence. A Fail goes back
 to the agent once before the user sees the change.
 
@@ -20,8 +22,10 @@ Kinds of "done when" item and how each is checked:
   run of the changed game and says whether, and when, the player got there.
 - ``no_errors`` (seconds, 10 to 300, default 60): the same run has no crash, freeze, script or
   engine error.
-- ``test`` (target: a res:// GUT test the agent wrote with the change): it ran with the
-  project's tests in Joinery's checks, which pass before anything here runs.
+- ``test`` (target: a res:// test the agent wrote with the change): it ran with the
+  project's tests in Joinery's checks, which pass before anything here runs. Two kinds
+  run: GUT tests in the project's GUT folders, and SceneTree tests (a script under
+  ``tests/`` that extends SceneTree and quits with 0 on pass; ``submission.scene_tree_tests``).
 - ``check`` (target: one of Joinery's checks: tests, Godot import, art bible, references,
   provenance, dependencies): it ran on this change.
 - ``look``: nothing checks it automatically; the user looks. Always Inconclusive.
@@ -45,7 +49,8 @@ Kind = Literal["reach", "no_errors", "test", "check", "look"]
 KINDS: tuple[str, ...] = ("reach", "no_errors", "test", "check", "look")
 Status = Literal["pass", "fail", "inconclusive"]
 #: ``[agents] todo_go``: when the agent waits for the user's Go.
-GO_MODES = ("multi", "always", "never")
+GO_MODES = ("auto", "multi", "always", "never")
+DEFAULT_GO = "auto"
 #: ``[agents] run_steps``: whether independent steps run as parallel tasks.
 RUN_STEPS = ("one_by_one", "together")
 MAX_STEPS = 8
@@ -246,14 +251,14 @@ def edited(todo: Todo, data: dict[str, Any]) -> Todo:
 
 
 def go_mode(project: Path) -> str:
-    """``[agents] todo_go``: "multi" (the default), "always" or "never"."""
+    """``[agents] todo_go``: "auto" (the default), "multi", "always" or "never"."""
     try:
         raw = tomllib.loads((project / "joinery.toml").read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return "multi"
+        return DEFAULT_GO
     agents = raw.get("agents", {})
-    value = agents.get("todo_go", "multi") if isinstance(agents, dict) else "multi"
-    return value if value in GO_MODES else "multi"
+    value = agents.get("todo_go", DEFAULT_GO) if isinstance(agents, dict) else ""
+    return value if value in GO_MODES else DEFAULT_GO
 
 
 def run_steps_mode(project: Path) -> str:
@@ -289,11 +294,16 @@ def step_words(numbers: list[int]) -> str:
     return f"steps {head} and {numbers[-1]}"
 
 
-def waits_for_go(todo: Todo, mode: str) -> bool:
-    """Whether the agent waits for the user's Go before changing anything."""
+def waits_for_go(todo: Todo, mode: str, *, unattended: bool = False) -> bool:
+    """Whether the agent waits for the user's Go before changing anything.
+    ``unattended``: nobody waits to press Go (the project keeps changes automatically,
+    or ``joinery run``), so "auto" carries on; the other modes are the project's own
+    choice and hold either way."""
     if mode == "always":
         return True
     if mode == "never":
+        return False
+    if mode == "auto" and unattended:
         return False
     return len(todo.steps) >= 2
 
@@ -529,20 +539,24 @@ def _test(
         return result("inconclusive", "The change has no files, so no test ran.")
     if not (stage / path).is_file():
         return result("fail", f"{criterion.target} isn't in the change.")
+    from joinery.submission import gut_dirs, scene_tree_tests
+
+    in_gut = any(
+        path.startswith(folder.rstrip("/") + "/") for folder in gut_dirs(stage)
+    )
+    if not in_gut and path not in scene_tree_tests(stage):
+        return result(
+            "inconclusive",
+            f"{criterion.target} isn't a test Joinery runs: put it under tests/ as a "
+            "GUT test, or as a script that extends SceneTree and quits with 0 on pass.",
+        )
     if "tests" not in ran:
         why = (
-            "the project has no GUT tests set up"
+            "the tests didn't apply to this change"
             if "tests" in skipped
             else "Joinery didn't run the tests for this change"
         )
         return result("inconclusive", f"{criterion.target} didn't run: {why}.")
-    from joinery.submission import gut_dirs
-
-    if not any(path.startswith(folder.rstrip("/") + "/") for folder in gut_dirs(stage)):
-        return result(
-            "inconclusive",
-            f"{criterion.target} isn't in the project's test folder, so it didn't run.",
-        )
     return result(
         "pass", f"{criterion.target} ran with the project's tests and passed."
     )

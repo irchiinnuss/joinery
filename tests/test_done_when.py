@@ -190,7 +190,10 @@ def test_the_user_rewords_and_removes_items_but_kinds_stay_the_agents() -> None:
 def test_go_waits_for_several_steps_by_default(project: Path) -> None:
     one = done_when.proposal({"steps": ["Make the door red"]})
     many = done_when.proposal(TODO)
-    assert done_when.go_mode(project) == "multi"
+    assert done_when.go_mode(project) == "auto"
+    assert done_when.waits_for_go(many, "auto") and not done_when.waits_for_go(
+        one, "auto"
+    )
     assert done_when.waits_for_go(many, "multi") and not done_when.waits_for_go(
         one, "multi"
     )
@@ -199,7 +202,15 @@ def test_go_waits_for_several_steps_by_default(project: Path) -> None:
     (project / "joinery.toml").write_text('[agents]\ntodo_go = "never"\n')
     assert done_when.go_mode(project) == "never"
     (project / "joinery.toml").write_text('[agents]\ntodo_go = "sometimes"\n')
-    assert done_when.go_mode(project) == "multi"
+    assert done_when.go_mode(project) == "auto"
+
+
+def test_nobody_to_press_go_carries_on_unless_the_project_asks() -> None:
+    many = done_when.proposal(TODO)
+    assert not done_when.waits_for_go(many, "auto", unattended=True)
+    # The project's own choice holds even with nobody there.
+    assert done_when.waits_for_go(many, "multi", unattended=True)
+    assert done_when.waits_for_go(many, "always", unattended=True)
 
 
 def test_go_tells_the_agent_the_todo_as_the_user_left_it() -> None:
@@ -261,6 +272,44 @@ def test_each_kind_is_checked_with_evidence(tmp_path: Path, plays: Plays) -> Non
     assert options.out is not None and options.out.is_relative_to(
         tmp_path / ".joinery" / "playtests"
     )
+
+
+def _test_item(target: str) -> done_when.Todo:
+    return done_when.proposal(
+        {
+            "steps": ["Make the door open"],
+            "done_when": [{"text": "The door opens", "kind": "test", "target": target}],
+        }
+    )
+
+
+def test_a_scene_tree_test_counts_without_gut(tmp_path: Path) -> None:
+    stage = tmp_path / "stage"
+    (stage / "tests").mkdir(parents=True)
+    (stage / "project.godot").write_text("config_version=5\n")
+    (stage / "tests/test_door.gd").write_text(
+        "extends SceneTree\n\nfunc _initialize():\n\tquit(0)\n"
+    )
+    (stage / "tests/harness.gd").write_text("extends Node\n")
+    (stage / "scripts").mkdir()
+    (stage / "scripts/check.gd").write_text("extends SceneTree\n")
+
+    def verify(target: str, ran: list[str]) -> done_when.Result:
+        (result,) = run(
+            lambda: done_when.verify(
+                _test_item(target), project=tmp_path, stage=stage, ran=ran, skipped=[]
+            )
+        )
+        return result
+
+    passed = verify("res://tests/test_door.gd", ["Godot import", "tests"])
+    assert passed.status == "pass"
+    assert "ran with the project's tests and passed" in passed.evidence
+    for target in ("res://tests/harness.gd", "res://scripts/check.gd"):
+        other = verify(target, ["Godot import", "tests"])
+        assert other.status == "inconclusive"
+        assert "extends SceneTree and quits with 0" in other.evidence
+    assert verify("res://tests/test_door.gd", []).status == "inconclusive"
 
 
 def test_a_place_not_reached_or_an_error_fails_and_a_missing_name_is_inconclusive(
@@ -612,5 +661,34 @@ def test_the_tool_passes_the_todo_through(
                 ],
             }
         ]
+
+    run(go)
+
+
+@pytest.mark.parametrize(
+    ("toml", "headless", "status"),
+    [
+        ("", False, "waiting_for_go"),
+        ("", True, "go"),
+        ("[agents]\nauto_accept = true\n", False, "go"),
+        ('[agents]\nauto_accept = true\ntodo_go = "multi"\n', False, "waiting_for_go"),
+        ('[agents]\ntodo_go = "always"\n', True, "waiting_for_go"),
+    ],
+)
+def test_go_is_not_waited_for_when_nobody_can_press_it(
+    project: Path, toml: str, headless: bool, status: str
+) -> None:
+    if toml:
+        (project / "joinery.toml").write_text(toml)
+
+    async def go() -> None:
+        gateway = wire(ProjectGateway(project))
+        gateway.keep_reviews = headless
+        controller = TurnController(gateway, lambda _e: None, "codex")
+        try:
+            controller.begin("Lock the vault")
+            assert controller.propose_todo(TODO)["status"] == status
+        finally:
+            await gateway.close()
 
     run(go)

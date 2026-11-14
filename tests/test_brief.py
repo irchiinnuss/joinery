@@ -713,3 +713,35 @@ def test_verb_inputs_that_are_not_actions_stay_plain_text() -> None:
     }
     verbs = dict(brief.sections(draft({}, blueprint, [])))["Player verbs"]
     assert "| Look | `look_left`, `look_right`, mouse | Camera orbits |" in verbs
+
+
+# --- What a change to the brief alters (auto-accept, ADR 0085) -------------------------
+
+
+def _drafted() -> str:
+    return draft({"pitch": "Hold the foundry against the slag."}, BLUEPRINTS[3], [])
+
+
+def test_a_routine_brief_edit_keeps_its_direction() -> None:
+    before = _drafted()
+    controls = dict(brief.sections(before))["Controls per device"]
+    after = before.replace(controls, controls + "\n| attack | Mouse 1 |\n", 1)
+    assert brief.direction_changes(before, after) == []
+    assert brief.edited_sections(before, after) == ["Controls per device"]
+
+
+def test_genre_players_and_scope_are_its_direction() -> None:
+    before = _drafted()
+    pitch = dict(brief.sections(before))["Pitch"]
+    assert brief.direction_changes(
+        before, before.replace(pitch, "\nA racing game.\n\n", 1)
+    ) == ["Pitch"]
+    players = before.replace("max_players = 1", "max_players = 4", 1)
+    assert players != before
+    assert brief.direction_changes(before, players) == ["facts.max_players"]
+    scope = dict(brief.sections(before))["Scope and milestones"]
+    assert brief.direction_changes(
+        before, before.replace(scope, "\nThree levels.\n\n", 1)
+    ) == ["Scope and milestones"]
+    assert brief.direction_changes(None, before) == ["the whole brief"]
+    assert brief.direction_changes(before, None) == ["the whole brief"]

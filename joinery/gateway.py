@@ -348,6 +348,11 @@ class ProjectGateway:
     def is_lane(self) -> bool:
         return self._root is not self
 
+    @property
+    def headless(self) -> bool:
+        """A ``joinery run`` host: no editor and nobody to press Go."""
+        return self._root.keep_reviews and self._root.held_by == "joinery run"
+
     def lane(self, task_id: str, title: str) -> ProjectGateway:
         """A gateway for a parallel task: shared project and apps, its own change."""
         root = self._root
@@ -1443,6 +1448,8 @@ class ProjectGateway:
             event["auto_accepted"] = True
             event["summary"] = tx.summary
             event["message"] = auto_accept.ACCEPTED
+            if tx.auto_notes:
+                event["notes"] = list(tx.auto_notes)
         if accept and tx.timeline.get("state") == "failed":
             # The change is kept either way; say why the Timeline lacks it.
             event["message"] = "Change accepted. " + tx.timeline.get("message", "")

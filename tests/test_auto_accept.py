@@ -47,9 +47,9 @@ def test_only_a_real_true_turns_it_on(tmp_path: Path) -> None:
 def test_cli_reads_and_sets(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     project = str(tmp_path)
     assert main(["auto-accept", "--project", project, "--json"]) == 0
-    assert json.loads(capsys.readouterr().out) == {"enabled": False}
+    assert json.loads(capsys.readouterr().out) == {"enabled": False, "hold_on": "block"}
     assert main(["auto-accept", "--project", project, "--json", "--set", "on"]) == 0
-    assert json.loads(capsys.readouterr().out) == {"enabled": True}
+    assert json.loads(capsys.readouterr().out) == {"enabled": True, "hold_on": "block"}
     assert auto_accept.enabled(tmp_path) is True
     assert main(["auto-accept", "--project", project, "--set", "off"]) == 0
     assert "waits for your Accept" in capsys.readouterr().out
@@ -67,8 +67,8 @@ def test_cli_says_why_a_save_failed(
 # --- The rule ------------------------------------------------------------------------
 
 
-def _note(severity: Any) -> PeerReview:
-    return PeerReview("reviewed", [ReviewNote(severity, "Check this.", "a.gd")])
+def _note(severity: Any, rule: str = "") -> PeerReview:
+    return PeerReview("reviewed", [ReviewNote(severity, "Check this.", "a.gd", rule)])
 
 
 def test_a_clean_change_needs_nobody() -> None:
@@ -95,22 +95,24 @@ def test_a_clean_change_needs_nobody() -> None:
     [
         "art/bible.md",
         "res://art/bible.md",
-        "design/brief.md",
         "art/reference/mood.png",
         ".joinery/art-approval.json",
     ],
 )
 def test_art_direction_and_approvals_always_wait(path: str) -> None:
     held = auto_accept.held(changes=[{"path": "a.gd"}, {"path": path}])
-    assert held == ["it changes the art direction or the game brief"]
+    assert held == ["it changes the art direction"]
 
 
 @pytest.mark.parametrize(
     ("given", "reason"),
     [
         ({"notes": ["Nothing in a scene uses mug.glb yet."]}, "notes for the user"),
-        ({"peer": _note("warn")}, "reviewer raised a warning"),
-        ({"peer": _note("block")}, "reviewer raised a warning"),
+        ({"peer": _note("warn"), "hold_on": "warn"}, "reviewer raised a warning"),
+        ({"peer": _note("warn", "broken")}, "may break or work be lost"),
+        ({"peer": _note("warn", "work_lost")}, "may break or work be lost"),
+        ({"peer": _note("block")}, "a problem that wasn't fixed"),
+        ({"peer": _note("block"), "hold_on": "warn"}, "a problem that wasn't fixed"),
         ({"peer": PeerReview("timeout"), "reviewer_on": True}, "didn't finish"),
         ({"peer": PeerReview("error"), "reviewer_on": True}, "didn't finish"),
         ({"reviewer_on": True}, "didn't finish"),
@@ -205,12 +207,15 @@ def test_on_a_bible_change_still_waits_for_the_user(session: Session) -> None:
     result = session.run(lambda: session.turn.submit("Art direction draft"))
     assert result.status == "in_review" and session.state == "review"
     held = next(e for e in session.events if e["kind"] == "auto_accept_held")
-    assert held["reasons"] == ["it changes the art direction or the game brief"]
+    assert held["reasons"] == ["it changes the art direction"]
     assert session.kinds()[-2:] == ["file_preview", "in_review"]
 
 
-def test_on_a_reviewer_warning_waits(session: Session) -> None:
+def test_on_a_reviewer_warning_waits_when_the_project_holds_warnings(
+    session: Session,
+) -> None:
     auto_accept.set_enabled(session.root, True)
+    auto_accept.set_hold_level(session.root, "warn")
 
     async def reviewer(_request: Any) -> PeerReview:
         return _note("warn")
@@ -220,6 +225,122 @@ def test_on_a_reviewer_warning_waits(session: Session) -> None:
     session.stage({"a.gd": "extends Node\n"})
     result = session.run(lambda: session.turn.submit("A script"))
     assert result.status == "in_review" and session.state == "review"
+
+
+def test_on_reviewer_warnings_and_notes_ride_with_the_kept_change(
+    session: Session,
+) -> None:
+    auto_accept.set_enabled(session.root, True)
+
+    async def reviewer(_request: Any) -> PeerReview:
+        return PeerReview(
+            "reviewed",
+            [
+                ReviewNote("warn", "The HUD sits outside the safe area.", "hud.tscn"),
+                ReviewNote("info", "No Krita texture yet.", ""),
+            ],
+        )
+
+    session.turn.reviewer = reviewer
+    session.turn.begin("Add a script")
+    session.stage({"a.gd": "extends Node\n"})
+    result = session.run(lambda: session.turn.submit("A script"))
+    assert result.status == "accepted"
+    decision = session.events[-1]
+    assert decision["auto_accepted"] is True
+    assert decision["notes"] == [
+        "Warning: The HUD sits outside the safe area. (hud.tscn)",
+        "Note: No Krita texture yet.",
+    ]
+
+
+BRIEF = """# Game brief - Foundry
+
+## 1. Pitch
+Hold the foundry against the slag.
+
+## 2. Genre and references
+- Genre: first-person shooter
+
+## 7. Controls per device
+| Action | Keys |
+| fire | Mouse 1 |
+
+## 17. Scope and milestones
+Ten rooms.
+"""
+
+
+def test_on_a_routine_brief_edit_is_kept_with_a_note(session: Session) -> None:
+    (session.root / "design").mkdir()
+    (session.root / "design/brief.md").write_text(BRIEF, encoding="utf-8")
+    auto_accept.set_enabled(session.root, True)
+    session.turn.begin("Rename fire to attack")
+    session.stage({"design/brief.md": BRIEF.replace("| fire |", "| attack |")})
+    result = session.run(lambda: session.turn.submit("Renamed the action"))
+    assert result.status == "accepted"
+    assert session.events[-1]["notes"] == [
+        "Note: updated the game brief (Controls per device); its direction is unchanged."
+    ]
+
+
+def test_on_a_brief_direction_change_waits(session: Session) -> None:
+    (session.root / "design").mkdir()
+    (session.root / "design/brief.md").write_text(BRIEF, encoding="utf-8")
+    auto_accept.set_enabled(session.root, True)
+    session.turn.begin("Make it a platformer")
+    session.stage(
+        {"design/brief.md": BRIEF.replace("first-person shooter", "platformer")}
+    )
+    result = session.run(lambda: session.turn.submit("New genre"))
+    assert result.status == "in_review"
+    held = next(e for e in session.events if e["kind"] == "auto_accept_held")
+    assert held["reasons"] == [
+        "it changes the game brief's direction (Genre and references)"
+    ]
+
+
+def test_a_brief_change_nobody_read_waits() -> None:
+    assert auto_accept.held(changes=[{"path": "design/brief.md"}]) == [
+        "it changes the game brief"
+    ]
+    assert (
+        auto_accept.held(changes=[{"path": "design/brief.md"}], brief_direction=[])
+        == []
+    )
+
+
+def test_the_hold_level_is_saved_and_read(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert auto_accept.hold_level(tmp_path) == "block"
+    project = str(tmp_path)
+    assert (
+        main(["auto-accept", "--project", project, "--json", "--hold-on", "warn"]) == 0
+    )
+    assert json.loads(capsys.readouterr().out)["hold_on"] == "warn"
+    assert 'auto_accept_hold = "warn"' in (tmp_path / "joinery.toml").read_text()
+    (tmp_path / "joinery.toml").write_text('[agents]\nauto_accept_hold = "x"\n')
+    assert auto_accept.hold_level(tmp_path) == "block"
+    with pytest.raises(ValueError, match="block or warn"):
+        auto_accept.set_hold_level(tmp_path, "info")
+
+
+def test_notes_shown_are_those_that_did_not_hold() -> None:
+    peer = PeerReview(
+        "reviewed",
+        [
+            ReviewNote("block", "Broken.", "a.gd", "broken"),
+            ReviewNote("warn", "Risky.", "a.gd", "request"),
+            ReviewNote("warn", "Crashes.", "a.gd", "broken"),
+            ReviewNote("info", "Polish later.", "a.gd"),
+        ],
+    )
+    assert auto_accept.shown_notes(peer) == [
+        "Warning: Risky. (a.gd)",
+        "Note: Polish later. (a.gd)",
+    ]
+    assert auto_accept.shown_notes(peer, "warn") == ["Note: Polish later. (a.gd)"]
 
 
 def test_on_a_variant_is_never_kept_alone(session: Session) -> None:

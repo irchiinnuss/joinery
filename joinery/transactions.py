@@ -289,6 +289,8 @@ class FileTransaction:
         self.reviewer: dict[str, Any] = {}
         #: Kept without the user's Accept, by the project's choice (joinery.auto_accept).
         self.auto_accepted = False
+        #: What a kept change says beside "Accepted automatically" (auto_accept.shown_notes).
+        self.auto_notes: list[str] = []
 
     @property
     def original(self) -> Path:
