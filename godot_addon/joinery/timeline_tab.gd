@@ -1,40 +1,45 @@
 @tool
 extends VBoxContainer
-## The Timeline tab in the editor's bottom panel: how the project changed, newest first.
+## The Timeline page: how the project changed, newest first, as a glanceable history.
 ##
 ## Every accepted Journeyman change, and every revert, is one git commit in the project's own
-## repository (joinery/timeline.py). Each shows here as one line: what changed, who, how many
-## files, when. The filter box narrows the list; entries load 50 at a time. Clicking one opens
-## its files (timeline_entry.gd) with Restore this file as it was, which stages an ordinary
-## reviewed change in the Review tab.
+## repository (joinery/timeline.py). The page is one centred column (ui_blocks.page_scroll):
+## the title, a filter, then the entries under quiet day captions ("Today", "Yesterday",
+## "Monday", "9 Nov"), each one line: what changed and, on the trailing edge, the time (and who,
+## once more than one person is on the list). Who, how many files and when sit in its tooltip.
+## Entries load 50 at a time. Clicking one opens its files (timeline_entry.gd), where Restore
+## is each file's secondary action and stages an ordinary reviewed change in the Review tab.
 ##
 ## Named Timeline because Godot's own History dock is the undo history. A project without git
-## offers "Start keeping a timeline"; nothing starts without that click. A scene edit accepted
-## live is not on disk until the scene is saved, so it joins the timeline on that save.
+## is a blankslate with "Start timeline"; nothing starts without that click. A scene edit
+## accepted live is not on disk until the scene is saved: it waits at the top under "Not saved
+## yet" and joins the timeline on that save.
 ##
 ## The list comes from `joinery timeline list` (command_job.gd), read when the tab is shown and
 ## when the editor gets focus back while it is shown; it never polls.
 ##
 ## A project shared with teammates (`joinery team connect`, ADR 0071) has Pull and Push beside
-## the filter, with how many changes each would move; the remote is asked when the tab is shown
-## (at most once a minute). A teammate's entry names them; the last pull's entries carry a dot.
-## What a pull or push did shows under the bar, with Review when a choice waits there.
+## the title, with how many changes each would move; the one worth doing next is the page's one
+## accent button. The remote is asked when the tab is shown (at most once a minute). The last
+## pull's entries carry a dot. What a pull or push did shows under the title, with Review when
+## a choice waits there.
 
 const UI_THEME := preload("ui_theme.gd")
 const UI_MOTION := preload("ui_motion.gd")
 const UI := preload("ui_components.gd")
-const INDICATOR := preload("activity_indicator.gd")
+const BLOCKS := preload("ui_blocks.gd")
+const STYLE := preload("sidebar_style.gd")
 const COMMAND := preload("command_job.gd")
 const REVIEW_TAB := preload("review_tab.gd")
 const ENTRY := preload("timeline_entry.gd")
 const SELF_PATH := "res://addons/joinery/timeline_tab.gd"
 const FILTER_DELAY := 0.25
-const OFFER_TITLE := "Keep a timeline of this project"
-const OFFER_TEXT := (
-	"Every change you accept becomes an entry here, so you can see how the game changed "
-	+ "and put any file back. Git keeps it, in this project's folder."
-)
-const PENDING_SCENES := "Scene edits you accepted join the timeline when you save the scene."
+const OFFER_TITLE := "Keep a timeline"
+const OFFER_TEXT := "Every change you accept, kept with git in this project."
+const SWITCHED_OFF := "Accepted changes aren't added. Turn it on in Settings."
+const PENDING_CAPTION := "Not saved yet"
+const MONTHS := ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+const WEEKDAYS := ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
 ## The remote is asked again when the tab is shown this long after the last time, in seconds.
 const FETCH_EVERY := 60.0
 
@@ -48,13 +53,16 @@ var _entry: ENTRY
 var _filter: LineEdit
 var _filter_timer: Timer
 var _content: VBoxContainer
-var _loading: HBoxContainer
+var _loading: VBoxContainer
 var _load_error: Label
 var _offer: VBoxContainer
 var _offer_title: Label
 var _offer_text: Label
 var _offer_button: Button
 var _note: Label
+## Live edits accepted in scenes not saved yet, at the top of the list.
+var _pending: VBoxContainer
+## The day captions and entry rows, in order; [method entry_rows] gives the rows alone.
 var _rows: VBoxContainer
 var _empty: Label
 var _more: Button
@@ -109,7 +117,7 @@ static func install(plugin: EditorPlugin) -> Control:
 
 func _init() -> void:
 	name = "Timeline"
-	theme_type_variation = "JoineryStack"
+	theme_type_variation = "JoineryFlush"
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	size_flags_vertical = Control.SIZE_EXPAND_FILL
 	accessibility_name = "Timeline: how this project changed, newest first"
@@ -238,6 +246,43 @@ func entry_view() -> ENTRY:
 	return _entry
 
 
+## The entry rows on the list, newest first, without their day captions.
+func entry_rows() -> Array[Control]:
+	var rows: Array[Control] = []
+	for child: Node in _rows.get_children():
+		if child.has_meta("commit"):
+			rows.append(child as Control)
+	return rows
+
+
+## The day caption for [param stamp] seen at [param now] (both Unix seconds, shown in local
+## time): "Today", "Yesterday", the weekday within a week, then "9 Nov" (with the year when it
+## is not this one).
+static func day_title(stamp: float, now: float) -> String:
+	var bias := int(Time.get_time_zone_from_system().get("bias", 0)) * 60
+	var day := floori((stamp + bias) / 86400.0)
+	var today := floori((now + bias) / 86400.0)
+	var date := Time.get_datetime_dict_from_unix_time(int(stamp) + bias)
+	match today - day:
+		0:
+			return "Today"
+		1:
+			return "Yesterday"
+	if today - day < 7 and today >= day:
+		return WEEKDAYS[int(date["weekday"])]
+	var title := "%d %s" % [int(date["day"]), MONTHS[int(date["month"]) - 1]]
+	if int(date["year"]) != int(Time.get_datetime_dict_from_unix_time(int(now) + bias)["year"]):
+		title += " %d" % int(date["year"])
+	return title
+
+
+## The local clock time of [param stamp]: "14:05".
+static func clock_text(stamp: float) -> String:
+	var bias := int(Time.get_time_zone_from_system().get("bias", 0)) * 60
+	var when := Time.get_datetime_dict_from_unix_time(int(stamp) + bias)
+	return "%02d:%02d" % [int(when["hour"]), int(when["minute"])]
+
+
 ## A live scene edit was accepted (scene_edits.gd): it reaches the timeline on save.
 func live_edit_accepted(scene_path: String, summary: String) -> void:
 	var summaries: Array = _unsaved.get_or_add(scene_path, [])
@@ -294,15 +339,21 @@ static func meta_text(entry: Dictionary, now: float) -> String:
 
 func _build_list() -> void:
 	_list_view = VBoxContainer.new()
-	_list_view.theme_type_variation = "JoineryTight"
+	_list_view.theme_type_variation = "JoineryFlush"
 	_list_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	add_child(_list_view)
-	var gutter_bar := MarginContainer.new()
-	gutter_bar.theme_type_variation = "JoineryGutter"
-	_list_view.add_child(gutter_bar)
+	var scroll := BLOCKS.page_scroll()
+	scroll.accessibility_name = "Timeline entries"
+	_list_view.add_child(scroll)
+	_content = scroll.get_meta("body")
+	var head := BLOCKS.page_title("Timeline")
+	_content.add_child(head)
+	_build_sync(head)
+	_build_sync_note()
 	var bar := HBoxContainer.new()
+	bar.name = "FilterBar"
 	bar.theme_type_variation = "JoineryRow"
-	gutter_bar.add_child(bar)
+	_content.add_child(_spaced(bar, 3))
 	_filter = LineEdit.new()
 	_filter.name = "Filter"
 	_filter.placeholder_text = "Filter by change, file or person"
@@ -317,83 +368,68 @@ func _build_list() -> void:
 			refresh()
 	)
 	bar.add_child(_filter)
-	_build_sync(bar)
-	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.follow_focus = true
-	scroll.accessibility_name = "Timeline entries"
-	UI_MOTION.rubber_band(scroll)
-	_list_view.add_child(scroll)
-	var gutter := MarginContainer.new()
-	gutter.theme_type_variation = "JoineryGutter"
-	gutter.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.add_child(gutter)
-	_content = VBoxContainer.new()
-	_content.theme_type_variation = "JoineryTight"
-	_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	gutter.add_child(_content)
-	_loading = HBoxContainer.new()
-	_loading.theme_type_variation = "JoineryRowTight"
-	var dots := INDICATOR.new()
-	dots.running = true
-	_loading.add_child(dots)
-	_loading.add_child(UI.label("Reading the timeline…", "JoineryCaption"))
-	UI.bind_height(_loading, "md", false)
-	_content.add_child(_loading)
+	_loading = BLOCKS.skeleton(3)
+	_loading.name = "Loading"
+	_content.add_child(_spaced(_loading, 5))
 	_load_error = UI.label("", "JoineryError", true)
 	_load_error.name = "LoadError"
 	_load_error.hide()
-	_content.add_child(_load_error)
+	_content.add_child(_spaced(_load_error, 4))
 	_build_offer()
-	_build_sync_note()
 	_note = UI.label("", "JoineryCaption", true)
 	_note.name = "Note"
 	_note.hide()
-	_content.add_child(_note)
+	_content.add_child(_spaced(_note, 4))
+	_pending = VBoxContainer.new()
+	_pending.name = "Pending"
+	_pending.theme_type_variation = "JoineryFlush"
+	_pending.hide()
+	_content.add_child(_pending)
 	_rows = VBoxContainer.new()
 	_rows.name = "Rows"
 	_rows.theme_type_variation = "JoineryFlush"
 	_content.add_child(_rows)
-	_empty = UI.label("", "JoineryCaption")
+	_empty = UI.label("", "JoineryCaption", true)
 	_empty.name = "Empty"
-	UI.bind_height(_empty, "md", false)
 	_empty.hide()
-	_content.add_child(_empty)
-	_more = UI.quiet("Show older entries")
+	_content.add_child(_spaced(_empty, 5))
+	_more = UI.quiet_link("Show older")
 	_more.name = "More"
 	_more.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	STYLE.hug_left(_more)
 	_more.hide()
 	_more.pressed.connect(_load_more)
-	_content.add_child(_more)
+	_content.add_child(_spaced(_more, 3))
 
 
-## The offer shown while there is no timeline: what it is, and the one button that starts it.
+func _spaced(control: Control, step: int) -> MarginContainer:
+	return BLOCKS.spaced(control, step)
+
+
+## No timeline yet: one blankslate with one button that starts it.
 func _build_offer() -> void:
-	_offer = VBoxContainer.new()
-	_offer.name = "Offer"
-	_offer.theme_type_variation = "JoineryTight"
-	_offer.hide()
-	_content.add_child(_offer)
-	_offer_title = UI.label(OFFER_TITLE, "JoinerySection", true)
-	_offer.add_child(_offer_title)
-	_offer_text = UI.label(OFFER_TEXT, "JoineryCaption", true)
-	_offer.add_child(_offer_text)
-	_offer_button = UI.primary("Start keeping a timeline")
+	_offer_button = UI.primary("Start timeline")
 	_offer_button.name = "Start"
-	_offer_button.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	_offer_button.tooltip_text = "Sets up git in this project and makes the first entry"
 	_offer_button.pressed.connect(_start_timeline)
-	_offer.add_child(_offer_button)
+	UI_MOTION.press_feedback(_offer_button)
+	_offer = BLOCKS.blankslate("chats", OFFER_TITLE, _offer_button, null, OFFER_TEXT)
+	_offer.name = "Offer"
+	_offer.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	_offer_title = _offer.find_child("Heading", true, false)
+	_offer_text = _offer.find_child("Line", true, false)
+	_offer.hide()
+	_content.add_child(_spaced(_offer, 6))
 
 
-## Pull and Push beside the filter, shown while the project is shared.
-func _build_sync(bar: HBoxContainer) -> void:
+## Pull and Push beside the title, shown while the project is shared.
+func _build_sync(head: HBoxContainer) -> void:
 	_sync = HBoxContainer.new()
 	_sync.name = "Sync"
-	_sync.theme_type_variation = "JoineryRowTight"
+	_sync.theme_type_variation = "JoineryRow"
+	_sync.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_sync.hide()
-	bar.add_child(_sync)
+	head.add_child(_sync)
 	_pull = UI.secondary("Pull")
 	_pull.name = "Pull"
 	_pull.tooltip_text = "Bring in your teammates' changes"
@@ -408,18 +444,18 @@ func _build_sync(bar: HBoxContainer) -> void:
 	_sync.add_child(_push)
 
 
-## What the last pull or push did, under the bar.
+## What the last pull or push did, under the title.
 func _build_sync_note() -> void:
 	_sync_note = HBoxContainer.new()
 	_sync_note.name = "SyncNote"
 	_sync_note.theme_type_variation = "JoineryRow"
 	_sync_note.hide()
-	_content.add_child(_sync_note)
+	_content.add_child(_spaced(_sync_note, 2))
 	_sync_text = UI.label("", "JoineryCaption", true)
 	_sync_text.name = "Text"
 	_sync_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_sync_note.add_child(_sync_text)
-	_sync_review = UI.quiet("Review")
+	_sync_review = UI.quiet_link("Review")
 	_sync_review.name = "Review"
 	_sync_review.tooltip_text = "Open the Review tab"
 	_sync_review.hide()
@@ -466,33 +502,45 @@ func _render(appended := false) -> void:
 		return
 	var state := str(_status.get("state", ""))
 	var ready := state == "ready"
+	var filtered := not _filter.text.strip_edges().is_empty()
 	_loading.visible = not _loaded
-	_filter.get_parent().visible = ready
+	_filter.get_parent().visible = ready and (filtered or not _entries.is_empty())
 	_render_offer(state)
-	var notes: Array[String] = []
-	if ready and not bool(_status.get("auto_commit", true)):
-		notes.append("Accepted changes aren't added. Turn this on in Journeyman settings.")
-	if not _unsaved.is_empty():
-		notes.append(PENDING_SCENES)
-	_note.text = "\n".join(notes)
-	_note.visible = not notes.is_empty()
+	_note.text = SWITCHED_OFF if ready and not bool(_status.get("auto_commit", true)) else ""
+	_note.visible = not _note.text.is_empty()
+	_render_pending()
 	_render_sync()
-	var first_new := 0 if not appended else _rows.get_child_count()
+	var shown := entry_rows().size()
+	var first_new := shown if appended else 0
 	if not appended:
 		for child: Node in _rows.get_children():
 			_rows.remove_child(child)
 			child.queue_free()
 	var now := Time.get_unix_time_from_system()
+	var authors := {}
+	for entry: Dictionary in _entries:
+		authors[str(entry.get("author", ""))] = true
+	var group := ""
+	if appended and first_new > 0:
+		group = day_title(float(_entries[first_new - 1].get("time", 0)), now)
+	var added: Array = []
 	for index: int in range(first_new, _entries.size()):
-		_rows.add_child(_row(_entries[index], now))
-	if appended:
-		UI_MOTION.stagger(_rows.get_children().slice(first_new))
-	var filtered := not _filter.text.strip_edges().is_empty()
+		var entry := _entries[index]
+		var day := day_title(float(entry.get("time", 0)), now)
+		if day != group:
+			group = day
+			_rows.add_child(BLOCKS.group_caption(day))
+		var row := _row(entry, now, authors.size() > 1)
+		_rows.add_child(row)
+		added.append(row)
+	# Rows arriving on an empty list or as an older page settle in; a refresh does not move.
+	if appended or shown == 0:
+		UI_MOTION.stagger(added)
 	_empty.visible = ready and _entries.is_empty()
 	_empty.text = (
 		"Nothing matches “%s”." % _filter.text.strip_edges()
 		if filtered
-		else "No entries yet. Accept a change and it shows here."
+		else "No changes yet. Accepted changes show here."
 	)
 	_more.visible = ready and _has_more
 
@@ -506,39 +554,75 @@ func _render_offer(state: String) -> void:
 			_offer_title.text = "Git isn't installed"
 			_offer_text.text = str(_status.get("message", ""))
 		"nested":
-			_offer_title.text = "This project is part of a bigger repository"
+			_offer_title.text = "Part of a bigger repository"
 			_offer_text.text = str(_status.get("message", ""))
 		_:
 			_offer_title.text = OFFER_TITLE
 			_offer_text.text = OFFER_TEXT
+	_offer_text.visible = not _offer_text.text.is_empty()
 
 
-func _row(entry: Dictionary, now: float) -> HBoxContainer:
+## Live edits accepted but not saved: muted rows under "Not saved yet", above the entries.
+func _render_pending() -> void:
+	for child: Node in _pending.get_children():
+		_pending.remove_child(child)
+		child.queue_free()
+	_pending.visible = not _unsaved.is_empty()
+	if _unsaved.is_empty():
+		return
+	_pending.add_child(BLOCKS.group_caption(PENDING_CAPTION))
+	for scene: String in _unsaved:
+		for summary: Variant in _unsaved[scene]:
+			var line := HBoxContainer.new()
+			line.theme_type_variation = "JoineryRow"
+			UI.bind_height(line, "md", false)
+			var words := UI.label(str(summary), "JoineryMuted")
+			words.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			words.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			line.add_child(words)
+			var when := UI.label("On save", "JoineryNumeric")
+			when.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			line.tooltip_text = "Joins the timeline when %s is saved" % scene.get_file()
+			line.add_child(when)
+			_pending.add_child(line)
+
+
+## One entry on one line: what changed, then (with several people on the list) who, then the
+## time. The whole row opens it; who, how many files and when are in its tooltip.
+func _row(entry: Dictionary, now: float, named: bool) -> HBoxContainer:
 	var line := HBoxContainer.new()
 	line.theme_type_variation = "JoineryRow"
 	line.set_meta("commit", str(entry.get("commit", "")))
 	UI.bind_height(line, "md", false)
 	var subject := str(entry.get("subject", "")).strip_edges()
-	var open := UI.row_button(subject if not subject.is_empty() else "Project changes", "")
+	if subject.is_empty():
+		subject = "Project changes"
+	var open := UI.row_button(subject, "")
 	open.name = "Open"
-	open.tooltip_text = subject
+	open.tooltip_text = subject + "\n" + meta_text(entry, now)
 	open.accessibility_name = subject + ", show its files"
 	open.pressed.connect(open_entry.bind(entry))
+	STYLE.hug_left(open)
 	UI_MOTION.press_feedback(open)
 	line.add_child(open)
-	var meta := UI.label(meta_text(entry, now), "JoineryNumeric")
-	meta.name = "Meta"
-	meta.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
-	meta.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	line.add_child(meta)
 	if bool(entry.get("pulled", false)):
 		# Arrived with the last pull: a dot before who and when, said in words for readers.
 		var dot := UI.status_dot("working")
 		dot.name = "Pulled"
 		dot.tooltip_text = "New from your last pull"
 		line.add_child(dot)
-		line.move_child(dot, meta.get_index())
 		open.accessibility_name = subject + ", new from your last pull, show its files"
+	var author := str(entry.get("author", ""))
+	if named and not author.is_empty():
+		var who := UI.label(author, "JoineryCaption")
+		who.name = "Author"
+		who.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		line.add_child(who)
+	var meta := UI.label(clock_text(float(entry.get("time", 0))), "JoineryNumeric")
+	meta.name = "Meta"
+	meta.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
+	meta.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	line.add_child(meta)
 	return line
 
 

@@ -73,6 +73,10 @@ func _check_wording() -> void:
 		TAB.meta_text(entry, now) == "Ada Lovelace · 3 files · 2 h ago", "Row meta reads plainly"
 	)
 	_check(TAB.meta_text({"files": 1}, now) == "1 file", "One file is singular")
+	_check(TAB.day_title(now, now) == "Today", "Today's caption")
+	_check(TAB.day_title(now - 86400, now) == "Yesterday", "Yesterday's caption")
+	var old := TAB.day_title(now - 40 * 86400, now)
+	_check(old.split(" ").size() >= 2 and not old.ends_with("day"), "An older day by date: " + old)
 	_check(ENTRY.size_text(340_000) == "340 KB", "Kilobytes read plainly")
 	_check(ENTRY.size_text(1_240_000) == "1.2 MB", "Megabytes keep one decimal")
 	var model := {
@@ -128,15 +132,20 @@ func _check_rows(tab: TAB) -> void:
 	_check(not tab._load_error.visible, "A good read clears the error")
 	_check(not tab._offer.visible, "A timeline hides the offer")
 	_check(tab._filter.get_parent().visible, "A timeline can be filtered")
-	_check(tab._rows.get_child_count() == 50, "Fifty rows on the first page")
-	var first: Control = tab._rows.get_child(0)
+	_check(tab.entry_rows().size() == 50, "Fifty rows on the first page")
+	var first: Control = tab.entry_rows()[0]
 	var open: Button = first.get_node("Open")
 	_check(open.text == "Change 0", "Newest first, by its message")
-	_check((first.get_node("Meta") as Label).text.begins_with("Ada Lovelace · 1 file"), "Meta")
+	var tip := (first.get_node("Open") as Button).tooltip_text
+	_check(tip.contains("Ada Lovelace · 1 file"), "Who, files and when in the tooltip: " + tip)
+	_check((first.get_node("Meta") as Label).text == TAB.clock_text(now), "The row shows the time")
+	_check(first.get_node_or_null("Author") == null, "One person: no name on each row")
+	var caption: Node = tab._rows.get_child(0)
+	_check(caption.find_child("Caption", true, false).text == "Today", "Grouped by day")
 	_check(tab._more.visible, "A full page offers older entries")
 	tab.apply_listing({"state": "ready", "entries": [page[0]], "more": false}, true)
 	await _frames()
-	_check(tab._rows.get_child_count() == 51 and not tab._more.visible, "Older entries append")
+	_check(tab.entry_rows().size() == 51 and not tab._more.visible, "Older entries append")
 	tab._filter.text = "lamp"
 	tab.apply_listing({"state": "ready", "auto_commit": false, "entries": [], "more": false})
 	await _frames()
@@ -146,14 +155,14 @@ func _check_rows(tab: TAB) -> void:
 	tab.live_edit_accepted("res://door.tscn", "Widen the door")
 	tab.apply_listing({"state": "ready", "auto_commit": true, "entries": page, "more": false})
 	await _frames()
-	_check(tab._note.text == TAB.PENDING_SCENES, "An unsaved live edit says when it joins")
+	_check(tab._pending.visible, "An unsaved live edit waits under Not saved yet")
 	tab.scene_saved("res://door.tscn")
 	await _frames()
-	_check(not tab._note.visible, "Saving the scene clears the note")
+	_check(not tab._pending.visible, "Saving the scene clears it")
 
 
 func _check_entry(tab: TAB) -> void:
-	var first: Control = tab._rows.get_child(0)
+	var first: Control = tab.entry_rows()[0]
 	(first.get_node("Open") as Button).pressed.emit()
 	await _frames()
 	var view := tab.entry_view()
@@ -270,14 +279,14 @@ func _check_real_cli() -> void:
 	tab.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_host.add_child(tab)
 	tab.refresh()
-	var offered := func() -> bool: return tab._offer.visible or tab._rows.get_child_count() > 0
+	var offered := func() -> bool: return tab._offer.visible or tab.entry_rows().size() > 0
 	_check(await _until(offered), "The real list answers")
 	if not tab._offer_button.visible:
 		push_error("A project without git must offer to start a timeline")
 		_failed = true
 		return
 	tab._offer_button.pressed.emit()
-	var started := func() -> bool: return tab._rows.get_child_count() == 1
+	var started := func() -> bool: return tab.entry_rows().size() == 1
 	_check(await _until(started, 60.0), "Start keeping a timeline makes the first entry")
 	var scene := "res://timeline_door.tscn"
 	var file := FileAccess.open(scene, FileAccess.WRITE)
@@ -285,21 +294,21 @@ func _check_real_cli() -> void:
 	file.close()
 	tab.live_edit_accepted(scene, "Widen the door")
 	tab.scene_saved(scene)
-	var saved := func() -> bool: return tab._rows.get_child_count() == 2
+	var saved := func() -> bool: return tab.entry_rows().size() == 2
 	_check(await _until(saved, 30.0), "A saved scene edit joins the timeline")
-	var newest: Control = tab._rows.get_child(0)
+	var newest: Control = tab.entry_rows()[0]
 	_check((newest.get_node("Open") as Button).text == "Widen the door", "By its summary")
-	var meta := (newest.get_node("Meta") as Label).text
-	_check(meta.begins_with("Joinery user · 1 file"), "The local author, one file: " + meta)
+	var meta := (newest.get_node("Open") as Button).tooltip_text
+	_check(meta.contains("Joinery user · 1 file"), "The local author, one file: " + meta)
 	file = FileAccess.open(scene, FileAccess.WRITE)
 	file.store_string('[gd_scene format=3]\n\n[node name="Door" type="Node3D"]\n')
 	file.store_string('[node name="Hinge" type="Node3D" parent="."]\n')
 	file.close()
 	tab.live_edit_accepted(scene, "Add a hinge")
 	tab.scene_saved(scene)
-	var hinged := func() -> bool: return tab._rows.get_child_count() == 3
+	var hinged := func() -> bool: return tab.entry_rows().size() == 3
 	_check(await _until(hinged, 30.0), "A second save is a second entry")
-	var widened: Control = tab._rows.get_child(1)
+	var widened: Control = tab.entry_rows()[1]
 	(widened.get_node("Open") as Button).pressed.emit()
 	var view := tab.entry_view()
 	var shown := func() -> bool: return view._rows.has("timeline_door.tscn")
@@ -313,7 +322,8 @@ func _check_real_cli() -> void:
 	(rows["timeline_door.tscn"]["restore"] as Button).pressed.emit()
 	var status: HBoxContainer = rows["timeline_door.tscn"]["status"]
 	var answered := func() -> bool:
-		return status.find_child("Review", true, false) != null or status.get_child_count() == 1
+		var restore: Button = rows["timeline_door.tscn"]["restore"]
+		return status.visible and not restore.disabled
 	_check(await _until(answered, 30.0), "The restore answers")
 	_check(status.find_child("Review", true, false) != null, "The restore waits in Review")
 	# Nothing on disk changed: the restore is a reviewed change, not a reset.

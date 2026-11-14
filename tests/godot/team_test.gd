@@ -81,7 +81,7 @@ func _check_timeline() -> void:
 	var team := {"connected": true, "ahead": 0, "behind": 2, "conflicts": 0}
 	tab.apply_listing({"state": "ready", "entries": entries, "team": team})
 	await _frames()
-	_check(tab._sync.visible, "Shared: Pull and Push beside the filter")
+	_check(tab._sync.visible, "Shared: Pull and Push beside the title")
 	_check(tab._pull.text == "Pull 2" and tab._push.text == "Push", "Counts in the words")
 	_check(tab._pull.theme_type_variation == "JoineryPrimaryButton", "Pull is the next step")
 	_check(tab._push.theme_type_variation == "JoinerySecondaryButton", "Push waits")
@@ -91,11 +91,11 @@ func _check_timeline() -> void:
 	tab.apply_team({"connected": true, "ahead": 3, "behind": 0, "conflicts": 1})
 	_check(tab._push.theme_type_variation == "JoinerySecondaryButton", "A choice waits first")
 	_check(tab._push.tooltip_text.contains("in Review first"), "And says so")
-	var first: Control = tab._rows.get_child(0)
+	var first: Control = tab.entry_rows()[0]
 	_check(first.get_node_or_null("Pulled") != null, "The last pull's entry has its dot")
-	_check(tab._rows.get_child(1).get_node_or_null("Pulled") == null, "Others don't")
-	var meta := (first.get_node("Meta") as Label).text
-	_check(meta.begins_with("Ana Lima · 1 file"), "A teammate's entry names them: " + meta)
+	_check(tab.entry_rows()[1].get_node_or_null("Pulled") == null, "Others don't")
+	var who: Label = first.get_node_or_null("Author")
+	_check(who != null and who.text == "Ana Lima", "A teammate's entry names them")
 	tab.show_sync_result("Pulled 2 changes from Ana.", false, true)
 	await _frames()
 	_check(tab._sync_note.visible and tab._sync_review.visible, "The result, with Review")
@@ -295,15 +295,15 @@ func _check_real_cli(cache: String) -> void:
 	_check(await _until(pulled, 60.0), "Pull answers: " + tab._sync_text.text)
 	_check(tab._sync_text.text == "Pulled 1 change from Ana.", "In words: " + tab._sync_text.text)
 	var arrived := func() -> bool:
-		if tab._rows.get_child_count() == 0:
+		if tab.entry_rows().is_empty():
 			return false
-		var open: Button = tab._rows.get_child(0).get_node("Open")
+		var open: Button = tab.entry_rows()[0].get_node("Open")
 		return open.text == "Add a lamp script"
 	_check(await _until(arrived, 30.0), "Her entry heads the Timeline")
-	if tab._rows.get_child_count() > 0:
-		var newest: Control = tab._rows.get_child(0)
-		var meta := (newest.get_node("Meta") as Label).text
-		_check(meta.begins_with("Ana Lima"), "With her name: " + meta)
+	if not tab.entry_rows().is_empty():
+		var newest: Control = tab.entry_rows()[0]
+		var who: Label = newest.get_node_or_null("Author")
+		_check(who != null and who.text == "Ana Lima", "With her name beside it")
 		_check(newest.get_node_or_null("Pulled") != null, "And the pulled dot")
 	_check(FileAccess.file_exists("res://lamp.gd"), "Her file is in the project")
 	tab.queue_free()

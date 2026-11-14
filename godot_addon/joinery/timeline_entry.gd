@@ -1,10 +1,11 @@
 @tool
 extends VBoxContainer
-## One Timeline entry, opened from the list (timeline_tab.gd): what it was, who made it, when,
-## and its files. Each file opens in place to show what changed: coloured lines for scenes and
-## scripts, before and after pictures for images, sizes for models and other binaries. Under
-## it, Open file and Restore this file as it was. Restoring stages an ordinary reviewed change
-## (it waits in the Review tab); the timeline itself is never rewritten.
+## One Timeline entry, opened from the list (timeline_tab.gd), as a page in the same centred
+## column: back and what it was as the title, who, how many files and when under it, then its
+## files. Each file opens in place to show what changed: coloured lines for scenes and scripts,
+## before and after pictures for images, sizes for models and other binaries. Under it,
+## Restore this version (the secondary action) and Open file. Restoring stages an ordinary
+## reviewed change (it waits in the Review tab); the timeline itself is never rewritten.
 ##
 ## Data arrives from `joinery timeline show` through [method show_entry] (the file list) and
 ## [method apply_file] (one file's detail, read when it is first opened).
@@ -13,7 +14,7 @@ extends VBoxContainer
 signal back
 ## A file row opened for the first time: read its detail.
 signal file_requested(commit: String, path: String)
-## "Restore this file as it was".
+## "Restore this version".
 signal restore_requested(commit: String, path: String)
 ## "Open file".
 signal open_requested(path: String)
@@ -24,6 +25,8 @@ const UI_THEME := preload("ui_theme.gd")
 const UI_MOTION := preload("ui_motion.gd")
 const UI := preload("ui_components.gd")
 const INDICATOR := preload("activity_indicator.gd")
+const BLOCKS := preload("ui_blocks.gd")
+const STYLE := preload("sidebar_style.gd")
 const CHANGE_WORDS := {
 	"created": "Created", "modified": "Changed", "deleted": "Deleted", "renamed": "Renamed"
 }
@@ -40,61 +43,51 @@ var entry: Dictionary = {}
 var _title: Label
 var _meta: Label
 var _files: VBoxContainer
-var _loading: HBoxContainer
+var _loading: VBoxContainer
 var _rows: Dictionary = {}
 
 
 func _init() -> void:
 	name = "TimelineEntry"
-	theme_type_variation = "JoineryTight"
+	theme_type_variation = "JoineryFlush"
 	size_flags_vertical = Control.SIZE_EXPAND_FILL
-	var back_button := UI.quiet("Timeline")
-	back_button.name = "Back"
-	back_button.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	back_button.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	back_button.tooltip_text = "Back to every entry"
-	UI.bind_icon(back_button, "back")
-	back_button.pressed.connect(func() -> void: back.emit())
-	add_child(back_button)
-	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.follow_focus = true
-	UI_MOTION.rubber_band(scroll)
+	var scroll := BLOCKS.page_scroll()
 	add_child(scroll)
-	var gutter := MarginContainer.new()
-	gutter.theme_type_variation = "JoineryGutter"
-	gutter.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.add_child(gutter)
-	var column := VBoxContainer.new()
-	column.theme_type_variation = "JoineryStack"
-	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	gutter.add_child(column)
-	# Inset like the rows, so the title lines up with the Back arrow and the file chevrons.
-	var inset := MarginContainer.new()
-	inset.theme_type_variation = "JoineryInset"
-	column.add_child(inset)
-	var head := VBoxContainer.new()
-	head.theme_type_variation = "JoineryFlush"
-	inset.add_child(head)
-	_title = UI.label("", "JoinerySection", true)
+	var column: VBoxContainer = scroll.get_meta("body")
+	# The title row of every page: back, then what this entry was, wrapping when it is long.
+	var head := HBoxContainer.new()
+	head.name = "Head"
+	head.theme_type_variation = "JoineryRow"
+	column.add_child(head)
+	var back_button := UI.icon_button("back", "Back to the timeline")
+	back_button.name = "Back"
+	back_button.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	var escape := InputEventKey.new()
+	escape.keycode = KEY_ESCAPE
+	back_button.shortcut = Shortcut.new()
+	back_button.shortcut.events = [escape]
+	back_button.shortcut_in_tooltip = false
+	back_button.pressed.connect(func() -> void: back.emit())
+	head.add_child(back_button)
+	var words := VBoxContainer.new()
+	words.theme_type_variation = "JoineryFlush"
+	words.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	words.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	head.add_child(words)
+	_title = UI.label("", "JoineryTitle", true)
 	_title.name = "Title"
-	head.add_child(_title)
+	words.add_child(_title)
 	_meta = UI.label("", "JoineryNumeric")
 	_meta.name = "Meta"
-	head.add_child(_meta)
-	_loading = HBoxContainer.new()
-	_loading.theme_type_variation = "JoineryRowTight"
-	var dots := INDICATOR.new()
-	dots.running = true
-	_loading.add_child(dots)
-	_loading.add_child(UI.label("Reading this entry…", "JoineryCaption"))
+	words.add_child(_meta)
+	_loading = BLOCKS.skeleton(3)
+	_loading.name = "Loading"
 	_loading.hide()
-	column.add_child(_loading)
+	column.add_child(BLOCKS.spaced(_loading, 5))
 	_files = VBoxContainer.new()
 	_files.name = "Files"
-	_files.theme_type_variation = "JoineryTight"
-	column.add_child(_files)
+	_files.theme_type_variation = "JoineryFlush"
+	column.add_child(BLOCKS.spaced(_files, 4))
 
 
 ## Show the entry [param summary] ({commit, subject, author, time, files}) while it is read.
@@ -194,10 +187,10 @@ func set_restore(path: String, outcome: String, message := "") -> void:
 		"busy":
 			var dots := INDICATOR.new()
 			dots.running = true
+			dots.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 			status.add_child(dots)
-			status.add_child(UI.label("Preparing…", "JoineryCaption"))
 		"done":
-			var words := UI.label("Waiting for you in Review", "JoineryCaption")
+			var words := UI.label("Waiting in Review", "JoineryCaption")
 			words.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 			status.add_child(words)
 			var link := UI.link("Review")
@@ -324,17 +317,11 @@ func _add_row(file: Dictionary) -> void:
 	view.name = "View"
 	view.theme_type_variation = "JoineryTight"
 	inner.add_child(view)
-	var reading := HBoxContainer.new()
-	reading.theme_type_variation = "JoineryRowTight"
-	var dots := INDICATOR.new()
-	dots.running = true
-	reading.add_child(dots)
-	reading.add_child(UI.label("Reading…", "JoineryCaption"))
-	view.add_child(reading)
+	view.add_child(BLOCKS.skeleton(2))
 	var actions := HBoxContainer.new()
 	actions.theme_type_variation = "JoineryRow"
 	inner.add_child(actions)
-	var restore := UI.secondary("Restore this file as it was")
+	var restore := UI.secondary("Restore this version")
 	restore.name = "Restore"
 	restore.tooltip_text = (
 		"Bring back the version from just before this entry deleted it. You review it first."
