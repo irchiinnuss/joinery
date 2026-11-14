@@ -836,7 +836,11 @@ def _side(world: World) -> Reach:
             continue
         target = Target(marker.id, marker.kind, marker.at)
         reach.targets.append(target)
-        hit = reaches(came, closed, marker)
+        # A locked door fills the place it stands: the player reaches it by
+        # walking up to it, which the walk with that door alone open finds.
+        own = closed - {marker.id}
+        walked = came if own == closed else doors.walk(own)
+        hit = reaches(walked, own, marker)
         if start is None:
             target.reason = "The spawn has no ground under it."
         elif hit is None:
@@ -850,7 +854,7 @@ def _side(world: World) -> Reach:
             )
         else:
             target.reached = True
-            target.route = _side_route(grid, came, hit)
+            target.route = _side_route(grid, walked, hit)
     return reach
 
 

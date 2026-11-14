@@ -235,6 +235,50 @@ def test_an_area_behind_a_door_whose_key_is_out_of_reach_is_reported() -> None:
     assert walked.ok, [p.text for p in walked.checked.problems]
 
 
+SIDE_DOOR = """name = "hall"
+mode = "2d-side"
+units = "tiles"
+
+[spawn]
+at = [3, 10]
+
+[[rooms]]
+id = "hall"
+rect = [0, 0, 40, 12]
+
+[[markers]]
+kind = "door"
+id = "gate"
+at = [20, 11]
+key = "red"
+
+[[markers]]
+kind = "goal"
+at = [36, 11]
+
+[[markers]]
+kind = "key"
+id = "red"
+at = [{key}, 11]
+"""
+
+
+def test_a_side_view_door_shuts_its_doorway_until_its_key_is_got() -> None:
+    before = blockout.make(Path("/x"), SIDE_DOOR.format(key=8))
+    assert before.ok, [p.text for p in before.checked.problems]
+    behind = blockout.make(Path("/x"), SIDE_DOOR.format(key=30))
+    reach = behind.checked.reach
+    assert reach is not None
+    # The door itself is walked up to; what lies past it is not.
+    assert {t.id: t.reached for t in reach.targets} == {
+        "gate": True,
+        "goal_1": False,
+        "red": False,
+    }
+    errors = [p.text for p in behind.checked.errors]
+    assert any(e.startswith("key red is locked behind door gate") for e in errors)
+
+
 # --- Rebuilds keep what was placed ----------------------------------------------------
 
 
