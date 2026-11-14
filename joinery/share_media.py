@@ -406,6 +406,7 @@ async def trailer(project: Path, seed: int, say: Progress) -> dict[str, Any]:
     options = playtest.Options(
         project=project, seconds=TRAILER_GAME_SECONDS + 1, seed=seed
     )
+    playtest._ensure_imported(playtest.godot_binary(), project, playtest._env(run_dir, {}))
     say("Recording a seeded run with Movie Maker")
     command = [
         str(binary), "--path", str(project), "--write-movie", str(movie),

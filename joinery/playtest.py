@@ -36,7 +36,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from joinery import playtest_heat, playtest_report
+from joinery import import_cache, playtest_heat, playtest_report
 from joinery.catalog import ROOT
 
 BOT = Path(__file__).resolve().parent / "playtest_bot" / "bot.gd"
@@ -238,16 +238,10 @@ def reach_words(places: list[str]) -> list[str]:
 
 
 def _ensure_imported(godot: Path, project: Path, env: dict[str, str]) -> None:
-    """A project never opened in the editor has no import cache; Godot makes one first."""
-    if (project / ".godot").is_dir():
-        return
-    subprocess.run(
-        [str(godot), "--headless", "--path", str(project), "--import"],
-        env=env,
-        capture_output=True,
-        timeout=600,
-        check=False,
-    )
+    """Godot imports first when the project has no import cache, or a stale one (a model
+    or a script class added since): playtests, media, replays and save checks play what
+    is in the project now (joinery.import_cache)."""
+    import_cache.ensure(godot, project, env)
 
 
 def _play(

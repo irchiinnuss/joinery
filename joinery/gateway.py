@@ -16,6 +16,7 @@ from mcp.types import CallToolResult, TextContent
 
 from joinery import (
     auto_accept,
+    import_cache,
     live_game,
     metrics,
     references,
@@ -1423,6 +1424,10 @@ class ProjectGateway:
         if accept:
             self.claims.generation += 1
             self._last_accepted = tx
+            if not self.editor_context:
+                # The next playtest, media run or replay plays what was just accepted.
+                # An open editor rescans and imports on its own.
+                import_cache.after_accept(self.project, changes)
         if not accept:
             added = references.created(tx.changes)
             tx.reject()

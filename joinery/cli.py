@@ -32,6 +32,7 @@ from joinery import (
     history,
     hook,
     idle_runs,
+    import_cache,
     kit_share_cli,
     kits_cli,
     match_cli,
@@ -709,6 +710,7 @@ def _transaction_decision(project: Path, identifier: str, accept: bool) -> int:
         if accept:
             changes = tx.accept()
             steps = game_setup.after_accept(tx.project, game_setup.follow_up(tx))
+            import_cache.after_accept(tx.project, changes, wait=True)
         else:
             added = references.created(tx.changes)
             tx.reject()
