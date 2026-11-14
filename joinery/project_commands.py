@@ -77,6 +77,7 @@ RESERVED = frozenset(
         "help",
         "idle",
         "match",
+        "mix",
         "models",
         "perf",
         "playtest",
