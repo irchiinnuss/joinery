@@ -147,9 +147,12 @@ func _enter_tree() -> void:
 
 	# Menu entries, so the features are reachable without the dock (also /setup and /focus in
 	# the sidebar): a slash command you have not been told about is hidden.
-	add_command("New Project…", _on_new_project)
+	# Creating a project from inside an open project is a Project Manager job, which a plugin
+	# cannot replace: the notice says so, and points at the path that works.
+	add_command("New Project…", _setup.open_new_project_notice)
 	add_command("Project Setup…", _on_project_setup)
 	add_command("Focus", _on_toggle_focus)
+	preload("sidebar_toggle.gd").install(self, _dock)
 	if _joinery_layout:
 		add_command("Show or Hide Viewport Toolbar", _on_toggle_toolbar)
 
@@ -558,12 +561,6 @@ func _on_workspace_selection() -> void:
 
 func _on_project_setup() -> void:
 	_setup.open_for_current_project()
-
-
-func _on_new_project() -> void:
-	# Creating a project from inside an open project is a Project Manager job,
-	# which a plugin cannot replace. Say so, and point at the path that works.
-	_setup.open_new_project_notice()
 
 
 func _on_toggle_focus() -> void:

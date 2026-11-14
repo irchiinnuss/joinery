@@ -370,7 +370,9 @@ func add_page(id: String, title: String, source: Dictionary) -> void:
 func set_panels(panels: Array[Dictionary]) -> void:
 	var signature: Array = []
 	for panel: Dictionary in panels:
-		signature.append([panel["id"], panel["title"], panel["icon"], panel["own"]])
+		signature.append(
+			[panel["id"], panel["title"], panel["icon"], panel.get("glyph"), panel["own"]]
+		)
 	if signature == _panel_signature:
 		return
 	_panel_signature = signature
@@ -383,9 +385,10 @@ func set_panels(panels: Array[Dictionary]) -> void:
 		var id := str(panel["id"])
 		var button := _button("Panel" + id.replace(" ", ""), str(panel["title"]))
 		button.pressed.connect(func() -> void: panel_toggled.emit(id))
-		# A dock without a Godot icon (Joinery's Review) gets Joinery's own glyph.
+		# Joinery's own docks (the sidebar, Review) wear Joinery's glyphs, not Godot's icons.
 		var icon := str(panel["icon"])
-		var source := {"editor": icon} if not icon.is_empty() else {"ui": "check"}
+		var glyph := str(panel.get("glyph", "check"))
+		var source := {"editor": icon} if not icon.is_empty() else {"ui": glyph}
 		var item := _item(button, source, false)
 		(_own_box if bool(panel["own"]) else _panel_box).add_child(item)
 		_panel_items[id] = item

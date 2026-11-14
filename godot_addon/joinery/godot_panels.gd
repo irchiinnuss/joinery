@@ -34,8 +34,14 @@ const CORE := [
 ]
 ## The side docks Ctrl+Alt+I shows and hides together.
 const COLUMN := ["Scene", "Inspector"]
-## Joinery's own bottom docks, listed with Joinery's pages instead.
-const OWN := ["Review"]
+## Joinery's own docks, listed with Joinery's pages instead: the Journeyman sidebar, then the
+## Review panel in the bottom panel.
+const OWN := ["Journeyman", "Review"]
+## The sidebar's dock: its icon shows and hides the whole sidebar (sidebar_toggle.gd), and stays
+## on the rail while the sidebar is hidden, so the sidebar can come back without the menu.
+const SIDEBAR := "Journeyman"
+## Joinery's glyph (ui_theme icon) for each of its own docks, which have no Godot icon.
+const GLYPHS := {"Journeyman": "chats", "Review": "check"}
 ## Marks the bottom panel while it shows one tab at a time (review_tab.gd leaves it be).
 const ONE_TAB := "joinery_one_tab"
 ## Seconds between looks at Output's mark.
@@ -214,6 +220,12 @@ func output_mark() -> String:
 
 ## Show panel [param id], or hide it when it already shows.
 func toggle(id: String) -> void:
+	if id == SIDEBAR:
+		var sidebar := get_parent().get_node_or_null("JoinerySidebarToggle")
+		if sidebar != null:
+			sidebar.call("toggle")
+			changed.emit()
+		return
 	var dock := _dock(id)
 	if dock == null:
 		return
@@ -398,7 +410,8 @@ func _entry(dock: Control, own: bool) -> Dictionary:
 	return {
 		"id": _key(dock),
 		"title": _key(dock) if title.is_empty() else title,
-		"icon": str(dock.get("icon_name")),
+		"icon": "" if own else str(dock.get("icon_name")),
+		"glyph": str(GLYPHS.get(_key(dock), "check")),
 		"own": own,
 	}
 
