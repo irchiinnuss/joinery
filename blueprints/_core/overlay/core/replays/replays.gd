@@ -10,9 +10,11 @@ extends Node
 ## as it goes. "Record this play" in the editor and `joinery playtest --record` pass it.
 ##
 ## Replaying: `-- --joinery-replay=<file>` plays the file's input back on the same frames
-## with the same seed, compares the state at each checkpoint, prints one
-## `JOINERY_REPLAY {json}` line and quits (`joinery replay run` does all this). Run it
-## headless at the recorded `--fixed-fps` for the same frames.
+## with the same seed, compares what the player experiences at each checkpoint (with
+## tolerance, replay_state.gd), prints one `JOINERY_REPLAY {json}` line and quits
+## (`joinery replay run` does all this). Run it headless at the recorded `--fixed-fps`
+## for the same frames. With `--joinery-rerecord` too it compares nothing and returns
+## each checkpoint as the game is now, for a change that is meant to alter the level.
 ##
 ## The file is JSON lines: a header, then `{"f": frame, "e": [events]}`,
 ## `{"f": frame, "check": {hash, state}}`, and an `{"end": ...}` line. An event's `t`
@@ -37,6 +39,7 @@ const REPLAY_ARG := "--joinery-replay="
 const OUT_ARG := "--joinery-replay-out="
 const SEED_ARG := "--joinery-seed="
 const PACE_ARG := "--joinery-pace"
+const RERECORD_ARG := "--joinery-rerecord"
 const RESULT_PREFIX := "JOINERY_REPLAY "
 const RECORD_IN_RELEASE := "game/replays/record_in_release"
 const MAX_MINUTES := "game/replays/max_minutes"
@@ -103,6 +106,9 @@ var _replay_out: String = ""
 var _checked: int = 0
 var _divergence: Dictionary = {}
 var _finished: bool = false
+## Re-recording (`--joinery-rerecord`): play the input, keep fresh checkpoints, compare none.
+var _rerecord: bool = false
+var _recaptured: Array[Dictionary] = []
 
 
 func _ready() -> void:
@@ -117,6 +123,8 @@ func _ready() -> void:
 			_replay_out = argument.substr(OUT_ARG.length())
 		elif argument.begins_with(SEED_ARG):
 			fixed_seed = int(argument.substr(SEED_ARG.length()))
+		elif argument == RERECORD_ARG:
+			_rerecord = true
 		elif argument == RECORD_ARG or argument.begins_with(RECORD_ARG + "="):
 			_record_to = argument.substr(RECORD_ARG.length() + 1)
 			if _record_to.is_empty():
@@ -532,18 +540,26 @@ func _replay_step() -> void:
 		var check: Dictionary = _replay_checks[frame]
 		var now: Dictionary = ReplayState.capture(get_tree())
 		_checked += 1
-		if str(now["hash"]) != str(check.get("hash", "")):
-			# Through JSON, as the recorded state was, so 78 and 78.0 read the same.
-			var replayed: Dictionary = JSON.parse_string(JSON.stringify(now["state"]))
-			_divergence = {
-				"frame": frame,
-				"seconds": snappedf(frame / float(Engine.physics_ticks_per_second), 0.01),
-				"differs": ReplayState.differences(check.get("state", {}), replayed),
-				"recorded": check.get("state", {}),
-				"replayed": replayed,
-			}
-			_finish("")
-			return
+		# Through JSON, as the recorded state was, so 78 and 78.0 read the same.
+		var replayed: Dictionary = JSON.parse_string(JSON.stringify(now["state"]))
+		if _rerecord:
+			_recaptured.append({"f": frame, "check": {"hash": now["hash"], "state": replayed}})
+		else:
+			# What the player experiences, with tolerance; looser on another build.
+			var loose: bool = str(_replay.get("build", "")) != build_id()
+			var differs: Array[String] = ReplayState.differences(
+				check.get("state", {}), replayed, loose
+			)
+			if not differs.is_empty():
+				_divergence = {
+					"frame": frame,
+					"seconds": snappedf(frame / float(Engine.physics_ticks_per_second), 0.01),
+					"differs": differs,
+					"recorded": check.get("state", {}),
+					"replayed": replayed,
+				}
+				_finish("")
+				return
 	for item: Variant in _replay_lines.get(frame, []):
 		var data: Dictionary = item if item is Dictionary else {}
 		if str(data.get("t", "")) == "call":
@@ -600,6 +616,11 @@ func _finish(reason: String) -> void:
 	elif reason.is_empty() and get_tree().current_scene != null:
 		end = ReplayState.capture(get_tree())
 		result["final_hash"] = end["hash"]
+	if _rerecord:
+		# The same input's checkpoints on the game as it is now (`joinery replay
+		# rerecord` writes them into the replay in place of the old ones).
+		result["recaptured"] = _recaptured
+		result["recaptured_build"] = build_id()
 	print(RESULT_PREFIX + JSON.stringify(result))
 	if not _replay_out.is_empty():
 		var out: FileAccess = FileAccess.open(_replay_out, FileAccess.WRITE)

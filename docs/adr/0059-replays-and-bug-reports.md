@@ -34,12 +34,16 @@ shipped game had no way to say what went wrong beyond an email.
      (`Replays.perform`: `Game.start_game/restart_level/quit_to_menu`,
      `Menus.close_all/open_pause/back`, `SaveGame.save_slot/load_slot`); a replay makes
      no other call.
-   - **The hash** covers, under the current scene in tree order, each node's class and
-     place, 2D and 3D transforms, body velocities, animation positions, timers,
-     visibility and label text, plus the core's saveable state and level and play time,
-     at full precision. Generated names (`@Node3D@12`) count as their class. The state
-     beside it (scene, paused, node count, level time, player places, a short hash per
-     child of the scene) says what differs.
+   - **The state** is what the player experiences: the scene, paused, the level time,
+     each player's place (and health), and the core's saveable state (goals, pickups,
+     doors) as plain values; the node count is kept for reading only. A replay compares
+     it with tolerance (places within 0.25 m or 4 px, times within 0.1 s, numbers within
+     0.1%), four times looser on another build than the one that recorded it, so a
+     change that adds nodes to a level, or a replay on another platform, doesn't diverge
+     by itself. (It first hashed the whole scene tree; any added node broke every
+     replay.) The hash covers the same parts, rounded. `--joinery-rerecord` plays the
+     input and returns fresh checkpoints instead, for `joinery replay rerecord` and the
+     agent's `rerecord_replay`, when a change is meant to alter what the player sees.
 2. **Recording from Joinery.** `/record` in the sidebar ("Record this play",
    `replay_record.gd`) runs the main scene once with `--fixed-fps <physics rate>` and
    `-- --joinery-record --joinery-pace` (held to real time), through Godot's own run

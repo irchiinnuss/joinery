@@ -3,7 +3,8 @@
 A scripted session (`replay_session.gd`) is recorded by the game core on two
 blueprints, replayed headless, and must end in the same state, twice. A change to the
 player's speed must be caught at the first checkpoint after it matters, with what
-differed; a replay with an input taken out must diverge too. A session that ends in
+differed; nodes added to the level must not be; a replay with an input taken out must
+diverge too. A session that ends in
 F8 (`report_session.gd`) must leave a bug report whose files say what happened, and
 whose replay plays back.
 """
@@ -83,6 +84,19 @@ def test_a_recorded_session_replays_identically(tmp_path: Path, blueprint: str) 
     assert first.final_hash and first.final_hash == second.final_hash
     assert first.build == first.recorded_build
 
+    # The level gains nodes the player never touches: the replay still plays the same,
+    # since it compares what the player experiences, not the scene tree.
+    level = project / "game/level.tscn"
+    level.write_text(
+        level.read_text(encoding="utf-8")
+        + "".join(
+            f'\n[node name="Extra{i}" type="Node2D" parent="."]\n' for i in range(40)
+        ),
+        encoding="utf-8",
+    )
+    extra = _replay(project, kept)
+    assert extra.ok, extra.line()
+
     # The game changes: the player runs faster. The first checkpoint after the walk
     # starts no longer matches, and the report says the player is elsewhere.
     path, text = SPEED[blueprint]
@@ -95,7 +109,6 @@ def test_a_recorded_session_replays_identically(tmp_path: Path, blueprint: str) 
     assert changed.status == "diverged", changed.line()
     assert changed.frame is not None and changed.frame % 60 == 0
     assert any(d.startswith("players:") for d in changed.differs), changed.differs
-    assert "Players: changed" in changed.differs
 
 
 @needs_godot
@@ -131,7 +144,7 @@ def test_a_replay_with_an_input_taken_out_diverges(tmp_path: Path) -> None:
     outcome = _replay(project, tampered)
     assert outcome.status == "diverged"
     assert outcome.frame is not None and outcome.seconds == outcome.frame / 60
-    assert "Players: changed" in outcome.differs
+    assert any(d.startswith("players:") for d in outcome.differs), outcome.differs
     assert "walk" not in outcome.line() and "diverged at frame" in outcome.line()
 
 
