@@ -150,7 +150,8 @@ func _check_image_pair(panel: PANEL) -> void:
 		)
 	)
 	await _frames()
-	_check(shown[0] == 1, "Showing a review asks to bring the panel into view")
+	# The sidebar opens it, once the user isn't typing (review_opener.gd); the panel doesn't.
+	_check(shown[0] == 0, "Showing a review leaves bringing it into view to the sidebar")
 	_check(panel.pending, "A shown review is pending")
 	_check(panel._title.text == "Darken the door wood", "The title is just the summary")
 	var facts: String = panel._summary.facts_text()

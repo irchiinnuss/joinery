@@ -7,6 +7,8 @@ extends VBoxContainer
 ## - "Run alongside" in the composer while Journeyman works starts the typed message as a task;
 ## - the header says "3 agents working" while two or more agents work;
 ## - Stop on Journeyman's own request asks, in one quiet line, whether to stop the tasks too;
+## - a task's change opens its review by itself once ready (review_opener.gd: never while
+##   the user types, never over the main request's review, not when Joinery kept it);
 ## - a finished task leaves one line in the transcript ("Lamp: change accepted.") and its card
 ##   steps out; its change is decided in the Review tab like any other;
 ## - a console error fix ("console": true, ADR 0075) has no card and leaves no line: its step and
@@ -45,6 +47,9 @@ const UI_MOTION := preload("ui_motion.gd")
 const STYLE := preload("sidebar_style.gd")
 ## Seconds a finished task's card stays before it steps out.
 const LINGER := 4.0
+## Seconds a ready change waits before its review opens: one Joinery keeps without asking
+## (`[agents] auto_accept`) is accepted by then and opens nothing.
+const OPEN_DELAY := 0.8
 ## Final state -> how its transcript line ends.
 const ENDINGS := {
 	"accepted": "change accepted.",
@@ -204,6 +209,8 @@ func on_event(event: Dictionary) -> void:
 			var after := str(each.get("state"))
 			if after != before and ENDINGS.has(after):
 				_finished(each, event)
+			elif after != before and after == "in_review":
+				open_review_soon(id, str(each.get("transaction_id")))
 		"progress":
 			var each := card(id)
 			if each != null:
@@ -220,6 +227,29 @@ func _follow_console(id: String, event: Dictionary) -> void:
 		debug.call("track", event)
 	if ENDINGS.has(state):
 		_console.erase(id)
+	elif state == "in_review" and before != "in_review":
+		open_review_soon(id, str(event.get("transaction_id", "")))
+
+
+## A task's change is ready: its review opens by itself after OPEN_DELAY, unless it was decided
+## meanwhile or the main request's own review is waiting (it is in the Review tab's list).
+func open_review_soon(task_id: String, transaction_id: String) -> void:
+	var opener: Object = dock.get("_opener") if dock != null else null
+	if opener == null or transaction_id.is_empty() or not is_inside_tree():
+		return
+	get_tree().create_timer(OPEN_DELAY).timeout.connect(
+		func() -> void:
+			var each := card(task_id)
+			var state := str(each.get("state")) if each != null else str(_console.get(task_id))
+			if state != "in_review" or bool(dock.get("_review_pending")):
+				return
+			opener.call("request", _show_review.bind(transaction_id), "task:" + transaction_id)
+	)
+
+
+func _show_review(transaction_id: String) -> void:
+	if bridge != null and bridge.has_method("show_task_review"):
+		bridge.call("show_task_review", transaction_id)
 
 
 ## "Run alongside": [param text] starts now as its own task.

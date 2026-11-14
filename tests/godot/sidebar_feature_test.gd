@@ -93,7 +93,8 @@ func _run() -> void:
 	# A suggestion from the brief: one line, and it only plans.
 	(
 		chat
-		. _on_suggestions(
+		. _suggestions
+		. take(
 			[
 				{
 					"text": "The brief says online play, but online play is not added.",
@@ -108,7 +109,7 @@ func _run() -> void:
 		chat._transcript.offer_texts()[0].begins_with("The brief says online play"),
 		"The first suggestion is offered first"
 	)
-	var links: Array = chat._offer_row.find_children("*", "Button", true, false)
+	var links: Array = chat._suggestions._row.find_children("*", "Button", true, false)
 	_check(links[0].text == "/feature add online-play", "The offer names its command")
 	links[0].pressed.emit()
 	await process_frame

@@ -189,9 +189,8 @@ func _run() -> void:
 		{"transaction_id": "t1", "summary": "Crate", "media": media, "media_pending": true}
 	)
 	_check(plugin._file_review.get("transaction_id") == "t1", "The file review is held")
-	_check(
-		plugin.calls == [["show_file_review", "Crate"], ["panel"]], "The file review opens at once"
-	)
+	# The sidebar opens the panel itself, once the user isn't typing (review_opener.gd).
+	_check(plugin.calls == [["show_file_review", "Crate"]], "The file review opens at once")
 	plugin.calls.clear()
 	chat.turn_state.emit({"state": "in_review", "transaction_id": "t1"})
 	_check(plugin.calls.is_empty(), "With a file review, the live edit rides along with it")

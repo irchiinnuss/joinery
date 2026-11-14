@@ -714,8 +714,9 @@ func _changes(light: bool, width: int) -> void:
 	)
 	(
 		chat
+		. get("_suggestions")
 		. call(
-			"_on_suggestions",
+			"take",
 			[
 				{
 					"text": "The brief says online play, but online play is not added.",

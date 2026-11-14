@@ -370,11 +370,10 @@ func _hide_edit_review_panel() -> void:
 		_focus.show_review(false)
 
 
-func _open_review(summary: String) -> void:
-	_call_dock("show_edit_review", [summary, _edits.changes.size()])
+func _open_review(summary: String) -> void:  # The dock opens the panel when no one types.
 	if _file_review.is_empty():
 		_review_tab.set_live({"id": "scene-edit", "summary": summary, "tools": ["godot"]})
-	_show_edit_review_panel()
+	_call_dock("show_edit_review", [summary, _edits.changes.size()])
 
 
 ## Close the review with one notice in the transcript ([param kind]: success, rejected, info,

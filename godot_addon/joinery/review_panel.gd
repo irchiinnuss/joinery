@@ -657,7 +657,7 @@ func _present(arriving: bool) -> void:
 	if arriving:
 		UI_MOTION.fade_in(self)
 		UI_MOTION.reveal(self, "down")
-	show_requested.emit()
+	# The sidebar brings it into view, once the user isn't typing (review_opener.gd).
 	glance_changed.emit()
 
 

@@ -164,8 +164,8 @@ func _on_file_preview(event: Dictionary) -> void:
 			]
 		)
 	)
+	# The sidebar opens the review itself once the user isn't typing (review_opener.gd).
 	_glance(event)
-	_plugin.call("_show_edit_review_panel")
 
 
 ## The review panel (review_panel.gd) held by the Review tab, or null.

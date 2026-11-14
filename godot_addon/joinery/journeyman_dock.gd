@@ -51,6 +51,8 @@ const MENU_SCRIPT := preload("res://addons/joinery/command_menu.gd")
 const SLASH_SCRIPT := preload("res://addons/joinery/slash_commands.gd")
 const CHATS_SCRIPT := preload("res://addons/joinery/chat_sessions.gd")
 const TASKS_SCRIPT := preload("res://addons/joinery/sidebar_tasks.gd")
+const SUGGESTIONS := preload("res://addons/joinery/sidebar_suggestions.gd")
+const OPENER := preload("res://addons/joinery/review_opener.gd")
 const REVIEW_PATH := "res://addons/joinery/review_panel.gd"
 const ART_DIALOG := preload("res://addons/joinery/art_review_dialog.gd")
 const REVIEW_WAIT := "Next message…"
@@ -107,10 +109,10 @@ var _bridge: Node
 ## The plan card of the last "/feature add|remove" and its {action, feature}.
 var _plan_card: Control
 var _plan: Dictionary = {}
-## Suggestions from the game brief still to offer, and the one on show.
-var _offers: Array[Dictionary] = []
-var _offer_row: Control
-var _offered: Array[String] = []
+## Suggestions from the game brief, offered one at a time (sidebar_suggestions.gd).
+var _suggestions: SUGGESTIONS
+## Opens a ready change's review by itself, never while the user types (review_opener.gd).
+var _opener: OPENER
 ## True between an art approval and sending the request the art gate held.
 var _resume_ready := false
 
@@ -182,6 +184,9 @@ func _ready() -> void:
 	_slash.bible_upgraded.connect(_on_bible_upgraded)
 	add_child(_slash)
 	_review = _make_review()
+	_suggestions = SUGGESTIONS.new(self)
+	_opener = OPENER.new()
+	add_child(_opener)
 	_chats = CHATS_SCRIPT.attach(self, _header.row, _content)
 	_tasks = TASKS_SCRIPT.attach(self, _content, _composer.get_parent())
 	_settings = SETTINGS_SCRIPT.attach(self, _header.row, _content)
@@ -247,7 +252,7 @@ func attach_bridge(bridge: Node) -> void:
 		"art_review": _on_art_review_event,
 		"art_gate": _on_art_gate,
 		"art_approved": _on_art_approved,
-		"suggestions": _on_suggestions,
+		"suggestions": _suggestions.take,
 		"usage_received": _header.usage.show_usage,
 		"connection_problem": _header.show_problem,
 	}
@@ -313,41 +318,6 @@ func _resume_held() -> void:
 		if is_instance_valid(card) and card.gated():
 			_send_request(card)
 			return
-
-
-## One-line suggestions from the game brief ({text, command}), offered one at a time.
-func _on_suggestions(items: Array) -> void:
-	for item: Variant in items:
-		if not item is Dictionary:
-			continue
-		var text := str(item.get("text", ""))
-		if text.is_empty() or _offered.has(text):
-			continue
-		_offered.append(text)
-		_offers.append(item)
-	if not is_instance_valid(_offer_row):
-		_next_offer()
-
-
-func _next_offer() -> void:
-	if is_instance_valid(_offer_row):
-		_transcript.remove_offer(_offer_row)
-	_offer_row = null
-	if _offers.is_empty():
-		return
-	var item: Dictionary = _offers.pop_front()
-	var actions: Array = []
-	var command := str(item.get("command", ""))
-	if not command.is_empty():
-		actions.append([command, _take_offer.bind(command)])
-	actions.append(["Not now", _next_offer])
-	_offer_row = _transcript.add_offer(str(item.get("text", "")), actions)
-
-
-## The user chose an offer: plan it (a plan changes nothing), and show the next one.
-func _take_offer(command: String) -> void:
-	_next_offer()
-	run_command(command)
 
 
 # --- Composer and commands ---------------------------------------------------------------------
@@ -901,6 +871,7 @@ func _arrive() -> void:
 func hide_edit_review(message: String = "", kind := "info") -> void:
 	var was_pending := _review_pending
 	_review_pending = false
+	_opener.cancel()
 	var decided := _decision_kind(message, kind)
 	if decided == "rejected":
 		message = DISCARDED
@@ -940,7 +911,8 @@ func _open_review(media: Array) -> void:
 		card.review_row().visibility_changed.connect(_sync, CONNECT_REFERENCE_COUNTED)
 	_command_popup.close()
 	_sync()
-	review_requested.emit()
+	# The review opens by itself, once the user isn't typing.
+	_opener.request(review_requested.emit)
 
 
 func _on_accept() -> void:
