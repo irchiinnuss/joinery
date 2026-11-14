@@ -14,7 +14,7 @@ import pytest
 from joinery.gateway import ProjectGateway
 from joinery.runner import Result
 from joinery.transactions import FileTransaction
-from joinery.turn import MAX_SUBMITS, TurnController, TurnState
+from joinery.turn import MAX_SUBMITS, NEXT_HELD, TurnController, TurnState
 
 T = TypeVar("T")
 
@@ -109,7 +109,11 @@ def test_a_fixable_failure_keeps_the_stage_for_another_try(session: Session) -> 
     assert "file_preview" not in session.kinds()
 
 
-def test_the_last_failure_is_final_and_drops_the_change(session: Session) -> None:
+def test_the_last_failure_is_final_and_holds_the_change_with_it(
+    session: Session,
+) -> None:
+    """Finished work is never thrown away for a check no one is left to fix: it waits
+    for the user, the failing check shown first among its notes, never auto-accepted."""
     session.turn.begin("Make an ashtray")
     tx = session.stage({"scenes/ashtray.tscn": SCENE})
 
@@ -118,14 +122,26 @@ def test_the_last_failure_is_final_and_drops_the_change(session: Session) -> Non
 
     results = session.run(three)
     assert [r.final for r in results] == [False, False, True]
-    assert results[-1].attempts_left == 0 and tx.state == "rejected"
-    assert session.turn.state is TurnState.IDLE
-    assert session.events[-1] == {
-        "kind": "turn_state",
-        "turn_id": session.turn.turn_id,
-        "state": "idle",
-        "reason": "failed",
-    }
+    last = results[-1]
+    assert last.attempts_left == 0 and last.status == "in_review"
+    assert [p.check for p in last.problems] == ["references"]
+    assert last.next == NEXT_HELD
+    assert session.state == "review" and session.turn.state is TurnState.IN_REVIEW
+    assert tx.review_notes[0]["severity"] == "block"
+    assert tx.review_notes[0]["text"].startswith("Failed check (references):")
+    preview = next(e for e in session.events if e.get("kind") == "file_preview")
+    assert [c["check"] for c in preview["failed_checks"]] == ["references"]
+    assert preview["review_notes"][0]["text"].startswith("Failed check (references)")
+    assert session.events[-1]["state"] == "in_review"
+    assert session.events[-1]["held_checks"] is True
+
+
+def test_a_policy_failure_still_drops_the_change(session: Session) -> None:
+    session.turn.begin("Change the tools")
+    tx = session.stage({"joinery.toml": "[tools]\n"})
+    result = session.run(lambda: session.turn.submit("Tools"))
+    assert result.final and result.status == "failed"
+    assert tx.state == "rejected" and session.turn.state is TurnState.IDLE
 
 
 @pytest.mark.parametrize(
@@ -363,7 +379,8 @@ def test_checks_joinery_cannot_run_are_final_at_once(
     session.turn.begin("Make an ashtray")
     session.stage({"a.gd": "extends Node\n"})
     result = session.run(lambda: session.turn.submit("Ashtray"))
-    assert result.status == "failed" and result.final and result.attempt == 1
+    # Final at once, and the finished change waits for the user with why it is unchecked.
+    assert result.status == "in_review" and result.final and result.attempt == 1
     (problem,) = result.problems
     assert problem.check == "checks" and not problem.fixable
 

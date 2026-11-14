@@ -226,7 +226,9 @@ def test_joinery_submits_a_change_the_agent_left(host: Host) -> None:
     assert preview["origin"] == "joinery" and preview["summary"] == "Make an ashtray"
 
 
-def test_a_failed_auto_submit_asks_once_then_says_so(host: Host) -> None:
+def test_a_failed_auto_submit_asks_once_then_holds_it_with_the_failure(
+    host: Host,
+) -> None:
     async def agent(bridge: Any) -> AsyncIterator[Any]:
         tx = host.stage({"scenes/ashtray.tscn": SCENE})
         host.tx = tx  # type: ignore[attr-defined]
@@ -243,18 +245,19 @@ def test_a_failed_auto_submit_asks_once_then_says_so(host: Host) -> None:
     assert "did not pass" in follow and "submit_for_review" in follow
     assert "references: Not submitted: scenes/ashtray.tscn uses" in follow
     kinds = host.kinds()
-    assert "file_preview" not in kinds and kinds.count("notice") == 1
+    # The finished work isn't thrown away: it waits for the user, the failure shown.
+    assert "file_preview" in kinds and kinds.count("notice") == 1
+    preview = host.events[kinds.index("file_preview")]
+    assert [c["check"] for c in preview["failed_checks"]] == ["references"]
     notice = host.events[kinds.index("notice")]
     assert notice["level"] == "warn"
-    assert notice["text"].startswith("Change not applied · ")
+    assert notice["text"].startswith("Waiting for your review, but it failed a check · ")
     assert "ashtray.tscn uses a file the change doesn't include" in notice["text"]
     assert "Not submitted" not in notice["text"], "The agent's wording stays with it"
-    assert notice["text"].endswith("Nothing was changed.")
+    assert notice["text"].endswith("Look at the failed checks before you accept it.")
     assert host.prompts[1].primer == ""
-    timing = next(e for e in host.events if e.get("kind") == "timing")
-    assert timing["outcome"] == "failed", "A dropped change is no success"
     assert kinds.index("notice") < kinds.index("done") and kinds.count("done") == 1
-    assert host.tx.state == "rejected"  # type: ignore[attr-defined]
+    assert "in_review" in kinds and kinds.index("file_preview") < kinds.index("done")
 
 
 def test_the_continuation_can_fix_the_change(host: Host) -> None:

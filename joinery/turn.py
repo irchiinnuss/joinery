@@ -148,6 +148,25 @@ class Problem:
         }
 
 
+def held(problems: list[Problem]) -> bool:
+    """Whether a change that failed only these checks is kept for the user."""
+    return bool(problems) and all(problem.check in HELD_CHECKS for problem in problems)
+
+
+def failed_notes(problems: list[Problem]) -> list[dict[str, str]]:
+    """Failed checks as review notes, so the review shows each one first."""
+    notes = []
+    for problem in problems:
+        note = {
+            "severity": "block",
+            "text": f"Failed check ({problem.check}): {problem.message[:400]}",
+        }
+        if problem.paths:
+            note["file"] = problem.paths[0]
+        notes.append(note)
+    return notes
+
+
 @dataclass
 class SubmitResult:
     status: Literal[
@@ -209,6 +228,29 @@ NEXT_NOTHING = (
     "your turn if nothing needed changing."
 )
 NEXT_ART = "Stop here and tell the user: they approve the art direction first (/art)."
+NEXT_HELD = (
+    "The change failed checks that weren't fixed, so it waits for the user with the "
+    "failing checks shown; nothing was thrown away. Say in a sentence or two what you "
+    "made and which check failed, and make no more changes this turn."
+)
+#: Checks whose failure keeps finished work waiting for the user, the failure shown,
+#: once no one is left to fix it. Policy checks (protected files, dependencies, asset
+#: provenance) and a live conflict still drop the change.
+HELD_CHECKS = frozenset(
+    {
+        "tests",
+        "replays",
+        "saves",
+        "godot_import",
+        "art_bible",
+        "references",
+        "variants",
+        "puzzles",
+        "checks",
+        "done_when",
+        "reviewer",
+    }
+)
 NEXT_REVIEWER = (
     "Joinery's reviewer read your change and found the problems listed. Fix each one "
     "in the same change, then call submit_for_review again. If one is wrong, leave it "
@@ -928,8 +970,11 @@ class TurnController:
                 next=NEXT_ART,
             )
         if problems:
-            final = self.attempts >= MAX_SUBMITS or any(
-                not problem.fixable for problem in problems
+            # On the last chance no one is left to fix them: the failure is final.
+            final = (
+                self.attempts >= MAX_SUBMITS
+                or self._last_chance
+                or any(not problem.fixable for problem in problems)
             )
             # What the checks found, for logs and smoke runs: the editor shows
             # only the status line, the agent gets the same list as its result.
@@ -942,6 +987,8 @@ class TurnController:
                 }
             )
             self._record_findings("checks", problems, final)
+            if final and found and held(problems):
+                return await self._hold(summary, found, origin, changes, problems, notes)
             if final:
                 await self._drop("failed")
                 return self._result(
@@ -1361,19 +1408,69 @@ class TurnController:
         self._peer, self._peer_print = peer, printed
         return peer
 
+    async def _hold(
+        self,
+        summary: str,
+        found: list[dict[str, str]],
+        origin: str,
+        changes: list[dict[str, str]],
+        problems: list[Problem],
+        notes: list[str],
+    ) -> SubmitResult:
+        """Finished work that failed checks no one is left to fix waits for the user
+        with the failing checks shown (never accepted by itself), instead of being
+        thrown away. The user accepts or discards it like any change."""
+        try:
+            preview = await self._open(summary, found, origin, None, failing=problems)
+        except Exception as exc:  # noqa: BLE001 - never leave the turn submitting.
+            await self._drop("failed")
+            return self._result(
+                "failed",
+                True,
+                changes=changes,
+                problems=[
+                    *problems,
+                    Problem(
+                        "review",
+                        f"Joinery could not open the review: {exc}",
+                        fixable=False,
+                    ),
+                ],
+                next=NEXT_STOP,
+            )
+        self.review_open = True
+        if preview is not None:
+            self.emit(preview)
+        done = {"done": list(self._done_items)} if self._done_items else {}
+        self._to(TurnState.IN_REVIEW, extra={**done, "held_checks": True})
+        self.gateway.start_media(self.emit)
+        return self._result(
+            "in_review",
+            True,
+            transaction_id=self.review_id,
+            changes=changes,
+            problems=problems,
+            next=NEXT_HELD,
+            notes=notes,
+        )
+
     async def _open(
         self,
         summary: str,
         found: list[dict[str, str]],
         origin: str,
         peer: PeerReview | None = None,
+        *,
+        failing: list[Problem] | None = None,
     ) -> dict[str, Any] | None:
-        """The checked change's ``file_preview``; None for a live edit alone."""
+        """The checked change's ``file_preview``; None for a live edit alone.
+        ``failing``: checks it failed, shown first among its notes (``_hold``)."""
         if not found:
             if self.gateway.transaction is not None:
                 await self.gateway.cancel()  # an empty stage beside a live edit
             return None
         notes = [note.as_dict() for note in peer.notes] if peer is not None else []
+        notes = [*failed_notes(failing or []), *notes]
         reviewer = (
             peer.status_dict(self.review_rounds)
             if peer is not None
@@ -1393,6 +1490,8 @@ class TurnController:
             preview["art_gate"] = {k: v for k, v in gate.items() if k != "kind"}
         preview["origin"] = origin
         preview["checks"] = self._passed
+        if failing:
+            preview["failed_checks"] = [problem.as_dict() for problem in failing]
         if self.todo is not None and self._done:
             preview["done_when"] = [r.as_dict() for r in self._done]
             preview["done_when_summary"] = done_when.counts_line(self._done)
@@ -1445,6 +1544,19 @@ class TurnController:
                 result = unchanged or await self.submit(self.request[:160], "joinery")
             finally:
                 self._last_chance = False
+            if (
+                result.status == "failed"
+                and not result.final
+                and last
+                and self._staged()
+                and held(result.problems)
+            ):
+                tx = self.gateway.transaction
+                found = tx.diff() if tx is not None else []
+                changes = [{"path": c["path"], "change": c["change"]} for c in found]
+                result = await self._hold(
+                    self.request[:160], found, "joinery", changes, result.problems, []
+                )
             if result.status == "failed" and not result.final and last:
                 await self._drop("failed")
                 result.final = True

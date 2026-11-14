@@ -106,6 +106,22 @@ def failure_notice(result: SubmitResult) -> dict[str, Any]:
     return {"kind": "notice", "level": "warn", "text": text}
 
 
+def held_notice(result: SubmitResult) -> dict[str, Any]:
+    """Joinery's own line when a finished change failed checks and waits for the user
+    anyway (``TurnController._hold``): what failed, so they look before accepting."""
+    reasons = [r for r in dict.fromkeys(map(_plain, result.problems)) if r]
+    text = "Waiting for your review, but it failed a check" + (
+        " · " + reasons[0] if reasons else ""
+    )
+    if reasons:
+        detail = "; ".join(reasons[:2])
+        text += (
+            "\n" + detail[:1].upper() + detail[1:] + ". Look at the failed checks before "
+            "you accept it."
+        )
+    return {"kind": "notice", "level": "warn", "text": text}
+
+
 def continuation(prompt: Prompt, result: SubmitResult) -> Prompt:
     """The same turn, asked once more: fix what the checks found and submit."""
     problems = "\n".join(f"- {p.check}: {p.message}" for p in result.problems)
@@ -530,6 +546,8 @@ async def _run_turn(
     )
     if last is not None and last.status == "failed" and last.final:
         emit(failure_notice(last))
+    elif last is not None and last.status == "in_review" and last.problems:
+        emit(held_notice(last))
     emit(Done(ok=ok).model_dump())
     if compact is not None and controller.needs_compaction():
         # Runs while the user reviews; the next request waits for it.
