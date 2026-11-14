@@ -54,7 +54,7 @@ from joinery.blockout.layout import (
 from joinery.blockout.plan import BACKGROUND, FLOOR, MARKERS, PLATFORM, SPAWN
 from joinery.blockout.png import PngError
 from joinery.blockout.png import read as read_png
-from joinery.blockout.world import Profile, profile_for, resolve
+from joinery.blockout.world import Profile, resolve
 
 if TYPE_CHECKING:
     from joinery.blockout import Built
@@ -746,7 +746,9 @@ def make(
 
     path, recorded = _sample_path(project, sample)
     chosen = blueprint or blockout.project_blueprint(project)
-    read, data = read_sample(path, lambda m: profile_for(chosen, m))
+    read, data = read_sample(
+        path, lambda m: blockout.player_profile(project, m, blueprint)
+    )
     resolved = mode or read.mode or blockout.BLUEPRINT_MODES.get(chosen) or "3d"
     if resolved not in CELL:
         raise GrowError("mode is 3d, 2d-topdown or 2d-side.")
@@ -757,7 +759,7 @@ def make(
         height=height,
         seed=seed,
         mode=level_mode,
-        profile=profile_for(chosen, level_mode),
+        profile=blockout.player_profile(project, level_mode, blueprint),
         name=slug(name),
         recipe={"sample": recorded, "sample_sha256": sha256(data)},
         pattern=pattern,

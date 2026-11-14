@@ -18,7 +18,7 @@ from typing import Any
 from joinery.blockout import build as scene_build
 from joinery.blockout import plan as plan_picture
 from joinery.blockout.check import Checked, check
-from joinery.blockout.layout import Layout, LayoutError, parse, to_toml
+from joinery.blockout.layout import Layout, LayoutError, Mode, parse, to_toml
 from joinery.blockout.merge import merge as merge_scene
 from joinery.blockout.player import measure
 from joinery.blockout.world import Profile, profile_for
@@ -106,6 +106,20 @@ def scene_for(layout: Layout, scene: str | None) -> str:
     return path
 
 
+def player_profile(project: Path, mode: Mode, blueprint: str | None = None) -> Profile:
+    """The player every layout check and generator uses: ``blueprint``'s (default the
+    project's own starting point), measured from the game's own player scene when it
+    is the project's (:mod:`.player`). Growing and checking share it, so whatever is
+    grown is reachable by the check's player."""
+    own = project_blueprint(project)
+    chosen = blueprint or own
+    profile = profile_for(chosen, mode)
+    if chosen == own:
+        # The player this game actually spawns, not only its starting point's.
+        profile = measure(project, profile)
+    return profile
+
+
 def make(
     project: Path,
     data: Any,
@@ -120,12 +134,8 @@ def make(
     problems the agent can fix are in ``built.checked.problems``.
     """
     layout = parse(data)
-    own = project_blueprint(project)
-    chosen = blueprint or own
-    profile = profile_for(chosen, layout.mode)
-    if chosen == own:
-        # The player this game actually spawns, not only its starting point's.
-        profile = measure(project, profile)
+    chosen = blueprint or project_blueprint(project)
+    profile = player_profile(project, layout.mode, blueprint)
     expected = BLUEPRINT_MODES.get(chosen, "")
     checked = check(layout, profile, expected_mode=expected)
     path = scene_for(layout, scene)

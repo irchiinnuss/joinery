@@ -795,13 +795,11 @@ def levels(project: Project) -> list[Finding]:
     from joinery import blockout
     from joinery.blockout.check import check as check_layout
     from joinery.blockout.layout import LayoutError, Marker, Spawn
-    from joinery.blockout.world import profile_for
 
     folder = project.root / blockout.DESIGN_DIR
     if not folder.is_dir():
         return []
     found: list[Finding] = []
-    blueprint = blockout.project_blueprint(project.root)
     started = time.monotonic()
     for path in sorted(folder.glob("*.toml")):
         rel = path.relative_to(project.root).as_posix()
@@ -811,7 +809,7 @@ def levels(project: Project) -> list[Finding]:
         except LayoutError as exc:
             project.skipped.append(f"{rel}: {exc}")
             continue
-        profile = profile_for(blueprint, layout.mode)
+        profile = blockout.player_profile(project.root, layout.mode)
         walked = check_layout(layout, profile)
         if walked.reach is None:
             project.skipped.append(
