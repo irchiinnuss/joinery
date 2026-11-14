@@ -27,7 +27,7 @@ from typing import Any
 from joinery.references import references
 
 MAP_DIR = ".joinery/map"
-VERSION = 1
+VERSION = 2
 #: Characters of map at most (about 1.75k tokens at four characters a token).
 BUDGET = 7000
 #: Cached maps kept per project.
@@ -314,7 +314,9 @@ def build(project: Path, budget: int = BUDGET) -> str:
         game = tomllib.loads(_text(project, "joinery.toml")).get("game", {})
     except tomllib.TOMLDecodeError:
         game = {}
-    head: list[str] = ["Project map (most referenced first; read a file for more):"]
+    head: list[str] = [
+        "Project map (most referenced first; search_project finds code and text):"
+    ]
     name = application.get("config/name", "").strip('"')
     line = f'Game "{name}"' if name else "Game"
     if game.get("blueprint"):
@@ -457,7 +459,7 @@ def build(project: Path, budget: int = BUDGET) -> str:
             out += lines[:cap]
             if len(lines) > cap:
                 out.append(
-                    f"  +{len(lines) - cap} more {label}: ask for the full map or list the folder."
+                    f"  +{len(lines) - cap} more {label}: search_project or list the folder."
                 )
         return "\n".join(out + tail)
 

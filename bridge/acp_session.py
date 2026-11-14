@@ -31,6 +31,7 @@ from bridge.provider_process import (
 )
 from joinery.api_profiles import list_public, runtime
 from joinery.chat_attachments import encoded
+from joinery.hook import shell_search
 from joinery.mcp_runtime import PolicyStop, validate_arguments
 from joinery.platform_support import launch_argv
 from joinery.roles import ROLE_ENV
@@ -439,10 +440,13 @@ class ACPSession:
         call = params.get("toolCall", {})
         allowed = False
         try:
-            validate_arguments(call.get("rawInput", {}))
+            raw = call.get("rawInput", {})
+            validate_arguments(raw)
             title = str(call.get("title", "")).replace("_", "-")
             allowed = (
-                call.get("kind") in {"read", "search"} or "joinery-registry" in title
+                call.get("kind") in {"read", "search"}
+                or "joinery-registry" in title
+                or (call.get("kind") == "execute" and shell_search(raw))
             )
         except PolicyStop as exc:
             await self.events.put(

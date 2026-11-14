@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -28,11 +29,16 @@ from bridge.provider_process import (
     proxy_config,
     readonly_command,
     require_provider,
+    stable_text,
     stop_process,
     turn_text,
 )
+
+#: Per session, a hash of the rules and map its last turn carried (under the project).
+SESSIONS_DIR = ".joinery/sessions"
 from joinery.catalog import ROOT
 from joinery.chat_attachments import encoded
+from joinery.hook import shell_search
 from joinery.platform_support import launch_argv
 from joinery.roles import CLAUDE_READ_TOOLS, ROLE_ENV, spec
 from joinery.stage_access import NO_STAGE, STAGE_ENV
@@ -62,15 +68,67 @@ def cache_flags(role: str, stable_system_prompt: bool, tools_flag: bool) -> list
     return flags
 
 
-def user_input(prompt: Prompt) -> bytes:
+#: Claude Code's own tools a Joinery session may use without a permission prompt:
+#: the file readers, delegation and tool loading (Bash only for a read-only search,
+#: which the hook lets through).
+PERMITTED_NATIVE = frozenset(
+    {
+        "Read",
+        "Grep",
+        "Glob",
+        "LS",
+        "NotebookRead",
+        "Agent",
+        "Task",
+        "ToolSearch",
+        "TodoWrite",
+    }
+)
+NOT_PERMITTED = (
+    "{tool} needs a permission prompt, which this session can't show: use the "
+    "joinery-registry tools (search_project to search, call_tool to change files)."
+)
+
+
+def permitted(tool: str, arguments: object, inspection_only: bool = False) -> str:
+    """Why Claude Code will refuse ``tool`` in a Joinery session ("" when it runs):
+    the session passes ``--allowedTools`` for the registry and shows no prompts, so
+    only the registry, the read tools and a read-only shell search get through."""
+    if tool.startswith(("mcp__joinery-registry__", "mcp__joinery_registry__")):
+        return ""
+    delegates = tool in {"Agent", "Task"}
+    if tool in PERMITTED_NATIVE and not (inspection_only and delegates):
+        return ""
+    if tool == "Bash" and shell_search(arguments):
+        return ""
+    return NOT_PERMITTED.format(tool=tool)
+
+
+def refusal(part: dict[str, Any]) -> str:
+    """The refusal text of a ``tool_result`` Claude Code wrote for a call it or the
+    policy hook refused ("" for a call that ran, even one that failed on its own)."""
+    if not part.get("is_error"):
+        return ""
+    content = part.get("content", "")
+    if isinstance(content, list):
+        content = " ".join(
+            str(c.get("text", "")) for c in content if isinstance(c, dict)
+        )
+    text = str(content).strip()
+    lowered = text.lower()
+    markers = ("permission", "blocked by joinery", "hook", "denied", "not allowed")
+    return text[:300] if any(m in lowered for m in markers) else ""
+
+
+def user_input(prompt: Prompt, known: str = "") -> bytes:
     """What goes to Claude's stdin: plain text, or with attached images one stream-json
     user message whose content is the text and each image as a base64 block. Joinery's
     instructions are the session's system prompt (``--append-system-prompt``), so the
     turn carries only its own text (ADR 0056)."""
     if not prompt.attachments:
-        return turn_text(prompt).encode()
+        return turn_text(prompt, known=known).encode()
     content: list[dict[str, Any]] = [
-        {"type": "text", "text": turn_text(prompt, images_inline=True)}
+        {"type": "text", "text": turn_text(prompt, images_inline=True, known=known)}
     ]
     for path in prompt.attachments:
         media, data = encoded(Path(path))
@@ -327,6 +385,25 @@ class ClaudeSession:
         self.usage = ClaudeUsage()
         return True
 
+    def _stable_record(self) -> Path:
+        return self.project / SESSIONS_DIR / f"{self.session_id}.stable"
+
+    def _holds(self, stable: str) -> bool:
+        """This session (perhaps resumed by another run) was last sent ``stable``."""
+        try:
+            saved = self._stable_record().read_text(encoding="utf-8").strip()
+        except OSError:
+            return False
+        return saved == hashlib.sha256(stable.encode()).hexdigest()
+
+    def _remember(self, stable: str) -> None:
+        record = self._stable_record()
+        try:
+            record.parent.mkdir(parents=True, exist_ok=True)
+            record.write_text(hashlib.sha256(stable.encode()).hexdigest())
+        except OSError:
+            pass  # only a saving: the next turn sends the map again
+
     async def new_session(self) -> None:
         self.session_id = str(uuid.uuid4())
         self.started = False
@@ -411,12 +488,19 @@ class ClaudeSession:
             limit=16_000_000,
         )
         assert self.process.stdin and self.process.stdout and self.process.stderr
-        self.process.stdin.write(user_input(prompt))
+        # A resumed session holds the map and rules from its last turn already.
+        stable = stable_text(prompt)
+        known = stable if self.started and self._holds(stable) else ""
+        self.process.stdin.write(user_input(prompt, known))
+        self._remember(stable)
         await self.process.stdin.drain()
         self.process.stdin.close()
         stderr = asyncio.create_task(self.process.stderr.read())
         streamed = False
         ok = False
+        #: Each call's name and what its activity said (allowed or not), by id,
+        #: until its result shows what really happened.
+        calls: dict[str, tuple[str, bool]] = {}
         try:
             while line := await self.process.stdout.readline():
                 try:
@@ -441,10 +525,41 @@ class ClaudeSession:
                         if part.get("type") == "text" and not streamed:
                             yield Message(text=str(part["text"]))
                         elif part.get("type") == "tool_use":
+                            name = str(part.get("name", ""))
+                            call_id = str(part.get("id", ""))
+                            reason = permitted(
+                                name, part.get("input"), self.inspection_only
+                            )
+                            calls[call_id] = (name, not reason)
                             yield ToolActivity(
-                                server="claude", tool=str(part.get("name", ""))
+                                server="claude",
+                                tool=name,
+                                allowed=not reason,
+                                reason=reason,
+                                call_id=call_id,
                             )
                     streamed = False
+                elif kind == "user":
+                    # The call's result corrects its activity: refused after all
+                    # (the policy hook, a rule of Claude Code's own), or run after
+                    # all (a command Claude Code itself knows only reads).
+                    content = event.get("message", {}).get("content", [])
+                    for part in content if isinstance(content, list) else []:
+                        if not isinstance(part, dict):
+                            continue
+                        call_id = str(part.get("tool_use_id", ""))
+                        if call_id not in calls:
+                            continue
+                        name, said = calls.pop(call_id)
+                        reason = refusal(part)
+                        if said == bool(reason):
+                            yield ToolActivity(
+                                server="claude",
+                                tool=name,
+                                allowed=not reason,
+                                reason=reason,
+                                call_id=call_id,
+                            )
                 elif kind == "result":
                     ok = (
                         not event.get("is_error", False)

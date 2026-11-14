@@ -40,6 +40,13 @@ ProjectDirEnv = Literal["CLAUDE_PROJECT_DIR", "CODEX_PROJECT_DIR", ""]
 #             the call, and say loudly in stderr that Rule Zero was hit.
 StopMode = Literal["json", "exit"]
 
+# How the gate lets a read-only project search through the agent's own permission
+# step, when the session can't show permission prompts (``joinery.hook``).
+#   "json" -> exit 0 with ``permissionDecision: "allow"`` (Claude Code's PreToolUse).
+#   "none" -> nothing to say: the agent's own sandbox or Joinery's permission answer
+#             (bridge.acp_session) already lets reads run; exit 0 is enough.
+AllowMode = Literal["json", "none"]
+
 
 class Agent(BaseModel):
     """One coding agent and the facts needed to enforce the gate inside it."""
@@ -71,6 +78,8 @@ class Agent(BaseModel):
     # (Claude Code: CLAUDE.md; Codex and opencode: AGENTS.md; Gemini CLI:
     # GEMINI.md). Joinery writes a stub there pointing at JOURNEYMAN.md (ADR 0077).
     memory_file: str = "AGENTS.md"
+    # How a judged read-only shell search is let through (see AllowMode).
+    allow_mode: AllowMode = "none"
 
 
 CLAUDE = Agent(
@@ -86,6 +95,7 @@ CLAUDE = Agent(
     stop_mode="json",
     blocking_hook=True,
     memory_file="CLAUDE.md",
+    allow_mode="json",
     gate_limits=(
         "The hook is a guard rail, not a sandbox: offline workers are the real boundary.",
     ),

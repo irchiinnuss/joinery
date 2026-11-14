@@ -295,6 +295,7 @@ def violation(raw: dict[str, Any]) -> Verdict | None:
                 "inspect_editor",
                 "view_editor",
                 "inspect_game",
+                "search_project",
             }
             if event.tool == "call_tool" and isinstance(values, dict):
                 allowed = read_only(
@@ -321,6 +322,45 @@ def violation(raw: dict[str, Any]) -> Verdict | None:
                 "This specialist is read-only. Use the main thread for changes.",
             )
     return rule_zero(event)
+
+
+def search_allowed(raw: dict[str, Any]) -> bool:
+    """A shell call that only reads the project (rg, grep, ls, find, cat, head, wc,
+    git status/log/diff, ...): every part a known reader, no redirection or
+    substitution (``joinery.roles.read_only_command``). Only asked once
+    :func:`violation` has passed the call, so Rule Zero, the denylist and the
+    staged-change folders have judged it first."""
+    event = normalise_event(raw)
+    return event.kind == "bash" and shell_search({"command": event.command})
+
+
+def shell_search(arguments: object) -> bool:
+    """``arguments`` (a shell tool's input: ``command`` or ``cmd``) only read the
+    project, and nothing in it is refused by Rule Zero or the denylist. The one
+    test every agent's own shell is let through by (the hook for Claude Code,
+    the permission answer for ACP agents)."""
+    if not isinstance(arguments, Mapping):
+        return False
+    command = arguments.get("command") or arguments.get("cmd") or ""
+    if isinstance(command, list):
+        command = " ".join(str(part) for part in command)
+    command = str(command)
+    if not command.strip() or not read_only_command(command):
+        return False
+    return (
+        command_violation(command, load_denylist()) is None
+        and user_only_violation(command) is None
+    )
+
+
+def _allow(event_name: str) -> dict[str, Any]:
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": event_name,
+            "permissionDecision": "allow",
+            "permissionDecisionReason": "Read-only project search, judged by Joinery.",
+        }
+    }
 
 
 def registry_probe(agent_id: str, project: Path) -> dict[str, Any]:
@@ -433,6 +473,13 @@ def main(agent_id: str | None = None) -> int:
         raw = json.load(sys.stdin)
         verdict = violation(raw)
         if verdict is None:
+            if agent_id and search_allowed(raw):
+                agent = get_agent(agent_id)
+                if agent.allow_mode == "json":
+                    # The session shows no permission prompts: a judged read-only
+                    # search is let through here rather than refused unasked.
+                    name = str(raw.get("hook_event_name") or agent.pre_tool_event)
+                    print(json.dumps(_allow(name)))
             return 0
         endpoint = os.environ.get("JOINERY_POLICY_ENDPOINT")
         if verdict.severity == Severity.STOP and endpoint:

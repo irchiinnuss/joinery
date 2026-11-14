@@ -19,6 +19,7 @@ from joinery import (
     compact,
     design,
     live_game,
+    project_search,
     replays,
     scene_variants,
     skills,
@@ -364,6 +365,16 @@ class GatewayRPC:
                     str(params.get("ref", "")),
                     str(params.get("path", "") or ""),
                     int(params.get("offset", 0) or 0),
+                )
+            elif method == "search":
+                data = project_search.search(
+                    self.gateway.search_root(),
+                    str(params.get("pattern", "")),
+                    path=str(params.get("path", "") or ""),
+                    glob=str(params.get("glob", "") or ""),
+                    regex=params.get("regex", True) is not False,
+                    ignore_case=params.get("ignore_case") is True,
+                    limit=int(params.get("limit", 0) or project_search.DEFAULT_LIMIT),
                 )
             elif method == "find_recipe":
                 if self.role and not registry_allowed(self.role, method):

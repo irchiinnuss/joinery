@@ -75,6 +75,8 @@ READ_ONLY_ROLES: frozenset[str] = frozenset(
     }
 )
 
+#: Search the project's text files (read-only, so every role may).
+SEARCH_PROJECT = "search_project"
 #: The running game: look (any role) and play with timed input (``may_drive``).
 INSPECT_GAME = "inspect_game"
 DRIVE_GAME = "drive_game"
@@ -86,6 +88,7 @@ REGISTRY_READS = frozenset(
         "inspect_editor",
         "view_editor",
         "details",
+        SEARCH_PROJECT,
         INSPECT_GAME,
         "tidy_check",
     }
@@ -236,6 +239,7 @@ REGISTRY_TOOLS: tuple[str, ...] = (
     "inspect_editor",
     "view_editor",
     "details",
+    SEARCH_PROJECT,
     "find_recipe",
     INSPECT_GAME,
     DRIVE_GAME,
@@ -310,12 +314,12 @@ CLAUDE_READ_TOOLS: tuple[str, ...] = ("Read", "Grep", "Glob", "Bash")
 
 # --- Read-only shell ------------------------------------------------------------------
 
-_SEGMENTS = re.compile(r"&&|\|\||[;|\n]")
 #: Programs that only read. Anything else (an editor, a package manager, a network
 #: client, an interpreter) is refused for the read-only roles.
 _READERS = frozenset(
     {
         "cat",
+        "cd",
         "head",
         "tail",
         "nl",
@@ -342,6 +346,14 @@ _GIT_READS = frozenset({"log", "show", "diff", "status", "blame", "ls-files"})
 _FIND_WRITES = frozenset(
     {"-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprintf", "-fls"}
 )
+#: Flags that make a reader run a program or write a file.
+_WRITE_FLAGS: dict[str, frozenset[str]] = {
+    "rg": frozenset({"--pre", "--pre-glob"}),
+    "sort": frozenset({"-o", "--output"}),
+    "tree": frozenset({"-o"}),
+    "git": frozenset({"--output", "-o", "--ext-diff", "--textconv"}),
+    "diff": frozenset({"--to-file"}),
+}
 #: ``sed -n 1,80p``-style scripts: printing only.
 _SED_PRINT = re.compile(r"^(?:\d+|\$|/[^/]*/)(?:,(?:\d+|\$|/[^/]*/))?p$")
 _WRAPPERS = re.compile(r"^(?:/bin/|/usr/bin/)?(?:ba|z)?sh\s+-l?c\s+")
@@ -360,17 +372,38 @@ def _unwrap(command: str) -> str:
     return text
 
 
-def _reads(segment: str) -> bool:
+def _segments(command: str) -> list[list[str]] | None:
+    """``command``'s simple commands as words, split at ``&&``, ``||``, ``;``,
+    ``|`` and newlines outside quotes (``rg 'a|b'`` is one command). None when it
+    doesn't parse, or uses any other operator (``&``, ``|&``)."""
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|\n")
+    lexer.whitespace = " \t\r"
+    lexer.whitespace_split = True
+    lexer.commenters = ""
     try:
-        tokens = shlex.split(segment)
+        words = list(lexer)
     except ValueError:
-        return False
+        return None
+    segments: list[list[str]] = [[]]
+    for word in words:
+        if word and set(word) <= set(";&|\n"):
+            if word.strip("\n") not in {"", "&&", "||", ";", "|"}:
+                return None
+            segments.append([])
+        else:
+            segments[-1].append(word)
+    return segments
+
+
+def _reads(tokens: list[str]) -> bool:
     while tokens and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=\S*", tokens[0]):
         tokens = tokens[1:]  # LC_ALL=C grep …
     if not tokens:
         return True
     program = Path(tokens[0]).name
     args = tokens[1:]
+    if any(arg.split("=", 1)[0] in _WRITE_FLAGS.get(program, ()) for arg in args):
+        return False  # rg --pre runs a program; sort -o and git diff --output write
     if program == "git":
         return bool(args) and args[0] in _GIT_READS
     if program not in _READERS:
@@ -392,7 +425,8 @@ def read_only_command(command: str) -> bool:
     inner = _unwrap(command)
     if re.search(r"[<>`]|\$\(|&(?!&)", inner.replace("&&", "")):
         return False
-    return all(_reads(part.strip()) for part in _SEGMENTS.split(inner))
+    segments = _segments(inner)
+    return segments is not None and all(_reads(words) for words in segments)
 
 
 # --- The policy -----------------------------------------------------------------------

@@ -133,7 +133,7 @@ def test_a_big_project_stays_within_its_budget(tmp_path: Path) -> None:
     text = project_map.build(root)
     assert len(text) <= project_map.BUDGET
     assert project_map.tokens(text) <= 2000
-    assert "more scenes: ask for the full map" in text
+    assert "more scenes: search_project or list the folder" in text
     # The best-ranked scenes stay.
     assert "- game/level.tscn:" in text and "- game/player.tscn:" in text
 

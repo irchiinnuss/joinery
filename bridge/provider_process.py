@@ -36,7 +36,10 @@ INSTRUCTIONS = (
     "Inspect existing sources before editing; preserve named parts. No creative asset work before user-approved art direction. "
     + REVIEW_GUIDE
     + " Never claim staged changes are accepted or saved. "
-    "Use focused tool searches, cache discovered schemas within the session, and write compact native scripts. "
+    "Find before you read: the project map lists scenes, scripts, classes and assets; search_project (or a read-only "
+    "shell search: rg, grep, ls, find, git log/diff) finds code and text in one call; then read only the lines you need "
+    "(Read with offset and limit), never folders file by file. Cache discovered schemas and write compact native scripts. "
+    "A refused tool call needs no apology or mention: take the permitted route and carry on. "
     "Document operators automatically export, import and record provenance; precheck runs the same checks early without submitting; submit_for_review runs the final checks and opens the review. "
     "Avoid repeating those checks after every call. If the user asks to place an asset in their scene, create the scene instance too. "
     "Long tool results arrive as summaries with a details ref: read more with details only when you need it. "
@@ -127,17 +130,28 @@ def project_memory(prompt: Prompt) -> str:
     return found + "\n\n" if found else ""
 
 
-def turn_text(prompt: Prompt, images_inline: bool = False) -> str:
-    """The turn as every provider gets it, stable parts first: the role's rules
-    (with the art bible and brief), the project memory, the project map, then the
-    turn (ADR 0056, ADR 0077)."""
+def stable_text(prompt: Prompt) -> str:
+    """The turn's stable parts: the role's rules (with the art bible and brief),
+    the project memory and the project map, the same bytes from turn to turn while
+    the project's files are the same."""
     rules = prompt.rules.strip()
     return (
-        (rules + "\n\n" if rules else "")
-        + project_memory(prompt)
-        + project_map(prompt)
-        + turn_part(prompt, images_inline)
+        (rules + "\n\n" if rules else "") + project_memory(prompt) + project_map(prompt)
     )
+
+
+def turn_text(prompt: Prompt, images_inline: bool = False, *, known: str = "") -> str:
+    """The turn as every provider gets it, stable parts first: the role's rules
+    (with the art bible and brief), the project memory, the project map, then the
+    turn (ADR 0056, ADR 0077). ``known``: the stable parts the provider's resumed
+    session already holds from an earlier turn; when they are unchanged only the
+    turn is sent, so a continued chat doesn't carry the map twice."""
+    stable = stable_text(prompt)
+    if known and stable == known:
+        return "(Project rules, memory and map: unchanged since the last turn.)\n\n" + (
+            turn_part(prompt, images_inline)
+        )
+    return stable + turn_part(prompt, images_inline)
 
 
 def prompt_text(

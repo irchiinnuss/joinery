@@ -152,6 +152,30 @@ def make_server(socket: Path, role: str | None = None) -> MCPServer[Any]:
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True))
     @tool_errors
+    async def search_project(
+        pattern: Annotated[str, Field(min_length=1, max_length=300)],
+        path: Annotated[str, Field(max_length=300)] = "",
+        glob: Annotated[str, Field(max_length=100)] = "",
+        regex: bool = True,
+        ignore_case: bool = False,
+        limit: Annotated[int, Field(ge=1, le=100)] = 50,
+    ) -> dict[str, Any]:
+        """Search the project's text files (scripts, scenes, resources, docs, settings) for a regex or plain text; returns 'path:line: text' per match, capped. path: a folder or file; glob: '*.gd'. Your change's own edits included. Use it before reading files."""
+        return await rpc(
+            socket,
+            "search",
+            {
+                "pattern": pattern,
+                "path": path,
+                "glob": glob,
+                "regex": regex,
+                "ignore_case": ignore_case,
+                "limit": limit,
+            },
+        )
+
+    @server.tool(annotations=ToolAnnotations(read_only_hint=True))
+    @tool_errors
     async def find_recipe(
         request: Annotated[str, Field(min_length=1, max_length=400)],
         limit: Annotated[int, Field(ge=1, le=5)] = 3,
