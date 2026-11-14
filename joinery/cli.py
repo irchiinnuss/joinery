@@ -964,7 +964,8 @@ def _rebuild(project: Path, prefer: str, record_mode: bool, timeout: int) -> int
         # Measures the committed outputs; it does not rebuild them.
         for path in paths:
             updated = record(path, project, runner)
-            fps = ", ".join(sorted(updated.expect.values()))
+            # A sound fingerprint carries its levels; its head is enough here.
+            fps = ", ".join(sorted(v[:76] for v in updated.expect.values()))
             print(f"recorded {path.name}: {fps}")
         return 0
 
@@ -983,10 +984,16 @@ def _rebuild(project: Path, prefer: str, record_mode: bool, timeout: int) -> int
         for result in rebuild_all(scratch, runner, timeout):
             mark = "ok " if result.ok else "FAIL"
             print(f"  [{mark}] {result.recipe:<28} {result.seconds:6.1f}s")
+            # On stdout, in order: each problem under its recipe, naming the
+            # recipe and (first) the asset, so a piped log reads as one story.
             for problem in result.problems:
-                print(f"         {problem}", file=sys.stderr)
+                print(f"         {result.recipe}: {problem}")
             failed += not result.ok
-    print("rebuild: " + ("FAILED" if failed else "ok"))
+    total = len(paths)
+    if failed:
+        print(f"rebuild: FAILED ({total - failed} of {total} recipes rebuilt)")
+    else:
+        print(f"rebuild: ok ({total} of {total} recipes rebuilt)")
     return 1 if failed else 0
 
 
