@@ -36,6 +36,9 @@ the same for Codex, Claude Code, Gemini CLI and opencode.
 
 from __future__ import annotations
 
+import argparse
+import json
+import sys
 import tomllib
 import uuid
 from collections.abc import Awaitable, Callable
@@ -259,6 +262,55 @@ def go_mode(project: Path) -> str:
     agents = raw.get("agents", {})
     value = agents.get("todo_go", DEFAULT_GO) if isinstance(agents, dict) else ""
     return value if value in GO_MODES else DEFAULT_GO
+
+
+#: ``joinery todo-go --set``: the modes, and "ask" for "multi".
+GO_CHOICES = {mode: mode for mode in GO_MODES} | {"ask": "multi"}
+GO_WORDS = {
+    "auto": "A to-do of two steps or more waits for your Go, unless changes are kept "
+    "automatically or the request came from joinery run (nobody there to say Go).",
+    "multi": "A to-do of two steps or more waits for your Go.",
+    "always": "Every to-do waits for your Go.",
+    "never": "To-dos start at once; nobody needs to say Go.",
+}
+
+
+def set_go_mode(project: Path, choice: str) -> str:
+    """Save ``[agents] todo_go`` (``auto``, ``multi`` or ``ask``, ``always``,
+    ``never``), keeping every other line of joinery.toml. Returns the mode saved."""
+    from joinery.roles import set_agents_values
+
+    mode = GO_CHOICES.get(choice)
+    if mode is None:
+        raise ValueError("Choose auto, multi, always or never.")
+    set_agents_values(project, {"todo_go": json.dumps(mode)})
+    if go_mode(project) != mode:
+        raise ValueError("joinery.toml keeps [agents] in a form Joinery can't edit.")
+    return mode
+
+
+def add_go_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--project", type=Path, default=Path.cwd())
+    parser.add_argument("--set", choices=sorted(GO_CHOICES), default=None)
+    parser.add_argument("--json", action="store_true")
+
+
+def go_main(args: argparse.Namespace) -> int:
+    """``joinery todo-go``: show or change when a to-do waits for the user's Go."""
+    project = Path(args.project).resolve()
+    try:
+        mode = set_go_mode(project, args.set) if args.set else go_mode(project)
+    except (OSError, ValueError) as exc:
+        if args.json:
+            print(json.dumps({"error": str(exc)}))
+        else:
+            print(str(exc), file=sys.stderr)
+        return 1
+    if args.json:
+        print(json.dumps({"todo_go": mode, "choices": list(GO_MODES)}))
+    else:
+        print(GO_WORDS[mode])
+    return 0
 
 
 def run_steps_mode(project: Path) -> str:

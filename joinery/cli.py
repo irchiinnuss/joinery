@@ -26,6 +26,7 @@ from joinery import (
     connection,
     console_errors,
     design_cli,
+    done_when,
     game_setup,
     godotsteam,
     headless,
@@ -1282,6 +1283,12 @@ def _parser() -> argparse.ArgumentParser:
             help="show or change whether passing changes are kept without asking",
         )
     )
+    done_when.add_go_arguments(
+        commands.add_parser(
+            "todo-go",
+            help="show or change when a to-do waits for your Go (ask, always, never)",
+        )
+    )
     workspace = commands.add_parser(
         "workspace", help="list assets and desktop viewers as JSON"
     )
@@ -1741,6 +1748,8 @@ def main(argv: list[str] | None = None) -> int:
         return complex_models.main(args)
     if args.command == "auto-accept":
         return auto_accept.main(args)
+    if args.command == "todo-go":
+        return done_when.go_main(args)
     if args.command == "fix-errors":
         return console_errors.main(args)
     if args.command == "agents":
