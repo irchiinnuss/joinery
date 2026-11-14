@@ -230,6 +230,28 @@ def claude_configured_model() -> str:
     return named.strip() if isinstance(named, str) else ""
 
 
+#: The flag that loads only the project's own Claude settings, not the user's.
+SETTING_SOURCES_FLAG = "--setting-sources"
+#: User settings a Joinery session still needs: how Claude Code signs in and reaches
+#: its API (env, apiKeyHelper), and the model it uses by default.
+KEPT_USER_SETTINGS = ("env", "apiKeyHelper", "model")
+
+
+def user_settings_kept() -> dict[str, Any]:
+    """From the user's Claude settings, only what signs in and picks the model. A
+    Joinery session skips the rest (user hooks, plugins, status line, personal
+    instructions): about 24k tokens on every call, and user hooks that rewrite
+    commands would fight the project gate."""
+    config = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
+    try:
+        settings = json.loads((config / "settings.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(settings, dict):
+        return {}
+    return {k: settings[k] for k in KEPT_USER_SETTINGS if k in settings}
+
+
 def claude_model_choices(
     configured: str, efforts: tuple[str, ...]
 ) -> list[ModelChoice]:
@@ -340,6 +362,8 @@ class ClaudeSession:
         self.stable_system_prompt = False
         #: This CLI takes ``--tools``, the built-in tools a session is offered.
         self.tools_flag = False
+        #: This CLI takes ``--setting-sources`` (load project settings, not the user's).
+        self.setting_sources = False
 
     async def connect(self, project: Path, profile_id: str = "") -> None:
         if profile_id:
@@ -362,6 +386,7 @@ class ClaudeSession:
             self.effort_supported = b"--effort" in output
             self.stable_system_prompt = DYNAMIC_SECTIONS_FLAG.encode() in output
             self.tools_flag = re.search(rb"(?m)^\s*--tools\b", output) is not None
+            self.setting_sources = SETTING_SOURCES_FLAG.encode() in output
         finally:
             await stop_process(probe)
         require_flags(output)
@@ -419,7 +444,8 @@ class ClaudeSession:
         if not self.executable or self.gateway_socket is None:
             raise ValueError("Claude is not connected.")
         hook = _command_str(str(ROOT), "claude")
-        settings = {
+        settings: dict[str, Any] = {
+            **(user_settings_kept() if self.setting_sources else {}),
             "hooks": {
                 "PreToolUse": [
                     {
@@ -427,7 +453,7 @@ class ClaudeSession:
                         "hooks": [{"type": "command", "command": hook, "timeout": 30}],
                     }
                 ]
-            }
+            },
         }
         args = [
             self.executable,
@@ -460,6 +486,10 @@ class ClaudeSession:
             self.session_id,
         ]
         args += cache_flags(self.role, self.stable_system_prompt, self.tools_flag)
+        if self.setting_sources:
+            # The project's settings (its joinery hook) and Joinery's own; the user's
+            # only for signing in and the model (user_settings_kept).
+            args += [SETTING_SOURCES_FLAG, "project,local"]
         env = dict(os.environ, DISABLE_TELEMETRY="1", DISABLE_ERROR_REPORTING="1")
         if prompt.model:
             args += ["--model", prompt.model]

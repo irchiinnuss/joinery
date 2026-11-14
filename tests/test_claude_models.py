@@ -59,8 +59,11 @@ class Started(Exception):
     """Stops the session at its process launch, with the arguments it had."""
 
 
-def launch_args(monkeypatch: pytest.MonkeyPatch, prompt: Prompt) -> list[str]:
+def launch_args(
+    monkeypatch: pytest.MonkeyPatch, prompt: Prompt, sources: bool = False
+) -> list[str]:
     session = ClaudeSession()
+    session.setting_sources = sources
     session.executable = "claude"
     session.gateway_socket = Path("gateway.sock")
     seen: list[str] = []
@@ -87,3 +90,34 @@ def test_a_chosen_model_is_passed(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "--model" not in launch_args(
         monkeypatch, Prompt(text="hi", project_dir="/p", model="")
     )
+
+
+def test_a_session_skips_the_users_own_settings_but_signs_in_as_before(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path))
+    (tmp_path / "settings.json").write_text(
+        json.dumps(
+            {
+                "model": "opus",
+                "env": {"ANTHROPIC_BASE_URL": "https://proxy.example"},
+                "apiKeyHelper": "~/bin/key",
+                "hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": []}]},
+                "enabledPlugins": {"caveman": True},
+            }
+        )
+    )
+    prompt = Prompt(text="hi", project_dir="/p")
+    args = launch_args(monkeypatch, prompt, sources=True)
+    assert args[args.index("--setting-sources") + 1] == "project,local"
+    settings = json.loads(args[args.index("--settings") + 1])
+    assert settings["env"] == {"ANTHROPIC_BASE_URL": "https://proxy.example"}
+    assert settings["apiKeyHelper"] == "~/bin/key" and settings["model"] == "opus"
+    assert "enabledPlugins" not in settings
+    # Only Joinery's gate among the hooks: the user's own don't reach the session.
+    assert "joinery" in json.dumps(settings["hooks"])
+    assert '"Bash"' not in json.dumps(settings["hooks"])
+    # An older CLI without the flag runs as before.
+    old = launch_args(monkeypatch, prompt)
+    assert "--setting-sources" not in old
+    assert "env" not in json.loads(old[old.index("--settings") + 1])
