@@ -72,6 +72,8 @@ var _others: Array[StringName] = []
 var _map_at: int = -1
 var _reach_nodes: Dictionary = {}
 var _reach_looked: int = -REACH_LOOK_EVERY
+## The scene the reach nodes were found in (its instance id): a reload makes a new one.
+var _reach_scene: int = 0
 
 
 func _init(scene_tree: SceneTree, generator: RandomNumberGenerator) -> void:
@@ -262,9 +264,7 @@ func _reach_target() -> Node:
 	for entry: Dictionary in reach_results:
 		if bool(entry["reached"]):
 			continue
-		for node: Node in _reach_nodes.get(str(entry["target"]), []):
-			if not is_instance_valid(node) or not node.is_inside_tree():
-				continue
+		for node: Node in _live_reach_nodes(str(entry["target"])):
 			var distance := _where(node).distance_to(_where(_player))
 			if distance < best_distance:
 				best_distance = distance
@@ -289,7 +289,7 @@ func _check_reach(frame: int) -> void:
 					"node": ""
 				}
 			)
-	if frame - _reach_looked >= REACH_LOOK_EVERY:
+	if frame - _reach_looked >= REACH_LOOK_EVERY or _reach_scene_changed():
 		_reach_looked = frame
 		_find_reach_nodes()
 	var at := _where(_player)
@@ -297,9 +297,7 @@ func _check_reach(frame: int) -> void:
 	for entry: Dictionary in reach_results:
 		if bool(entry["reached"]):
 			continue
-		for node: Node in _reach_nodes.get(str(entry["target"]), []):
-			if not is_instance_valid(node) or not node.is_inside_tree():
-				continue
+		for node: Node in _live_reach_nodes(str(entry["target"])):
 			var distance := _flat_distance(_where(node), at)
 			if entry["closest"] == null or distance < float(entry["closest"]):
 				entry["closest"] = snappedf(distance, 0.01)
@@ -316,9 +314,50 @@ func _check_reach(frame: int) -> void:
 				break
 
 
+## The nodes [param word] names that are still in the tree. A level reload frees the old
+## ones: each is checked untyped before it is used as a Node, and once one is gone the
+## names are looked up again in the new scene.
+func _live_reach_nodes(word: String) -> Array[Node]:
+	var live: Array[Node] = []
+	var gone := false
+	for item: Variant in _reach_nodes.get(word, []):
+		if not is_instance_valid(item):
+			gone = true
+			continue
+		var node := item as Node
+		if node == null or not node.is_inside_tree():
+			gone = true
+			continue
+		live.append(node)
+	if gone:
+		_find_reach_nodes()
+		live = []
+		for item: Variant in _reach_nodes.get(word, []):
+			if is_instance_valid(item) and (item as Node).is_inside_tree():
+				live.append(item as Node)
+	return live
+
+
+## The current scene is another one than the reach nodes came from (a reload, a new level).
+func _reach_scene_changed() -> bool:
+	var scene := tree.current_scene
+	return (scene.get_instance_id() if scene != null else 0) != _reach_scene
+
+
+## Whether node name [param node_name] is the place [param word] names: the whole name,
+## lower case without separators ("key room" is KeyRoom, not KeyRoomDoor), or a glob
+## when the word has * or ? ("keyroom*" is both).
+static func reach_matches(node_name: String, word: String) -> bool:
+	var plain := _plain(node_name)
+	if word.contains("*") or word.contains("?"):
+		return plain.match(word)
+	return plain == word
+
+
 func _find_reach_nodes() -> void:
 	_reach_nodes.clear()
 	var scene := tree.current_scene
+	_reach_scene = scene.get_instance_id() if scene != null else 0
 	if scene == null:
 		return
 	var nodes: Array[Node] = scene.find_children("*", "Node", true, false)
@@ -328,7 +367,7 @@ func _find_reach_nodes() -> void:
 		for node: Node in nodes:
 			if node == _player or not (node is Node3D or node is Node2D):
 				continue
-			if _plain(String(node.name)).contains(word):
+			if reach_matches(String(node.name), word):
 				found.append(node)
 		_reach_nodes[word] = found
 		if not found.is_empty():

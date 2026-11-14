@@ -222,11 +222,13 @@ def _bot_args(
 
 def reach_words(places: list[str]) -> list[str]:
     """Places to reach as the bot matches them against node names: "the key room" is
-    "keyroom" (lower case, letters and digits, no articles)."""
+    "keyroom" (lower case, letters and digits, no articles). The bot takes a node whose
+    whole name is that word (KeyRoom, never KeyRoomDoor); ``*`` and ``?`` are kept, so
+    "key room*" is a glob that takes both."""
     words: list[str] = []
     for place in places:
         kept = [
-            "".join(c for c in part if c.isalnum())
+            "".join(c for c in part if c.isalnum() or c in "*?")
             for part in place.lower().replace("_", " ").replace("-", " ").split()
         ]
         word = "".join(p for p in kept if p not in _ARTICLES)[:40]
@@ -563,7 +565,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "--reach",
         action="append",
         default=[],
-        help="a place to head for first (a node's name); repeat for more",
+        help="a place to head for first: a node's whole name ('key room' is KeyRoom, not "
+        "KeyRoomDoor), or a glob ('key room*'); repeat for more",
     )
     parser.add_argument(
         "--record",
