@@ -497,6 +497,15 @@ def make_server(socket: Path, role: str | None = None) -> MCPServer[Any]:
 
     @server.tool()
     @tool_errors
+    async def save_design_doc(
+        name: Annotated[str, Field(max_length=120)],
+        text: Annotated[str, Field(min_length=1, max_length=400_000)],
+    ) -> dict[str, Any]:
+        """Only when the user pasted a design document (GDD) into the chat and asked you to save it: stage it in your change, word for word, as design/docs/<name>.md, listed in the game brief (Markdown headings that name a still-open brief section draft it). text: exactly what the user pasted, never your summary or your own words. name: a short file name, e.g. 'gdd'. It joins the project when the user accepts the change, and every later session reads it with game_brief. Then call submit_for_review."""
+        return await rpc(socket, "save_design_doc", {"name": name, "text": text})
+
+    @server.tool()
+    @tool_errors
     async def report_review(notes: list[ReviewNoteArgument]) -> dict[str, Any]:
         """Reviewer agents only: report your review of the submitted change, once, then end your turn. notes: up to 12 findings, most important first, each {severity, text, file?, rule?}. severity 'block': the change is wrong and the author must fix it (breaks the request, the art bible, the game brief or the game); 'warn': a real risk the user should decide on before the change is kept (it can hold an automatic accept); 'info': a note shown with the change that never holds it (style, polish, things not made yet). rule: what a block or warn is about: request, art_bible, brief, broken (the game), work_lost, or other. An empty list means nothing to note."""
         return await rpc(

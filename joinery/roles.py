@@ -114,11 +114,13 @@ TIDY_REMOVE = "tidy_remove"
 #: Re-record a kept replay into the change (its input, the level as changed): a staged
 #: write like any other, so only the lead and workers may.
 RERECORD_REPLAY = "rerecord_replay"
+#: Save a design document the user pasted, staged for their review: the lead's alone.
+SAVE_DESIGN_DOC = "save_design_doc"
 ROLE_ONLY = frozenset({REVIEW_REPORT, DIAGNOSIS_REPORT, REPRODUCE, DESIGN_REPORT})
 #: A request's to-do, shown to the user before the work (ADR 0060): the lead's alone.
 PROPOSE_TODO = "propose_todo"
 #: Only the lead starts more agents (parallel tasks and variants) or shows a to-do.
-LEAD_ONLY = frozenset({"start_task", "start_variants", PROPOSE_TODO})
+LEAD_ONLY = frozenset({"start_task", "start_variants", PROPOSE_TODO, SAVE_DESIGN_DOC})
 
 
 @dataclass(frozen=True)
@@ -260,6 +262,7 @@ REGISTRY_TOOLS: tuple[str, ...] = (
     TIDY_CHECK,
     TIDY_REMOVE,
     RERECORD_REPLAY,
+    SAVE_DESIGN_DOC,
     "report_review",
     "report_design",
     "report_diagnosis",

@@ -528,3 +528,67 @@ def test_art_direction_shows_the_reference_images(tmp_path: Path, picked: Path) 
     ]
     images = [c for c in result.content if c.type == "image"]
     assert len(images) == 1 and images[0].mime_type == "image/png"
+
+
+# --- A document the user pasted into the chat ----------------------------------------
+
+
+def test_a_pasted_document_lands_in_design_docs_and_the_brief(tmp_path: Path) -> None:
+    project = made(tmp_path)
+    path, drafted = setup_imports.save_pasted(project, "Harbour GDD", GDD)
+    assert path == "design/docs/Harbour GDD.md"
+    assert (project / path).read_text() == GDD
+    assert (project / "design/docs/.gdignore").is_file()
+    assert drafted is not None
+    assert f"`{path}`" in (project / "design/brief.md").read_text()
+    # The same words again are not saved twice; different words get their own name.
+    assert setup_imports.save_pasted(project, "Harbour GDD", GDD)[0] == path
+    other, _ = setup_imports.save_pasted(project, "Harbour GDD.md", "# Other\n")
+    assert other == "design/docs/Harbour GDD-2.md"
+    escaped, _ = setup_imports.save_pasted(project, "../../x.txt", "hi")
+    assert escaped == "design/docs/x.txt"
+    with pytest.raises(ValueError, match="empty"):
+        setup_imports.save_pasted(project, "gdd", "  \n")
+
+
+def test_the_lead_stages_a_pasted_document_for_the_user_to_accept(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from joinery.gateway import ProjectGateway
+    from joinery.gateway_rpc import GatewayRPC, rpc
+    from tests.test_crew import FakeConnection
+
+    project = made(tmp_path)
+    monkeypatch.setattr("joinery.gateway.configured", lambda _: ([], []))
+    monkeypatch.setattr("joinery.gateway.approved", lambda _project: True)
+    monkeypatch.setattr("joinery.gateway.MCPConnection", FakeConnection)
+    args = {"name": "gdd", "text": GDD}
+
+    async def go() -> None:
+        gateway = ProjectGateway(project)
+        lead = GatewayRPC(gateway)
+        worker = GatewayRPC(gateway, role="worker")
+        reviewer = GatewayRPC(gateway, role="reviewer")
+        for server in (lead, worker, reviewer):
+            await server.start()
+        try:
+            for other in (worker, reviewer):
+                with pytest.raises(RuntimeError):
+                    await rpc(other.path, "save_design_doc", args)
+            data = await rpc(lead.path, "save_design_doc", args)
+            assert data["status"] == "staged" and data["path"] == "design/docs/gdd.md"
+            tx = gateway.transaction
+            assert tx is not None
+            assert (tx.stage / "design/docs/gdd.md").read_text() == GDD
+            assert not (project / "design/docs/gdd.md").exists()
+            tx.review()
+            tx.accept()
+        finally:
+            for server in (reviewer, worker, lead):
+                await server.close()
+            await gateway.close()
+
+    asyncio.run(go())
+    data = json.loads(call(project, "game_brief").content[0].text)
+    documents = {d["path"]: d for d in data["design_documents"]}
+    assert documents["design/docs/gdd.md"]["text"] == GDD

@@ -18,6 +18,7 @@ from typing import Any, Literal
 from joinery import (
     compact,
     design,
+    design_doc_tool,
     live_game,
     project_search,
     replays,
@@ -598,13 +599,23 @@ class GatewayRPC:
                         else "Specialists cannot re-record replays; the main thread does."
                     )
                 data = await replays.rerecord_tool(self.gateway, params)
+            elif method == "save_design_doc":
+                if self.inspection_only or (
+                    self.role and not registry_allowed(self.role, method)
+                ):
+                    raise ValueError(
+                        refusal(self.role)
+                        if self.role
+                        else "Specialists cannot save documents; the main thread does."
+                    )
+                data = await design_doc_tool.save(self.gateway, params)
             elif method == "task_status":
                 if self.task_status is None:
                     raise ValueError("Parallel tasks are not available here.")
                 data = self.task_status(str(params.get("id", "")))
             else:
                 raise ValueError(
-                    "The model interface supports inventory, schema, call, submit, propose_todo, blockout, grow_level, make_variant, playtest, the checks, sound_audit, tidy_check, tidy_remove, rerecord_replay and the running game's inspect_game and drive_game; no approval methods."
+                    "The model interface supports inventory, schema, call, submit, propose_todo, blockout, grow_level, make_variant, playtest, the checks, sound_audit, tidy_check, tidy_remove, rerecord_replay, save_design_doc and the running game's inspect_game and drive_game; no approval methods."
                 )
             project = getattr(self.gateway, "project", None)
             if method in COMPACTED and isinstance(project, Path):

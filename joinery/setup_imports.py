@@ -650,6 +650,55 @@ def apply(root: Path, chosen: Plan) -> list[dict[str, str]]:
     return steps
 
 
+# --- A document the user pasted into the chat -----------------------------------
+
+#: The most text one pasted document may carry.
+MAX_PASTED = 400_000
+
+
+def save_pasted(root: Path, name: str, text: str) -> tuple[str, list[str] | None]:
+    """Write a design document the user pasted into the chat to `root`/design/docs/.
+
+    `root` is a review stage: the document is the user's own words, saved at their
+    request, and it enters the project only when they accept the change, which is
+    them adding it. It is listed in the brief like a picked file, and Markdown drafts
+    the brief's open sections the same way. Returns the project path and the brief
+    sections drafted (None when there is no brief).
+    """
+    if not text.strip():
+        raise ValueError("The document is empty. Paste its text to save it.")
+    data = (text.rstrip("\n") + "\n").encode("utf-8")
+    if len(data) > MAX_PASTED:
+        raise ValueError(
+            f"That document is over {MAX_PASTED // 1000} KB. Add the file in /setup."
+        )
+    clean = safe_name(name.strip() or "design", "design")
+    stem, dot, suffix = clean.rpartition(".")
+    if not dot or f".{suffix}" not in TEXT_SUFFIXES:
+        stem, suffix = clean, "md"
+    folder = _folder(root, DOCS_DIR)
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / ".gdignore").touch()
+    digest = hashlib.sha256(data).hexdigest()
+    taken = _existing(folder)
+    number = 1
+    while True:
+        candidate = f"{stem}.{suffix}" if number == 1 else f"{stem}-{number}.{suffix}"
+        existing = taken.get(candidate.casefold())
+        if existing is None:
+            break
+        if _sha256(folder / existing) == digest:
+            return f"{DOCS_DIR}/{existing}", None
+        number += 1
+    target = folder / candidate
+    if not target.resolve().is_relative_to(root.resolve()):
+        raise ValueError(f"{candidate} would be outside the project.")
+    target.write_bytes(data)
+    destination = f"{DOCS_DIR}/{candidate}"
+    planned = Planned("document", target, destination, "", True, digest)
+    return destination, update_brief(root, Plan(documents=[planned]))
+
+
 # --- For agents ---------------------------------------------------------------
 
 #: How much of one document, and of all of them, an agent gets as text.

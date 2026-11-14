@@ -55,6 +55,7 @@ WRITERS = {
     "blockout",
     "grow_level",
     "inspect_in_parallel",
+    "save_design_doc",
 }
 
 SCENE = {
