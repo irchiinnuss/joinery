@@ -202,7 +202,9 @@ async def stage(
                 before = old.plan_png
             except (LayoutError, OSError, ValueError):
                 before = None
-        for relative, data in built.files.items():
+        files, kept = blockout.merged_files(tx.stage, built)
+        facts = [*facts, *kept]
+        for relative, data in files.items():
             target = tx.stage / relative
             if relative == blockout.SCRIPT_FILE and target.is_file():
                 continue

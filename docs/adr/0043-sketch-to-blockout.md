@@ -17,8 +17,8 @@ hard to change ("move the door to the north wall") and different every time.
    (pydantic, version 1): rooms (rects or polygons, a floor height, open edges), openings
    (door, window or gap on one named wall of a room, at a distance from its west or north
    end), corridors, stairs (rising toward a compass direction between two rooms' floors),
-   platforms, free walls, one spawn, and markers (`goal`, `pickup`, `coin`,
-   `checkpoint`, `hazard`). The plan is seen from above (3D, top-down 2D) or the side
+   platforms, free walls, one spawn, and markers (`goal`, `exit`, `pickup`, `coin`,
+   `key`, `door` with the `key` that opens it, `checkpoint`, `hazard`, `enemy`). The plan is seen from above (3D, top-down 2D) or the side
    (`2d-side`): x right, y down. 3D is in metres (plan x, y are Godot X, Z); 2D is in
    tiles or pixels. `scale` turns sketch units into plan units; with no measure given
    the agent reads a door gap as about 1 m (2 tiles in 2D). The canonical TOML lives in
@@ -70,6 +70,19 @@ hard to change ("move the door to the north wall") and different every time.
 6. **Iterating** edits the layout file, not the scene: the agent reads
    `design/blockouts/<name>.toml`, changes it and calls `blockout` again with the whole
    layout. `joinery blockout check|build|walk <layout>` replays it from the command line.
+   `walk` builds the layout fresh into `.joinery/walk/` and returns the route and what
+   was reached, or why it couldn't walk.
+7. **Rebuilds keep what was placed** (`merge.py`). The scene is where the game grows:
+   nodes placed in it (an enemy under `Markers/<id>`) and looks changed on built nodes
+   (a material on a floor) survive a rebuild, merged by node path. The layout the scene
+   was last built from (its hash is on the root) is built again to tell built nodes
+   from placed ones.
+8. **The game's own player** (`player.py`). The check reads the player scene the game
+   spawns: collider radius and height, the edge a capsule rides over
+   (`r * (1 - cos floor_max_angle)`; CharacterBody3D has no step logic, and a 0.25 m
+   ledge stopped the third-person player in Godot while 0.1 m did not), and the jump
+   from `jump_velocity` and gravity. Jump and gap are capped by the starting point's
+   profile, which was measured with the bot's held jumps.
 
 ## Consequences
 

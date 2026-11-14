@@ -19,6 +19,8 @@ from joinery.blockout import build as scene_build
 from joinery.blockout import plan as plan_picture
 from joinery.blockout.check import Checked, check
 from joinery.blockout.layout import Layout, LayoutError, parse, to_toml
+from joinery.blockout.merge import merge as merge_scene
+from joinery.blockout.player import measure
 from joinery.blockout.world import Profile, profile_for
 
 DESIGN_DIR = "design/blockouts"
@@ -121,6 +123,9 @@ def make(
     own = project_blueprint(project)
     chosen = blueprint or own
     profile = profile_for(chosen, layout.mode)
+    if chosen == own:
+        # The player this game actually spawns, not only its starting point's.
+        profile = measure(project, profile)
     expected = BLUEPRINT_MODES.get(chosen, "")
     checked = check(layout, profile, expected_mode=expected)
     path = scene_for(layout, scene)
@@ -136,6 +141,47 @@ def make(
             files[SCRIPT_FILE] = scene_build.SCRIPT_SOURCE.read_bytes()
     picture = plan_picture.render(checked.world, checked.reach)
     return Built(layout, checked, profile, files, layout_file, path, picture)
+
+
+_RECORDED = re.compile(r'^metadata/blockout_(layout|sha256) = "([^"]*)"$', re.MULTILINE)
+
+
+def merged_files(root: Path, built: Built) -> tuple[dict[str, bytes], list[str]]:
+    """``built.files`` to write into ``root`` (the project or a review stage), with
+    the scene merged into the one already there (:mod:`.merge`): placed enemies,
+    pickups and changed materials survive a rebuild. Returns the files and what the
+    merge kept or moved, in plain sentences."""
+    files = dict(built.files)
+    relative = built.scene.removeprefix("res://")
+    target = root / relative
+    if relative not in files or not target.is_file():
+        return files, []
+    try:
+        old = target.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return files, []
+    recorded = dict(_RECORDED.findall(old))
+    base: str | None = None
+    source = root / recorded.get("layout", "").removeprefix("res://")
+    if recorded.get("layout") and source.is_file():
+        data = source.read_bytes()
+        if hashlib.sha256(data).hexdigest() == recorded.get("sha256"):
+            try:
+                before = make(
+                    root,
+                    data.decode("utf-8"),
+                    scene=built.scene,
+                    blueprint=built.profile.blueprint or None,
+                )
+                base = before.files.get(relative, b"").decode("utf-8") or None
+            except (LayoutError, UnicodeDecodeError, ValueError):
+                base = None
+    try:
+        merged = merge_scene(old, files[relative].decode("utf-8"), base)
+    except ValueError:
+        return files, []
+    files[relative] = merged.text.encode("utf-8")
+    return files, merged.notes
 
 
 def route(built: Built) -> dict[str, Any]:

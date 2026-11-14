@@ -598,8 +598,16 @@ the paperclip, paste or drop, and send `/blockout`, or just "build this level"
   reference; it is never copied into the game.
 - Joinery checks the layout first: closed rooms, sizes the player fits through,
   stairs that aren't too steep, and that the spawn reaches every goal with your
-  starting point's own player (how high it jumps, how wide it is). Journeyman
+  game's own player: its collision shape, the ledge it can step up without
+  jumping, and how high and far it jumps. These are read from the player scene
+  the game spawns, so a change to the player changes the check. Journeyman
   fixes whatever the check finds before you see anything.
+- Markers say what the level holds: the goal or `exit`, coins, pickups, `key`s
+  and the `door`s they open (`key = "red"` on the door), checkpoints, hazards
+  and `enemy` spots. Each one is a node, `Markers/<id>`. Put the enemy, door or
+  model for it under that node. Rebuilding the layout keeps what you placed
+  there and any material you changed on a floor or wall. When a marker leaves
+  the layout, what was under it moves up a level and the rebuild says so.
 - The level is built as a greybox scene, `game/<name>_blockout.tscn`: CSG boxes
   with collision in 3D, solid rectangles in 2D, a named node for every room,
   wall piece and marker, and the spawn and markers in the groups the game and
@@ -613,7 +621,10 @@ the paperclip, paste or drop, and send `/blockout`, or just "build this level"
   Journeyman edits it and rebuilds, and the review shows the earlier plan and
   the new one. Edit the TOML yourself and run `joinery blockout build
   design/blockouts/<name>.toml --project .` to rebuild the same way
-  (`check` only checks it, `walk` walks it in Godot).
+  (`check` only checks it). `walk` builds the layout as it is now into a scratch
+  folder, walks it in Godot with your player, and prints which targets it
+  reached. If it can't walk, it says why: no player, no Godot, nothing
+  reachable on the plan, or the scene didn't start.
 
 ### Sound and music
 

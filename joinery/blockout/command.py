@@ -16,16 +16,21 @@ build and walk then treat it like any other layout.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
+import shutil
 import sys
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Any
 
 from joinery import blockout, playtest
+from joinery.blockout import build as scene_build
 from joinery.blockout import grow
 from joinery.blockout.grow import GrowError
 from joinery.blockout.layout import LayoutError
+from joinery.blockout.player import player_scene
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -162,13 +167,15 @@ def main(args: argparse.Namespace) -> int:
         args.picture.write_bytes(built.plan_png)
     data = _summary(built)
     if built.ok and args.action == "build":
-        for relative, content in built.files.items():
+        files, kept = blockout.merged_files(project, built)
+        for relative, content in files.items():
             target = project / relative
             if relative == blockout.SCRIPT_FILE and target.is_file():
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(content)
-        data["written"] = sorted(built.files)
+        data["written"] = sorted(files)
+        data["kept"] = kept
     if built.ok and args.action == "walk":
         data["walk"] = _walk(project, built)
     if args.json:
@@ -178,27 +185,123 @@ def main(args: argparse.Namespace) -> int:
             print(f"[{problem['severity']}] {problem['text']}")
         if data["fact"]:
             print(data["fact"])
-        for target in data.get("walk", {}).get("route", []):
+        walk = data.get("walk", {})
+        for target in walk.get("route", []):
             state = "reached" if target.get("reached") else "missed"
             print(f"- {target.get('kind')} {target.get('id')}: {state} in Godot")
+        if walk.get("reason"):
+            print(walk["reason"])
         for written in data.get("written", []):
             print(f"Wrote {written}")
+        for note in data.get("kept", []):
+            print(note)
+    walked = data.get("walk")
+    if walked is not None and (walked.get("reason") or not walked.get("route")):
+        return 1
     return 0 if built.ok else 1
 
 
+def _planned(route: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        {"id": t["id"], "kind": t["kind"], "at": t["at"], "waypoints": t["waypoints"]}
+        for t in route.get("targets", [])
+    ]
+
+
 def _walk(project: Path, built: blockout.Built) -> dict[str, Any]:
-    """Walk the built scene in Godot (it must be in the project already)."""
-    with tempfile.TemporaryDirectory(prefix="joinery-walk-") as folder:
-        route = Path(folder) / "route.json"
-        route.write_text(json.dumps(blockout.route(built)), encoding="utf-8")
-        report = playtest.run(
-            playtest.Options(
-                project=project,
-                seconds=min(25.0 * max(len(built.checked.world.markers), 1) + 10, 150),
-                seed=1,
-                scene=built.scene,
-                route=route,
-                out=Path(folder) / "run",
-            )
+    """Walk the layout as it builds now, in Godot, with the game's own player.
+
+    The scene is built into a scratch folder inside the project (``.joinery/walk/``,
+    hidden from Godot's import and git, removed afterwards), so the walk never needs
+    a ``build`` first and never sees an older scene. Returns the planned route, what
+    the player reached, and a plain ``reason`` whenever the walk couldn't say.
+    """
+    route = blockout.route(built)
+    data: dict[str, Any] = {"status": "", "planned": _planned(route), "route": []}
+    reach = built.checked.reach
+    if reach is None or not reach.targets:
+        data["reason"] = (
+            "The layout has nothing to walk to: add a goal, pickup, coin or checkpoint."
         )
-    return {"status": report.get("status"), "route": report.get("route", [])}
+        return data
+    if not route.get("targets"):
+        data["reason"] = (
+            f"On the plan the spawn reaches none of its targets ({reach.fact()}). "
+            "Fix the layout's problems first."
+        )
+        return data
+    if not player_scene(project):
+        data["reason"] = (
+            "The game spawns no player into levels (no game/hooks/player_scene in "
+            "project.godot), so there's no one to walk the route."
+        )
+        return data
+    try:
+        playtest.godot_binary()
+    except (OSError, ValueError) as exc:
+        data["reason"] = f"Godot couldn't run, so only the plan was walked: {exc}"
+        return data
+    scratch = project / WALK_DIR / uuid.uuid4().hex[:12]
+    try:
+        scene = _scratch_scene(project, built, scratch)
+        with tempfile.TemporaryDirectory(prefix="joinery-walk-") as folder:
+            route_file = Path(folder) / "route.json"
+            route_file.write_text(json.dumps(route), encoding="utf-8")
+            report = playtest.run(
+                playtest.Options(
+                    project=project,
+                    seconds=min(25.0 * len(route["targets"]) + 10, 150),
+                    seed=1,
+                    scene=scene,
+                    route=route_file,
+                    out=Path(folder) / "run",
+                )
+            )
+    except (OSError, ValueError, RuntimeError) as exc:
+        data["reason"] = f"The walk didn't run: {exc}"
+        return data
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+        with contextlib.suppress(OSError):
+            (project / WALK_DIR).rmdir()
+    data["status"] = report.get("status", "")
+    data["route"] = report.get("route", []) or []
+    if not data["route"]:
+        why = [
+            f"{item.get('title')}: {item.get('detail')}"
+            for item in report.get("items", [])
+            if item.get("severity") in {"critical", "high"}
+        ]
+        data["reason"] = (
+            "The player never started the route ("
+            + (why[0] if why else f"the game {data['status'] or 'did not run'}")
+            + ")."
+        )
+    else:
+        missed = [r for r in data["route"] if not r.get("reached")]
+        if missed:
+            data["reason"] = (
+                "In Godot the player didn't reach "
+                + ", ".join(f"{r.get('kind')} {r.get('id')}" for r in missed)
+                + "; the way there is too narrow, too high or too far to jump for "
+                "this player."
+            )
+    return data
+
+
+WALK_DIR = ".joinery/walk"
+
+
+def _scratch_scene(project: Path, built: blockout.Built, scratch: Path) -> str:
+    """Write the built scene (and the level script it uses) into ``scratch``."""
+    scratch.mkdir(parents=True, exist_ok=True)
+    script = scene_build.SCRIPT_SOURCE.read_bytes()
+    (scratch / "blockout_level.gd").write_bytes(script)
+    relative = scratch.relative_to(project).as_posix()
+    text = built.files[built.scene.removeprefix("res://")].decode("utf-8")
+    text = text.replace(
+        f'path="{scene_build.SCRIPT_PATH}"',
+        f'path="res://{relative}/blockout_level.gd"',
+    )
+    (scratch / "level.tscn").write_text(text, encoding="utf-8")
+    return f"res://{relative}/level.tscn"
