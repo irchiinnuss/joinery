@@ -16,6 +16,7 @@ from mcp import Client
 
 from joinery.art_approval import (
     APPROVED_AT_CREATION,
+    APPROVED_FROM_PRESET,
     AT_CREATION,
     approve,
     approved,
@@ -117,7 +118,9 @@ def test_skipped_answers_still_start_approved(tmp_path: Path) -> None:
 def test_a_bible_drafted_without_answers_starts_approved(tmp_path: Path) -> None:
     project = new(tmp_path)
     step = apply(project, None)
-    assert step["message"] == APPROVED_AT_CREATION
+    # Nothing claims answers the user never gave.
+    assert step["message"] == APPROVED_FROM_PRESET
+    assert "your answers" not in step["message"]
     assert approved(project)
 
 

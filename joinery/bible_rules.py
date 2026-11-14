@@ -1126,6 +1126,56 @@ def ui_resource_problems(
     return problems
 
 
+_EXT = re.compile(r'ExtResource\(\s*"([^"]+)"\s*\)')
+_VECTOR3 = re.compile(r"Vector3\(\s*([-\d.e]+)\s*,\s*([-\d.e]+)\s*,\s*([-\d.e]+)\s*\)")
+_MATERIALS = {"StandardMaterial3D", "ORMMaterial3D"}
+
+
+def material_texel_problems(
+    path: str, text: str, stage: Path, rules: BibleRules
+) -> list[str]:
+    """Texel density of textures laid on with world triplanar mapping.
+
+    A painted texture on level geometry is usually mapped in world space
+    (``uv1_world_triplanar``): one UV unit per metre, times ``uv1_scale``. Its
+    density is then exactly the image width times that scale, so the bible's
+    texel rule for the texture's folder applies to it as it does to a model.
+    Materials mapped through a mesh's own UVs are measured on the model.
+    """
+    sections = _sections(text)
+    images: dict[str, str] = {}
+    for kind, attrs, _values in sections:
+        source = attrs.get("path", "")
+        if kind == "ext_resource" and source.startswith("res://"):
+            images[attrs.get("id", "")] = source.removeprefix("res://")
+    problems: list[str] = []
+    for kind, attrs, values in sections:
+        if attrs.get("type") not in _MATERIALS and not (
+            kind == "resource" and values.get("albedo_texture")
+        ):
+            continue
+        if values.get("uv1_world_triplanar") != "true":
+            continue
+        ref = _EXT.search(values.get("albedo_texture", ""))
+        texture = images.get(ref.group(1), "") if ref else ""
+        if not texture or _suffix(texture) not in _IMAGES:
+            continue
+        rule = _folder_value(rules.models.texel_density, texture)
+        if rule is None or not (stage / texture).is_file():
+            continue
+        size = image_size((stage / texture).read_bytes(), _suffix(texture))
+        scale = _VECTOR3.search(values.get("uv1_scale", ""))
+        if size is None:
+            continue
+        sx, sy = (float(scale.group(1)), float(scale.group(2))) if scale else (1.0, 1.0)
+        density = max(size[0] * abs(sx), size[1] * abs(sy))
+        what = f"{texture} (material {attrs.get('id') or kind})"
+        problem = _texel_problem(path, what, density, rule)
+        if problem:
+            problems.append(problem)
+    return problems
+
+
 # --- worker output parsing ---------------------------------------------------
 
 
@@ -1661,6 +1711,10 @@ async def check_rules(
                 height = viewport_height(stage)
             problems += ui_resource_problems(
                 path, (stage / path).read_text(errors="replace"), access, height
+            )
+        if suffix in _UI_RESOURCES and rules.models.texel_density:
+            problems += material_texel_problems(
+                path, (stage / path).read_text(errors="replace"), stage, rules
             )
     if blends:
         got = await measure(measure_argv(blends), stage)

@@ -401,30 +401,127 @@ def list_presets() -> list[dict[str, str]]:
     return [{"id": k, "name": presets[k].name} for k in order]
 
 
+_HEX_ANSWER = re.compile(
+    r"(?<![0-9A-Za-z])#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})(?![0-9A-Za-z])"
+)
+_PX_PER_M = re.compile(
+    r"(\d+(?:\.\d+)?)\s*(?:px|pixels?)\s*(?:/|per|a)\s*(?:m|metres?|meters?)\b",
+    re.IGNORECASE,
+)
+_SQUARE = re.compile(r"\b(\d+)\s*[x×]\s*(\d+)\b")
+_PX = re.compile(r"\b(\d+)\s*-?\s*(?:px|pixels?)\b", re.IGNORECASE)
+_TEXTURE_WORDS = re.compile(r"textur|pixel|tile", re.IGNORECASE)
+#: Answers that may describe textures; the palette answer holds colours.
+_LOOK_KEYS = ("look", "materials", "models", "sprites", "vision", "references")
+
+
+def answer_colours(answers: dict[str, str]) -> list[str]:
+    """Hex colours the user gave for the palette, as "#rrggbb", in order."""
+    found: list[str] = []
+    for match in _HEX_ANSWER.finditer(str(answers.get("palette") or "")):
+        digits = match.group(1).lower()
+        if len(digits) == 3:
+            digits = "".join(c * 2 for c in digits)
+        colour = "#" + digits
+        if colour not in found:
+            found.append(colour)
+    return found
+
+
+def _power_of_two(value: int) -> bool:
+    return 8 <= value <= 4096 and value & (value - 1) == 0
+
+
+def answer_texel_density(answers: dict[str, str]) -> float | None:
+    """Pixels per metre the user's answers ask for, if they give one.
+
+    "256 px/m" is taken as written. A texture size ("64x64 px pixel-art
+    textures", "32 px tiles") means one texture across a metre of surface,
+    the usual way such a size is meant, so 64 px is 64 px/m.
+    """
+    texts = [str(answers.get(key) or "") for key in _LOOK_KEYS]
+    for text in texts:
+        match = _PX_PER_M.search(text)
+        if match:
+            return float(match.group(1))
+    for text in texts:
+        if not _TEXTURE_WORDS.search(text):
+            continue
+        square = _SQUARE.search(text)
+        if (
+            square
+            and square.group(1) == square.group(2)
+            and _power_of_two(int(square.group(1)))
+        ):
+            return float(square.group(1))
+        for match in _PX.finditer(text):
+            if _power_of_two(int(match.group(1))):
+                return float(match.group(1))
+    return None
+
+
+def _number(value: float) -> float | int:
+    return int(value) if value == int(value) else value
+
+
+def answer_rules(answers: dict[str, str]) -> dict[str, Any]:
+    """Checked rules the user's own answers set: palette colours, texel density."""
+    rules: dict[str, Any] = {}
+    colours = answer_colours(answers)
+    if colours:
+        rules["palette"] = {"colours": colours}
+    density = answer_texel_density(answers)
+    if density is not None:
+        rules["models"] = {
+            "texel_density": {"art": {"px_per_m": _number(density), "tolerance": 0.2}}
+        }
+    return rules
+
+
 def apply_preset(answers: dict[str, str], preset: str | None) -> dict[str, str]:
     """Preset section bodies under the user's answers; the answers win.
+
+    A density the answers give replaces the preset's in its suggested text
+    too, so the prose and the checked rules say the same number.
 
     Raises ValueError when the preset would fill a taste token.
     """
     chosen = get(preset)
+    density = answer_texel_density(answers)
+    preset_density = _lookup(chosen.rules, "models.texel_density.art.px_per_m")
     values: dict[str, str] = {}
     for token, body in chosen.sections.items():
         if bible_schema.is_taste(token):
             raise ValueError(f"preset {chosen.id!r} may not fill {token!r}")
-        values[token] = suggested_line(chosen.name) + "\n\n" + body.strip()
+        text = body.strip()
+        if density is not None and preset_density is not None:
+            text = re.sub(
+                rf"\b{_number(float(preset_density))}\s*px/m",
+                f"{_number(density)} px/m (from your answers)",
+                text,
+            )
+        values[token] = suggested_line(chosen.name) + "\n\n" + text
     for key, answer in answers.items():
         if str(answer).strip():
             values[key] = str(answer)
     return values
 
 
-def rules_dict(preset: str | None) -> dict[str, Any]:
-    return merge(DEFAULT_RULES, get(preset).rules)
+def rules_dict(
+    preset: str | None, answers: dict[str, str] | None = None
+) -> dict[str, Any]:
+    """Default rules, the preset's over them, and the user's answers over both."""
+    rules = merge(DEFAULT_RULES, get(preset).rules)
+    given = answer_rules(answers or {})
+    if "models" in given:
+        # The user's number holds for every folder, not only where the preset had none.
+        rules["models"]["texel_density"] = {}
+    return merge(rules, given)
 
 
-def rules_block(preset: str | None) -> str:
+def rules_block(preset: str | None, answers: dict[str, str] | None = None) -> str:
     """The complete TOML text (no fences) for `{{checked_rules}}`."""
-    text = write_rules(rules_dict(preset))
+    text = write_rules(rules_dict(preset, answers))
     parse_rules(text)  # never hand out a block that does not parse
     return text
 
@@ -441,7 +538,7 @@ def fill(template: str, answers: dict[str, str], preset: str | None = None) -> s
     so no `{{token}}` survives into a project.
     """
     values = apply_preset(answers, preset)
-    block = rules_block(preset).rstrip("\n")
+    block = rules_block(preset, answers).rstrip("\n")
 
     def substitute(match: re.Match[str]) -> str:
         key = match.group(1)

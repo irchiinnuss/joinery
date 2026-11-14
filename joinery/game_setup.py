@@ -256,6 +256,7 @@ def write_bible(
             "Kept the look that is already there.",
             board_rows=rows,
         )
+    answered = bible.answered(project)
     written = bible.write_from_answers_file(project, preset)
     if written is None:
         bible.write_bible(project, {}, preset)
@@ -267,7 +268,9 @@ def write_bible(
             report,
             "bible",
             "done",
-            art_approval.APPROVED_AT_CREATION,
+            art_approval.APPROVED_AT_CREATION
+            if answered
+            else art_approval.APPROVED_FROM_PRESET,
             board_rows=rows,
         )
     return _step(

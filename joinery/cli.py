@@ -782,6 +782,9 @@ def _bible(project: Path) -> int:
             if record
             else None
         )
+        from joinery.bible import answered as _answered
+
+        answered = _answered(project)
         written = write_from_answers_file(project, preset or None)
         # The wizard's reference images go on the board before the approval.
         imports = setup_imports.plan_from_args(
@@ -795,11 +798,15 @@ def _bible(project: Path) -> int:
     if written is None:
         print("bible: no answers file to read; nothing written")
         return 0
-    from joinery.art_approval import APPROVED_AT_CREATION, approve_at_creation
+    from joinery.art_approval import (
+        APPROVED_AT_CREATION,
+        APPROVED_FROM_PRESET,
+        approve_at_creation,
+    )
 
     # Drafted from the user's own answers: approved at creation, if complete.
     if approve_at_creation(project):
-        print(f"bible: {APPROVED_AT_CREATION}")
+        print(f"bible: {APPROVED_AT_CREATION if answered else APPROVED_FROM_PRESET}")
         return 0
     print(f"bible: wrote {written}")
     return 0

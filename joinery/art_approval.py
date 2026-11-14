@@ -141,6 +141,12 @@ APPROVED_AT_CREATION = (
     "audio work can start. Fill in any open sections in /art; if it changes later, "
     "approve it again there."
 )
+#: The same, when the user skipped every question and the preset filled it.
+APPROVED_FROM_PRESET = (
+    "Wrote the look from the starting point (no answers were given). It counts "
+    "as approved, so art and audio work can start. Fill in the open sections in "
+    "/art; if it changes later, approve it again there."
+)
 
 
 def approve_at_creation(project: Path) -> bool:

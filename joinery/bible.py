@@ -146,6 +146,23 @@ def write_bible(
     return destination
 
 
+def answered(project: Path) -> bool:
+    """Whether the answers file beside the project holds any real answer."""
+    try:
+        raw = json.loads((project / ANSWERS_FILE).read_text())
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(raw, dict):
+        return False
+    return any(
+        str(value).strip()
+        for key, value in raw.items()
+        if key != PRESET_KEY
+        and isinstance(value, str | int | float)
+        and not isinstance(value, bool)
+    )
+
+
 def write_from_answers_file(project: Path, preset: str | None = None) -> Path | None:
     """Read the answers a front end dropped in the project, then remove them.
 
