@@ -135,6 +135,11 @@ _USER_TIDY = re.compile(
 )
 
 
+#: The wizard's answers given at creation draft the look, which is then approved as
+#: the user's own (art_approval): only the user passes them, never an agent.
+_USER_ANSWERS = re.compile(r"\bjoinery\b(?:\s+\S+)*?\s+new\b.*\s--answers\b")
+
+
 _TIDY_FLAGS = ("--remove", "--yes", "--keep", "--unkeep", "--clear-caches")
 _IMPORT_FLAGS = ("--reference", "--design-doc")
 
@@ -186,6 +191,11 @@ _MESSAGES = {
         "Ask the user to add the file there, or to paste the document into the "
         "chat and ask you to save it: save_design_doc stages it for their review."
     ),
+    "answers": (
+        "Answers given when a project is made count as the user's own approval of "
+        "its look, so only the user passes them: in the new-project wizard, or "
+        "`joinery new --answers` in their own terminal. Ask the user to run it."
+    ),
 }
 
 
@@ -207,6 +217,8 @@ def _guard(argv: tuple[str, ...]) -> str | None:
         return "kits"
     if _follows(args, "references", frozenset({"add"})) or _flag(args, _IMPORT_FLAGS):
         return "import"
+    if "new" in args and _flag(args[args.index("new") :], ("--answers",)):
+        return "answers"
     return None
 
 
@@ -218,6 +230,7 @@ def _guard_text(segment: str) -> str | None:
         ("timeline", _USER_ONLY),
         ("kits", _USER_KITS),
         ("import", _USER_IMPORT),
+        ("answers", _USER_ANSWERS),
     ):
         if pattern.search(segment):
             return name

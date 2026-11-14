@@ -1181,6 +1181,16 @@ uv run joinery references add --project /path/to/game \
   kind is refused with the reason, before anything is written. Only you add
   references and design documents; an agent asking to run `joinery references
   add` is refused.
+- To save a design document you have as text, paste it into the chat and ask
+  Journeyman to save it. It stages your words unchanged as
+  `design/docs/<name>.md`, listed in the brief, and it joins the project when
+  you accept the change. Accepting it is you adding it.
+- For scripted setup, `joinery new … --answers answers.json` takes your answers
+  in one step: `{"brief": {...}, "bible": {...}, "references": [{"path",
+  "note"}], "design_docs": ["gdd.md"]}`. The brief and bible objects are the
+  ones the wizard writes for `game apply`, and paths are relative to the
+  file. The look drafted from them is approved at creation, as in the wizard,
+  so only you can pass them. An agent running `--answers` is refused.
 
 Journeyman reads `design/docs/` with the brief (`game_brief` returns each
 document, with the text of Markdown and text ones) and sees the pictures on the

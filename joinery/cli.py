@@ -84,7 +84,7 @@ from joinery.installer import (
 from joinery.lockfile import check_assets
 from joinery.locking import write_lock
 from joinery.policy import load_denylist, normalise
-from joinery.project import create_project, mark_tour_pending
+from joinery.project import create_project, mark_tour_pending, read_answers
 from joinery.puzzle import command as puzzle_command
 from joinery.recipe import rebuild_all, recipe_paths, record
 from joinery.runner import pick
@@ -273,13 +273,19 @@ def _new(
         if blueprint is not None:
             chosen = _defaults(blueprint, chosen)
             game_setup.check_choices(blueprint, chosen, steam_app_id, connect)
+        answers: dict[str, dict[str, Any]] = {}
+        listed: list[str] = []
+        docs: list[str] = []
+        answers_file = getattr(policy_args, "answers", None)
+        if answers_file is not None:
+            answers, listed, docs = read_answers(answers_file)
         picked = [
             setup_imports.parse_reference(text)
-            for text in getattr(policy_args, "reference", None) or []
+            for text in [*(getattr(policy_args, "reference", None) or []), *listed]
         ]
         documents = [
             Path(text).expanduser()
-            for text in getattr(policy_args, "design_doc", None) or []
+            for text in [*(getattr(policy_args, "design_doc", None) or []), *docs]
         ]
         selection = _choose(tools, path / "joinery.toml")
         create_project(
@@ -295,6 +301,7 @@ def _new(
             wizard=True,
             references=picked,
             documents=documents,
+            answers=answers,
         )
         if policy is not None:
             history.write_policy(path.resolve(), policy)
@@ -1083,6 +1090,16 @@ def _parser() -> argparse.ArgumentParser:
         help="with Online play and Steam: connect players through Steam or direct IP",
     )
     _import_arguments(new)
+    new.add_argument(
+        "--answers",
+        type=Path,
+        metavar="FILE",
+        help=(
+            "your answers as JSON: {brief: {...}, bible: {...}, references: [...], "
+            "design_docs: [...]}, the objects `game apply` reads; the look drafted "
+            "from them is approved, as in the wizard"
+        ),
+    )
     history.add_policy_arguments(new)
     game_cmd = commands.add_parser(
         "game", help="apply the new-project wizard's game choices to a project"

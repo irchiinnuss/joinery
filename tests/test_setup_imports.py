@@ -592,3 +592,60 @@ def test_the_lead_stages_a_pasted_document_for_the_user_to_accept(
     data = json.loads(call(project, "game_brief").content[0].text)
     documents = {d["path"]: d for d in data["design_documents"]}
     assert documents["design/docs/gdd.md"]["text"] == GDD
+
+
+# --- Answers given to `joinery new` -------------------------------------------------
+
+
+def test_new_takes_the_users_answers_in_one_step(tmp_path: Path, picked: Path) -> None:
+    answers = picked / "answers.json"
+    answers.write_text(
+        json.dumps(
+            {
+                "brief": {"pitch": "Flip it"},
+                "bible": {"references": "Hob: chunky shapes"},
+                "references": [{"path": "quarry.png", "note": "the rock colours"}],
+                "design_docs": ["gdd.md"],
+            }
+        )
+    )
+    project = made(tmp_path, "--answers", str(answers))
+    assert "Flip it" in (project / "design/brief.md").read_text()
+    assert "Hob: chunky shapes" in (project / "art/bible.md").read_text()
+    assert (project / "art/reference/quarry.png").is_file()
+    assert (project / "design/docs/gdd.md").read_text() == GDD
+    # The user's own answers: the look is approved at creation, as in the wizard.
+    assert approved(project)
+    assert not list(project.glob(".joinery-*-answers.json"))
+    assert answers.is_file()
+
+
+@pytest.mark.parametrize(
+    ("content", "error"),
+    [
+        ("{nope", "not valid JSON"),
+        ('{"pitch": "x"}', "expected an object"),
+        ('{"brief": "x"}', "brief must be an object"),
+        ('{"references": [{"note": "x"}]}', "needs a path"),
+    ],
+)
+def test_bad_answers_are_refused_before_anything_is_made(
+    tmp_path: Path, content: str, error: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    answers = tmp_path / "answers.json"
+    answers.write_text(content)
+    project = tmp_path / "game"
+    argv = ["new", str(project), "--tools", "godot", "--blueprint", "blank"]
+    assert main([*argv, "--answers", str(answers)]) == 1
+    assert error in capsys.readouterr().err
+    assert not project.exists()
+
+
+def test_agents_cannot_pass_creation_answers() -> None:
+    verdict = user_only_violation(
+        "uv run joinery new g --blueprint blank --answers a.json"
+    )
+    assert verdict is not None and "approval" in verdict.reason
+    assert (
+        user_only_violation("echo 'joinery new g --answers a.json' >> notes.md") is None
+    )
