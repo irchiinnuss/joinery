@@ -39,6 +39,8 @@ class Profile:
     tile: float = 1.0
     #: Can the player jump at all.
     jumps: bool = True
+    #: Read from the project's own player (:mod:`joinery.blockout.player`).
+    measured: bool = False
 
 
 PROFILES: dict[str, Profile] = {
@@ -161,6 +163,8 @@ class Spot:
     size: float
     height: float = 0.0
     facing: str = "north"
+    #: A door: the key marker that opens it.
+    key: str = ""
 
 
 @dataclass
@@ -446,6 +450,7 @@ def resolve(layout: Layout, profile: Profile) -> World:
                 (x, y),
                 marker.size * unit if marker.size else default_size,
                 world.floor_at(x, y) or 0.0,
+                key=marker.key or "",
             )
         )
     return world

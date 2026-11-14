@@ -30,9 +30,19 @@ Point = Annotated[list[Number], Field(min_length=2, max_length=2)]
 #: [x, y, width, height]
 Rect = Annotated[list[Number], Field(min_length=4, max_length=4)]
 Direction = Literal["north", "south", "east", "west"]
-MarkerKind = Literal["goal", "pickup", "coin", "checkpoint", "hazard"]
+MarkerKind = Literal[
+    "goal", "exit", "pickup", "coin", "key", "door", "checkpoint", "hazard", "enemy"
+]
 #: Marker kinds the player should be able to walk to from the spawn.
-TARGETS: tuple[str, ...] = ("goal", "pickup", "coin", "checkpoint")
+TARGETS: tuple[str, ...] = (
+    "goal",
+    "exit",
+    "pickup",
+    "coin",
+    "key",
+    "door",
+    "checkpoint",
+)
 #: Rect edge names in the order a rect room lists them.
 RECT_EDGES: tuple[str, ...] = ("north", "east", "south", "west")
 
@@ -124,13 +134,18 @@ class Spawn(_Strict):
 
 
 class Marker(_Strict):
-    """Something placed in the level: the goal, a pickup or coin, a checkpoint, or a
-    hazard. Its id names its node; omitted: kind and number (coin_1)."""
+    """Something placed in the level: the goal or exit, a pickup, coin or key, a door,
+    a checkpoint, a hazard, or where an enemy stands. Its id names its node
+    (``Markers/<id>``); omitted: kind and number (coin_1). What the game places for it
+    (an enemy, a door, a pickup's model) goes under that node, and a rebuild keeps it
+    there while the marker stays in the layout."""
 
     kind: MarkerKind
     at: Point
     id: Ident | None = None
     size: Number | None = None
+    #: A door: the id of the key marker that opens it.
+    key: Ident | None = None
 
 
 class Grown(_Strict):

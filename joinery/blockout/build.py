@@ -6,7 +6,9 @@ the editor. 2D levels are StaticBody2D rectangles with a Polygon2D each, and flo
 flat polygons under them. Every room, corridor, wall piece and marker is a named node:
 ``Rooms/hall/north_1``, ``Markers/goal_exit``. Markers are areas in the groups the
 starting points and the playtest bot use (``goal``, ``coin``, ``pickup``,
-``checkpoint``, ``hazard``); the spawn is a marker in ``player_spawn``, and players
+``checkpoint``, ``hazard``; an ``exit`` is also a ``goal``, a ``key`` also a
+``pickup``, a ``door`` names its key in ``metadata/key``), and an ``enemy`` is a plain
+marker where the game puts one. The spawn is a marker in ``player_spawn``, and players
 appear under ``Players`` (the game core's level contract, ADR 0024).
 """
 
@@ -38,7 +40,22 @@ COLOURS = {
     "pickup": (0.34, 0.63, 0.83),
     "checkpoint": (0.88, 0.88, 0.88),
     "hazard": (0.88, 0.35, 0.28),
+    "exit": (0.3, 0.69, 0.31),
+    "key": (0.96, 0.62, 0.18),
+    "door": (0.55, 0.38, 0.24),
+    "enemy": (0.66, 0.24, 0.52),
 }
+#: The groups a marker's node is in: an exit is a goal, a key a pickup too, so the
+#: level script, the playtest bot and the checks treat them alike.
+MARKER_GROUPS = {"exit": ["exit", "goal"], "key": ["key", "pickup"]}
+
+
+def marker_groups(kind: str) -> list[str]:
+    return MARKER_GROUPS.get(kind, [kind])
+
+
+def _marker_meta(marker: Spot) -> list[str]:
+    return [f'metadata/key = "{marker.key}"'] if marker.key else []
 
 
 def _colour(name: str) -> str:
@@ -390,17 +407,40 @@ def _markers_3d(scene: _Scene, world: World) -> None:
 
 def _marker_3d(scene: _Scene, marker: Spot) -> None:
     radius = max(marker.size / 2, 0.3)
+    where = "transform = " + _translate(marker.at[0], marker.height, marker.at[1])
+    if marker.kind == "enemy":
+        path = scene.node(marker.id, "Marker3D", "Markers", [where], groups=["enemy"])
+        mesh = scene.resource(
+            "CapsuleMesh",
+            f"enemy:{number(radius)}",
+            [
+                f'material = SubResource("{_material(scene, "enemy")}")',
+                f"radius = {number(radius * 0.6)}",
+                f"height = {number(max(radius * 3, 1.2))}",
+            ],
+        )
+        scene.node(
+            "Look",
+            "MeshInstance3D",
+            path,
+            [
+                "transform = " + _translate(0, max(radius * 1.5, 0.6), 0),
+                f'mesh = SubResource("{mesh}")',
+            ],
+        )
+        return
     path = scene.node(
         marker.id,
         "Area3D",
         "Markers",
         [
-            "transform = " + _translate(marker.at[0], marker.height, marker.at[1]),
+            where,
             "collision_layer = 0",
             f"collision_mask = {MARKER_MASK}",
             "monitorable = false",
+            *_marker_meta(marker),
         ],
-        groups=[marker.kind],
+        groups=marker_groups(marker.kind),
     )
     shape = scene.resource(
         "CylinderShape3D",
@@ -414,7 +454,7 @@ def _marker_3d(scene: _Scene, marker: Spot) -> None:
         ["transform = " + _translate(0, 1.0, 0), f'shape = SubResource("{shape}")'],
     )
     material = _material(scene, marker.kind)
-    if marker.kind in {"goal", "checkpoint", "hazard"}:
+    if marker.kind in {"goal", "exit", "checkpoint", "hazard", "door"}:
         mesh = scene.resource(
             "CylinderMesh",
             f"pad:{marker.kind}:{number(radius)}",
@@ -460,7 +500,7 @@ def _marker_3d(scene: _Scene, marker: Spot) -> None:
         path,
         ["transform = " + transform, f'mesh = SubResource("{mesh}")'],
     )
-    if marker.kind == "goal":
+    if marker.kind in {"goal", "exit"}:
         pole = scene.resource(
             "CylinderMesh",
             "pole",
@@ -616,25 +656,37 @@ def _markers_2d(scene: _Scene, world: World) -> None:
         )
     for marker in world.markers:
         radius = max(marker.size / 2, 4.0)
-        path = scene.node(
-            marker.id,
-            "Area2D",
-            "Markers",
-            [
-                "position = " + _vec2(*marker.at),
-                "collision_layer = 0",
-                f"collision_mask = {MARKER_MASK}",
-                "monitorable = false",
-            ],
-            groups=[marker.kind],
-        )
-        shape = scene.resource(
-            "CircleShape2D", f"circle:{number(radius)}", [f"radius = {number(radius)}"]
-        )
-        scene.node(
-            "Shape", "CollisionShape2D", path, [f'shape = SubResource("{shape}")']
-        )
-        sides = 4 if marker.kind in {"coin", "pickup"} else 8
+        if marker.kind == "enemy":
+            path = scene.node(
+                marker.id,
+                "Marker2D",
+                "Markers",
+                ["position = " + _vec2(*marker.at)],
+                groups=["enemy"],
+            )
+        else:
+            path = scene.node(
+                marker.id,
+                "Area2D",
+                "Markers",
+                [
+                    "position = " + _vec2(*marker.at),
+                    "collision_layer = 0",
+                    f"collision_mask = {MARKER_MASK}",
+                    "monitorable = false",
+                    *_marker_meta(marker),
+                ],
+                groups=marker_groups(marker.kind),
+            )
+            shape = scene.resource(
+                "CircleShape2D",
+                f"circle:{number(radius)}",
+                [f"radius = {number(radius)}"],
+            )
+            scene.node(
+                "Shape", "CollisionShape2D", path, [f'shape = SubResource("{shape}")']
+            )
+        sides = 4 if marker.kind in {"coin", "pickup", "key"} else 8
         points = [
             (
                 radius

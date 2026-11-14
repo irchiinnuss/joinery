@@ -31,6 +31,10 @@ MARKERS: dict[str, RGB] = {
     "pickup": (86, 160, 211),
     "checkpoint": (226, 226, 226),
     "hazard": (224, 90, 72),
+    "exit": (80, 190, 96),
+    "key": (245, 158, 46),
+    "door": (140, 97, 61),
+    "enemy": (168, 61, 133),
 }
 SPAWN: RGB = (92, 168, 255)
 
@@ -69,11 +73,11 @@ def render(world: World, reach: Reach | None = None, size: int = 640) -> bytes:
     for marker in world.markers:
         cx, cy = at(*marker.at)
         colour = MARKERS[marker.kind]
-        if marker.kind == "goal":
+        if marker.kind in {"goal", "exit"}:
             canvas.circle(cx, cy, dot * 1.3, colour)
             canvas.circle(cx, cy, dot * 0.6, BACKGROUND)
             canvas.circle(cx, cy, dot * 0.35, colour)
-        elif marker.kind == "hazard":
+        elif marker.kind in {"hazard", "enemy"}:
             canvas.polygon(
                 [
                     (cx, cy - dot),
@@ -82,11 +86,11 @@ def render(world: World, reach: Reach | None = None, size: int = 640) -> bytes:
                 ],
                 colour,
             )
-        elif marker.kind == "pickup":
+        elif marker.kind in {"pickup", "key"}:
             canvas.polygon(
                 [(cx, cy - dot), (cx + dot, cy), (cx, cy + dot), (cx - dot, cy)], colour
             )
-        elif marker.kind == "checkpoint":
+        elif marker.kind in {"checkpoint", "door"}:
             canvas.rect(
                 cx - dot * 0.8, cy - dot * 0.8, cx + dot * 0.8, cy + dot * 0.8, colour
             )

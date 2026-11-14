@@ -109,6 +109,7 @@ def _names(layout: Layout, error: Say) -> None:
                 )
             seen.setdefault(item.id, table)
     markers: set[str] = set()
+    keys: set[str] = set()
     counts: dict[str, int] = {}
     for marker in layout.markers:
         counts[marker.kind] = counts.get(marker.kind, 0) + 1
@@ -116,6 +117,19 @@ def _names(layout: Layout, error: Say) -> None:
         if ident in markers or ident == "Spawn":
             error(f"Two markers are both called {ident}; give each its own id.")
         markers.add(ident)
+        if marker.kind == "key":
+            keys.add(ident)
+    for marker in layout.markers:
+        if marker.key is not None and marker.kind != "door":
+            error(
+                f"Marker {marker.id or marker.kind}: only a door names a key "
+                f"(key = {marker.key!r})."
+            )
+        elif marker.key is not None and marker.key not in keys:
+            error(
+                f"Door {marker.id or 'door'} opens with key {marker.key}, but there is "
+                "no key marker with that id; add one or fix the name."
+            )
 
 
 def _shapes(world: World, error: Say, warn: Say) -> None:

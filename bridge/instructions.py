@@ -176,8 +176,9 @@ TASK_PROMPT = RolePrompt(
 BLOCKOUT_GUIDE = (
     "When the user shows a level sketch (or a top-down screenshot) and asks to build "
     "it, or types /blockout, read the attached image and call blockout(layout) with "
-    "rooms, walls, doors, corridors, stairs, platforms, the spawn and the goals it "
-    "shows, at the sketch's proportions; the sketch is a reference only, never an "
+    "rooms, walls, doors, corridors, stairs, platforms, the spawn and the markers it "
+    "shows (exit, keys and the doors they open, pickups, enemies), at the sketch's "
+    "proportions; the sketch is a reference only, never an "
     "asset. Fix every problem blockout returns and call it again. To change a built "
     "blockout ('move the door to the north wall', 'make room B bigger'), read "
     "design/blockouts/<name>.toml, change the layout and call blockout again; don't "

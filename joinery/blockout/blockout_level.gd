@@ -9,6 +9,8 @@ extends Node
 ## (`Game.level_ready`), so players appear at the `player_spawn` marker under
 ## `Players`, and what happens goes out through `GameEvents`. Without the core it
 ## still plays: put a player in group `player` under `Players`.
+## An `exit` is a `goal`, a `key` is also a `pickup` and is remembered in `keys`, a
+## `door` opens once its key is held, and an `enemy` marker is where the game puts one.
 
 ## "3d", "2d-topdown" or "2d-side"; the builder sets it.
 @export var mode: String = "3d"
@@ -17,6 +19,9 @@ extends Node
 @export var fall_depth: float = 20.0
 
 var score: int = 0
+## The key markers taken so far (their names); a door marker names its key in
+## `metadata/key`, and children of the door with an `open()` method open with it.
+var keys: Array[String] = []
 var completed: bool = false
 var elapsed: float = 0.0
 
@@ -71,12 +76,17 @@ func send_back(player: Node) -> void:
 
 
 func save_state() -> Dictionary:
-	return {"score": score, "time": elapsed, "taken": _taken.duplicate()}
+	return {"score": score, "time": elapsed, "taken": _taken.duplicate(), "keys": keys.duplicate()}
 
 
 func load_state(state: Dictionary) -> void:
 	score = int(state.get("score", score))
 	elapsed = float(state.get("time", elapsed))
+	var held: Variant = state.get("keys", [])
+	if held is Array:
+		for name: Variant in held:
+			if not str(name) in keys:
+				keys.append(str(name))
 	var taken: Variant = state.get("taken", [])
 	if taken is Array:
 		for name: Variant in taken:
@@ -91,9 +101,21 @@ func _on_entered(body: Node, marker: Node) -> void:
 	if marker.is_in_group(&"goal"):
 		_complete()
 	elif marker.is_in_group(&"coin") or marker.is_in_group(&"pickup"):
+		if marker.is_in_group(&"key") and not str(marker.name) in keys:
+			keys.append(str(marker.name))
+			_emit(&"key_taken", [str(marker.name)])
 		_take(marker)
 		score += 1
 		_emit(&"score_changed", [score])
+	elif marker.is_in_group(&"door"):
+		var key: String = str(marker.get_meta(&"key", ""))
+		if key.is_empty() or key in keys:
+			for child: Node in marker.get_children():
+				if child.has_method(&"open"):
+					child.call(&"open")
+			_emit(&"door_opened", [str(marker.name)])
+		else:
+			_emit(&"door_locked", [str(marker.name), key])
 	elif marker.is_in_group(&"checkpoint"):
 		_respawn = _where(marker)
 		_emit(&"checkpoint_reached", [str(marker.name)])
