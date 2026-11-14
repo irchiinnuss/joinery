@@ -183,6 +183,157 @@ static func blankslate(
 	return block
 
 
+## A full page's scroller (Timeline, Share, in the editor's main screen): one column at most
+## MAX_W.column wide and centred, SPACE.5 above the content and SPACE.6 below it, SPACE.4 at
+## the sides, rubber-banded, its content fading under a sticky foot. The content goes in the
+## VBoxContainer kept as the scroller's "body" meta (JoinerySections between its groups).
+static func page_scroll() -> ScrollContainer:
+	var scroll := ScrollContainer.new()
+	scroll.name = "Scroll"
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.follow_focus = true
+	UI_MOTION.rubber_band(scroll)
+	STYLE.scroll_fade(scroll)
+	var margin := MarginContainer.new()
+	margin.name = "Margin"
+	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	STYLE.on_theme_overrides(
+		margin,
+		func() -> void:
+			var side := UI_THEME.space(margin, 4)
+			margin.add_theme_constant_override("margin_left", side)
+			margin.add_theme_constant_override("margin_right", side)
+			margin.add_theme_constant_override("margin_top", UI_THEME.space(margin, 5))
+			margin.add_theme_constant_override("margin_bottom", UI_THEME.space(margin, 6))
+	)
+	scroll.add_child(margin)
+	var body := VBoxContainer.new()
+	body.name = "Body"
+	body.theme_type_variation = "JoineryFlush"
+	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	margin.add_child(body)
+	STYLE.centered_column(scroll)
+	scroll.set_meta("body", body)
+	return scroll
+
+
+## [param control] with SPACE[[param step]] above it, in a holder that shows and hides with
+## the control's own visible property (a parent hiding is not a change), so a hidden part of a
+## page leaves no gap behind.
+static func spaced(control: Control, step: int) -> MarginContainer:
+	var holder := MarginContainer.new()
+	holder.name = str(control.name) + "Space"
+	holder.visible = control.visible
+	control.set_meta("_joinery_spaced", control.visible)
+	control.visibility_changed.connect(
+		func() -> void:
+			if control.visible != bool(control.get_meta("_joinery_spaced", true)):
+				control.set_meta("_joinery_spaced", control.visible)
+				holder.visible = control.visible
+	)
+	STYLE.on_theme_overrides(
+		holder,
+		func() -> void:
+			holder.add_theme_constant_override("margin_top", UI_THEME.space(holder, step))
+	)
+	holder.add_child(control)
+	return holder
+
+
+## A page's title row: [param title] at title size on the leading edge, named "Title", with
+## the row's trailing actions added after it by the caller (Pull and Push, a compose button).
+static func page_title(title: String) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.name = "Head"
+	row.theme_type_variation = "JoineryRow"
+	var words := UI.label(title, "JoineryTitle")
+	words.name = "Title"
+	words.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	words.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(words)
+	UI.bind_height(row, "md", false)
+	return row
+
+
+## A quiet group caption ("Today", "Builds"): JoineryCaption in sentence case, SPACE.5 above it
+## when [param gap] (none for the first group on a page) and SPACE.2 below. The label is the
+## "Caption" child; [param trailing] (a quiet link such as "Remake") sits on its trailing edge.
+static func group_caption(text: String, gap := true, trailing: Control = null) -> MarginContainer:
+	var holder := MarginContainer.new()
+	holder.name = text.capitalize().replace(" ", "")
+	STYLE.on_theme_overrides(
+		holder,
+		func() -> void:
+			var top := UI_THEME.space(holder, 5) if gap else 0
+			holder.add_theme_constant_override("margin_top", top)
+			holder.add_theme_constant_override("margin_bottom", UI_THEME.space(holder, 2))
+	)
+	var row := HBoxContainer.new()
+	row.theme_type_variation = "JoineryRow"
+	holder.add_child(row)
+	var caption := UI.label(text, "JoineryCaption")
+	caption.name = "Caption"
+	caption.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	caption.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(caption)
+	if trailing != null:
+		trailing.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		row.add_child(trailing)
+	return holder
+
+
+## A page's sticky foot, outside its scroll, under a hairline on the page's ground: the state
+## on the leading edge and the one action on the trailing edge, in the page's centred column.
+## Add them to the row kept as the panel's "row" meta.
+static func page_foot(scroll: ScrollContainer = null) -> PanelContainer:
+	var foot := PanelContainer.new()
+	foot.name = "Foot"
+	STYLE.on_theme_overrides(
+		foot,
+		func() -> void:
+			var box := StyleBoxFlat.new()
+			box.bg_color = foot.get_theme_color("surface", "Joinery")
+			box.border_color = foot.get_theme_color("border_subtle", "Joinery")
+			box.border_width_top = maxi(1, roundi(UI_THEME.unit(foot)))
+			box.content_margin_top = UI_THEME.space(foot, 3)
+			box.content_margin_bottom = UI_THEME.space(foot, 3)
+			box.content_margin_right = float(foot.get_meta("_joinery_bar", 0.0))
+			foot.add_theme_stylebox_override("panel", box)
+	)
+	if scroll != null:
+		# The page's column is centred beside its scrollbar: the foot keeps the same room so
+		# its state and action line up with the page above.
+		var bar := scroll.get_v_scroll_bar()
+		var follow := func() -> void:
+			var room := 0.0
+			if bar.visible:
+				room = bar.size.x + scroll.get_theme_constant("scrollbar_h_separation")
+			if room != float(foot.get_meta("_joinery_bar", 0.0)):
+				foot.set_meta("_joinery_bar", room)
+				foot.theme_changed.emit()
+		bar.visibility_changed.connect(follow)
+		bar.resized.connect(follow)
+	# The same column and side padding as page_scroll, so the foot lines up with the page.
+	var margin := MarginContainer.new()
+	margin.name = "Margin"
+	STYLE.on_theme_overrides(
+		margin,
+		func() -> void:
+			var side := UI_THEME.space(margin, 4)
+			margin.add_theme_constant_override("margin_left", side)
+			margin.add_theme_constant_override("margin_right", side)
+	)
+	foot.add_child(margin)
+	var row := HBoxContainer.new()
+	row.name = "Row"
+	row.theme_type_variation = "JoineryRow"
+	margin.add_child(row)
+	STYLE.centered_column(margin)
+	foot.set_meta("row", row)
+	return foot
+
+
 ## A centred empty state for a preview pane: a faint [param icon_name] icon, a [param title],
 ## an optional [param line] saying what to do, and an optional [param action]. Fills the height.
 static func empty_state(
