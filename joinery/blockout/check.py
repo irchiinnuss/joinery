@@ -96,6 +96,8 @@ def check(layout: Layout, profile: Profile, *, expected_mode: str = "") -> Check
     for target in walked.targets:
         if not target.reached and target.reason:
             error(target.reason)
+    for locked in walked.locks:
+        error(locked)
     return found
 
 

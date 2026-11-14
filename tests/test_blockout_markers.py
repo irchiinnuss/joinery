@@ -128,6 +128,113 @@ def test_a_door_must_name_a_key_that_is_there() -> None:
     assert any("only a door names a key" in e for e in errors)
 
 
+# Three rooms in a row; locked doors in the doorways between them.
+DOORS = """name = "keys"
+mode = "3d"
+
+[spawn]
+at = [2, 3]
+
+[[rooms]]
+id = "a"
+rect = [0, 0, 6, 6]
+
+[[rooms]]
+id = "b"
+rect = [6, 0, 6, 6]
+
+[[rooms]]
+id = "c"
+rect = [12, 0, 6, 6]
+
+[[openings]]
+room = "a"
+wall = "east"
+
+[[openings]]
+room = "b"
+wall = "east"
+
+[[markers]]
+kind = "door"
+id = "gate"
+at = [6, 3]
+key = "red"
+
+[[markers]]
+kind = "door"
+id = "vault"
+at = [12, 3]
+key = "blue"
+
+[[markers]]
+kind = "exit"
+id = "way_out"
+at = [16, 3]
+"""
+
+
+def _keys(red: tuple[int, int], blue: tuple[int, int]) -> str:
+    return "".join(
+        f'\n[[markers]]\nkind = "key"\nid = "{name}"\nat = [{x}, {y}]\n'
+        for name, (x, y) in (("red", red), ("blue", blue))
+    )
+
+
+def test_keys_open_their_doors_in_turn() -> None:
+    # red is by the spawn and opens gate; behind it lies blue, which opens vault.
+    built = blockout.make(Path("/x"), DOORS + _keys((2, 1), (9, 1)))
+    assert built.ok, [p.text for p in built.checked.problems]
+    reach = built.checked.reach
+    assert reach is not None and all(t.reached for t in reach.targets)
+    assert reach.locks == []
+
+
+def test_a_key_behind_its_own_door_is_reported_with_what_it_locks_away() -> None:
+    built = blockout.make(Path("/x"), DOORS + _keys((9, 1), (9, 5)))
+    reach = built.checked.reach
+    assert reach is not None
+    reached = {t.id: t for t in reach.targets}
+    assert not reached["red"].reached and not reached["way_out"].reached
+    assert reached["red"].reason.startswith(
+        "key red is locked behind door gate, the door it opens"
+    )
+    assert "only reachable through locked door gate, whose key red is locked " in (
+        reached["blue"].reason
+    )
+    assert reach.locks[0] == (
+        "Room b is only reachable through locked door gate, whose key red is locked "
+        "behind that same door."
+    )
+    errors = [p.text for p in built.checked.errors]
+    assert reached["red"].reason in errors and reach.locks[0] in errors
+
+
+def test_an_area_behind_a_door_whose_key_is_out_of_reach_is_reported() -> None:
+    # blue lies in room c, behind vault, the door it opens: room c is shut away.
+    built = blockout.make(Path("/x"), DOORS + _keys((2, 1), (16, 1)))
+    reach = built.checked.reach
+    assert reach is not None
+    reached = {t.id: t.reached for t in reach.targets}
+    assert reached == {
+        "gate": True,
+        "vault": True,
+        "way_out": False,
+        "red": True,
+        "blue": False,
+    }
+    assert reach.locks == [
+        (
+            "Room c is only reachable through locked door vault, whose key blue is "
+            "locked behind that same door."
+        )
+    ]
+    # Without the doors' keys the same layout is walkable end to end.
+    open_doors = DOORS.replace('key = "red"\n', "").replace('key = "blue"\n', "")
+    walked = blockout.make(Path("/x"), open_doors + _keys((2, 1), (16, 1)))
+    assert walked.ok, [p.text for p in walked.checked.problems]
+
+
 # --- Rebuilds keep what was placed ----------------------------------------------------
 
 

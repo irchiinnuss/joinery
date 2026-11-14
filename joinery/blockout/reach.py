@@ -19,9 +19,11 @@ import heapq
 import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import partial
+from typing import Any
 
 from joinery.blockout.layout import TARGETS
-from joinery.blockout.world import XY, Area, Profile, World
+from joinery.blockout.world import XY, Area, Profile, Spot, World
 
 Free = Callable[[int], bool]
 Cell = Callable[[int, int], bool]
@@ -49,6 +51,8 @@ class Reach:
     spawn_reason: str = ""
     targets: list[Target] = field(default_factory=list)
     cell: float = 0.0
+    #: Areas only reachable through a locked door whose key the player can't get.
+    locks: list[str] = field(default_factory=list)
 
     @property
     def reached(self) -> int:
@@ -161,32 +165,211 @@ def _plan(world: World) -> Reach:
         reach.spawn_reason = _spot_reason(
             world, world.spawn.at, "The spawn", heights, grid
         )
-        start_k = -1
-    else:
-        start_k = start
-    came: dict[int, tuple[int, bool]] = {}
-    if start_k >= 0:
-        came = _dijkstra(world, grid, heights, free, near, avoid, start_k)
+    # A locked door is a wall across its doorway until its key is reached.
+    shut_cells = {
+        door.id: _disc(grid, door.at, door.size / 2 + radius) for door in _locked(world)
+    }
+
+    def passable(closed: frozenset[str]) -> Free:
+        shut = set().union(*(shut_cells[d] for d in closed))
+        return lambda k: free(k) and k not in shut
+
+    def search(closed: frozenset[str]) -> dict[int, tuple[int, bool]]:
+        if start is None:
+            return {}
+        return _dijkstra(world, grid, heights, passable(closed), near, avoid, start)
+
+    def reaches(
+        came: dict[int, tuple[int, bool]], closed: frozenset[str], spot: Spot
+    ) -> int | None:
+        goal = _nearest_free(
+            grid, passable(closed), spot.at, max(radius * 2, spot.size)
+        )
+        return goal if goal is not None and goal in came else None
+
+    doors = _Doors(world, search, reaches)
+    came, closed = doors.came, doors.closed
+    final = passable(closed)
     for marker in world.markers:
         if marker.kind not in TARGETS:
             continue
         target = Target(marker.id, marker.kind, marker.at)
         reach.targets.append(target)
-        goal = _nearest_free(grid, free, marker.at, max(radius * 2, marker.size))
-        if start_k < 0:
+        goal = _nearest_free(grid, final, marker.at, max(radius * 2, marker.size))
+        if start is None:
             target.reason = "The spawn is not on a floor the player can stand on."
-        elif goal is None:
+        elif (
+            goal is None
+            and _nearest_free(grid, free, marker.at, max(radius * 2, marker.size))
+            is None
+        ):
             target.reason = _spot_reason(
                 world, marker.at, f"{marker.kind} {marker.id}", heights, grid
             )
-        elif goal not in came:
-            target.reason = _why_not(
+        elif goal is None or goal not in came:
+            target.reason = doors.why(marker) or _why_not(
                 world, grid, came, marker.at, marker.id, marker.kind
             )
         else:
             target.reached = True
-            target.route = _route(grid, heights, free, came, goal)
+            target.route = _route(grid, heights, final, came, goal)
+    if start is not None and closed:
+        cells: dict[str, list[int]] = {}
+
+        def inside(area: Area, came_: dict[int, tuple[int, bool]]) -> bool:
+            if area.id not in cells:
+                cells[area.id] = _area_cells(grid, area)
+            return any(k in came_ for k in cells[area.id])
+
+        reach.locks = doors.areas(inside)
     return reach
+
+
+def _locked(world: World) -> list[Spot]:
+    """Doors that open with a key marker."""
+    return [m for m in world.markers if m.kind == "door" and m.key]
+
+
+def _disc(grid: _Grid, at: XY, reach: float) -> set[int]:
+    x, y = at
+    return {
+        j * grid.w + i
+        for j in grid.span(y - reach, y + reach, 1)
+        for i in grid.span(x - reach, x + reach, 0)
+        if math.dist(grid.centre(i, j), at) <= reach
+    }
+
+
+def _area_cells(grid: _Grid, area: Area) -> list[int]:
+    x0, y0, x1, y1 = area.bounds
+    return [
+        j * grid.w + i
+        for j in grid.span(y0, y1, 1)
+        for i in grid.span(x0, x1, 0)
+        if area.contains(*grid.centre(i, j))
+    ]
+
+
+class _Doors[C]:
+    """The key and door search: which locked doors the player can open.
+
+    A door stays shut until its key is reachable with every still-shut door in
+    the way; each door opened may make further keys reachable, so the search
+    walks again until nothing more opens. ``search(closed)`` walks with those
+    doors shut and returns what it reaches; ``reaches(came, closed, spot)``
+    finds a marker in it.
+    """
+
+    def __init__(
+        self,
+        world: World,
+        search: Callable[[frozenset[str]], dict[C, Any]],
+        reaches: Callable[[dict[C, Any], frozenset[str], Spot], C | None],
+    ) -> None:
+        self.world = world
+        self._search = search
+        self._walks: dict[frozenset[str], dict[C, Any]] = {}
+        self.reaches = reaches
+        self.doors = {door.id: door for door in _locked(world)}
+        self.keys = {m.id: m for m in world.markers if m.kind == "key"}
+        closed = frozenset(self.doors)
+        while True:
+            came = self.walk(closed)
+            opened = {d for d in closed if self._key_in(closed, self.doors[d].key)}
+            if not opened:
+                break
+            closed = closed - opened
+        self.came = came
+        self.closed = closed
+
+    def walk(self, closed: frozenset[str]) -> dict[C, Any]:
+        """What the player reaches with these doors shut (each walk once)."""
+        if closed not in self._walks:
+            self._walks[closed] = self._search(closed)
+        return self._walks[closed]
+
+    def _key_in(self, closed: frozenset[str], key: str) -> bool:
+        spot = self.keys.get(key)
+        return (
+            spot is not None
+            and self.reaches(self.walk(closed), closed, spot) is not None
+        )
+
+    def behind_itself(self, door: str) -> bool:
+        """Whether the door's key is reached once that door alone is open."""
+        return self._key_in(self.closed - {door}, self.doors[door].key)
+
+    def blocking(self, found: Callable[[frozenset[str]], bool]) -> list[str]:
+        """The shut doors in the way of what ``found(closed)`` looks for: those any
+        one of which, opened, lets the player reach it; else every shut door,
+        when only opening them all does. Empty when it is out of reach anyway."""
+        if not self.closed or not found(frozenset()):
+            return []
+        alone = [d for d in sorted(self.closed) if found(self.closed - {d})]
+        return alone or sorted(self.closed)
+
+    def door_words(self, doors: list[str]) -> str:
+        words: list[str] = []
+        for door in doors:
+            key = self.doors[door].key
+            if key not in self.keys:
+                words.append(f"door {door}, whose key {key} isn't in the level")
+            elif self.behind_itself(door):
+                words.append(
+                    f"door {door}, whose key {key} is locked behind that same door"
+                )
+            else:
+                words.append(f"door {door}, whose key {key} can't be reached")
+        return "; ".join(words)
+
+    def why(self, marker: Spot) -> str:
+        """Why a marker the player can't reach is locked away, or ""."""
+        unit = self.world.unit
+        if marker.kind == "key":
+            own = [d for d, door in self.doors.items() if door.key == marker.id]
+            for door in own:
+                if door in self.closed and self.behind_itself(door):
+                    spot = self.doors[door].at
+                    return (
+                        f"key {marker.id} is locked behind door {door}, the door it "
+                        f"opens: the player can't reach the key without going through "
+                        f"[{spot[0] / unit:g}, {spot[1] / unit:g}] first. Move the key "
+                        "to the spawn's side of the door, or have another key open it."
+                    )
+        doors = self.blocking(
+            lambda closed: self.reaches(self.walk(closed), closed, marker) is not None
+        )
+        if not doors:
+            return ""
+        area = self.world.area_at(*marker.at)
+        where = f" in {area.kind} {area.id}" if area is not None else ""
+        return (
+            f"{marker.kind} {marker.id}{where} is only reachable through locked "
+            f"{self.door_words(doors)}. Put the key where the player can get it "
+            f"first, or move the {marker.kind}."
+        )
+
+    def _inside_when(
+        self,
+        inside: Callable[[Area, dict[C, Any]], bool],
+        area: Area,
+        closed: frozenset[str],
+    ) -> bool:
+        return inside(area, self.walk(closed))
+
+    def areas(self, inside: Callable[[Area, dict[C, Any]], bool]) -> list[str]:
+        """Areas only reachable through a door whose key the player can't get."""
+        found: list[str] = []
+        for area in [*self.world.areas, *self.world.platforms]:
+            if inside(area, self.came):
+                continue
+            doors = self.blocking(partial(self._inside_when, inside, area))
+            if doors:
+                found.append(
+                    f"{area.kind.capitalize()} {area.id} is only reachable through "
+                    f"locked {self.door_words(doors)}."
+                )
+        return found
 
 
 def _around_hazards(world: World, grid: _Grid, radius: float) -> set[int]:
@@ -511,6 +694,16 @@ def _touches(
 # --- Side views (2D platformers) -----------------------------------------------------
 
 
+@dataclass(frozen=True)
+class _Ground:
+    """A side view's free cells and standing places with some doors shut."""
+
+    empty: Cell
+    body: Cell
+    stand: Cell
+    stands: dict[int, list[int]]
+
+
 def _side(world: World) -> Reach:
     profile = world.profile
     cell = max(world.tile_px / 2, 2.0)
@@ -552,9 +745,43 @@ def _side(world: World) -> Reach:
     def stand(i: int, j: int) -> bool:
         return body(i, j) and 0 <= j + 1 < grid.h and solid[(j + 1) * grid.w + i]
 
-    stands: dict[int, list[int]] = {}
+    # A locked door fills its doorway, body high, until its key is reached.
+    shut_cells: dict[str, set[tuple[int, int]]] = {}
+    for door in _locked(world):
+        half = max(door.size / 2, cell)
+        x, y = door.at
+        shut_cells[door.id] = {
+            (i, j)
+            for j in grid.span(y - profile.height, y + profile.height / 2, 1)
+            for i in grid.span(x - half, x + half, 0)
+        }
+    standing: dict[frozenset[str], _Ground] = {}
+
+    def ground(closed: frozenset[str]) -> _Ground:
+        """Where the player stands with these doors shut, by column."""
+        if closed not in standing:
+            shut = set().union(*(shut_cells[d] for d in closed))
+
+            def free(i: int, j: int) -> bool:
+                return empty(i, j) and (i, j) not in shut
+
+            def body_at(i: int, j: int) -> bool:
+                return all(free(i, j - r) for r in range(tall))
+
+            def stand_at(i: int, j: int) -> bool:
+                return (
+                    body_at(i, j)
+                    and 0 <= j + 1 < grid.h
+                    and solid[(j + 1) * grid.w + i]
+                )
+
+            columns = {i: [j for j in base[i] if stand_at(i, j)] for i in range(grid.w)}
+            standing[closed] = _Ground(free, body_at, stand_at, columns)
+        return standing[closed]
+
+    base: dict[int, list[int]] = {}
     for i in range(grid.w):
-        stands[i] = [j for j in range(grid.h) if stand(i, j)]
+        base[i] = [j for j in range(grid.h) if stand(i, j)]
     assert world.spawn is not None
     start = _drop_to_stand(grid, stand, empty, world.spawn.at)
     reach = Reach(cell=cell)
@@ -564,9 +791,13 @@ def _side(world: World) -> Reach:
             "The spawn has no ground under it the player can stand on; put it above "
             "a floor or platform."
         )
-    came: dict[tuple[int, int], tuple[tuple[int, int] | None, bool]] = {}
-    if start is not None:
-        came = {start: (None, False)}
+    Came = dict[tuple[int, int], tuple[tuple[int, int] | None, bool]]
+
+    def search(closed: frozenset[str]) -> Came:
+        if start is None:
+            return {}
+        at = ground(closed)
+        came: Came = {start: (None, False)}
         best = {start: 0.0}
         queue: list[tuple[float, tuple[int, int]]] = [(0.0, start)]
         while queue:
@@ -574,7 +805,7 @@ def _side(world: World) -> Reach:
             if cost > best.get((i, j), math.inf):
                 continue
             for nxt, jumped in _side_moves(
-                i, j, stands, stand, empty, body, rise, reach_x, tall
+                i, j, at.stands, at.stand, at.empty, at.body, rise, reach_x, tall
             ):
                 dx = abs(nxt[0] - i)
                 step = 4.0 + 2.0 * dx if jumped else dx + 0.2 * abs(nxt[1] - j)
@@ -583,25 +814,35 @@ def _side(world: World) -> Reach:
                     best[nxt] = cost + step
                     came[nxt] = ((i, j), jumped)
                     heapq.heappush(queue, (cost + step, nxt))
-    for marker in world.markers:
-        if marker.kind not in TARGETS:
-            continue
-        target = Target(marker.id, marker.kind, marker.at)
-        reach.targets.append(target)
-        mi, mj = grid.index(*marker.at)
+        return came
+
+    def reaches(
+        came: Came, closed: frozenset[str], spot: Spot
+    ) -> tuple[int, int] | None:
+        stands = ground(closed).stands
+        mi, mj = grid.index(*spot.at)
         options = [
             (abs(di), j - mj, (mi + di, j))
             for di in (0, -1, 1)
             for j in stands.get(mi + di, [])
             if 0 <= j - mj <= rise + 1
         ]
-        hit = next((o[2] for o in sorted(options) if o[2] in came), None)
+        return next((o[2] for o in sorted(options) if o[2] in came), None)
+
+    doors = _Doors(world, search, reaches)
+    came, closed = doors.came, doors.closed
+    for marker in world.markers:
+        if marker.kind not in TARGETS:
+            continue
+        target = Target(marker.id, marker.kind, marker.at)
+        reach.targets.append(target)
+        hit = reaches(came, closed, marker)
         if start is None:
             target.reason = "The spawn has no ground under it."
         elif hit is None:
             where = world.area_at(*marker.at)
             inside = f" in {where.kind} {where.id}" if where else ""
-            target.reason = (
+            target.reason = doors.why(marker) or (
                 f"{marker.kind} {marker.id}{inside} can't be reached from the spawn: no "
                 f"ground within a jump ({profile.jump / world.tile_px:g} tiles up, "
                 f"{profile.across / world.tile_px:g} across) leads to it. Add a "
