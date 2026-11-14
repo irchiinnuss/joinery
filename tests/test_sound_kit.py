@@ -5,12 +5,13 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
 
 from joinery import gateway, sound_kit
-from joinery.tools import get
+from joinery.tools import get, supercollider
 from servers.sound import make
 
 
@@ -110,7 +111,7 @@ def test_make_sound_needs_a_transaction_and_its_tool(tmp_path: Path) -> None:
         asyncio.run(make.make_sound(stage, "jump", "player_jump"))
 
 
-def test_make_sounds_renders_a_batch_side_by_side(
+def test_make_sounds_batches_supercollider_and_runs_surge_side_by_side(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     running: list[str] = []
@@ -124,16 +125,45 @@ def test_make_sounds_renders_a_batch_side_by_side(
         most = max(most, len(running))
         await asyncio.sleep(0.05)
         running.remove(name)
-        if name == "bad":
-            raise ValueError("no such kind")
         return {"outputs": [f"audio/sfx/{name}.wav"], "status": "staged"}
 
+    def prepare(project: Path, kind: str, name: str, **_k: object) -> object:
+        if kind == "nope":
+            raise ValueError("no such kind")
+        tool = "surge-xt" if kind == "pickup" else "supercollider"
+        return SimpleNamespace(
+            spec=SimpleNamespace(tool=tool), code="{ 0.exit }", n=name
+        )
+
+    batches: list[list[str]] = []
+
+    async def together(project: Path, prepared: list[SimpleNamespace]) -> list[object]:
+        batches.append([p.n for p in prepared])
+        return [
+            RuntimeError("render failed")
+            if p.n == "j1"
+            else {"outputs": [f"audio/sfx/{p.n}.wav"]}
+            for p in prepared
+        ]
+
     monkeypatch.setattr(make, "make_sound", fake)
-    sounds = [make.SoundArgument(kind="jump", name=f"s{i}") for i in range(6)]
+    monkeypatch.setattr(make, "_prepare", prepare)
+    monkeypatch.setattr(make, "_render_together", together)
+    locks: list[Path] = []
+    monkeypatch.setattr(make.authoring, "_lock", locks.append)
+    sounds = [make.SoundArgument(kind="pickup", name=f"s{i}") for i in range(6)]
+    sounds += [make.SoundArgument(kind="jump", name=f"j{i}") for i in range(3)]
     sounds.append(make.SoundArgument(kind="nope", name="bad"))
     result = asyncio.run(make.make_sounds(tmp_path, sounds, parallel=3))
-    assert len(result["made"]) == 6 and most == 3
-    assert result["failed"] == [{"name": "bad", "error": "no such kind"}]
+    # Surge sounds three at a time; every SuperCollider sound in one session.
+    assert most == 3 and batches == [["j0", "j1", "j2"]]
+    # The side-by-side sounds write the lock once, after they all finished.
+    assert locks == [tmp_path]
+    assert len(result["made"]) == 8
+    assert result["failed"] == [
+        {"name": "j1", "error": "render failed"},
+        {"name": "bad", "error": "no such kind"},
+    ]
     assert "audio/sfx/s0.wav" in result["outputs"] and result["requires_review"]
     with pytest.raises(ValueError, match="own name"):
         asyncio.run(make.make_sounds(tmp_path, [sounds[0], sounds[0]]))
@@ -145,3 +175,76 @@ def test_a_batch_holds_the_slot_of_every_app_it_runs() -> None:
     kinds = [{"kind": "footstep"}, {"kind": "pickup"}, {"kind": "jump"}]
     apps = gateway.op_apps("make_sounds", {"sounds": kinds})
     assert set(apps) == {sound_kit.app_for(k) for k in kinds}
+
+
+def test_a_batch_script_renders_each_patch_as_its_own_recipe_would() -> None:
+    spec = sound_kit.SoundSpec(kind="hit", name="hit")
+    code = spec.source_text("audio/sfx/hit.wav", 48000, 1)
+    assert supercollider.batchable(code)
+    script = supercollider.batch_script(
+        [("audio/sources/sfx/hit.scd", code, "audio/sfx/hit.wav", "print('edit')\n")]
+        * 2
+    )
+    # Each sound writes its source and edit program, then signals the next sound
+    # where its own recipe would end sclang; only the batch's end exits.
+    assert script.count("JOINERY_SOUND_BEGIN ") == 2
+    # The source keeps its own exit; the code the batch runs signals instead.
+    assert script.count("{ 0.exit }") == 2
+    assert script.count("~joineryDone.signal") == 2
+    assert script.count("~joineryDone.wait;") == 2
+    assert f"thisThread.randSeed = {spec.effective_seed};" in script
+    assert "  0.exit;\n}.play(AppClock);" in script
+    assert not supercollider.batchable("0.exit; 1.exit;")
+    log = (
+        "JOINERY_SOUND_BEGIN 0\nJOINERY_AUDIO {}\nJOINERY_SOUND_OK 0\n"
+        "JOINERY_SOUND_BEGIN 1\nJOINERY_SOUND_FAILED 1"
+    )
+    assert supercollider.batch_results(log, 3) == [
+        (True, "JOINERY_AUDIO {}\nJOINERY_SOUND_OK 0"),
+        (False, "JOINERY_SOUND_FAILED 1"),
+        (False, ""),
+    ]
+
+
+def test_a_batch_records_each_sound_alone_and_one_failure_undoes_only_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from joinery import authoring
+    from joinery.runner import Result
+
+    stage = tmp_path / "stage"
+    stage.mkdir()
+    (tmp_path / "journal.json").write_text(json.dumps({"state": "staging"}))
+    (stage / "joinery.toml").write_text('[tools]\nenabled = ["supercollider"]\n')
+    sounds = [make._prepare(stage, "hit", "hit"), make._prepare(stage, "door", "door")]
+
+    async def render(argv: list[str], project: Path, *_a: object) -> Result:
+        assert argv[-2] == "sclang" and (project / argv[-1]).is_file()
+        for path in sounds[0].outputs:  # only the first sound renders
+            (project / path).write_bytes(b"RIFF")
+        (project / sounds[1].source).write_text("half made")
+        return Result(True, "JOINERY_SOUND_BEGIN 0\nJOINERY_SOUND_OK 0\n", "", 1.0)
+
+    recorded: list[str] = []
+    locked: list[Path] = []
+
+    async def record(
+        project: Path, recipe: object, path: Path, *, lock: bool = True
+    ) -> dict[str, object]:
+        assert not lock
+        recorded.append(path.name)
+        return {"outputs": list(recipe.outputs), "status": "staged"}  # type: ignore[attr-defined]
+
+    monkeypatch.setattr(authoring, "run_offline", render)
+    monkeypatch.setattr(authoring, "_record", record)
+    monkeypatch.setattr(authoring, "_lock", locked.append)
+    made, failed = asyncio.run(make._render_together(stage, sounds))
+    assert isinstance(made, dict) and made["sound"]["name"] == "hit"
+    assert isinstance(failed, RuntimeError)
+    # One recipe each, one lock for the batch, and no batch script left behind.
+    assert len(recorded) == 1 and locked == [stage]
+    scripts = list((stage / "recipes").glob("*.scd"))
+    assert len(scripts) == 1 and "joinery_hit" in scripts[0].read_text()
+    assert not list(stage.glob(".joinery-batch-*"))
+    # The failed sound leaves nothing half made.
+    assert not (stage / sounds[1].source).exists()

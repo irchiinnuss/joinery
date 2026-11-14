@@ -8,6 +8,7 @@ replay runs under `timeout` as a last resort.
 
 from __future__ import annotations
 
+import hashlib
 import re
 import zlib
 
@@ -355,3 +356,103 @@ class SuperCollider(ToolModule):
 
 
 MODULE = SuperCollider()
+
+
+# --- Batches -----------------------------------------------------------------------
+
+#: The completion action a patch ends with to join a batch: in the batch it
+#: signals the next sound instead of ending sclang.
+STANDALONE_DONE = "{ 0.exit }"
+_BATCH_DONE = "{ ~joineryDone.test = true; ~joineryDone.signal }"
+#: Lines a batch prints around each sound, with the sound's index.
+SOUND_BEGIN = "JOINERY_SOUND_BEGIN "
+SOUND_OK = "JOINERY_SOUND_OK "
+SOUND_FAILED = "JOINERY_SOUND_FAILED "
+#: Seconds a batch may run: a sound's share on top of one patch's limit.
+BATCH_SOUND_SECONDS = 30
+
+
+def batchable(code: str) -> bool:
+    """Whether a patch can join a batch: it ends its render with one
+    `{ 0.exit }` action and calls exit nowhere else."""
+    return code.count(STANDALONE_DONE) == 1 and len(_EXITS.findall(code)) == 1
+
+
+def batch_limit(count: int) -> int:
+    """Seconds a batch of `count` sounds may run before it stops."""
+    return RENDER_LIMIT + BATCH_SOUND_SECONDS * count
+
+
+def batch_script(sounds: list[tuple[str, str, str, str]]) -> str:
+    """One sclang session rendering several patches, each to its own files.
+
+    Each sound is (source, code, render, edit program): exactly what its own
+    recipe script does (`SuperCollider.script` then `supercollider_chain`),
+    run one after another. Every NRT score still renders in its own scsynth
+    (recordNRT starts one per score); what the batch shares is sclang, its
+    class library start-up and the worker. A sound's failure is reported with
+    its index and the batch goes on to the next. The batch is never a recipe:
+    each sound keeps its own standalone script, which rebuild replays alone.
+    """
+    from joinery.tools.audio_chain import SC_CHAIN_PROGRAM, sc_string
+
+    lines = [
+        "(",
+        "var patch, out, program;",
+        f"OnError.add({{ {_sc(RUN_ERROR)}.postln; 1.exit }});",
+        (
+            f"SystemClock.sched({batch_limit(len(sounds))}, "
+            f"{{ {_sc(TIMEOUT)}.postln; 2.exit; nil }});"
+        ),
+        "~joineryDone = Condition(false);",
+        "Routine {",
+    ]
+    for index, (source, code, render, post) in enumerate(sounds):
+        if not batchable(code):
+            raise ValueError(
+                f"Sound {index} does not end its render with {STANDALONE_DONE}."
+            )
+        digest = hashlib.sha256(post.encode()).hexdigest()[:16]
+        program = SC_CHAIN_PROGRAM.removesuffix(".py") + f"-{digest}.py"
+        command = f"python3 {program} 2>&1; echo JOINERY_EXIT=$?"
+        run = code.replace(STANDALONE_DONE, _BATCH_DONE)
+        seed = patch_seed(code)
+        failed = f"{_sc(SOUND_FAILED + str(index))}.postln"
+        lines += [
+            f"  {_sc(SOUND_BEGIN + str(index))}.postln;",
+            f'  File.use({_sc(source)}, "w", {{ |file| file.write({_sc(code)}); }});',
+            f"  File.delete({sc_string(render)});",
+            f'  File.use({sc_string(program)}, "w", {{ |file| file.write({_sc(post)}) }});',
+            "  ~joineryDone.test = false;",
+            f"  patch = {_sc(run)}.compile;",
+            "  if(patch.isNil) {",
+            f"    {_sc(PARSE_ERROR)}.postln; {failed};",
+            "  } {",
+            *([f"    thisThread.randSeed = {seed};"] if seed is not None else []),
+            "    { patch.value; ~joineryDone.wait;",
+            f"      out = {sc_string(command)}.unixCmdGetStdOut;",
+            "      out.post;",
+            '      if(out.contains("JOINERY_EXIT=0")) {',
+            f"        {_sc(SOUND_OK + str(index))}.postln;",
+            f"      }} {{ {failed} }};",
+            f"    }}.try {{ |error| error.reportError; {_sc(RUN_ERROR)}.postln; {failed} }};",
+            "  };",
+        ]
+    lines += ["  0.exit;", "}.play(AppClock);", ")", ""]
+    return "\n".join(lines)
+
+
+def batch_results(output: str, count: int) -> list[tuple[bool, str]]:
+    """Each sound's (finished, its own part of the output) from a batch's log."""
+    parts: list[list[str]] = [[] for _ in range(count)]
+    current = -1
+    for line in output.splitlines():
+        if line.startswith(SOUND_BEGIN):
+            current = int(line.removeprefix(SOUND_BEGIN).strip())
+            continue
+        if 0 <= current < count:
+            parts[current].append(line)
+    return [
+        (f"{SOUND_OK}{i}" in part and f"{SOUND_FAILED}{i}" not in part, "\n".join(part))
+        for i, part in enumerate(parts)
+    ]

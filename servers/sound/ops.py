@@ -21,6 +21,7 @@ import asyncio
 import json
 import re
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -134,17 +135,23 @@ def _recording() -> asyncio.Lock:
     return _RECORD_LOCKS.setdefault(loop, asyncio.Lock())
 
 
-async def _run(
+@dataclass(frozen=True)
+class Staged:
+    """A recipe script written and its recipe made, not yet rendered."""
+
+    recipe: Recipe
+    identifier: str
+
+
+def stage(
     project: Path,
     tool: str,
     script_text: str,
     outputs: list[str],
     sources: tuple[str, ...],
     note: str,
-    *,
-    chained: bool = False,
-) -> dict[str, Any]:
-    """Run a recipe script in the worker, then record it like operate_document."""
+) -> Staged:
+    """Write a recipe script and make its recipe, ready to render."""
     module = tools.get(tool)
     # Refuse before rendering if another recipe would be left half-replaced.
     authoring._replacements(project, tuple(outputs))
@@ -163,26 +170,70 @@ async def _run(
         note=note,
         seed=module.recipe_seed(script_text),
     )
-    result = await authoring.run_offline(
-        module.replay_argv(recipe.script), project, RENDER_TIMEOUT
-    )
-    failed = not result.ok or "JOINERY_POST_FAILED" in result.output
-    if chained and tool == "supercollider" and "JOINERY_POST_OK" not in result.output:
+    return Staged(recipe, identifier)
+
+
+async def finish(
+    project: Path,
+    staged: Staged,
+    ok: bool,
+    output: str,
+    *,
+    chained: bool = False,
+    lock: bool = True,
+) -> dict[str, Any]:
+    """Record a rendered recipe, or drop its script and say why it failed.
+
+    `lock=False` leaves joinery.lock to the caller (see `authoring._record`).
+    """
+    recipe = staged.recipe
+    module = tools.get(recipe.tool)
+    failed = not ok or "JOINERY_POST_FAILED" in output
+    if chained and recipe.tool == "supercollider" and "JOINERY_POST_OK" not in output:
         failed = True
-    missing = [o for o in outputs if not (project / o).is_file()]
+    missing = [o for o in recipe.outputs if not (project / o).is_file()]
     if failed or missing:
-        script.unlink(missing_ok=True)
-        detail = _tail(result.output)
+        (project / recipe.script).unlink(missing_ok=True)
+        detail = _tail(output)
         if missing and not failed:
             detail = "it did not write " + ", ".join(missing)
         raise RuntimeError(f"{module.name} did not complete the operation: {detail}")
-    report = audio_chain.parse_report(result.stdout)
+    report = audio_chain.parse_report(output)
+    recipe_dir = project / "recipes"
     async with _recording():
         # Renders may run side by side (make_sounds); the lock file is one writer.
-        recorded = await authoring._record(
-            project, recipe, recipe_dir / (identifier + ".toml")
+        path = recipe_dir / (staged.identifier + ".toml")
+        recorded = await (
+            authoring._record(project, recipe, path)
+            if lock
+            else authoring._record(project, recipe, path, lock=False)
         )
     return {**recorded, "measured": report}
+
+
+async def _run(
+    project: Path,
+    tool: str,
+    script_text: str,
+    outputs: list[str],
+    sources: tuple[str, ...],
+    note: str,
+    *,
+    chained: bool = False,
+    lock: bool = True,
+) -> dict[str, Any]:
+    """Run a recipe script in the worker, then record it like operate_document.
+
+    `lock=False` leaves joinery.lock to the caller (see `authoring._record`).
+    """
+    staged = stage(project, tool, script_text, outputs, sources, note)
+    module = tools.get(tool)
+    result = await authoring.run_offline(
+        module.replay_argv(staged.recipe.script), project, RENDER_TIMEOUT
+    )
+    return await finish(
+        project, staged, result.ok, result.output, chained=chained, lock=lock
+    )
 
 
 def _check_format(

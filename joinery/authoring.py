@@ -636,7 +636,21 @@ def _fingerprint_runner() -> Runner:
     return SandboxRunner(image=IMAGE)
 
 
-async def _record(project: Path, recipe: Recipe, path: Path) -> dict[str, Any]:
+def _lock(project: Path) -> None:
+    """Write joinery.lock from the recipes; refuse when provenance is missing."""
+    problems = write_lock(project)
+    if problems:
+        raise ValueError("Provenance recording failed: " + "; ".join(problems))
+
+
+async def _record(
+    project: Path, recipe: Recipe, path: Path, *, lock: bool = True
+) -> dict[str, Any]:
+    """Write a recipe with its measured outputs, then the lock file.
+
+    `lock=False` leaves the lock to the caller, which records several recipes
+    whose files appeared together (a batch) and writes the lock once after.
+    """
     replacements = [p for p in _replacements(project, recipe.outputs) if p != path]
     rows = [
         "version = 1",
@@ -655,9 +669,8 @@ async def _record(project: Path, recipe: Recipe, path: Path) -> dict[str, Any]:
         history.mkdir(exist_ok=True)
         for previous in replacements:
             previous.rename(history / previous.name)
-    problems = write_lock(project)
-    if problems:
-        raise ValueError("Provenance recording failed: " + "; ".join(problems))
+    if lock:
+        _lock(project)
     return {
         "source": recipe.outputs[0],
         "outputs": list(recipe.outputs),
