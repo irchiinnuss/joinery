@@ -9,6 +9,7 @@ decides what happens next: that is the turn controller's job.
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
@@ -95,6 +96,15 @@ GODOT_SUFFIXES = frozenset({".gd", ".tscn", ".tres", ".gdshader", ".glb"})
 GUT_RUNNER = "addons/gut/gut_cmdln.gd"
 TEST_DIRS = ("test", "tests")
 OFFLINE_SECONDS = 180
+#: SceneTree tests (``extends SceneTree`` under tests/): how many run, and how long each.
+SCENE_TESTS_MAX = 20
+SCENE_TEST_SECONDS = 120
+_SCENE_TREE = re.compile(
+    r'^[ \t]*(?:class_name[ \t]+\w+[ \t]+)?extends[ \t]+"?SceneTree"?[ \t]*(?:#.*)?$',
+    re.MULTILINE,
+)
+#: A SceneTree test's own failure line ("FAIL: the door stayed shut").
+_FAIL_LINE = re.compile(r"^\s*FAIL(?:ED)?\b", re.MULTILINE)
 
 
 def is_reference(path: str) -> bool:
@@ -140,6 +150,30 @@ def gut_dirs(stage: Path) -> list[str]:
     if not (stage / GUT_RUNNER).is_file():
         return []
     return [name for name in TEST_DIRS if (stage / name).is_dir()]
+
+
+def is_scene_tree_test(path: Path) -> bool:
+    """A script whose own class is SceneTree: Godot runs it with ``-s``."""
+    try:
+        head = path.read_text(encoding="utf-8", errors="replace")[:4000]
+    except OSError:
+        return False
+    return _SCENE_TREE.search(head) is not None
+
+
+def scene_tree_tests(stage: Path) -> list[str]:
+    """The project's SceneTree tests: scripts under ``tests/`` (or ``test/``) that
+    extend SceneTree, by project path. Each runs headless on its own and passes
+    when it quits with 0 and prints no ``FAIL`` line and no script error."""
+    found: list[str] = []
+    for name in TEST_DIRS:
+        folder = stage / name
+        if not folder.is_dir():
+            continue
+        for path in sorted(folder.rglob("*.gd")):
+            if path.is_file() and is_scene_tree_test(path):
+                found.append(path.relative_to(stage).as_posix())
+    return found[:SCENE_TESTS_MAX]
 
 
 @dataclass
@@ -306,7 +340,9 @@ async def validate(
         for change in changes
     )
     tests = gut_dirs(tx.stage) if godot else []
-    if godot and not tests:
+    # SceneTree tests run too, with or without GUT: one convention for done-when tests.
+    scene_tests = scene_tree_tests(tx.stage) if godot else []
+    if godot and not tests and not scene_tests:
         found.skipped.append("tests")
     importing = godot and not gateway.import_current(tx)
     # Recorded play sessions replay on a change to the game (ADR 0059).
@@ -321,8 +357,8 @@ async def validate(
         name
         for name, on in (
             ("art bible", rules),
-            ("Godot import", importing or bool(tests)),
-            ("tests", bool(tests)),
+            ("Godot import", importing or bool(tests) or bool(scene_tests)),
+            ("tests", bool(tests) or bool(scene_tests)),
             ("replays", replaying),
             ("saves", saving),
         )
@@ -334,6 +370,7 @@ async def validate(
         rules=rules,
         godot=importing,
         tests=tests,
+        scene_tests=scene_tests,
         span=gateway.span,
         imported=lambda: gateway.mark_imported(tx),
         replays_on=replaying,
@@ -353,6 +390,7 @@ async def checks(
     imported: Callable[[], None] | None = None,
     replays_on: bool = False,
     saves_on: bool = False,
+    scene_tests: list[str] | None = None,
 ) -> list[Problem]:
     """The art bible's measured rules beside Godot's import check, the project's tests,
     its recorded replays and its kept saves.
@@ -391,7 +429,8 @@ async def checks(
 
     async def godot_checks() -> list[Problem]:
         found: list[Problem] = []
-        if godot or tests:
+        testing = bool(tests) or bool(scene_tests)
+        if godot or testing:
             with timed("review_import"):
                 got = await run_offline(
                     ["godot", "--headless", "--path", "/work", "--editor", "--import"],
@@ -413,11 +452,13 @@ async def checks(
                 imported()
         if tests:
             found += await run_tests(tx.stage, tests, timed)
+        if scene_tests:
+            found += await run_scene_tests(tx.stage, scene_tests, timed)
         if replays_on:
-            found += await run_replays(tx, imported=godot or bool(tests), timed=timed)
+            found += await run_replays(tx, imported=godot or testing, timed=timed)
         if saves_on:
             found += await run_saves(
-                tx, imported=godot or bool(tests) or replays_on, timed=timed
+                tx, imported=godot or testing or replays_on, timed=timed
             )
         return found
 
@@ -473,6 +514,46 @@ async def run_tests(
             items=reasons.tests(got.output),
         )
     ]
+
+
+async def run_scene_tests(
+    stage: Path, scripts: list[str], timed: Any = None
+) -> list[Problem]:
+    """Run each SceneTree test headless (``godot -s``); one that exits non-zero, prints
+    a ``FAIL`` line or a script error, or never quits is a problem naming it."""
+    problems: list[Problem] = []
+    with timed("review_scene_tests") if timed is not None else nullcontext():
+        for script in scripts:
+            got = await run_offline(
+                ["godot", "--headless", "--path", "/work", "-s", "res://" + script],
+                stage,
+                SCENE_TEST_SECONDS,
+            )
+            worker_ready(got)
+            if scene_test_passed(got):
+                continue
+            problems.append(
+                Problem(
+                    "tests",
+                    f"The test res://{script} failed: "
+                    + (
+                        got.output[-2000:].strip()
+                        or "it exited with an error or didn't quit (end it with quit())."
+                    ),
+                    [script],
+                    items=reasons.tests(got.output),
+                )
+            )
+    return problems
+
+
+def scene_test_passed(got: Result) -> bool:
+    """A SceneTree test's verdict: exit code 0, no FAIL line, no script error."""
+    return (
+        got.ok
+        and not _broken(got.output, got.ok)
+        and _FAIL_LINE.search(got.output) is None
+    )
 
 
 async def run_replays(
