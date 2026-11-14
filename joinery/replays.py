@@ -5,15 +5,19 @@ physics frame, the random seed, the start scene, the build and a state checkpoin
 second. A replay file is JSON lines: a header, ``{"f", "e": [events]}`` and
 ``{"f", "check": {hash, state}}`` lines, and an ``{"end"}`` line.
 
-    joinery replay add <file> --project P [--name N]   # keep it in tests/replays/
+    joinery replay add <file> --project P [--name N]   # keep it in tests/replays/ (reviewed)
     joinery replay run --project P [NAME…|--all]        # replay headless, report divergence
+    joinery replay rerecord --project P [NAME…]         # new checkpoints, same input (reviewed)
     joinery replay list --project P
 
 A replay runs headless at the recorded physics rate (``--fixed-fps``), with the recorded
 seed, settings and window size, an empty save folder and a HOME of its own, and compares
-each checkpoint. On the build that recorded it the state must match exactly; on another
-build (another engine, platform or CPU) the checks are compared against what the same
-replay did on that build before the change (the staged-change check does this).
+what the player experiences at each checkpoint (the scene, the player's place and health,
+the level time and what the game saves) with tolerance, looser on another build than the
+one that recorded it. A staged change is also judged against what the same replay did on
+the worker's build before the change. ``add`` and ``rerecord`` change ``tests/`` through
+a transaction the user reviews, like any other change; Journeyman re-records with its
+``rerecord_replay`` tool, into the change it is making.
 
 Every staged change that touches the game runs the project's replays when
 ``[checks] replays`` is on (the default once ``tests/replays/`` has any): a replay that
@@ -397,6 +401,150 @@ def run_all(project: Path, names: Iterable[str] = ()) -> list[Outcome]:
     return found + [run(project, p) for p in paths]
 
 
+# --- Re-recording ------------------------------------------------------------------------
+
+#: The game's flag: play the input, compare nothing, return fresh checkpoints.
+RERECORD_ARG = "--joinery-rerecord"
+
+
+def rewrite(text: str, recaptured: list[dict[str, Any]], build: str, when: str) -> str:
+    """The replay ``text`` with its checkpoints taken from ``recaptured`` (the same
+    input's state on the game as it is now): header, inputs and end line kept, the
+    header naming the build and time it was re-recorded."""
+    out: list[str] = []
+    checks = sorted(
+        (c for c in recaptured if isinstance(c, dict) and isinstance(c.get("check"), dict)),
+        key=lambda c: int(c.get("f", 0)),
+    )
+    header_done = False
+    end: dict[str, Any] | None = None
+    for raw in text.splitlines():
+        if not raw.strip():
+            continue
+        line = json.loads(raw)
+        if not header_done:
+            header = dict(line)
+            header["build"] = build or header.get("build", "")
+            header["rerecorded"] = when
+            out.append(json.dumps(header))
+            header_done = True
+        elif isinstance(line, dict) and isinstance(line.get("end"), dict):
+            end = dict(line["end"])
+        elif isinstance(line, dict) and "check" in line:
+            continue
+        else:
+            out.append(raw)
+    # Inputs and checkpoints in frame order, a frame's inputs before its checkpoint.
+    events = [(int(json.loads(r).get("f", 0)), 0, r) for r in out[1:]]
+    events += [(int(c["f"]), 1, json.dumps({"f": int(c["f"]), "check": c["check"]})) for c in checks]
+    events.sort(key=lambda item: (item[0], item[1]))
+    lines = [out[0], *(r for _, _, r in events)]
+    if end is not None:
+        if checks:
+            end["check_frame"] = int(checks[-1]["f"])
+            end["hash"] = str(checks[-1]["check"].get("hash", ""))
+        lines.append(json.dumps({"end": end}))
+    return "\n".join(lines) + "\n"
+
+
+def rerecord(root: Path, path: Path, *, godot: Path | None = None) -> Replay:
+    """Play ``path``'s recorded input on the game in ``root`` and write its checkpoints
+    afresh, in place: for a change that is meant to alter what the replay sees. Raises
+    ValueError in words when the replay can't play, or hits errors its recording didn't."""
+    root = root.resolve()
+    replay = read(path)
+    if replay.header.get("partial"):
+        raise ValueError(f"{replay.name} starts mid-session, so it can't be re-recorded.")
+    binary = godot or godot_binary()
+    with tempfile.TemporaryDirectory(prefix="joinery-rerecord-") as temp:
+        work = Path(temp)
+        (work / "saves").mkdir()
+        (work / "settings.cfg").write_text(str(replay.header.get("settings", "")))
+        env = _env(work)
+        from joinery import import_cache
+
+        import_cache.ensure(binary, root, env)
+        argv = command(replay, str(root), str(path.resolve()), godot=str(binary), work=str(work))
+        argv.append(RERECORD_ARG)
+        limit = STARTUP_SECONDS + replay.seconds * SECONDS_PER_GAME_SECOND
+        try:
+            done = subprocess.run(
+                argv, env=env, capture_output=True, text=True, timeout=limit, check=False
+            )
+        except subprocess.TimeoutExpired:
+            raise ValueError(
+                f"{replay.name} didn't finish in {limit:.0f} s; the game may be frozen."
+            ) from None
+    console = done.stdout + done.stderr
+    data: dict[str, Any] | None = None
+    for line in console.splitlines():
+        if line.startswith(RESULT_PREFIX):
+            try:
+                parsed = json.loads(line[len(RESULT_PREFIX) :])
+            except ValueError:
+                continue
+            data = parsed if isinstance(parsed, dict) else data
+    if data is None or not isinstance(data.get("recaptured"), list):
+        detail = (
+            outcome(replay.name, console, done.returncode, replay).detail
+            if data is None
+            else "the game's core is older than re-recording (core/replays/replays.gd)."
+        )
+        raise ValueError(f"{replay.name} couldn't be re-recorded: {detail}")
+    judged = outcome(replay.name, console, done.returncode, replay)
+    if judged.status == "errors":
+        raise ValueError(
+            f"{replay.name} hits errors on the game as it is now, so it wasn't re-recorded: "
+            + "; ".join(judged.errors[:3])
+        )
+    if isinstance(data.get("divergence"), dict) and data["divergence"].get("error"):
+        raise ValueError(f"{replay.name} couldn't be re-recorded: {data['divergence']['error']}")
+    from datetime import UTC, datetime
+
+    text = rewrite(
+        path.read_text(encoding="utf-8"),
+        data["recaptured"],
+        str(data.get("recaptured_build", "")),
+        datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    )
+    path.write_text(text, encoding="utf-8")
+    return read(path)
+
+
+def stage_add(project: Path, source: Path, name: str = "") -> tuple[Any, Path]:
+    """``add`` as a change waiting for the user's review."""
+    from joinery.transactions import stage_change
+
+    label = name or source.stem
+    tx, target = stage_change(
+        project, f"Keep replay {label}", "joinery replay", lambda stage: add(stage, source, name)
+    )
+    return tx, project / target.relative_to(tx.stage)
+
+
+def stage_rerecord(
+    project: Path, names: Iterable[str], *, godot: Path | None = None
+) -> tuple[Any, list[Replay]]:
+    """Re-record the named replays (default: all) as a change waiting for review."""
+    from joinery.transactions import stage_change
+
+    wanted = [n.removesuffix(SUFFIX) for n in names]
+
+    def write(stage: Path) -> list[Replay]:
+        paths = project_replays(stage)
+        if wanted:
+            missing = sorted(set(wanted) - {p.stem for p in paths})
+            if missing:
+                raise ValueError(f"There is no tests/replays/{missing[0]}{SUFFIX}.")
+            paths = [p for p in paths if p.stem in wanted]
+        if not paths:
+            raise ValueError("There are no replays in tests/replays/ to re-record.")
+        return [rerecord(stage, p, godot=godot) for p in paths]
+
+    words = ", ".join(wanted) if wanted else "every replay"
+    return stage_change(project, f"Re-record {words}", "joinery replay", write)
+
+
 # --- The staged-change check -----------------------------------------------------------
 
 OfflineRun = Callable[[list[str], Path, int], Awaitable[Result]]
@@ -588,13 +736,58 @@ def problems_text(outcomes: list[Outcome]) -> str:
 # --- CLI -----------------------------------------------------------------------------
 
 
+def _staged(args: argparse.Namespace, project: Path) -> int:
+    """``add`` and ``rerecord``: the files change through a reviewed transaction."""
+    from joinery.transactions import review_line
+
+    try:
+        if args.action == "add":
+            tx, target = stage_add(project, args.file, args.name)
+            words = [f"Keep {target.relative_to(project).as_posix()}"]
+            summaries = [read(tx.stage / FOLDER / target.name).summary()]
+        else:
+            tx, again = stage_rerecord(project, args.names)
+            words = [f"Re-recorded {r.name}" for r in again]
+            summaries = [r.summary() for r in again]
+        if args.yes:
+            tx.accept()
+    except (OSError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    if args.json:
+        print(
+            json.dumps(
+                {"transaction_id": tx.id, "state": tx.state, "replays": summaries},
+                indent=2,
+            )
+        )
+        return 0
+    for line, summary in zip(words, summaries, strict=True):
+        print(
+            f"{line}: {summary['seconds']:g} s, {summary['events']} inputs, "
+            f"{summary['checks']} checkpoints."
+        )
+    print("Accepted." if tx.state == "accepted" else review_line(project, tx))
+    return 0
+
+
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     actions = parser.add_subparsers(dest="action", required=True)
     add_cmd = actions.add_parser("add", help="keep a recorded play as a test in tests/replays/")
     add_cmd.add_argument("file", type=Path, help="a .replay file, or a bug report folder")
     add_cmd.add_argument("--project", type=Path, required=True)
     add_cmd.add_argument("--name", default="", help="the replay's name in tests/replays/")
+    add_cmd.add_argument("--yes", action="store_true", help="accept the change at once")
     add_cmd.add_argument("--json", action="store_true")
+    again = actions.add_parser(
+        "rerecord",
+        help="play a replay's input on the game as it is and keep its new checkpoints "
+        "(for a change meant to alter the level), as a change for review",
+    )
+    again.add_argument("names", nargs="*", help="replays in tests/replays/ (default: all)")
+    again.add_argument("--project", type=Path, required=True)
+    again.add_argument("--yes", action="store_true", help="accept the change at once")
+    again.add_argument("--json", action="store_true")
     run_cmd = actions.add_parser("run", help="replay headless and report where it diverges")
     run_cmd.add_argument("names", nargs="*", help="replays in tests/replays/ (default: all)")
     run_cmd.add_argument("--project", type=Path, required=True)
@@ -611,22 +804,8 @@ def main(args: argparse.Namespace) -> int:
     if not (project / "project.godot").is_file():
         print(f"{project} is not a Godot project.", file=sys.stderr)
         return 2
-    if args.action == "add":
-        try:
-            target = add(project, args.file, args.name)
-        except ValueError as exc:
-            print(str(exc), file=sys.stderr)
-            return 2
-        summary = read(target).summary()
-        if args.json:
-            print(json.dumps(summary, indent=2))
-        else:
-            print(
-                f"Added {target.relative_to(project).as_posix()} "
-                f"({summary['seconds']:g} s, {summary['events']} inputs, "
-                f"{summary['checks']} checkpoints)."
-            )
-        return 0
+    if args.action in {"add", "rerecord"}:
+        return _staged(args, project)
     if args.action == "list":
         listed = []
         for path in project_replays(project):

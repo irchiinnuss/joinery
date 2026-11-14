@@ -50,6 +50,7 @@ from typing import Any
 
 from joinery import console_errors
 from joinery.runner import Result
+from joinery.transactions import FileTransaction, review_line, stage_change
 
 FOLDER = Path("tests") / "saves"
 SUMMARY = ".summary.json"
@@ -199,9 +200,12 @@ def add(
     *,
     load: bool = True,
     godot: Path | None = None,
+    into: Path | None = None,
 ) -> list[Kept]:
     """Keep the saves in ``source`` as tests; with ``load``, each must load in the game as
-    it is now, and what it loaded as becomes its summary."""
+    it is now, and what it loaded as becomes its summary. ``into`` is where the files go
+    (a change's stage; default the project), the game they load in is ``project``."""
+    root = into or project
     added: list[Kept] = []
     files = _sources(source)
     for index, path in enumerate(files):
@@ -211,7 +215,7 @@ def add(
         base = _NAME.sub("-", stem).strip("-.") or "save"
         if len(files) > 1:
             base += "-" + path.stem.replace("slot_", "slot")
-        target = folder(project) / label / (base.removesuffix(".json") + ".json")
+        target = folder(root) / label / (base.removesuffix(".json") + ".json")
         if target.exists() and target.resolve() != path.resolve():
             raise ValueError(
                 f"{FOLDER.as_posix()}/{label}/{target.name} already exists; pick another --name."
@@ -236,6 +240,31 @@ def add(
         summary_file.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
         added.append(Kept(target, label, data, summary))
     return added
+
+
+def stage_add(
+    project: Path,
+    source: Path,
+    name: str = "",
+    version: str = "",
+    *,
+    load: bool = True,
+    godot: Path | None = None,
+) -> tuple[FileTransaction, list[Kept]]:
+    """``add`` as a change waiting for the user's review: the saves load in the game as
+    it is, and their files go into the change, not the project."""
+    label = name or source.stem
+    tx, added = stage_change(
+        project,
+        f"Keep save {label}",
+        "joinery saves",
+        lambda stage: add(project, source, name, version, load=load, godot=godot, into=stage),
+    )
+    kept = [
+        Kept(project / k.path.relative_to(tx.stage), k.version, k.data, k.summary)
+        for k in added
+    ]
+    return tx, kept
 
 
 # --- Comparing --------------------------------------------------------------------------
@@ -648,6 +677,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     add_cmd = actions.add_parser("add", help="keep saves as tests in tests/saves/<version>/")
     add_cmd.add_argument("source", type=Path, help="a slot file, or a playtest run folder")
     add_cmd.add_argument("--project", type=Path, required=True)
+    add_cmd.add_argument("--yes", action="store_true", help="accept the change at once")
     add_cmd.add_argument("--name", default="", help="the save's name in tests/saves/")
     add_cmd.add_argument("--version", default="", help="the folder (default: the game's version)")
     add_cmd.add_argument(
@@ -669,19 +699,34 @@ def main(args: argparse.Namespace) -> int:
         return 2
     if args.action == "add":
         try:
-            added = add(project, args.source, args.name, args.version, load=not args.no_load)
-        except ValueError as exc:
+            tx, added = stage_add(
+                project, args.source, args.name, args.version, load=not args.no_load
+            )
+            if args.yes:
+                tx.accept()
+        except (OSError, ValueError) as exc:
             print(str(exc), file=sys.stderr)
             return 2
         if args.json:
-            print(json.dumps([k.describe() for k in added], indent=2))
-        for item in [] if args.json else added:
+            print(
+                json.dumps(
+                    {
+                        "transaction_id": tx.id,
+                        "state": tx.state,
+                        "saves": [k.describe() for k in added],
+                    },
+                    indent=2,
+                )
+            )
+            return 0
+        for item in added:
             info = item.describe()
             print(
-                f"Kept {info['path']} ({info['level']}, {info['nodes']} saved nodes"
+                f"Keep {info['path']} ({info['level']}, {info['nodes']} saved nodes"
                 + (f", “{info['line']}”" if info["line"] else "")
                 + ")."
             )
+        print("Accepted." if tx.state == "accepted" else review_line(project, tx))
         return 0
     if args.action == "list":
         listed = [k.describe() for k in kept(project)]

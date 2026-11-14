@@ -110,6 +110,15 @@ def test_a_recorded_session_replays_identically(tmp_path: Path, blueprint: str) 
     assert changed.frame is not None and changed.frame % 60 == 0
     assert any(d.startswith("players:") for d in changed.differs), changed.differs
 
+    # The change is meant to make the player faster: re-recording keeps the same input
+    # and takes the new checkpoints, and the replay passes again.
+    binary = godot_binary()
+    assert binary is not None
+    again = replays.rerecord(project, kept, godot=binary)
+    assert again.events == recorded.events and again.checks == recorded.checks
+    assert again.header["rerecorded"]
+    assert _replay(project, kept).ok
+
 
 @needs_godot
 def test_a_normal_run_records_and_replays_with_its_arguments(tmp_path: Path) -> None:

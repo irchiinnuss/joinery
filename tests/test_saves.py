@@ -13,6 +13,7 @@ import pytest
 
 from joinery import cli, reasons, saves, submission
 from joinery.runner import Result
+from joinery.transactions import list_transactions
 
 SAVE: dict[str, Any] = {
     "format": 1,
@@ -266,12 +267,24 @@ def test_cli_adds_lists_and_checks(
     source = _slot(tmp_path / "slot_1.json")
     args = ["saves", "add", str(source), "--project", str(project), "--name", "cave", "--no-load"]
     assert cli.main(args) == 0
-    assert "Kept tests/saves/1.2/cave.json (res://game/level.tscn, 2 saved nodes)." in (
-        capsys.readouterr().out
-    )
+    out = capsys.readouterr().out
+    assert "Keep tests/saves/1.2/cave.json (res://game/level.tscn, 2 saved nodes)." in out
+    # tests/ changes only through a change the user reviews.
+    assert "Waiting for your review" in out
+    assert not (project / "tests/saves/1.2/cave.json").exists()
+    (pending,) = [t for t in list_transactions(project) if t.state == "review"]
+    assert {c["path"] for c in pending.changes} >= {
+        "tests/saves/1.2/cave.json",
+        "tests/saves/1.2/cave.summary.json",
+    }
+    pending.accept()
+    assert cli.main([*args[:-1], "--name", "cave2", "--no-load", "--yes"]) == 0
+    assert "Accepted." in capsys.readouterr().out
+    assert (project / "tests/saves/1.2/cave2.json").is_file()
     assert cli.main(["saves", "list", "--project", str(project), "--json"]) == 0
-    (listed,) = json.loads(capsys.readouterr().out)
-    assert listed["name"] == "1.2/cave" and listed["loaded"] is False
+    listed = {item["name"]: item for item in json.loads(capsys.readouterr().out)}
+    assert sorted(listed) == ["1.2/cave", "1.2/cave2"]
+    assert listed["1.2/cave"]["loaded"] is False
 
     def run_file(project: Path, path: Path, **_: Any) -> saves.Outcome:
         return saves.Outcome("1.2/cave", "tests/saves/1.2/cave.json", "lost", "loads but loses data:", ["coin_1.collected is gone (was true)"])

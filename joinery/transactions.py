@@ -856,6 +856,34 @@ class FileTransaction:
             pass
 
 
+def stage_change[T](
+    project: Path, summary: str, by: str, write: Callable[[Path], T]
+) -> tuple[FileTransaction, T]:
+    """A change a command makes (``write`` into the stage it is given), waiting for the
+    user's review and kept for it after the command ends; nothing in the project moves
+    until it is accepted. Returns the transaction and what ``write`` returned."""
+    tx = FileTransaction(project)
+    tx.note_tool("joinery")
+    tx.begin(summary)
+    try:
+        made = write(tx.stage)
+        tx.review()
+        tx.hold(by)
+    except BaseException:
+        if tx.state in {"staging", "review"}:
+            tx.reject()
+        raise
+    return tx, made
+
+
+def review_line(project: Path, tx: FileTransaction) -> str:
+    """How the user accepts a change a command staged."""
+    return (
+        "Waiting for your review. Accept with: joinery transactions accept "
+        f"--project {project} --id {tx.id}"
+    )
+
+
 # --- Retention ----------------------------------------------------------------
 
 

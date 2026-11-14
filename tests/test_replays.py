@@ -12,6 +12,7 @@ import pytest
 
 from joinery import cli, playtest, replays, submission
 from joinery.runner import Result
+from joinery.transactions import list_transactions
 
 HEADER = {
     "format": "joinery-replay",
@@ -255,12 +256,60 @@ def test_cli_adds_and_lists_replays(tmp_path: Path, capsys: pytest.CaptureFixtur
     project = _project(tmp_path)
     source = _write(tmp_path / "play.replay")
     assert cli.main(["replay", "add", str(source), "--project", str(project), "--name", "walk"]) == 0
-    assert "Added tests/replays/walk.replay (2.17 s, 3 inputs, 2 checkpoints)." in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "Keep tests/replays/walk.replay: 2.17 s, 3 inputs, 2 checkpoints." in out
+    # tests/ changes only through a change the user reviews.
+    assert "Waiting for your review" in out
+    assert not (project / "tests/replays/walk.replay").exists()
+    (pending,) = [t for t in list_transactions(project) if t.state == "review"]
+    assert "tests/replays/walk.replay" in {c["path"] for c in pending.changes}
+    pending.accept()
+    assert (project / "tests/replays/walk.replay").is_file()
     assert cli.main(["replay", "list", "--project", str(project), "--json"]) == 0
     (listed,) = json.loads(capsys.readouterr().out)
     assert listed["name"] == "walk" and listed["seed"] == 42
     assert cli.main(["replay", "run", "nope", "--project", str(project)]) == 1
     assert "nope: failed: There is no tests/replays/nope.replay." in capsys.readouterr().out
+
+
+def test_rerecording_keeps_the_input_and_swaps_the_checkpoints(tmp_path: Path) -> None:
+    path = _write(tmp_path / "walk.replay")
+    fresh = [
+        {"f": 120, "check": {"hash": "ddd", "state": {"scene": "res://b.tscn"}}},
+        {"f": 60, "check": {"hash": "ccc", "state": {"scene": "res://b.tscn"}}},
+    ]
+    path.write_text(replays.rewrite(path.read_text(), fresh, "4.7 abc Linux x86_64", "now"))
+    lines = [json.loads(line) for line in path.read_text().splitlines()]
+    assert lines[0]["build"] == "4.7 abc Linux x86_64" and lines[0]["rerecorded"] == "now"
+    assert [line.get("f") for line in lines[1:-1]] == [3, 60, 90, 120]
+    assert [line["check"]["hash"] for line in lines if "check" in line] == ["ccc", "ddd"]
+    assert lines[-1]["end"]["hash"] == "ddd" and lines[-1]["end"]["check_frame"] == 120
+    again = replays.read(path)
+    assert (again.events, again.checks, again.frames) == (3, 2, 130)
+
+
+def test_rerecord_stages_a_change_for_review(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = _project(tmp_path)
+    _write(project / "tests/replays/walk.replay")
+    _write(project / "tests/replays/other.replay")
+    done: list[Path] = []
+
+    def fake(root: Path, path: Path, *, godot: Path | None = None) -> replays.Replay:
+        done.append(path)
+        path.write_text(replays.rewrite(path.read_text(), [], "new build", "now"))
+        return replays.read(path)
+
+    monkeypatch.setattr(replays, "rerecord", fake)
+    pending, again = replays.stage_rerecord(project, ["walk"])
+    assert [r.name for r in again] == ["walk"] and len(done) == 1
+    assert pending.state == "review" and pending.summary == "Re-record walk"
+    assert "tests/replays/walk.replay" in {c["path"] for c in pending.changes}
+    assert "new build" not in (project / "tests/replays/walk.replay").read_text()
+    pending.reject()
+    with pytest.raises(ValueError, match="no tests/replays/nope"):
+        replays.stage_rerecord(project, ["nope"])
 
 
 def test_playtest_seeds_the_game_and_can_record(tmp_path: Path) -> None:
