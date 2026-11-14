@@ -115,3 +115,31 @@ def test_a_mac_app_is_opened_as_an_app(tmp_path: Path) -> None:
         "--path",
         str(tmp_path),
     ]
+
+
+def test_the_addon_ships_the_files_godot_would_generate() -> None:
+    """Godot 4.7 writes a .uid beside every script and a .import beside every
+    imported file, and both belong in version control. The add-on ships them, so
+    a new project's git has nothing new after the first import.
+    """
+    from joinery.catalog import ROOT
+
+    addon = ROOT / "godot_addon/joinery"
+    scripts = [p for p in addon.rglob("*") if p.suffix in {".gd", ".gdshader"}]
+    imported = [
+        p
+        for p in addon.rglob("*")
+        if p.suffix in {".png", ".svg", ".ttf", ".otf", ".wav", ".ogg"}
+    ]
+    assert scripts and imported
+    missing = [
+        p.relative_to(addon).as_posix()
+        for p in scripts
+        if not Path(f"{p}.uid").is_file()
+    ]
+    missing += [
+        p.relative_to(addon).as_posix()
+        for p in imported
+        if not Path(f"{p}.import").is_file()
+    ]
+    assert not missing, missing
