@@ -94,3 +94,15 @@ def test_texel_rule_applies_to_world_mapped_textures(tmp_path: Path) -> None:
     assert not material_texel_problems(
         "game/hall.tscn", SCENE.format(scale=1.0), tmp_path, rules
     )
+
+
+def test_a_dark_metal_is_flagged_before_it_renders_black() -> None:
+    from joinery.bible_presets import rules_dict
+    from joinery.bible_rules import _material_problems
+
+    rules = BibleRules.model_validate(rules_dict(None)).materials
+    # The scattergun's iron: metallic 1 (glTF's default) on a dark rust colour.
+    dark = _material_problems("art/gun.glb", "Iron_Metal", 0.85, 1.0, 0.09, rules)
+    assert any("near black" in p for p in dark), dark
+    assert not _material_problems("art/gun.glb", "Iron_Metal", 0.85, 1.0, 0.5, rules)
+    assert not _material_problems("art/gun.glb", "Grip_Wood", 0.85, 0.0, 0.09, rules)

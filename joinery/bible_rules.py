@@ -134,6 +134,10 @@ class MaterialRules(_Strict):
     metallic_requires_name: str | None = None
     #: Relative luminance bounds; outside counts as pure black or white.
     albedo_luminance: tuple[float, float] | None = None
+    #: Lowest base-colour luminance for a metallic material (metallic > 0.5).
+    #: A metal's colour is what it reflects; a dark one with metallic 1 shows
+    #: almost nothing but black wherever little light is reflected.
+    metal_min_luminance: float | None = Field(default=None, ge=0, le=1)
     #: Share of albedo texture samples allowed outside albedo_luminance.
     albedo_max_outside: float = Field(default=0.01, ge=0, le=1)
     albedo_suffixes: list[str] = [
@@ -1327,6 +1331,20 @@ def _material_problems(
                 f"{path}: material {name!r} is metallic ({metallic:.2f}) but its "
                 "name does not say metal; the look keeps metallic for real metal"
             )
+    floor = rules.metal_min_luminance
+    if (
+        luminance is not None
+        and metallic is not None
+        and floor is not None
+        and metallic > 0.5
+        and luminance < floor
+    ):
+        problems.append(
+            f"{path}: material {name!r} is metallic ({metallic:.2f}) with a dark base "
+            f"colour (luminance {luminance:.3f}, the look asks at least {floor:g} for "
+            "metal); it renders near black in game. Brighten the colour (a metal's "
+            "colour is its reflectance) or set metallic 0 if it is not bare metal"
+        )
     if luminance is not None and rules.albedo_luminance is not None:
         low, high = rules.albedo_luminance
         if luminance < low or luminance > high:
@@ -1411,6 +1429,7 @@ def _glb_problems(path: str, data: bytes, rules: BibleRules) -> list[str]:
         or rules.materials.metallic is not None
         or rules.materials.metallic_requires_name is not None
         or rules.materials.albedo_luminance is not None
+        or rules.materials.metal_min_luminance is not None
     )
     wanted = (
         budget is not None
@@ -1504,6 +1523,7 @@ def _blend_wanted(path: str, rules: BibleRules) -> bool:
                 or material.metallic is not None
                 or material.metallic_requires_name is not None
                 or material.albedo_luminance is not None
+                or material.metal_min_luminance is not None
             )
         )
     )

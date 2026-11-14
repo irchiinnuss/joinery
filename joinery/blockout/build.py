@@ -166,15 +166,34 @@ def build(world: World, layout_path: str, layout_sha: str) -> str:
 
 def _build_3d(scene: _Scene, world: World, meta: list[str]) -> None:
     scene.node("Blockout", "Node3D", None, meta)
+    # Metal reflects its surroundings rather than lighting. With only the dark
+    # background colour to reflect, every metallic model (a held weapon above
+    # all) renders almost black; a neutral sky used for reflections only keeps
+    # the dark backdrop and gives metal something to show.
+    sky_material = scene.resource(
+        "ProceduralSkyMaterial",
+        "reflection-sky",
+        [
+            "sky_top_color = Color(0.62, 0.64, 0.68, 1)",
+            "sky_horizon_color = Color(0.7, 0.7, 0.7, 1)",
+            "ground_bottom_color = Color(0.24, 0.23, 0.22, 1)",
+            "ground_horizon_color = Color(0.5, 0.5, 0.5, 1)",
+        ],
+    )
+    sky = scene.resource(
+        "Sky", "reflection", [f'sky_material = SubResource("{sky_material}")']
+    )
     env = scene.resource(
         "Environment",
         "env",
         [
             "background_mode = 1",
             "background_color = Color(0.16, 0.17, 0.19, 1)",
+            f'sky = SubResource("{sky}")',
             "ambient_light_source = 2",
             "ambient_light_color = Color(0.72, 0.74, 0.78, 1)",
             "ambient_light_energy = 0.55",
+            "reflected_light_source = 2",
         ],
     )
     scene.node(

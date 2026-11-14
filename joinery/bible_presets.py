@@ -79,6 +79,7 @@ DEFAULT_RULES: dict[str, Any] = {
         "metallic": [0.0, 1.0],
         "metallic_requires_name": "(?i)metal",
         "albedo_luminance": [0.03, 0.92],
+        "metal_min_luminance": 0.18,
         "albedo_max_outside": 0.01,
         "albedo_suffixes": [
             "_albedo",
@@ -174,6 +175,7 @@ _LAYOUT: tuple[tuple[str, tuple[tuple[str, str], ...], tuple[str, ...]], ...] = 
                 "metallic > 0.05 only on materials named like this",
             ),
             ("albedo_luminance", "relative luminance; outside = pure black or white"),
+            ("metal_min_luminance", "metallic materials at least this bright"),
             ("albedo_max_outside", "share of albedo texture samples allowed outside"),
             ("albedo_suffixes", "image stems that count as albedo textures"),
         ),

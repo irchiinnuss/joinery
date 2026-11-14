@@ -202,6 +202,15 @@ def test_the_same_layout_builds_the_same_bytes_in_3d_and_2d(tmp_path: Path) -> N
         }
 
 
+def test_the_3d_scene_gives_metal_something_to_reflect(tmp_path: Path) -> None:
+    """A dark background as the only reflection made held metal models render black."""
+    built = _make(_layout("keep"), "third-person-3d", tmp_path)
+    scene = built.files["game/keep_blockout.tscn"].decode()
+    assert '[sub_resource type="ProceduralSkyMaterial"' in scene
+    assert "reflected_light_source = 2" in scene
+    assert "background_mode = 1" in scene  # the backdrop itself stays a colour
+
+
 def test_the_scene_names_every_piece_and_records_its_layout(tmp_path: Path) -> None:
     built = _make(_layout("keep"), "third-person-3d", tmp_path)
     scene = built.files["game/keep_blockout.tscn"].decode()
