@@ -158,15 +158,12 @@ func _run() -> void:
 	var older_row: Node = page.call("row_for", OLDER)
 	_check(latest_row != null and older_row != null, "Both chats are listed")
 	_check(
-		(
-			(latest_row.get("dot") as Control).visible
-			and not (older_row.get("dot") as Control).visible
-		),
-		"The open chat has the accent dot, no 'Open' word"
+		latest_row.get("current") and not older_row.get("current"),
+		"The open chat is highlighted, no 'Open' word"
 	)
 	_check(older_row.get("caption").text == "3d", older_row.get("caption").text)
-	var tip: String = older_row.get("_open").tooltip_text
-	_check(tip.contains("Claude · 3 days ago"), "Who answered is in the tooltip: " + tip)
+	var told: String = older_row.get("_open").accessibility_description
+	_check(told == "Claude · 3 days ago", "Who answered is told: " + told)
 	var filled := 0
 	for button: Node in page.find_children("*", "Button", true, false):
 		filled += int((button as Button).theme_type_variation == "JoineryPrimaryButton")

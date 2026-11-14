@@ -976,8 +976,9 @@ func _saved_chats(light: bool, width: int) -> void:
 	_check(sessions.call("current_id") == "20261110-090000-aaaaaa", "The latest chat is back")
 	await _shot("chat-restored", light, width, chat)
 	sessions.call("open_list")
-	await _shot("chats", light, width, chat)
 	var page: Node = sessions.get("page")
+	page.call("row_for", "20261110-090000-aaaaaa").call("set_pointed", true)  # Open, pointed at.
+	await _shot("chats", light, width, chat)
 	var row: Node = page.call("row_for", "20261107-090000-bbbbbb")
 	row.call("begin_rename")
 	await _shot("chats-rename", light, width, chat)
