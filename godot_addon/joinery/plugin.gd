@@ -499,6 +499,8 @@ func rail_button(id: String) -> Control:
 
 
 func _open_rail_page(id: String) -> void:
+	if _rail != null and _rail.selected() == id:  # Pressed again: back to the scene.
+		return _on_tool_selected("godot")
 	_page = id
 	get_editor_interface().set_main_screen_editor(SCREEN)
 	_show_page()

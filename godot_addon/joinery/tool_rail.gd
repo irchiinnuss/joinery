@@ -198,6 +198,8 @@ func in_scroll() -> ScrollContainer:
 
 func _ready() -> void:
 	size_flags_vertical = Control.SIZE_EXPAND_FILL
+	# A second click on the current page reaches tool_selected, so the page can close.
+	_group.allow_unpress = true
 	UI_THEME.watch(self)
 	_tools = VBoxContainer.new()
 	_tools.theme_type_variation = "JoineryTight"
@@ -325,6 +327,11 @@ func update_tools(tools: Array, assets: Array) -> void:
 	select_tool(_selected)
 
 
+## The current item's id (see select_tool).
+func selected() -> String:
+	return _selected
+
+
 ## Mark [param tool] as the current item ("godot", "" for Assets, an app or a page id).
 func select_tool(tool: String) -> void:
 	_selected = tool
@@ -428,6 +435,9 @@ func _add_tool(id: String, title: String, source: Dictionary, parent: Control = 
 			# A click opens the app; its card has done its job until the pointer comes back.
 			_card_dismissed = id
 			_hide_card_now()
+			# Only a page closes on a second click; anything else stays chosen.
+			if not button.button_pressed and not _page_ids.has(id):
+				button.set_pressed_no_signal(true)
 			tool_selected.emit(id)
 	)
 	button.mouse_entered.connect(

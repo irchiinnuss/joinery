@@ -13,6 +13,7 @@ static func screens(suite: Variant) -> void:
 	await sidebar_title(suite)
 	await sidebar_toggle(suite)
 	await files_stacked(suite)
+	await page_toggle(suite)
 	var plugin: EditorPlugin = suite._plugin
 	var panels: Node = plugin.get("_panels")
 	var rail: Control = plugin.get("_rail")
@@ -228,6 +229,33 @@ static func files_stacked(suite: Variant) -> void:
 ## The whole sidebar hides and shows: from the Joinery menu's command, its shortcut and the
 ## rail's Journeyman icon, which stays on screen while the sidebar is hidden. The viewport takes
 ## the sidebar's width, and the choice is an editor setting.
+## Joinery's pages (Timeline, Share) open from the rail and close on a second click.
+static func page_toggle(suite: Variant) -> void:
+	var plugin: EditorPlugin = suite._plugin
+	var rail: Control = plugin.get("_rail")
+	var pages: Dictionary = plugin.get("_pages")
+	var buttons: Dictionary = rail.get("_buttons")
+	suite._check(not pages.is_empty(), "Joinery's pages are on the rail")
+	for id: String in pages:
+		var button: Button = buttons.get(id)
+		if button == null:
+			suite._check(false, "%s has a rail icon" % id)
+			continue
+		for expected: String in [id, "godot"]:
+			# A click on a toggle button: flip it, then press.
+			button.set_pressed_no_signal(not button.button_pressed)
+			button.pressed.emit()
+			await suite.get_tree().create_timer(0.3).timeout
+			suite._check(
+				rail.call("selected") == expected,
+				(
+					"%s %s"
+					% [id, "opens from the rail" if expected == id else "closes on a second click"]
+				)
+			)
+		suite._check(not button.button_pressed, "%s's icon shows it is closed" % id)
+
+
 static func sidebar_toggle(suite: Variant) -> void:
 	var plugin: EditorPlugin = suite._plugin
 	var toggle: Node = plugin.get_node_or_null("JoinerySidebarToggle")
