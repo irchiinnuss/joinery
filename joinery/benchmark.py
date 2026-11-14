@@ -253,9 +253,11 @@ class LiveDriver:
     async def __call__(self, project: Path, case: Case, pin: Pin) -> None:
         if not pin.agent:
             raise ValueError("Pin an agent (--agent) for a live run.")
-        await headless.drive(
+        outcome = await headless.drive(
             self.command(project, pin),
             [headless.prompt_message(case.request, pin)],
             accept=True,
             timeout=self.timeout,
         )
+        if outcome.error.startswith("Stopped:"):
+            raise TimeoutError(outcome.error)

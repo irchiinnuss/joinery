@@ -281,6 +281,9 @@ async def _serve(
         emit(connect_errors.event(agent_id, agent_name, exc))
         return 1
     gateway.keep_reviews = keep_reviews
+    # A headless run never loses applied work: a change it stopped in waits too.
+    gateway.keeps_unfinished = keep_reviews
+    gateway.on_kept = emit
     editor_calls: dict[str, asyncio.Future[dict[str, Any]]] = {}
     gateway.progress = lambda text: emit({"kind": "progress", "text": text})
     controller = TurnController(gateway, emit, agent_id)

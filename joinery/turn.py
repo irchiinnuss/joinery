@@ -205,6 +205,11 @@ class SubmitResult:
 #: The request checklist (``submit_for_review``'s done): items, characters each.
 DONE_ITEMS = 8
 DONE_CHARS = 120
+#: The note on a change a headless run kept after the agent failed mid-turn.
+CRASH_NOTE = (
+    "The agent stopped with an error before this change was finished; Joinery's "
+    "import, lint and test checks did not run on it. Look it over before accepting."
+)
 #: What the agent is told to do next, by outcome.
 NEXT_FIX = "Fix each problem, then call submit_for_review again."
 NEXT_STOP = (
@@ -1599,6 +1604,14 @@ class TurnController:
         if self.review_open:
             # The change on screen came from an earlier turn; it stays.
             self._to(TurnState.IN_REVIEW, reason)
+            return
+        keep = getattr(self.gateway, "keep_unfinished", None)
+        kept = keep(CRASH_NOTE) if reason == "failed" and callable(keep) else ""
+        if isinstance(kept, str) and kept:
+            # A headless run keeps what was applied for review (never a policy stop).
+            self.live_scenes.clear()
+            self.live_edits = 0
+            self._to(TurnState.IDLE, reason)
             return
         await self._drop(reason)
 

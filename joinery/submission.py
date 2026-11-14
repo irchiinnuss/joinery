@@ -188,6 +188,41 @@ class Validation:
     ran: list[str] = field(default_factory=list)
 
 
+def keep_refusal(
+    project: Path, tx: FileTransaction, changes: list[dict[str, str]]
+) -> str:
+    """Why an unfinished change may not wait for review ("" when it may): the
+    checks no agent fix or user click gets around. Project policy files, asset
+    work before the art bible is approved, an asset without a provenance entry
+    and a denied dependency. The rest (import, lint, tests, the reviewer) are left
+    for the user, and the kept change says they did not run."""
+    protected = [c["path"] for c in changes if Path(c["path"]).parts[0] in PROTECTED]
+    if protected:
+        return "it changes project policy files (" + ", ".join(protected[:3]) + ")."
+    assets = [
+        c["path"]
+        for c in changes
+        if (
+            Path(c["path"]).parts[0] in {"art", "audio"}
+            and c["path"] != "art/bible.md"
+            or Path(c["path"]).suffix.lower() in ASSET_SUFFIXES
+        )
+        and DIRECTORY not in {c["before"], c["after"]}
+    ]
+    if assets:
+        if not approved_in(project, tx.stage) and not all(
+            is_reference(p) for p in assets
+        ):
+            return "asset work needs the art bible approved first."
+        problems = check_assets(tx.stage, load_catalog())
+        if problems:
+            return "asset provenance: " + "; ".join(problems[:3])
+    problems = check_deps(tx.stage, load_denylist())
+    if problems:
+        return "dependencies: " + "; ".join(problems[:3])
+    return ""
+
+
 async def validate(
     gateway: ProjectGateway, tx: FileTransaction, live_scenes: set[str]
 ) -> Validation:

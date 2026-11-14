@@ -64,7 +64,7 @@ from joinery.rebase import Rebase, rebase, refresh_review
 from joinery.review import Render, plan, render
 from joinery.server_install import configured
 from joinery.stage_watch import StageWatch
-from joinery.submission import is_reference
+from joinery.submission import is_reference, keep_refusal
 from joinery.text_patch import apply as apply_patch
 from joinery.timing import TurnTiming
 from joinery.transactions import (
@@ -139,6 +139,7 @@ OP_APPS: dict[str, tuple[str, ...]] = {
     "edit_track": ("surge-xt",),
     # The sound kit: SuperCollider or Surge XT, by the kind of sound.
     "make_sound": (),
+    "make_sounds": (),
 }
 NATIVE_OPS = frozenset(OP_APPS)
 #: Key prefix of a read-only agent's connection on the stage, beside the staged ones.
@@ -162,6 +163,11 @@ def op_apps(tool: str, arguments: dict[str, Any]) -> tuple[str, ...]:
         apps.append(str(arguments.get("editor") or "krita"))
     elif tool == "make_sound":
         apps.append(sound_kit.app_for(arguments))
+    elif tool == "make_sounds":
+        sounds = arguments.get("sounds")
+        for sound in sounds if isinstance(sounds, list) else []:
+            if isinstance(sound, dict):
+                apps.append(sound_kit.app_for(sound))
     return tuple(dict.fromkeys(app for app in apps if app))
 
 
@@ -244,6 +250,13 @@ def result_text(result: CallToolResult) -> str:
     )
 
 
+#: The note on a change a headless run kept unfinished (it stopped or timed out).
+UNFINISHED_NOTE = (
+    "The run stopped before this change was finished; Joinery's import, lint and "
+    "test checks did not run on it. Look it over before accepting."
+)
+
+
 class ProjectGateway:
     """The project's tools for one turn's agent.
 
@@ -298,6 +311,12 @@ class ProjectGateway:
         self.keep_reviews = False
         #: Who kept them: "joinery run", or the editor restarting its chat.
         self.held_by = "joinery run"
+        #: A headless run also keeps a change it never finished (a timeout, a crash):
+        #: what was applied waits for review with a note, rather than being thrown
+        #: away (:meth:`keep_unfinished`). The editor's own chat never does.
+        self.keeps_unfinished = False
+        #: Told about each change kept that way (the chat host emits it).
+        self.on_kept: Callable[[dict[str, Any]], None] | None = None
         self.claims.register(MAIN, MAIN_TITLE)
         self.editor_context: dict[str, str] = {}
         self._lane_state()
@@ -1324,6 +1343,14 @@ class ProjectGateway:
             return nullcontext({})
         return self.timing.span(phase, name, attributes)
 
+    def search_root(self) -> Path:
+        """Where ``search_project`` looks: this change's stage while one is open (so
+        the agent finds its own edits), the project otherwise."""
+        tx = self.transaction
+        if tx is not None and tx.state == "staging" and tx.stage.is_dir():
+            return tx.stage
+        return self.project
+
     def import_current(self, tx: FileTransaction) -> bool:
         """Godot already imported this exact stage cleanly (after a native export)."""
         if self._imported is None or self._imported[0] != tx.id:
@@ -1526,9 +1553,53 @@ class ProjectGateway:
         self.transaction = None
         self.claims.release(self.task_id)
 
+    def keep_unfinished(self, note: str) -> str:
+        """Keep the change this run left staged, unfinished and unchecked, waiting for
+        the user's review with ``note`` (why it stopped), instead of discarding it.
+
+        Only in a headless run (``keeps_unfinished``). The checks no agent can fix
+        still hold: a change touching project policy, asset work without an
+        approved art bible, an asset without provenance or a denied dependency is
+        never kept (``submission.keep_refusal``). Returns the kept change's id, ""
+        when nothing was kept.
+        """
+        tx = self.transaction
+        if not self._root.keeps_unfinished or tx is None or tx.state != "staging":
+            return ""
+        try:
+            changes = tx.diff()
+            if not changes:
+                return ""
+            refused = keep_refusal(self.project, tx, changes)
+            if refused:
+                self.progress("Not kept for review: " + refused)
+                return ""
+            tx.review_notes = [
+                *tx.review_notes,
+                {"severity": "warn", "text": note[:400], "file": ""},
+            ]
+            tx.review()
+            tx.hold(self._root.held_by)
+        except (OSError, ValueError):
+            return ""
+        self.transaction = None
+        event = {
+            "kind": "kept",
+            "transaction_id": tx.id,
+            "summary": tx.summary,
+            "note": note,
+            "changes": changes,
+            "task_id": "" if self.task_id == MAIN else self.task_id,
+        }
+        if self._root.on_kept is not None:
+            self._root.on_kept(event)
+        return tx.id
+
     async def close(self) -> None:
         await self.stop_media()
         await self._close_check()
+        if self.transaction is not None and self.transaction.state == "staging":
+            self.keep_unfinished(UNFINISHED_NOTE)
         if self.transaction is not None and self.transaction.state in {
             "staging",
             "review",
