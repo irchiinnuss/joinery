@@ -427,7 +427,8 @@ func visible_steps() -> PackedStringArray:
 	var shown := PackedStringArray()
 	for row: Node in _steps.get_children():
 		if (row as Control).visible and _steps.visible:
-			shown.append(str((row.get_child(-1) as Label).text))
+			# Its dot, then its words (the live one may also carry the clock).
+			shown.append(str((row.get_child(1) as Label).text))
 	return shown
 
 
@@ -826,12 +827,28 @@ func _place_outcome() -> void:
 
 ## The assistant's side shows only when something in it does; the status line likewise.
 func _sync_activity() -> void:
+	_place_timer()
 	var timed := _summary != null and _summary.visible
+	var clock := _timer.visible and _timer.get_parent() == _status
 	_done_mark.visible = _fold.visible or (timed and state in ["accepted", "done"])
-	_joiner.visible = _apps.visible and (timed or _timer.visible or _fold.visible)
-	_status.visible = _sending.visible or _apps.visible or _timer.visible or timed or _fold.visible
+	_joiner.visible = _apps.visible and (timed or clock or _fold.visible)
+	_status.visible = _sending.visible or _apps.visible or clock or timed or _fold.visible
 	_progress.visible = _any_visible(_progress)
 	_activity.visible = _any_visible(_column)
+
+
+## While Journeyman works, the clock rides at the end of the live step's line; before the first
+## step, and once the steps fold, it is back on the status line.
+func _place_timer() -> void:
+	var live := _steps.get_child(-1) as Control if _steps.get_child_count() > 0 else null
+	var inline := live != null and _steps.visible and not _fold.visible
+	var target: Node = live if inline else _status
+	if _timer.get_parent() == target:
+		return
+	_timer.get_parent().remove_child(_timer)
+	target.add_child(_timer)
+	if target == _status:
+		_status.move_child(_timer, _fold.get_index())
 
 
 static func _any_visible(parent: Node) -> bool:
