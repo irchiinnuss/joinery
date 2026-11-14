@@ -528,6 +528,12 @@ func _run() -> void:
 		chat._header._name.text.is_empty() and not chat._header._dot.visible,
 		"A healthy header shows no name and no dot"
 	)
+	var title: Label = chat._header.title
+	_check(
+		title.text == "Journeyman" and title.theme_type_variation == "JoineryTitle",
+		"The header's title says Journeyman in the heading style"
+	)
+	_check(title.get_index() == 0, "The title leads the header row")
 	_check(
 		chat._prompt.placeholder_text == "Ask Journeyman, or / for commands",
 		"The persona is Journeyman, and / opens the commands"

@@ -1,8 +1,9 @@
 @tool
 extends VBoxContainer
-## The sidebar's top. When all is well it holds only the settings menu on the right: no name,
-## no dot. It says "Connecting…" with the activity dots while Journeyman connects, and a red
-## dot with "Not connected" after a failure. When Journeyman is not reachable a banner offers
+## The sidebar's top. When all is well it holds only the "Journeyman" title on the left (the
+## app's heading style, JoineryTitle) and the icon buttons on the right: no status, no dot.
+## It says "Connecting…" with the activity dots while Journeyman connects, and a red dot with
+## "Not connected" after a failure. When Journeyman is not reachable a banner offers
 ## the one action that fixes it, in a danger-tinted banner. First-run setup (no agent yet) is a
 ## step, not a failure: the empty chat's blankslate offers Connect then, and the header is quiet.
 ## The banner keeps SPACE.5 above and below, like other sections.
@@ -40,6 +41,8 @@ const FIXES := {
 
 ## The header row; the settings page adds its menu button here.
 var row: HBoxContainer
+## The sidebar's name at the row's left, in the heading style.
+var title: Label
 ## The context ring beside the menu (usage_meter.gd), shown once the provider reports usage.
 var usage: USAGE_SCRIPT
 ## What Joinery or the project's apps need, below the banner (setup_notice.gd).
@@ -81,6 +84,11 @@ func _init() -> void:
 	row.theme_type_variation = "JoineryRow"
 	row.set_meta("joinery_gutter", true)
 	inset.add_child(row)
+	title = UI.label("Journeyman", "JoineryTitle")
+	title.name = "Title"
+	title.accessibility_name = "Journeyman"
+	title.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(title)
 	_dot = UI.status_dot("off")
 	row.add_child(_dot)
 	_indicator = INDICATOR.new()
