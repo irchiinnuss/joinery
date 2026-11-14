@@ -80,6 +80,8 @@ FAMILIES = {
         "render_music",
         "process_audio",
         "set_surge_parameters",
+        # Several kit sounds in one call (servers/sound).
+        "make_sounds",
         # Adaptive music (servers/sound/tracks.py).
         "inspect_track",
         "compose_track",
