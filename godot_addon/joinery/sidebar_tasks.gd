@@ -29,6 +29,8 @@ extends VBoxContainer
 ## and so does a request's to-do (sidebar_todo.gd): its steps and "done when" items, Go, and each
 ## item's result.
 
+## The most of the sidebar's height the cards take before they scroll.
+const CARDS_SHARE := 0.4
 const CARD := preload("sidebar_task_card.gd")
 const DEBUG := preload("sidebar_debug.gd")
 const DESIGN := preload("sidebar_design.gd")
@@ -107,8 +109,25 @@ var _offer: Control
 static func attach(sidebar: Control, content: Control, before: Control) -> VBoxContainer:
 	var tasks: VBoxContainer = load("res://addons/joinery/sidebar_tasks.gd").new()
 	tasks.dock = sidebar
-	content.add_child(tasks)
-	content.move_child(tasks, before.get_index())
+	# The cards scroll on their own once they pass a share of the sidebar, so the chat above
+	# them keeps room and still scrolls.
+	var scroll := ScrollContainer.new()
+	scroll.name = "TaskScroll"
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	# Wheel and touchpad scroll it; a bar would narrow the cards off the chat's edges.
+	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
+	scroll.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
+	content.add_child(scroll)
+	content.move_child(scroll, before.get_index())
+	tasks.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(tasks)
+	var fit := func() -> void:
+		scroll.visible = tasks.visible
+		var cap := sidebar.size.y * CARDS_SHARE
+		scroll.custom_minimum_size.y = minf(tasks.get_combined_minimum_size().y, cap)
+	tasks.minimum_size_changed.connect(fit)
+	tasks.visibility_changed.connect(fit)
+	sidebar.resized.connect(fit)
 	# Agents' cards share the chat's centred column.
 	STYLE.centered_column(tasks)
 	var composer: Object = sidebar.get("_composer")
