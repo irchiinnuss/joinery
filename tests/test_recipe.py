@@ -338,3 +338,13 @@ def test_kra_fingerprint_ignores_filter_layer_attribute_order(tmp_path: Path) ->
     found = [fingerprint(p.name, tmp_path, FakeRunner()) for p in (one, two, other)]
     assert found[0] == found[1], "the same layers fingerprinted differently"
     assert found[0] != found[2], "a changed filter setting went unnoticed"
+
+
+def test_recipe_text_keeps_the_seed() -> None:
+    from joinery.recipe import recipe_text
+
+    recipe = Recipe(
+        tool="supercollider", script="recipes/a.scd", outputs=("a.wav",), seed=7
+    )
+    assert "\nseed = 7\n" in recipe_text(recipe)
+    assert "seed" not in recipe_text(recipe.model_copy(update={"seed": None}))

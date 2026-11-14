@@ -720,3 +720,57 @@ def test_a_failed_blender_edit_leaves_the_texture_files_in_place(
             )
         )
     assert (textures / "steel_rough.png").read_bytes() == b"pixels"
+
+
+SEEDLESS_PATCH = (
+    "(\nvar def = SynthDef(\\hit, { |out = 0|\n    var sig;\n"
+    "    sig = WhiteNoise.ar(0.2);\n    Out.ar(out, sig);\n});\n"
+    "Score([[0.0, [\\d_recv, def.asBytes]]]).recordNRT("
+    'outputFilePath: "audio/sfx/hit.wav", duration: 0.1, action: { 0.exit });\n)\n'
+)
+
+
+@pytest.mark.parametrize("given", [None, 1234])
+def test_supercollider_patch_is_seeded_and_the_recipe_records_the_seed(
+    stage: Path, monkeypatch: pytest.MonkeyPatch, given: int | None
+) -> None:
+    from joinery.tools.supercollider import derived_seed
+
+    record = AsyncMock(return_value={"status": "staged"})
+    monkeypatch.setattr(authoring, "_record", record)
+    monkeypatch.setattr(
+        authoring, "run_offline", AsyncMock(return_value=Result(True, "", "", 0.01))
+    )
+    source = "audio/sources/hit.scd"
+    asyncio.run(
+        authoring.edit_document(
+            stage,
+            "supercollider",
+            source,
+            SEEDLESS_PATCH,
+            ["audio/sfx/hit.wav"],
+            seed=given,
+        )
+    )
+    recipe: Recipe = record.await_args.args[1]
+    seed = derived_seed(source) if given is None else given
+    assert recipe.seed == seed
+    line = f"RandID.ir(0); RandSeed.ir(1, {seed});"
+    # The saved source and the replayed script both carry it.
+    assert line in (stage / source).read_text()
+    script = (stage / recipe.script).read_text()
+    assert line in script and f"thisThread.randSeed = {seed};" in script
+
+
+def test_only_supercollider_takes_a_seed(stage: Path) -> None:
+    with pytest.raises(ValueError, match="takes no seed"):
+        asyncio.run(
+            authoring.edit_document(
+                stage,
+                "surge-xt",
+                "audio/sources/c.json",
+                "{}",
+                ["audio/sfx/c.wav"],
+                seed=3,
+            )
+        )

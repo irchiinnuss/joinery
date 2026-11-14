@@ -198,6 +198,21 @@ class ToolModule:
         """
         return False
 
+    def seed_code(self, code: str, source: str, seed: int | None) -> str:
+        """The code with its random sources seeded, for tools that seed them.
+
+        A tool whose renders would otherwise differ run to run (SuperCollider)
+        fixes its generators here, so the render is byte-identical on replay.
+        Others take the code as it is and refuse a seed.
+        """
+        if seed is not None:
+            raise ValueError(f"{self.name} takes no seed.")
+        return code
+
+    def recipe_seed(self, script: str) -> int | None:
+        """The seed a recipe script starts its random sources from, if any."""
+        return None
+
     def script_inputs(self, code: str) -> tuple[str, ...]:
         """Project files the code reads, recorded as the recipe's sources."""
         return ()

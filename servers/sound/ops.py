@@ -161,6 +161,7 @@ async def _run(
         outputs=tuple(outputs),
         sources=sources,
         note=note,
+        seed=module.recipe_seed(script_text),
     )
     result = await authoring.run_offline(
         module.replay_argv(recipe.script), project, RENDER_TIMEOUT

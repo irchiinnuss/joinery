@@ -24,6 +24,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from joinery.tools.supercollider import seed_line
+
 Tool = Literal["supercollider", "surge-xt"]
 SURFACES = ("default", "grass", "stone", "wood", "metal", "sand", "water")
 #: One-shot sounds: kind -> (what it is, the tool that makes it).
@@ -441,7 +443,7 @@ def _supercollider(
         "(\n"
         f"var definition = SynthDef(\\{definition}, {{ |out = 0|\n"
         "    var sig, env;\n"
-        f"    RandSeed.ir(1, {seed});\n"
+        f"    {seed_line(seed)}\n"
         + "".join("    " + line + "\n" for line in body.strip().splitlines())
         + "    Out.ar(out, Limiter.ar(LeakDC.ar(sig) * 0.5, 0.95, 0.002));\n"
         "});\n"

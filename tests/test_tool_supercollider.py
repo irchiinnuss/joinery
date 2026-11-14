@@ -15,6 +15,9 @@ from joinery.tools.supercollider import (
     REPLAY_TIMEOUT,
     RUN_ERROR,
     TIMEOUT,
+    derived_seed,
+    patch_seed,
+    seed_patch,
 )
 from joinery.workers import AUDITION_DIR, supercollider_worker
 
@@ -142,3 +145,53 @@ def test_missing_folders_are_not_mounted_over(
     args = _collider(tmp_path, monkeypatch, "tapes")
     mounts = [args[i + 1] for i, a in enumerate(args) if a == "--mount"]
     assert mounts == ["type=tmpfs,destination=/opt/collider/tapes,tmpfs-mode=0555"]
+
+
+SEEDLESS = (
+    "(\nvar d = SynthDef(\\n, { |out = 0, amp = 0.1|\n"
+    "    var sig, env; // a brace in a comment {\n"
+    "    var x = [1, 2];\n"
+    '    sig = WhiteNoise.ar(amp) * "}".size;\n'
+    "    Out.ar(out, sig);\n});\n"
+    "SynthDef(\\b, { Out.ar(0, Dust.ar(3)) });\n"
+    "SynthDef(\\c, { arg out; RandSeed.ir(1, 3); Out.ar(out, PinkNoise.ar) });\n"
+    "/* SynthDef(\\z, { WhiteNoise.ar }) */\n"
+    "0.exit;\n)\n"
+)
+
+
+def test_seed_goes_after_the_declarations_of_every_unseeded_synthdef() -> None:
+    seeded = seed_patch(SEEDLESS, 42)
+    line = "RandID.ir(0); RandSeed.ir(1, 42);"
+    assert "    var x = [1, 2];\n    " + line + "\n    sig = " in seeded
+    assert "SynthDef(\\b, { " + line + " Out.ar" in seeded
+    # A SynthDef with its own seed, and one in a comment, are left alone.
+    assert "{ arg out; RandSeed.ir(1, 3);" in seeded
+    assert "/* SynthDef(\\z, { WhiteNoise.ar }) */" in seeded
+    assert seeded.count(line) == 2
+    # Seeding twice changes nothing.
+    assert seed_patch(seeded, 42) == seeded
+
+
+def test_seed_code_prefers_given_then_own_then_derived() -> None:
+    patch = "SynthDef(\\a, { Out.ar(0, WhiteNoise.ar) });\n0.exit;\n"
+    assert patch_seed(SC.seed_code(patch, "audio/a.scd", 9)) == 9
+    derived = SC.seed_code(patch, "audio/a.scd", None)
+    assert patch_seed(derived) == derived_seed("audio/a.scd")
+    own = "SynthDef(\\a, { RandSeed.ir(1, 77); Out.ar(0, WhiteNoise.ar) });\n0.exit;\n"
+    assert SC.seed_code(own, "audio/a.scd", None) == own
+    with pytest.raises(ValueError, match="whole number"):
+        SC.seed_code(patch, "audio/a.scd", -1)
+
+
+def test_a_seeded_script_renders_the_same_bytes_and_records_its_seed() -> None:
+    patch = SC.seed_code(
+        "SynthDef(\\a, { Out.ar(0, WhiteNoise.ar) });\n0.exit;\n", "audio/a.scd", 5
+    )
+    script = SC.script("audio/a.scd", "", patch, ["audio/a.wav"])
+    assert "thisThread.randSeed = 5;" in script
+    assert SC.recipe_seed(script) == 5
+    assert not SC.renders_vary(script)
+    # An old unseeded patch still renders by sound (the snd: fallback).
+    old = SC.script("audio/a.scd", "", "WhiteNoise.ar; 0.exit;", ["audio/a.wav"])
+    assert SC.renders_vary(old) and SC.recipe_seed(old) is None

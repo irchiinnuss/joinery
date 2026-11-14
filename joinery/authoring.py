@@ -187,17 +187,21 @@ async def edit_document(
     keep_macro_shape_keys: bool | None = None,
     shape_keys: blender_export.ExportShapeKeys | None = None,
     inputs: tuple[str, ...] = (),
+    seed: int | None = None,
 ) -> dict[str, Any]:
     """Apply `code` to a native document, export it and record the recipe.
 
     `inputs` are further project files the code reads (a painted map), listed
     as recipe sources. For Blender, `shape_keys` chooses the GLB's morph
     targets and `keep_macro_shape_keys` keeps MPFB2's body-shape keys as morph
-    targets; with neither, the model keeps its recorded choice.
+    targets; with neither, the model keeps its recorded choice. `seed` fixes a
+    SuperCollider patch's random sources (derived from the source when left
+    out); the recipe records it.
     """
     module, source, exports, target = _checked_document(
         project, tool, source, exports, (code,)
     )
+    code = module.seed_code(code, source, seed)
     inputs = tuple(dict.fromkeys((*inputs, *module.script_inputs(code))))
     textures: tuple[str, ...] = ()
     if tool == "blender":
@@ -233,6 +237,7 @@ async def edit_document(
         outputs=(source, *exports),
         sources=tuple(dict.fromkeys(((base,) if base else ()) + inputs)),
         note=note,
+        seed=module.recipe_seed(code),
     )
     # Keep the old maps in memory: a failed or refused edit puts them back, so
     # the next edit still finds every output of the recipe it replaces.
@@ -641,6 +646,8 @@ async def _record(project: Path, recipe: Recipe, path: Path) -> dict[str, Any]:
         f"sources = {json.dumps(recipe.sources)}",
         f"note = {json.dumps(recipe.note)}",
     ]
+    if recipe.seed is not None:
+        rows.append(f"seed = {recipe.seed}")
     path.write_text("\n".join(rows) + "\n")
     await asyncio.to_thread(record, path, project, _fingerprint_runner())
     if replacements:

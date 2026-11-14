@@ -151,6 +151,9 @@ class Recipe(BaseModel):
     #: output path -> fingerprint, e.g. {"art/door.blend": "blend:ab12..."}.
     expect: dict[str, str] = Field(default_factory=dict)
     note: str = ""
+    #: The seed the script starts its random sources from (a SuperCollider
+    #: patch's RandSeed), so the render replays byte for byte.
+    seed: int | None = None
 
     @model_validator(mode="after")
     def safe_paths(self) -> Recipe:
@@ -729,6 +732,8 @@ def recipe_text(recipe: Recipe) -> str:
         )
     if recipe.note:
         lines.append(f"note = {json.dumps(recipe.note)}")
+    if recipe.seed is not None:
+        lines.append(f"seed = {recipe.seed}")
     lines.append("")
     lines.append("# Measured from the real outputs by `joinery rebuild --record`.")
     lines.append("[expect]")

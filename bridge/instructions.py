@@ -328,6 +328,10 @@ PLAYTEST_GUIDE = (
     "call sound_audit; make one with joinery-sound make_sound, several with one "
     "make_sounds call (they render side by side), then precheck once. The user starts the "
     "whole sound pass with /sound-pass. "
+    "Every SuperCollider patch is seeded: each SynthDef starts with "
+    "RandID.ir(0); RandSeed.ir(1, seed) (operate_document inserts it and the recipe "
+    "records the seed), so a rebuild gives the same bytes; pass another seed for "
+    "another take, never drop it. "
 )
 
 #: The prompt the sound-designer role starts from: ``{level}``, ``{focus}``, ``{making}``.
