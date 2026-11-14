@@ -108,6 +108,9 @@ SOUND_AUDIT = "sound_audit"
 #: stages a change like any write, so only the lead and workers may.
 TIDY_CHECK = "tidy_check"
 TIDY_REMOVE = "tidy_remove"
+#: Re-record a kept replay into the change (its input, the level as changed): a staged
+#: write like any other, so only the lead and workers may.
+RERECORD_REPLAY = "rerecord_replay"
 ROLE_ONLY = frozenset({REVIEW_REPORT, DIAGNOSIS_REPORT, REPRODUCE, DESIGN_REPORT})
 #: A request's to-do, shown to the user before the work (ADR 0060): the lead's alone.
 PROPOSE_TODO = "propose_todo"
@@ -252,6 +255,7 @@ REGISTRY_TOOLS: tuple[str, ...] = (
     "sound_audit",
     TIDY_CHECK,
     TIDY_REMOVE,
+    RERECORD_REPLAY,
     "report_review",
     "report_design",
     "report_diagnosis",

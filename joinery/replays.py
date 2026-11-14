@@ -545,6 +545,48 @@ def stage_rerecord(
     return stage_change(project, f"Re-record {words}", "joinery replay", write)
 
 
+#: What the agent hears after re-recording into its change.
+NEXT_RERECORDED = (
+    "Re-recorded into your change. Call submit_for_review; tell the user which replays "
+    "you re-recorded and why, so they can check the new recording with the change."
+)
+
+
+async def rerecord_tool(gateway: Any, params: dict[str, Any]) -> dict[str, Any]:
+    """The agents' ``rerecord_replay``: re-record kept replays into the turn's change
+    (the stage), so the new recordings are reviewed with the change that needs them."""
+    import asyncio
+
+    names = params.get("names") or []
+    if not isinstance(names, list) or any(
+        not isinstance(n, str) or not 1 <= len(n) <= 80 for n in names
+    ):
+        raise ValueError("names is a list of replay names in tests/replays/.")
+    if gateway.turn is not None:
+        gateway.turn.admit_mutation()
+    async with gateway.call_lock:
+        tx = gateway.staging()
+        paths = project_replays(tx.stage)
+        wanted = {n.removesuffix(SUFFIX) for n in names}
+        missing = sorted(wanted - {p.stem for p in paths})
+        if missing:
+            raise ValueError(f"There is no tests/replays/{missing[0]}{SUFFIX}.")
+        paths = [p for p in paths if not wanted or p.stem in wanted]
+        if not paths:
+            raise ValueError("There are no replays in tests/replays/ to re-record.")
+        tx.note_tool("joinery")
+        again = [await asyncio.to_thread(rerecord, tx.stage, p) for p in paths]
+        if gateway.claims.contended():
+            gateway.claim_stage(strict=True)
+    return {
+        "status": "staged",
+        "rerecorded": [
+            {"name": r.name, "seconds": r.seconds, "checkpoints": r.checks} for r in again
+        ],
+        "next": NEXT_RERECORDED,
+    }
+
+
 # --- The staged-change check -----------------------------------------------------------
 
 OfflineRun = Callable[[list[str], Path, int], Awaitable[Result]]
@@ -729,7 +771,8 @@ def problems_text(outcomes: list[Outcome]) -> str:
     return (
         "A recorded play session no longer plays the same: "
         + " ".join(lines)
-        + " If the change is meant to alter this, say so; the user can record the replay again."
+        + " If the change is meant to alter this, re-record it with rerecord_replay and"
+        " say so; the user reviews the new recording with the change."
     )
 
 

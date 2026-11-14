@@ -461,6 +461,18 @@ def make_server(socket: Path, role: str | None = None) -> MCPServer[Any]:
 
     @server.tool()
     @tool_errors
+    async def rerecord_replay(
+        names: Annotated[
+            list[Annotated[str, Field(min_length=1, max_length=80)]],
+            Field(max_length=20),
+        ]
+        | None = None,
+    ) -> dict[str, Any]:
+        """Only when your change is meant to alter what a kept replay (tests/replays/) sees, and the submit's replay check says it no longer plays the same: play each named replay's recorded input (default: all) on the game as your change makes it, and keep its new checkpoints in your change. Refused when the replay then hits errors. Say in your reply which replays you re-recorded and why; the user reviews the new recordings with the change. Never re-record to hide a regression."""
+        return await rpc(socket, "rerecord_replay", {"names": names or []})
+
+    @server.tool()
+    @tool_errors
     async def report_review(notes: list[ReviewNoteArgument]) -> dict[str, Any]:
         """Reviewer agents only: report your review of the submitted change, once, then end your turn. notes: up to 12 findings, most important first, each {severity, text, file?, rule?}. severity 'block': the change is wrong and the author must fix it (breaks the request, the art bible, the game brief or the game); 'warn': a real risk the user should decide on before the change is kept (it can hold an automatic accept); 'info': a note shown with the change that never holds it (style, polish, things not made yet). rule: what a block or warn is about: request, art_bible, brief, broken (the game), work_lost, or other. An empty list means nothing to note."""
         return await rpc(

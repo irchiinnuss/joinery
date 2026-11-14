@@ -312,6 +312,51 @@ def test_rerecord_stages_a_change_for_review(
         replays.stage_rerecord(project, ["nope"])
 
 
+def test_journeyman_rerecords_into_its_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from joinery.gateway import ProjectGateway
+    from joinery.gateway_rpc import GatewayRPC, rpc
+    from tests.test_crew import FakeConnection
+
+    project = _project(tmp_path)
+    _write(project / "tests/replays/walk.replay")
+    monkeypatch.setattr("joinery.gateway.configured", lambda _: ([], []))
+    monkeypatch.setattr("joinery.gateway.MCPConnection", FakeConnection)
+
+    def fake(root: Path, path: Path, *, godot: Path | None = None) -> replays.Replay:
+        path.write_text(replays.rewrite(path.read_text(), [], "new build", "now"))
+        return replays.read(path)
+
+    monkeypatch.setattr(replays, "rerecord", fake)
+
+    async def go() -> None:
+        gateway = ProjectGateway(project)
+        lead = GatewayRPC(gateway)
+        reviewer = GatewayRPC(gateway, role="reviewer")
+        await lead.start()
+        await reviewer.start()
+        try:
+            with pytest.raises(RuntimeError):
+                await rpc(reviewer.path, "rerecord_replay", {"names": []})
+            with pytest.raises(RuntimeError, match="no tests/replays/nope"):
+                await rpc(lead.path, "rerecord_replay", {"names": ["nope"]})
+            data = await rpc(lead.path, "rerecord_replay", {"names": ["walk"]})
+            assert data["status"] == "staged"
+            assert data["rerecorded"][0]["name"] == "walk"
+            assert "submit_for_review" in data["next"]
+            tx = gateway.transaction
+            assert tx is not None
+            assert "new build" in (tx.stage / "tests/replays/walk.replay").read_text()
+            assert "new build" not in (project / "tests/replays/walk.replay").read_text()
+        finally:
+            await reviewer.close()
+            await lead.close()
+            await gateway.close()
+
+    asyncio.run(go())
+
+
 def test_playtest_seeds_the_game_and_can_record(tmp_path: Path) -> None:
     options = playtest.Options(project=tmp_path, seed=99, record=True)
     args = playtest._bot_args(options, tmp_path)
