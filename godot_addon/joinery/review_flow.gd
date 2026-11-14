@@ -217,7 +217,7 @@ func _on_file_decision(event: Dictionary) -> void:
 	if card is Object:
 		(card as Object).set("transaction_id", id)
 		(card as Object).set("undo_live", undo)
-		(card as Object).call("set_outcome", "auto", str(event.get("message", AUTO_ACCEPTED)))
+		(card as Object).call("set_outcome", "auto", auto_text(event))
 	var paths := PackedStringArray()
 	for change: Variant in event.get("changes", []):
 		paths.append(str((change as Dictionary).get("path", "")))
@@ -225,6 +225,15 @@ func _on_file_decision(event: Dictionary) -> void:
 		_plugin.call("_on_review_row_applied", id, paths, event.get("changes", []))
 	if dock is Object and (dock as Object).has_method("refresh_revertible"):
 		(dock as Object).call("refresh_revertible")
+
+
+## The kept change's outcome line, with what the reviewer noted and a routine brief edit under
+## it, one per line (ADR 0085): nothing held the change, but the user still sees them.
+static func auto_text(event: Dictionary) -> String:
+	var lines := PackedStringArray([str(event.get("message", AUTO_ACCEPTED))])
+	for note: Variant in event.get("notes", []):
+		lines.append(str(note))
+	return "\n".join(lines)
 
 
 ## A change with live edits that Joinery said may be kept: accept its files the way the Accept

@@ -291,6 +291,8 @@ func _init(text := "", context: Array = []) -> void:
 	_outcome.add_child(_outcome_icon)
 	_outcome_text = UI.label("", "JoineryCaption")
 	_outcome_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# A kept change's notes sit under its line; they wrap in a narrow sidebar.
+	_outcome_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_outcome.add_child(_outcome_text)
 	_revert = UI.quiet("Revert")
 	_revert.accessibility_name = "Revert this accepted change"

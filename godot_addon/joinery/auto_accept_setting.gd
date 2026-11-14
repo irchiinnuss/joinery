@@ -3,17 +3,26 @@ extends VBoxContainer
 ## The "Accept changes automatically" switch in Settings → Agent (ADR 0085): on, a change that
 ## passes every check with nothing to say is kept without asking, and its card offers Undo
 ## (`[agents] auto_accept = true` in joinery.toml); off, the default, every change waits for
-## Accept. Read with `joinery auto-accept` whenever the settings page shows it; a change applies
-## at once and a failed write puts the switch back and says why.
+## Accept. Under it, while on, "Hold reviewer warnings" (`[agents] auto_accept_hold`): off, the
+## default, only the reviewer's blocking findings keep a change waiting and its warnings and notes
+## are shown with the kept change; on, its warnings keep the change waiting too. Read with
+## `joinery auto-accept` whenever the settings page shows it; a change applies at once and a
+## failed write puts the switch back and says why.
 
 const UI := preload("ui_components.gd")
 const COMMAND := preload("command_job.gd")
 const TITLE := "Accept changes automatically"
 const CAPTION := "Changes that pass every check are kept without asking. Undo stays one click."
+const HOLD_TITLE := "Hold reviewer warnings"
+const HOLD_CAPTION := (
+	"On: a change the reviewer warns about waits for you. Off: only its blocking findings "
+	+ "hold a change; warnings and notes are shown with it."
+)
 
 ## The CLI program and leading arguments, for tests; empty runs the engine's `uv run joinery`.
 var cli_prefix := PackedStringArray()
 var row: UI.SwitchRow
+var hold_row: UI.SwitchRow
 var _job: RefCounted
 var _job_kind := ""
 
@@ -32,6 +41,15 @@ func _init() -> void:
 	row.set_checking()
 	row.toggled.connect(_on_toggled)
 	add_child(row)
+	hold_row = UI.switch_row(HOLD_TITLE, "", false)
+	hold_row.tooltip_text = HOLD_CAPTION
+	hold_row.switch_button.accessibility_name = HOLD_TITLE
+	hold_row.title.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
+	hold_row.title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hold_row.toggled.connect(_on_hold_toggled)
+	# Only while changes are kept automatically: off, every change waits anyway.
+	hold_row.hide()
+	add_child(hold_row)
 	set_process(false)
 
 
@@ -45,12 +63,12 @@ func _notification(what: int) -> void:
 
 ## Read the project's choice again.
 func refresh() -> void:
-	if _job_kind == "save":
+	if _job_kind.begins_with("save"):
 		return
 	_run("status", ["auto-accept", "--project", _project(), "--json"])
 
 
-## Show a `joinery auto-accept` answer ({enabled} or {error}).
+## Show a `joinery auto-accept` answer ({enabled, hold_on} or {error}).
 func apply_status(data: Dictionary) -> void:
 	row.set_disabled_reason("")
 	if data.has("error"):
@@ -58,12 +76,24 @@ func apply_status(data: Dictionary) -> void:
 		row.reason.show()
 		return
 	row.reason.hide()
-	row.set_on(bool(data.get("enabled", false)))
+	var on := bool(data.get("enabled", false))
+	row.set_on(on)
+	hold_row.set_on(str(data.get("hold_on", "block")) == "warn")
+	hold_row.switch_button.disabled = false
+	hold_row.visible = on
 
 
 func _on_toggled(on: bool) -> void:
 	row.switch_button.disabled = true
 	_run("save", ["auto-accept", "--project", _project(), "--json", "--set", "on" if on else "off"])
+
+
+func _on_hold_toggled(on: bool) -> void:
+	hold_row.switch_button.disabled = true
+	_run(
+		"save_hold",
+		["auto-accept", "--project", _project(), "--json", "--hold-on", "warn" if on else "block"]
+	)
 
 
 func _run(kind: String, args: Array) -> void:
@@ -95,6 +125,8 @@ func _process(_delta: float) -> void:
 		print("[Joinery] auto-accept\n", result.get("output", ""), "\n", result.get("error", ""))
 	if kind == "save" and data.has("error"):
 		row.set_on(not row.is_on())
+	elif kind == "save_hold" and data.has("error"):
+		hold_row.set_on(not hold_row.is_on())
 	apply_status(data)
 
 

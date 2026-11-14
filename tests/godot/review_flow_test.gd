@@ -276,6 +276,15 @@ func _check_auto_accepted(chat: FakeChat, plugin: FakePlugin) -> void:
 	plugin.calls.clear()
 	chat.file_decision.emit(decision.merged({"task_id": "t9"}))
 	_check(plugin.calls.is_empty(), "A task's change is its own card's")
+	var noted := decision.merged({"notes": ["Note: no texture painted yet (art/door.kra)"]})
+	_check(
+		(
+			FLOW.auto_text(noted)
+			== "Accepted automatically\nNote: no texture painted yet (art/door.kra)"
+		),
+		"What the reviewer noted shows under the kept change's line"
+	)
+	_check(FLOW.auto_text(decision) == "Accepted automatically", "No notes, the line alone")
 
 	var real: VBoxContainer = CARD.new("Make the door open")
 	root.add_child(real)
