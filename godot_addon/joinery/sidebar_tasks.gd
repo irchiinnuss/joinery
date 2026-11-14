@@ -124,7 +124,10 @@ static func attach(sidebar: Control, content: Control, before: Control) -> VBoxC
 	var fit := func() -> void:
 		scroll.visible = tasks.visible
 		var cap := sidebar.size.y * CARDS_SHARE
-		scroll.custom_minimum_size.y = minf(tasks.get_combined_minimum_size().y, cap)
+		var need := tasks.get_combined_minimum_size().y
+		scroll.custom_minimum_size.y = minf(need, cap)
+		# Clip only while scrolling: a clip cuts the cards' shadows into a dark band.
+		scroll.clip_contents = need > cap
 	tasks.minimum_size_changed.connect(fit)
 	tasks.visibility_changed.connect(fit)
 	sidebar.resized.connect(fit)
