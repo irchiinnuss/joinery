@@ -461,8 +461,9 @@ func _parallel(light: bool, width: int, chat: Control) -> void:
 	composer.get("stop").disabled = false
 
 
-## Debugging: the offer after a new error in Output with the Errors list, and the
-## "Debugging: <error>" card; then the list while fixes run on their own.
+## Debugging: the offer after a new error in Output with the Errors list; then the list while
+## fixes run on their own, the one place they show: a fix's step and timer on its row, an
+## editor message set aside, a fixed row and one whose cause is open.
 func _debugging(light: bool, width: int, chat: Control, tasks: Node, backend: Node) -> void:
 	for id: String in ["t1", "t2"]:
 		tasks.call("_remove", id)
@@ -470,47 +471,43 @@ func _debugging(light: bool, width: int, chat: Control, tasks: Node, backend: No
 	var watcher: Node = tasks.find_child("Debugging", false, false)
 	var error := "SCRIPT" + " ERROR: Invalid call. Nonexistent function 'jump' in base 'Player'."
 	watcher.call("take_output", error + "\n   at: _physics_process (res://player.gd:42)\n")
-	var jump := _error_row("g1", "Invalid call. Nonexistent function 'jump' in base 'Player'.")
-	jump.merge({"place": "player.gd:42", "count": 3, "line": error}, true)
-	var score := _error_row("g2", 'Node not found: "Score" (relative to "/root/HUD").')
-	score["place"] = "hud.gd:7"
+	var jump := _error_row("g1", "player.gd:42 — Nonexistent function 'jump'", error)
+	jump["count"] = 3
+	var score := _error_row("g2", 'hud.gd:7 — Node not found: "Score"', "Node not found")
 	watcher.call("on_errors", {"kind": "errors", "mode": "ask", "groups": [jump, score]})
 	watcher.call(
 		"on_errors", {"kind": "errors", "mode": "ask", "groups": [jump, score], "offer": jump}
 	)
 	await _shot("debugging", light, width, chat)
 	watcher.call("_drop_offer")
-	# Automatic: each new error starts a fix; a fix waits for review; one gave up.
-	jump.merge({"status": "in_review", "transaction_id": "tx1"}, true)
-	score["status"] = "fixing"
-	var health := _error_row("g3", "Invalid get index 'health' (on base: 'null instance').")
-	health.merge({"place": "enemy.gd:18", "count": 12, "status": "stopped"}, true)
-	var ammo := _error_row("g4", "Out of ammo: magazine is empty")
-	ammo.merge({"place": "gun.gd:31", "status": "ignored"}, true)
-	var groups := [score, jump, health, ammo]
+	# Automatic: one fix works on two errors; an editor message never reached an agent.
+	jump.merge({"status": "fixing", "task_id": "c1"}, true)
+	score.merge({"status": "fixing", "task_id": "c1"}, true)
+	var window := _error_row("g3", "window.cpp:2138 — !is_inside_tree()", "", "editor")
+	var health := _error_row("g4", "enemy.gd:18 — Invalid get index 'health'", "", "fixed")
+	var gpu := _error_row("g5", "lamp.gdshader:3 — Shader compilation failed", "", "explained")
+	gpu["cause"] = "The GPU driver rejects this shader; nothing in the project causes it."
+	var groups := [jump, score, window, health, gpu]
+	var fix := {"kind": "task", "task_id": "c1", "console": true, "state": "working"}
+	fix.merge({"step": "Reading the error…", "elapsed_s": 21})
+	tasks.call("on_event", fix)
 	watcher.call("on_errors", {"kind": "errors", "mode": "auto", "groups": groups})
-	var title := 'Fixing: Node not found: "Score" (relative to "/root/HUD"). (hud.gd:7)'
-	var debug := {"kind": "task", "task_id": "d1", "title": title}
-	debug.merge({"role": "debugger", "error": error, "state": "working", "origin": "debug"})
-	debug["step"] = "Reproducing the error offline…"
-	tasks.call("on_event", debug)
-	tasks.call("card", "d1").call("set_elapsed", 21)
+	var card: Control = tasks.get("errors_card")
+	card.call("_toggle_more")
+	_check(tasks.call("card", "c1") == null, "A console fix has no card of its own")
+	for found: Node in card.find_children("", "Button", true, false):
+		if (found as Button).tooltip_text == "Why":
+			(found as Button).button_pressed = true
 	await _shot("errors-auto", light, width, chat)
+	card.call("_toggle_more")
 	watcher.call("on_errors", {"kind": "errors", "mode": "ask", "groups": []})
-	tasks.call("_remove", "d1")
+	tasks.call("on_event", fix.merged({"state": "failed"}, true))
 	backend.set("_connected", false)
 
 
-func _error_row(id: String, message: String) -> Dictionary:
-	return {
-		"id": id,
-		"kind": "error",
-		"message": message,
-		"label": message,
-		"place": "",
-		"count": 1,
-		"status": "open",
-	}
+func _error_row(id: String, title: String, message := "", status := "open") -> Dictionary:
+	var words := message if not message.is_empty() else title
+	return {"id": id, "kind": "error", "message": words, "title": title, "status": status}
 
 
 ## The playtester: its card while the bot plays, then the findings with one opened.

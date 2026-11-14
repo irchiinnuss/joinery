@@ -8,7 +8,9 @@ extends VBoxContainer
 ## - the header says "3 agents working" while two or more agents work;
 ## - Stop on Journeyman's own request asks, in one quiet line, whether to stop the tasks too;
 ## - a finished task leaves one line in the transcript ("Lamp: change accepted.") and its card
-##   steps out; its change is decided in the Review tab like any other.
+##   steps out; its change is decided in the Review tab like any other;
+## - a console error fix ("console": true, ADR 0075) has no card and leaves no line: its step and
+##   timer go on its rows in the Errors list (errors_card.gd), the one place it shows.
 ##
 ## It hears the host through the chat bridge's task_event ([method on_event]).
 ##
@@ -91,6 +93,8 @@ var todo_card: Control
 var debug: Node
 var errors_card: Control
 var _cards: Dictionary = {}
+## Console error fixes followed by the Errors list: task id -> its last state.
+var _console: Dictionary = {}
 var _main_busy := false
 var _offer: Control
 
@@ -187,6 +191,9 @@ func on_event(event: Dictionary) -> void:
 	if variants != null and variants.call("take", event):
 		_sync()
 		return
+	if bool(event.get("console", false)) or _console.has(id):
+		_follow_console(id, event)
+		return
 	match str(event.get("kind", "")):
 		"task":
 			var each := card(id)
@@ -202,6 +209,17 @@ func on_event(event: Dictionary) -> void:
 			if each != null:
 				each.call("set_step", str(event.get("text", "")))
 	_sync()
+
+
+## A console error fix: the Errors list shows it; it ends without a transcript line.
+func _follow_console(id: String, event: Dictionary) -> void:
+	var before := str(_console.get(id, ""))
+	var state := str(event.get("state", before)) if event.get("kind") == "task" else before
+	_console[id] = state
+	if debug != null:
+		debug.call("track", event)
+	if ENDINGS.has(state):
+		_console.erase(id)
 
 
 ## "Run alongside": [param text] starts now as its own task.

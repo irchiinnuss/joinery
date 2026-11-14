@@ -4,7 +4,8 @@ extends Node
 ## Debug sends the error line, the Output text around it and the tail of the game's log to the
 ## chat host (chat_bridge.gd's start_debug). A debugger agent finds the cause (read-only,
 ## offline) and a worker stages the fix; the user sees a "Debugging: <error>" card
-## (sidebar_tasks.gd) and then a normal review.
+## (sidebar_tasks.gd) and then a normal review. A fix the host starts for a console error is
+## followed on its row in the Errors list instead ([method track]).
 ##
 ## Every second the editor's Output panel and the game's log are read, and what they gained goes
 ## to the host, which groups the errors (same message and place: one row with a count), drops
@@ -53,6 +54,8 @@ var _context: PackedStringArray = []
 var _output: RichTextLabel
 var _log_read := -1
 var _listening: Object
+## Fix tasks' events that came before the Errors card did.
+var _early: Array[Dictionary] = []
 
 
 static func attach(sidebar: Control, list: Object) -> Node:
@@ -268,10 +271,14 @@ func _show_card(event: Dictionary) -> void:
 		card.connect("fix_requested", _fix)
 		card.connect("ignore_requested", _ignore)
 		card.connect("review_requested", _review)
+		card.connect("stop_requested", _stop)
 		(tasks as Node).add_child(card)
 		(tasks as Node).move_child(card, 0)
 		tasks.set("errors_card", card)
 		card.call("apply", event)
+		for early: Dictionary in _early:
+			card.call("track", early)
+		_early.clear()
 		UI_MOTION.enter(card)
 	else:
 		card.call("apply", event)
@@ -284,6 +291,21 @@ func _show_card(event: Dictionary) -> void:
 			card.hide()
 	if tasks.has_method("sync_visible"):
 		tasks.call("sync_visible")
+
+
+## A console error fix's own events (sidebar_tasks.gd): its rows show its step and timer.
+## Events that come before the host's first list wait for the card.
+func track(event: Dictionary) -> void:
+	if is_instance_valid(card):
+		card.call("track", event)
+	else:
+		_early.append(event)
+
+
+func _stop(task_id: String) -> void:
+	var bridge: Object = tasks.get("bridge") if tasks != null else null
+	if bridge != null and bridge.has_method("cancel_task"):
+		bridge.call("cancel_task", task_id)
 
 
 func _fix(ids: Array) -> void:

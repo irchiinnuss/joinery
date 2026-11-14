@@ -348,9 +348,86 @@ func _debugging() -> void:
 		"\n".join(lines).contains(title + ": Cause: The GPU driver crashed."),
 		"A cause with nothing to fix is one line"
 	)
+	await _console_fix(backend, tasks, transcript, group)
 	backend.queue_free()
 	dock.queue_free()
 	await process_frame
+
+
+## A console error fix the host started: no card of its own and no transcript lines. Its row
+## in the Errors list is the one place it shows: a short title, its step and timer while it
+## works, then what it came to, with the cause behind a disclosure. An editor message the host
+## set aside says so and isn't counted.
+func _console_fix(backend: Node, tasks: Control, transcript: Object, group: Dictionary) -> void:
+	var editor := {
+		"id": "e1",
+		"kind": "error",
+		"message": 'scene/main/window.cpp:2138 - Condition "!is_inside_tree()" is true.',
+		"title": "window.cpp:2138 — !is_inside_tree()",
+		"count": 1,
+		"status": "editor",
+		"note": "Editor message, not a game error.",
+	}
+	var fixing := group.duplicate()
+	fixing.merge(
+		{"status": "fixing", "task_id": "c1", "title": "player.gd:12 — Invalid call"}, true
+	)
+	var lines_before := (transcript.get("_log") as Array).size()
+	var task := {
+		"kind": "task",
+		"task_id": "c1",
+		"title": "Fixing: Invalid call (player.gd:12)",
+		"origin": "debug",
+		"role": "debugger",
+		"console": true,
+		"state": "working",
+		"step": "Reading the error…",
+		"elapsed_s": 9,
+	}
+	# The task's first event comes before the list that links it, as from the host.
+	backend.call("_handle", task)
+	backend.call("_handle", {"kind": "errors", "mode": "auto", "groups": [fixing, editor]})
+	_check(tasks.call("card", "c1") == null, "A console fix has no card of its own")
+	var card: Control = tasks.get("errors_card")
+	_check(card != null and card.visible, "The Errors list shows it")
+	if card == null:
+		return
+	var titles: PackedStringArray = card.call("row_texts")
+	_check(titles[0] == "player.gd:12 — Invalid call", "A short title: %s" % titles)
+	var captions: PackedStringArray = card.call("caption_texts")
+	_check(
+		captions[0] == "2 times · Reading the error… · 0:09", "Its step and timer: %s" % captions
+	)
+	_check(captions[1] == "Not a game error", "An editor message says so: %s" % captions)
+	_check(str(card.get("headline").text) == "1 console error", "…and isn't counted")
+	backend.call("_handle", {"kind": "progress", "task_id": "c1", "text": "Making the fix…"})
+	captions = card.call("caption_texts")
+	_check(captions[0].begins_with("2 times · Making the fix…"), "The newest step: %s" % captions)
+	task.merge({"state": "done", "cause": "The GPU driver crashed.", "message": "Cause: …"}, true)
+	backend.call("_handle", task)
+	fixing.merge({"status": "explained", "task_id": "", "cause": "The GPU driver crashed."}, true)
+	backend.call("_handle", {"kind": "errors", "mode": "auto", "groups": [fixing, editor]})
+	_check(
+		(transcript.get("_log") as Array).size() == lines_before,
+		"A console fix leaves no transcript lines"
+	)
+	captions = card.call("caption_texts")
+	_check(captions[0] == "2 times · No fix needed", "What it came to: %s" % captions)
+	var why: Button = null
+	for found: Node in card.find_children("", "Button", true, false):
+		if (found as Button).tooltip_text == "Why" and (found as Button).is_visible_in_tree():
+			why = found as Button
+	var cause := card.find_child("Cause", true, false) as Label
+	_check(why != null and cause != null and not cause.visible, "The cause waits behind a ›")
+	if why != null and cause != null:
+		why.button_pressed = true
+		_check(cause.visible and cause.text == "The GPU driver crashed.", "› opens the cause")
+		# A new list keeps it open.
+		backend.call("_handle", {"kind": "errors", "mode": "auto", "groups": [fixing, editor]})
+		await process_frame
+		var again := card.find_child("Cause", true, false) as Label
+		_check(again != null and again.visible, "The cause stays open across lists")
+	backend.call("_handle", {"kind": "errors", "mode": "auto", "groups": []})
 
 
 func _reviewer_setting() -> void:
