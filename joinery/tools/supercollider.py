@@ -31,6 +31,11 @@ RENDER_LIMIT = 240
 REPLAY_TIMEOUT = 300
 #: A patch ends sclang itself (usually `0.exit` in recordNRT's action).
 _EXITS = re.compile(r"\bexit\b")
+#: A patch that seeds the server's or the language's random generators.
+_SEEDED = re.compile(r"\b[Rr]andSeed\b")
+#: Random sources, on the server and in the language. Broad on purpose: a
+#: false hit only means the render is compared by sound instead of bytes.
+_RANDOM = re.compile(r"Noise|Dust|Gendy|CoinGate|[Rr]and|choose|scramble|coin")
 
 NO_EXIT = (
     "JOINERY_ERROR: the patch never exits. End the render with 0.exit, for "
@@ -149,6 +154,15 @@ class SuperCollider(ToolModule):
 
     def replay_argv(self, script: str) -> list[str]:
         return ["timeout", str(REPLAY_TIMEOUT), "sclang", script]
+
+    def renders_vary(self, script: str) -> bool:
+        # scsynth seeds WhiteNoise, Dust, Rand and the rest from the clock, as
+        # does sclang for rrand or choose, so such a patch renders new grains
+        # every run. A patch that seeds them (RandSeed, randSeed) renders the
+        # same bytes and keeps the exact check; so does one with no randomness.
+        if _SEEDED.search(script):
+            return False
+        return bool(_RANDOM.search(script))
 
 
 MODULE = SuperCollider()

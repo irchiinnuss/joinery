@@ -28,6 +28,12 @@ way that is actually stable for its format:
   survives path-tracing noise but still catches a moved sun, changed colours or
   a different resolution.
 
+* `snd:`    audio whose recipe cannot render the same samples twice: a
+  SuperCollider patch with noise in it that does not seed it (the server seeds
+  from the clock). Compared by band levels over time within a tolerance
+  (`joinery.audio_signature`): new noise grains pass; a changed pitch, filter,
+  envelope, length or loudness fails. A seeded patch stays `sha256:`.
+
 The fingerprint prefix records which check was used, so a recipe cannot quietly
 downgrade from an exact comparison to a loose one.
 """
@@ -48,7 +54,7 @@ from xml.etree import ElementTree
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from joinery import gltf_signature, tools
+from joinery import audio_signature, gltf_signature, tools
 from joinery.runner import DEFAULT_TIMEOUT, Result, Runner
 
 RECIPE_DIR = "recipes"
@@ -63,6 +69,8 @@ EXACT_SUFFIXES = frozenset(
 #: Raster formats. Exact when baked, coarse when rendered through a camera;
 #: which one applies is recorded per output in the recipe's expectations.
 IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".exr"})
+#: Audio that a varying tool's recipe compares by sound (`snd:`), not bytes.
+AUDIO_SUFFIXES = frozenset({".wav", ".ogg"})
 #: Models fingerprinted by content (`glb:`), not bytes.
 GLTF_SUFFIXES = frozenset({".glb", ".gltf"})
 #: Downsample size and bit depth for a render signature. 32x16 averages ~1000
@@ -212,7 +220,12 @@ def blend_signatures(rels: list[str], project: Path, runner: Runner) -> dict[str
 
 
 def fingerprints(
-    rels: tuple[str, ...], project: Path, runner: Runner, renders: tuple[str, ...] = ()
+    rels: tuple[str, ...],
+    project: Path,
+    runner: Runner,
+    renders: tuple[str, ...] = (),
+    *,
+    varying_audio: bool = False,
 ) -> dict[str, str | Exception]:
     """Each output's fingerprint, or the error measuring it (FileNotFoundError: missing).
 
@@ -235,7 +248,13 @@ def fingerprints(
         if rel in measured:
             continue
         try:
-            measured[rel] = fingerprint(rel, project, runner, render=rel in renders)
+            measured[rel] = fingerprint(
+                rel,
+                project,
+                runner,
+                render=rel in renders,
+                varying_audio=varying_audio,
+            )
         except (FileNotFoundError, RuntimeError) as exc:
             measured[rel] = exc
     return measured
@@ -286,14 +305,100 @@ def image_signature(rel: str, project: Path, runner: Runner) -> str:
     return "img:" + hashlib.sha256(quantised).hexdigest()
 
 
+def sound_signature(rel: str, project: Path, runner: Runner) -> str:
+    """The ``snd:`` fingerprint of an audio file: its band levels over time."""
+    probe = runner.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "a:0",
+            "-show_entries",
+            "stream=sample_rate,channels",
+            "-of",
+            "json",
+            rel,
+        ],
+        project,
+        timeout=DEFAULT_TIMEOUT,
+    )
+    try:
+        stream = json.loads(probe.stdout or "{}")["streams"][0]
+        channels, rate = int(stream["channels"]), int(stream["sample_rate"])
+    except (ValueError, KeyError, IndexError, TypeError):
+        raise RuntimeError(
+            f"ffprobe found no audio in {rel}: {probe.output[-300:]}"
+        ) from None
+    scratch = project / ".joinery-fingerprint.raw"
+    got = runner.run(
+        audio_signature.ffmpeg_argv(rel, scratch.name),
+        project,
+        timeout=DEFAULT_TIMEOUT,
+    )
+    try:
+        if not got.ok or not scratch.is_file():
+            raise RuntimeError(f"ffmpeg could not decode {rel}: {got.output[-300:]}")
+        raw = scratch.read_bytes()
+    finally:
+        scratch.unlink(missing_ok=True)
+    seconds = len(raw) / 4 / audio_signature.BANDS / audio_signature.RATE
+    try:
+        return audio_signature.signature(raw, channels, rate, seconds)
+    except ValueError as exc:
+        raise RuntimeError(f"{rel}: {exc}") from None
+
+
+def matches(wanted: str, measured: str) -> bool:
+    """Whether a measured fingerprint is what the recipe expects.
+
+    Equal, or for ``snd:`` audio, the same sound within its tolerance.
+    """
+    if wanted == measured:
+        return True
+    snd = audio_signature.PREFIX
+    return wanted.startswith(snd) and audio_signature.similar(wanted, measured)
+
+
+def mismatch(rel: str, wanted: str, measured: str) -> str:
+    """The problem line for an output that came back different."""
+    snd = audio_signature.PREFIX
+    if wanted.startswith(snd) and measured.startswith(snd):
+        why = audio_signature.difference(wanted, measured)
+        return f"{rel}: the rebuilt sound differs ({why})"
+    # Sound fingerprints carry their levels; a prefix of each identifies it.
+    return f"{rel}: expected {wanted[:76]}, rebuilt {measured[:76]}"
+
+
+def varies(recipe: Recipe, project: Path) -> bool:
+    """Whether the recipe's script renders audio that differs run to run.
+
+    The tool decides from the script (`ToolModule.renders_vary`): an unseeded
+    SuperCollider patch with noise in it does, a seeded one does not.
+    """
+    try:
+        module = tools.get(recipe.tool)
+        script = (project / recipe.script).read_text(errors="replace")
+    except (ValueError, OSError):
+        return False
+    return module.renders_vary(script)
+
+
 def fingerprint(
-    rel: str, project: Path, runner: Runner, *, render: bool = False
+    rel: str,
+    project: Path,
+    runner: Runner,
+    *,
+    render: bool = False,
+    varying_audio: bool = False,
 ) -> str:
     """Fingerprint one output the strictest way that is stable for its format.
 
     `render=True` marks a camera render, the one case where exactness is not
     attainable. Recipes declare those explicitly in their `renders` list, so a
     loose check is always a visible choice rather than a silent default.
+    `varying_audio=True` is the tool's judgement that this recipe's audio
+    cannot be reproduced exactly (see `varies`).
     """
     path = project / rel
     if not path.is_file():
@@ -303,6 +408,8 @@ def fingerprint(
         if suffix not in IMAGE_SUFFIXES:
             raise ValueError(f"{rel}: only an image can be fingerprinted as a render")
         return image_signature(rel, project, runner)
+    if varying_audio and suffix in AUDIO_SUFFIXES:
+        return sound_signature(rel, project, runner)
     if suffix == ".blend":
         return blend_signature(path, project, runner)
     if suffix in GLTF_SUFFIXES:
@@ -426,10 +533,12 @@ def rebuild_one(
                     raise ValueError(
                         f"{relative}: recipe outputs must be regular files"
                     )
-                output.unlink(missing_ok=True)
-            return _verify_rebuilt(
-                name, _upgraded(recipe, project), scratch, runner, timeout
-            )
+            # Read old expectations against the outputs as they were, in the
+            # copy, before the replay removes them.
+            upgraded = _upgraded(recipe, scratch, runner)
+            for relative in recipe.outputs:
+                (scratch / relative).unlink(missing_ok=True)
+            return _verify_rebuilt(name, upgraded, scratch, runner, timeout)
     except (OSError, ValueError) as exc:
         return Rebuilt(name, False, 0.0, (str(exc),))
 
@@ -456,11 +565,36 @@ def _legacy_model(rel: str, wanted: str, project: Path) -> str | None:
         return None
 
 
-def _upgraded(recipe: Recipe, project: Path) -> Recipe:
-    """The recipe with any byte-recorded model expectation read by content."""
+def _legacy_sound(rel: str, wanted: str, project: Path, runner: Runner) -> str | None:
+    """The ``snd:`` fingerprint for varying audio recorded by bytes, when proved.
+
+    The same rule as for models: only when the file in the project still has
+    the recorded bytes is its sound what the recipe measured.
+    """
+    if Path(rel).suffix.lower() not in AUDIO_SUFFIXES or not wanted.startswith(
+        "sha256:"
+    ):
+        return None
+    path = project / rel
+    try:
+        if not path.is_file() or _exact(path) != wanted:
+            return None
+        return sound_signature(rel, project, runner)
+    except (OSError, RuntimeError):
+        return None
+
+
+def _upgraded(recipe: Recipe, project: Path, runner: Runner | None = None) -> Recipe:
+    """The recipe with byte-recorded expectations read by content where proved.
+
+    Models always; audio of a tool whose renders vary, given a runner to decode.
+    """
     expect = dict(recipe.expect)
+    sound = runner is not None and varies(recipe, project)
     for rel, wanted in recipe.expect.items():
         better = _legacy_model(rel, wanted, project)
+        if better is None and sound and runner is not None:
+            better = _legacy_sound(rel, wanted, project, runner)
         if better:
             expect[rel] = better
     if expect == recipe.expect:
@@ -496,7 +630,13 @@ def _verify_rebuilt(
         return Rebuilt(name, False, got.seconds, (f"{recipe.tool} failed: {tail}",))
     problems: list[str] = []
     measured: dict[str, str] = {}
-    found = fingerprints(recipe.outputs, project, runner, recipe.renders)
+    found = fingerprints(
+        recipe.outputs,
+        project,
+        runner,
+        recipe.renders,
+        varying_audio=varies(recipe, project),
+    )
     for rel in recipe.outputs:
         value = found[rel]
         if isinstance(value, FileNotFoundError):
@@ -509,8 +649,8 @@ def _verify_rebuilt(
         wanted = recipe.expect.get(rel)
         if wanted is None:
             problems.append(f"{rel}: recipe records no expected fingerprint")
-        elif wanted != measured[rel]:
-            problems.append(f"{rel}: expected {wanted}, rebuilt {measured[rel]}")
+        elif not matches(wanted, measured[rel]):
+            problems.append(mismatch(rel, wanted, measured[rel]))
     return Rebuilt(name, not problems, got.seconds, tuple(problems), measured)
 
 
@@ -557,7 +697,11 @@ def record(path: Path, project: Path, runner: Runner) -> Recipe:
     recipe = load_recipe(path)
     expect: dict[str, str] = {}
     for rel, value in fingerprints(
-        recipe.outputs, project, runner, recipe.renders
+        recipe.outputs,
+        project,
+        runner,
+        recipe.renders,
+        varying_audio=varies(recipe, project),
     ).items():
         if isinstance(value, Exception):
             raise value

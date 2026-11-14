@@ -189,6 +189,15 @@ class ToolModule:
     #: "" uses the runner's image (the creative worker for document edits).
     replay_image: str = ""
 
+    def renders_vary(self, script: str) -> bool:
+        """Whether this recipe script renders audio with new samples every run.
+
+        True for random generators seeded from the clock. Its WAV and Ogg
+        outputs are then compared by sound (``snd:``, joinery.audio_signature)
+        instead of bytes. Most tools render deterministically.
+        """
+        return False
+
     def script_inputs(self, code: str) -> tuple[str, ...]:
         """Project files the code reads, recorded as the recipe's sources."""
         return ()

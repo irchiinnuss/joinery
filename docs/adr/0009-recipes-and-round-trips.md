@@ -36,6 +36,7 @@ strictest way that is actually stable, and the prefix records which:
 | `sha256:` | WAV, baked PNG, MIDI, text | Deterministic; compared exactly |
 | `blend:` | `.blend` | Blender writes pointers and timestamps, so bytes differ while the model is identical. Compares objects, topology counts, materials, modifiers, rounded transforms |
 | `img:` | camera renders | Cycles renders are not bit-exact (below). Downsampled to 32x16 and quantised to 4 bits, which survives sampling noise but catches real change |
+| `snd:` | WAV/Ogg of an unseeded noisy SuperCollider patch | The server seeds noise from the clock, so such a patch never renders the same samples twice. Third-octave band levels in 50 ms slices, compared within about 1.5 dB; a seeded patch stays `sha256:` (below) |
 
 A recipe must name its camera renders in `renders`, so the loose check is always
 a visible choice. Asking for it on a non-image is an error, which stops `img:`
