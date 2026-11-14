@@ -372,6 +372,21 @@ def test_a_sound_project_has_nothing_to_flag(broken: Path) -> None:
     assert "design/brief.md" in report.read and "design/docs/gdd.md" in report.read
 
 
+@pytest.mark.parametrize(
+    "row", ["| Fire | `fire` | A bolt flies |", "| Fire | `fire` (`shoot`) | A bolt |"]
+)
+def test_the_games_own_action_name_counts(broken: Path, row: str) -> None:
+    """The brief says `fire`, the game says `shoot`: one control, not a missing one."""
+    write(
+        broken,
+        {"design/brief.md": BRIEF.replace("| Shoot | `shoot` | A bolt flies |", row)},
+    )
+    titles = [f.title for f in design.check(broken).findings]
+    assert not any("`fire` isn't in the input map" in t for t in titles), titles
+    # The game's action is then checked as usual (here nothing reads it).
+    assert "Fire is bound but nothing reads `shoot`" in titles
+
+
 def test_no_brief_means_nothing_is_promised(tmp_path: Path) -> None:
     root = write(
         tmp_path / "bare", {"project.godot": "config_version=5\n", "main.gd": LEVEL}

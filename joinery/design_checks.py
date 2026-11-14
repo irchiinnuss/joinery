@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from joinery import brief as brief_mod
@@ -45,6 +45,34 @@ _SESSION_ACTIONS = (
     "screenshot",
     "fullscreen",
 )
+
+
+#: Names games use for the same verb. A brief that says `fire` for a game whose
+#: input map, scenes and scripts all say `attack` describes the same control.
+ACTION_SYNONYMS: tuple[frozenset[str], ...] = (
+    frozenset(
+        {"fire", "attack", "shoot", "primary_fire", "fire_primary", "use_weapon"}
+    ),
+    frozenset({"alt_fire", "secondary_fire", "fire_secondary", "alt_attack", "aim"}),
+    frozenset({"interact", "use", "activate"}),
+    frozenset({"sprint", "run"}),
+    frozenset({"crouch", "duck"}),
+    frozenset({"dash", "dodge"}),
+    frozenset({"next_weapon", "weapon_next", "switch_weapon", "cycle_weapon"}),
+    frozenset({"previous_weapon", "prev_weapon", "weapon_previous"}),
+)
+
+
+def project_action(action: str, known: Mapping[str, object]) -> str:
+    """The project's own name for ``action``: itself, or a synonym the input map has."""
+    if action in known:
+        return action
+    for group in ACTION_SYNONYMS:
+        if action in group:
+            for other in sorted(group):
+                if other in known:
+                    return other
+    return action
 
 
 def _gameplay_actions(project: Project) -> list[str]:
@@ -132,9 +160,16 @@ def verbs(project: Project) -> list[Finding]:
                 )
             )
             continue
-        for action in _actions_in(cell, project.actions):
+        named = _actions_in(cell, project.actions)
+        for action in named:
             if action.startswith("ui_") and action not in project.actions:
                 continue  # Godot's own ui_* actions: bound by the engine, read by its controls
+            if action not in project.actions and any(
+                other in project.actions for other in named
+            ):
+                # The brief maps its name onto the game's ("`fire` (`attack`)").
+                continue
+            action = project_action(action, project.actions)
             events = project.actions.get(action)
             where = _brief_ev(section, line, quote)
             if events is None:
