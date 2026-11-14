@@ -180,12 +180,12 @@ def test_the_pass_makes_its_sounds_as_parallel_tasks_and_the_designer_reports(
     assert states[0] == "auditing" and states[-1] == "done"
     last = events[-1]
     assert last["kind"] == "sound_pass"
-    assert last["audit"]["headline"] == "11 sounds missing in level.tscn"
+    assert last["audit"]["headline"] == "11 sounds missing in level.tscn (8 places)"
     assert all(row["state"] == "in_review" for row in last["tasks"])
     assert last["tasks"][0]["categories"] == ["footsteps", "jump_land"]
     assert last["summary"].startswith("The level was silent.")
     # The designer read the audit through its own read-only tool.
-    assert agent.audit["headline"] == "11 sounds missing in level.tscn"
+    assert agent.audit["headline"] == "11 sounds missing in level.tscn (8 places)"
     assert "note_for_you" in agent.audit
     assert "Add pickup sound to coin: pickup_coin" in agent.prompts[0].text
 
@@ -225,7 +225,7 @@ def test_the_pass_waits_for_approval_and_for_the_core(tmp_path: Path) -> None:
 
     asyncio.run(go(_game(tmp_path / "a", approved=False)))
     assert events[-1]["state"] == "failed" and events[-1]["art_gate"]
-    assert events[-1]["audit"]["headline"].endswith("missing in level.tscn")
+    assert events[-1]["audit"]["headline"].endswith("missing in level.tscn (8 places)")
     events.clear()
     asyncio.run(go(_game(tmp_path / "b", runtime=False)))
     assert events[-1]["state"] == "failed"

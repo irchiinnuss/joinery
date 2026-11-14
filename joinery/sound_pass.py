@@ -758,15 +758,21 @@ def audit(project: Path, scene: str = "") -> Audit:
 
 
 def headline(findings: list[Finding], level: str) -> str:
+    """The summary line. A row (finding) can need several sounds, so when the two
+    counts differ both are given, and the number of rows below always matches."""
     count = sum(len(f.sounds) for f in findings)
+    places = len(findings)
     name = Path(rel(level)).name
     if count == 0:
         return (
             f"Nothing missing in {name}"
             if not findings
-            else f"{len(findings)} things to place in {name}"
+            else f"{places} things to place in {name}"
         )
-    return f"{count} sound{'s' if count != 1 else ''} missing in {name}"
+    line = f"{count} sound{'s' if count != 1 else ''} missing in {name}"
+    if places != count:
+        line += f" ({places} place{'s' if places != 1 else ''})"
+    return line
 
 
 def _prop_findings(

@@ -77,7 +77,7 @@ def test_audit_finds_what_a_third_person_level_is_missing(third_person: Path) ->
     ambience = next(f for f in audit.findings if f.category == "ambience")
     assert ambience.sounds[0].kind == "wind"
     assert ambience.placement is not None and ambience.placement.detail["mask"] == "2"
-    assert audit.headline == "11 sounds missing in level.tscn"
+    assert audit.headline == "11 sounds missing in level.tscn (8 places)"
     rows = {row["id"]: row["missing"] for row in audit.categories}
     assert rows == {
         "footsteps": 3,
@@ -299,11 +299,14 @@ def test_cli_json_and_plan(
         == 0
     )
     data = json.loads(capsys.readouterr().out)
-    assert data["headline"] == "11 sounds missing in level.tscn"
+    assert data["headline"] == "11 sounds missing in level.tscn (8 places)"
     assert len(data["plan"]) == 5
     assert cli_main(["sound-pass", "--project", str(third_person)]) == 0
     out = capsys.readouterr().out
-    assert out.startswith("11 sounds missing in level.tscn")
+    assert out.startswith("11 sounds missing in level.tscn (8 places)")
+    # The header's place count is the number of rows under it.
+    rows = [line for line in out.splitlines()[1:] if "; make " in line]
+    assert len(rows) == 8 == len(data["findings"])
     assert (
         cli_main(
             ["sound-pass", "--project", str(third_person), "--scene", "res://nope.tscn"]
