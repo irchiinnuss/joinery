@@ -17,6 +17,7 @@ re-applies them instead of silently dropping them.
 from __future__ import annotations
 
 import ast
+import asyncio
 import json
 import re
 import uuid
@@ -124,6 +125,15 @@ def _tail(text: str) -> str:
     return text.strip()[-1500:] or "no output"
 
 
+_RECORD_LOCKS: dict[int, asyncio.Lock] = {}
+
+
+def _recording() -> asyncio.Lock:
+    """One recipe recorded at a time on this event loop (joinery.lock is shared)."""
+    loop = id(asyncio.get_running_loop())
+    return _RECORD_LOCKS.setdefault(loop, asyncio.Lock())
+
+
 async def _run(
     project: Path,
     tool: str,
@@ -166,9 +176,11 @@ async def _run(
             detail = "it did not write " + ", ".join(missing)
         raise RuntimeError(f"{module.name} did not complete the operation: {detail}")
     report = audio_chain.parse_report(result.stdout)
-    recorded = await authoring._record(
-        project, recipe, recipe_dir / (identifier + ".toml")
-    )
+    async with _recording():
+        # Renders may run side by side (make_sounds); the lock file is one writer.
+        recorded = await authoring._record(
+            project, recipe, recipe_dir / (identifier + ".toml")
+        )
     return {**recorded, "measured": report}
 
 

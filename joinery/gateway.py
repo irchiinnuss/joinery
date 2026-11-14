@@ -165,9 +165,13 @@ def op_apps(tool: str, arguments: dict[str, Any]) -> tuple[str, ...]:
         apps.append(sound_kit.app_for(arguments))
     elif tool == "make_sounds":
         sounds = arguments.get("sounds")
-        for sound in sounds if isinstance(sounds, list) else []:
-            if isinstance(sound, dict):
-                apps.append(sound_kit.app_for(sound))
+        listed = (
+            [s for s in sounds if isinstance(s, dict)]
+            if isinstance(sounds, list)
+            else []
+        )
+        # Nothing readable yet: SuperCollider's slot, like a make_sound of no kind.
+        apps += [sound_kit.app_for(sound) for sound in listed or [{}]]
     return tuple(dict.fromkeys(app for app in apps if app))
 
 

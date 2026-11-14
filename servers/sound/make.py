@@ -10,10 +10,12 @@ audio edits or Surge parameter changes keep working on it.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 from mcp.server import MCPServer
+from pydantic import BaseModel, Field
 
 from joinery import authoring, sound_kit
 from joinery.bible_rules import load_rules
@@ -25,6 +27,21 @@ from servers.sound import ops
 
 #: Every recipe make_sound writes says so in its note.
 NOTE_PREFIX = "Joinery sound kit: "
+#: Sounds one make_sounds call takes, and how many render at once.
+MAX_BATCH = 24
+BATCH_PARALLEL = 4
+
+
+class SoundArgument(BaseModel):
+    """One sound of a make_sounds batch: make_sound's own arguments."""
+
+    kind: Annotated[str, Field(min_length=1, max_length=40)]
+    name: Annotated[str, Field(min_length=1, max_length=80)]
+    surface: str | None = None
+    variant: int = 0
+    seed: int | None = None
+    export: str | None = None
+    note: Annotated[str, Field(max_length=400)] = ""
 
 
 def _channels(spec: sound_kit.SoundSpec, allowed: list[int]) -> int:
@@ -157,7 +174,53 @@ async def make_sound(
     return result
 
 
+async def make_sounds(
+    project: Path, sounds: list[SoundArgument], parallel: int = BATCH_PARALLEL
+) -> dict[str, Any]:
+    """Several kit sounds in one call: each is made exactly as make_sound makes it
+    (its own source, recipe and lock entry, so rebuild and later edits work per
+    sound), rendered side by side a few at a time instead of one round trip each.
+    A sound that fails is reported beside the ones made; it never undoes them."""
+    if not 1 <= len(sounds) <= MAX_BATCH:
+        raise ValueError(f"Give 1 to {MAX_BATCH} sounds.")
+    names = [s.name for s in sounds]
+    twice = sorted({n for n in names if names.count(n) > 1})
+    if twice:
+        raise ValueError("Each sound needs its own name: " + ", ".join(twice) + ".")
+    gate = asyncio.Semaphore(max(1, parallel))
+
+    async def one(sound: SoundArgument) -> dict[str, Any]:
+        async with gate:
+            return await make_sound(project, **sound.model_dump())
+
+    results = await asyncio.gather(*(one(s) for s in sounds), return_exceptions=True)
+    made: list[dict[str, Any]] = []
+    failed: list[dict[str, str]] = []
+    for sound, result in zip(sounds, results, strict=True):
+        if isinstance(result, BaseException):
+            if not isinstance(result, Exception):
+                raise result  # a cancel or exit is never a sound's own failure
+            failed.append(
+                {"name": sound.name, "error": str(result) or type(result).__name__}
+            )
+        else:
+            made.append(result)
+    return {
+        "made": made,
+        "failed": failed,
+        "status": "staged" if made else "failed",
+        "requires_review": bool(made),
+        "outputs": [o for r in made for o in r.get("outputs", [])],
+    }
+
+
 def register(server: MCPServer[Any], project: Path) -> None:
+    @server.tool(name="make_sounds")
+    @tool_errors
+    async def make_sounds_tool(sounds: list[SoundArgument]) -> dict[str, Any]:
+        """Make several kit sounds in one call (up to 24): each item takes make_sound's arguments (kind, name, surface, variant, seed, export, note). They render side by side, each with its own source and replayable recipe. Prefer it to one make_sound call per sound. Returns made (each like make_sound's result) and failed (name, error)."""
+        return await make_sounds(project, sounds)
+
     @server.tool(name="make_sound")
     @tool_errors
     async def make_sound_tool(

@@ -320,7 +320,8 @@ PLAYTEST_GUIDE = (
     "asks whether the game works; replay a finding with its seed. The user starts the "
     "playtester agent with /playtest. "
     "To hear which sounds a level lacks (footsteps, pickups, switches, ambience, UI), "
-    "call sound_audit; make one with joinery-sound make_sound. The user starts the "
+    "call sound_audit; make one with joinery-sound make_sound, several with one "
+    "make_sounds call (they render side by side), then precheck once. The user starts the "
     "whole sound pass with /sound-pass. "
 )
 

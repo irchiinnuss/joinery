@@ -108,3 +108,40 @@ def test_make_sound_needs_a_transaction_and_its_tool(tmp_path: Path) -> None:
     (stage / "audio/sfx/player_jump.wav").write_bytes(b"RIFF")
     with pytest.raises(ValueError, match="did not make it"):
         asyncio.run(make.make_sound(stage, "jump", "player_jump"))
+
+
+def test_make_sounds_renders_a_batch_side_by_side(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    running: list[str] = []
+    most = 0
+
+    async def fake(
+        project: Path, kind: str, name: str, *_a: object, **_k: object
+    ) -> dict[str, object]:
+        nonlocal most
+        running.append(name)
+        most = max(most, len(running))
+        await asyncio.sleep(0.05)
+        running.remove(name)
+        if name == "bad":
+            raise ValueError("no such kind")
+        return {"outputs": [f"audio/sfx/{name}.wav"], "status": "staged"}
+
+    monkeypatch.setattr(make, "make_sound", fake)
+    sounds = [make.SoundArgument(kind="jump", name=f"s{i}") for i in range(6)]
+    sounds.append(make.SoundArgument(kind="nope", name="bad"))
+    result = asyncio.run(make.make_sounds(tmp_path, sounds, parallel=3))
+    assert len(result["made"]) == 6 and most == 3
+    assert result["failed"] == [{"name": "bad", "error": "no such kind"}]
+    assert "audio/sfx/s0.wav" in result["outputs"] and result["requires_review"]
+    with pytest.raises(ValueError, match="own name"):
+        asyncio.run(make.make_sounds(tmp_path, [sounds[0], sounds[0]]))
+    with pytest.raises(ValueError, match="1 to"):
+        asyncio.run(make.make_sounds(tmp_path, []))
+
+
+def test_a_batch_holds_the_slot_of_every_app_it_runs() -> None:
+    kinds = [{"kind": "footstep"}, {"kind": "pickup"}, {"kind": "jump"}]
+    apps = gateway.op_apps("make_sounds", {"sounds": kinds})
+    assert set(apps) == {sound_kit.app_for(k) for k in kinds}
