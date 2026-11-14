@@ -39,7 +39,6 @@ model-facing API, and the read-only roles can't write anything at all.
 from __future__ import annotations
 
 import re
-import shlex
 import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -48,6 +47,7 @@ from typing import Any, Literal, get_args
 
 from joinery.policy import Severity, Verdict
 from joinery.read_access import read_only
+from joinery.shell_words import simple_commands
 
 Role = Literal[
     "lead",
@@ -366,36 +366,16 @@ def _unwrap(command: str) -> str:
     """``bash -lc '…'`` (how Codex runs a command) -> the command inside."""
     text = command.strip()
     if _WRAPPERS.match(text):
-        try:
-            parts = shlex.split(text)
-        except ValueError:
-            return text
-        if len(parts) >= 3:
-            return parts[2]
+        parts = simple_commands(text)
+        if parts is not None and len(parts) == 1 and len(parts[0]) >= 3:
+            return parts[0][2]
     return text
 
 
 def _segments(command: str) -> list[list[str]] | None:
-    """``command``'s simple commands as words, split at ``&&``, ``||``, ``;``,
-    ``|`` and newlines outside quotes (``rg 'a|b'`` is one command). None when it
-    doesn't parse, or uses any other operator (``&``, ``|&``)."""
-    lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|\n")
-    lexer.whitespace = " \t\r"
-    lexer.whitespace_split = True
-    lexer.commenters = ""
-    try:
-        words = list(lexer)
-    except ValueError:
-        return None
-    segments: list[list[str]] = [[]]
-    for word in words:
-        if word and set(word) <= set(";&|\n"):
-            if word.strip("\n") not in {"", "&&", "||", ";", "|"}:
-                return None
-            segments.append([])
-        else:
-            segments[-1].append(word)
-    return segments
+    """``command``'s simple commands as words (:func:`joinery.shell_words.simple_commands`,
+    the one shell parser the hook uses too)."""
+    return simple_commands(command)
 
 
 def _reads(tokens: list[str]) -> bool:

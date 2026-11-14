@@ -91,6 +91,25 @@ def invocations(command: str) -> list[tuple[str, ...]]:
     return found
 
 
+#: Operators that only join commands one after another or into a pipe.
+_JOINS = frozenset({"|", "&&", "||", ";"})
+
+
+def simple_commands(command: str) -> list[list[str]] | None:
+    """``command``'s commands as words when it is only simple commands joined by
+    ``&&``, ``||``, ``;``, ``|`` or newlines (quotes respected: ``rg 'a|b'`` is one
+    command). None when it doesn't parse, or uses anything else: redirection,
+    substitution, a heredoc, a subshell or running in the background."""
+    try:
+        parser = _Parser(command)
+        commands, nested = parser.parse()
+    except ShellParseError:
+        return None
+    if nested or parser.operators - _JOINS or any(c.stdin for c in commands):
+        return None
+    return [list(c.words) for c in commands]
+
+
 def _collect(source: str, depth: int, found: list[tuple[str, ...]]) -> None:
     if depth > _MAX_DEPTH:
         raise ShellParseError("nested too deeply")
@@ -247,6 +266,8 @@ class _Parser:
         self.commands: list[_Command] = []
         self.nested: list[str] = []
         self.pipeline = 0
+        #: Every operator the line uses (``|``, ``&&``, ``&``, ``redirect``…).
+        self.operators: set[str] = set()
         self.current = _Command()
         self.pending: list[tuple[str, bool, bool, _Command]] = []
 
@@ -266,17 +287,23 @@ class _Parser:
             elif src.startswith("|&", self.i) or (
                 ch == "|" and src[self.i + 1 : self.i + 2] != "|"
             ):
-                self.i += 2 if src.startswith("|&", self.i) else 1
+                op = "|&" if src.startswith("|&", self.i) else "|"
+                self.operators.add(op)
+                self.i += len(op)
                 self._end_command(piped=True)
             elif src.startswith(("&&", "||", ";;"), self.i):
+                self.operators.add(src[self.i : self.i + 2])
                 self.i += 2
                 self._end_command()
             elif ch in ";()" or (ch == "&" and not src.startswith("&>", self.i)):
+                self.operators.add(ch)
                 self.i += 1
                 self._end_command()
             elif src.startswith(("<(", ">("), self.i):
+                self.operators.add(src[self.i : self.i + 2])
                 self.current.words.append(self._word())
             elif m := _REDIRECT.match(src, self.i):
+                self.operators.add("redirect")
                 self._redirect(m.group(0))
             else:
                 start = self.i
