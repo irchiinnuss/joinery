@@ -237,6 +237,76 @@ async def make_map_editable(
     return await _two_steps(project, (document, picture), seed_krita, link_krita)
 
 
+def bible_map_size(project: Path, source: str) -> int:
+    """A new map's size from the look: its texel density over one metre, capped.
+
+    One texture across a metre of surface is how a size per metre is read in
+    the bible's answers too (`bible_presets.answer_texel_density`); the
+    texture size limit for the folder caps it. 512 without a rule.
+    """
+    from joinery.bible_rules import _folder_value, parse_rules, rules_text
+
+    path = project / "art" / "bible.md"
+    block = rules_text(path.read_text()) if path.is_file() else None
+    if block is None:
+        return 512
+    try:
+        rules = parse_rules(block)
+    except ValueError:
+        return 512
+    texel = _folder_value(rules.models.texel_density, source)
+    wanted = texel.px_per_m if texel else 512.0
+    size = 8
+    while size < 4096 and size * 1.5 < wanted:
+        size *= 2
+    limit = _folder_value(rules.textures.max_size, source)
+    while limit and size > limit and size > 8:
+        size //= 2
+    return size
+
+
+async def add_painted_map(
+    project: Path,
+    source: str,
+    material: str,
+    role: str,
+    image: str,
+    size: int | None,
+    interpolation: str,
+    exports: list[str] | None,
+) -> dict[str, Any]:
+    """Give a flat material a map painted in Krita: a Blender edit, then make_map_editable."""
+    _name(material, "material")
+    parts.check_targets(parts.prompt_targets(project, source), material=material)
+    image = _clean(image or f"{material}_{role}")
+    chosen = size or bible_map_size(project, source)
+    code = blender_parts.add_map_code(material, image, role, chosen, interpolation)
+    document, picture = map_paths(source, image)
+
+    async def add() -> dict[str, Any]:
+        return await edit_document(
+            project,
+            "blender",
+            source,
+            code,
+            _exports(project, source, exports),
+            f"New {chosen} px {role} map {image} on {material}",
+        )
+
+    async def paint(added: dict[str, Any]) -> dict[str, Any]:
+        made = await make_map_editable(
+            project, source, material, image, "krita", exports
+        )
+        return {**made, "added": added, "size": chosen, "image": image}
+
+    return await _two_steps(
+        project,
+        (source, document, picture, *(_exports(project, source, exports))),
+        add,
+        paint,
+    )
+
+
 def _mm_size(part: parts.Part, project: Path) -> int:
     """Material Maker's size setting (2^n pixels) closest to the map's own size."""
     import struct
@@ -537,6 +607,22 @@ def register(server: MCPServer[Any], project: Path) -> None:
         """Make one texture map of a Blender model an editable source: a Krita document (editor "krita", for painting) or a Material Maker graph (editor "material-maker", for procedural changes) that starts from the map's own pixels, under art/sources/maps/<model>/. The model's map is then loaded from that source, so later paint_map edits replay. Run it once per map; the parts list shows maps that have a source. Exports default to the model's existing GLB."""
         return await make_map_editable(
             project, source, material, image, editor, exports
+        )
+
+    @server.tool(name="add_painted_map")
+    @tool_errors
+    async def add_painted_map_tool(
+        source: str,
+        material: str,
+        role: str = "base_color",
+        image: str = "",
+        size: int | None = None,
+        interpolation: str = "linear",
+        exports: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Give a flat-colour material of a Blender model a texture painted in Krita, when the look calls for textures. Adds an image map on one input (role: base_color, roughness, metallic, emission, normal), filled with the input's current colour or value so nothing changes yet; meshes using the material without UVs are unwrapped. The map then becomes a Krita document under art/sources/maps/<model>/ (as make_map_editable), so paint it with paint_map. size defaults to the look's texel density over one metre (capped by its texture size limit); interpolation "closest" keeps pixel art crisp. image defaults to <material>_<role>."""
+        return await add_painted_map(
+            project, source, material, role, image, size, interpolation, exports
         )
 
     @server.tool(name="paint_map")

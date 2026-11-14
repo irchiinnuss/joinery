@@ -96,7 +96,7 @@ IDENTITY: dict[str, tuple[str, ...]] = {
 #: Typed operations per part kind (maps depend on the map; see Part.ops).
 PART_OPS: dict[str, tuple[str, ...]] = {
     "object": ("transform_parts",),
-    "material": ("set_material_value", "split_material"),
+    "material": ("set_material_value", "add_painted_map", "split_material"),
     "bone": ("edit_bone",),
     "shape_key": ("edit_shape_key", "bake_shape_keys"),
     "animation": ("edit_action", "make_cycle"),

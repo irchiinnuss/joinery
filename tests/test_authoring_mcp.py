@@ -28,6 +28,7 @@ FAMILIES = {
         # Maps, material copies, bones and shape keys (servers/blender_ops/ops.py).
         "make_map_editable",
         "paint_map",
+        "add_painted_map",
         "replace_map",
         "split_material",
         "edit_bone",

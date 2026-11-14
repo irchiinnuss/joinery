@@ -32,7 +32,7 @@ const PART_KINDS := {
 ## from the target, so a chip routes the request to the operation for its part.
 const PART_OPS := {
 	"object": "transform_parts",
-	"material": "set_material_value,split_material",
+	"material": "set_material_value,add_painted_map,split_material",
 	"texture": "adjust_map,make_map_editable,replace_map,split_material",
 	"bone": "edit_bone",
 	"shape_key": "edit_shape_key,bake_shape_keys",

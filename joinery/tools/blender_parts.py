@@ -67,6 +67,100 @@ def _joinery_link_map(material, image, path, editable):
         'size': [width, height], 'editable': editable,
     }))
 
+_JOINERY_MAP_SOCKETS = {
+    'base_color': ('Base Color',),
+    'roughness': ('Roughness',),
+    'metallic': ('Metallic',),
+    'emission': ('Emission Color', 'Emission'),
+    'normal': ('Normal',),
+}
+
+def _joinery_unwrap(obj):
+    # Smart UV project needs the object active and in edit mode; a mesh that
+    # can't be entered (hidden, not in the view layer) keeps Blender's default
+    # per-face UVs, which still show a tiling texture.
+    obj.data.uv_layers.new(name='UVMap')
+    try:
+        bpy.context.view_layer.objects.active = obj
+        for other in bpy.context.view_layer.objects:
+            other.select_set(other == obj)
+        bpy.ops.object.mode_set(mode='EDIT')
+        bpy.ops.mesh.select_all(action='SELECT')
+        bpy.ops.uv.smart_project(angle_limit=1.15192, island_margin=0.02)
+        bpy.ops.object.mode_set(mode='OBJECT')
+        return 'smart_project'
+    except Exception:
+        if obj.mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode='OBJECT')
+        return 'default'
+
+def _joinery_add_map(material, image, role, size, interpolation):
+    material = _joinery_material(material)
+    bsdf = _joinery_bsdf(material)
+    socket = None
+    for name in _JOINERY_MAP_SOCKETS[role]:
+        socket = bsdf.inputs.get(name) or socket
+    if socket is None:
+        raise RuntimeError(f'{material.name!r} has no {role} input.')
+    if socket.is_linked:
+        raise RuntimeError(
+            f'{socket.name} of {material.name!r} already comes from a map or node. '
+            'Use make_map_editable and paint_map on that map.'
+        )
+    if bpy.data.images.get(image) is not None:
+        raise RuntimeError(f'There is already an image named {image!r}; pick another name.')
+    if role in _JOINERY_COLOUR_ROLES:
+        colour = list(socket.default_value)[:4] + [1.0] * (4 - len(socket.default_value))
+    elif role == 'normal':
+        colour = [0.5, 0.5, 1.0, 1.0]
+    else:
+        value = float(socket.default_value)
+        colour = [value, value, value, 1.0]
+    space = 'sRGB' if role in _JOINERY_COLOUR_ROLES else 'Non-Color'
+    # A generated image is not an 'IMAGE' and is not exported: write it as a
+    # PNG and load that back, so it is a plain packed image like any other map.
+    scratch = _joinery_os.path.abspath(f'.joinery-new-map-{image}.png')
+    blank = bpy.data.images.new('joinery_new_map', size, size, alpha=True)
+    blank.colorspace_settings.name = space
+    blank.generated_color = colour
+    blank.filepath_raw = scratch
+    blank.file_format = 'PNG'
+    blank.save()
+    bpy.data.images.remove(blank)
+    try:
+        picture = bpy.data.images.load(scratch, check_existing=False)
+        picture.name = image
+        picture.colorspace_settings.name = space
+        picture.pack()
+        picture.filepath = ''
+    finally:
+        _joinery_os.remove(scratch)
+    tree = material.node_tree
+    node = tree.nodes.new('ShaderNodeTexImage')
+    node.name = node.label = image
+    node.image = picture
+    node.interpolation = 'Closest' if interpolation == 'closest' else 'Linear'
+    node.location = (bsdf.location.x - 420, bsdf.location.y)
+    if role == 'normal':
+        bump = tree.nodes.new('ShaderNodeNormalMap')
+        bump.location = (bsdf.location.x - 200, bsdf.location.y - 200)
+        tree.links.new(node.outputs['Color'], bump.inputs['Color'])
+        tree.links.new(bump.outputs['Normal'], socket)
+    else:
+        tree.links.new(node.outputs['Color'], socket)
+    unwrapped = {}
+    for obj in sorted(bpy.data.objects, key=lambda o: o.name):
+        if obj.type != 'MESH' or obj.data.uv_layers:
+            continue
+        if not any(slot.material == material for slot in obj.material_slots):
+            continue
+        unwrapped[obj.name] = _joinery_unwrap(obj)
+        _joinery_also.add('object:' + obj.name)
+    print('JOINERY_PART_OP:' + _joinery_json.dumps({
+        'material': material.name, 'image': picture.name, 'role': role,
+        'size': [size, size], 'colour': colour, 'unwrapped': unwrapped,
+    }))
+
 def _joinery_split_material(material, objects, name, image_names):
     old = _joinery_material(material)
     if bpy.data.materials.get(name) is not None:
@@ -275,6 +369,33 @@ def link_map_code(material: str, image: str, path: str, editable: str = "") -> s
     """Blender code that loads a tool-made PNG into one map, scope-guarded to that image."""
     return guarded(
         _call("_joinery_link_map", material, image, path, editable), images=(image,)
+    )
+
+
+#: Material inputs a new map can drive.
+MAP_ROLES = ("base_color", "roughness", "metallic", "emission", "normal")
+MAP_SIZES = tuple(2**n for n in range(3, 13))
+
+
+def add_map_code(
+    material: str, image: str, role: str, size: int, interpolation: str = "linear"
+) -> str:
+    """Blender code that gives a material a new image map, filled with its current value.
+
+    The image starts as the colour (or value) the input had, so the model
+    looks the same until the map is painted. Objects using the material that
+    have no UVs get them (smart UV project); the scope guard allows those.
+    """
+    if role not in MAP_ROLES:
+        raise ValueError(f"role is one of: {', '.join(MAP_ROLES)}.")
+    if size not in MAP_SIZES:
+        raise ValueError(f"size is a power of two from 8 to 4096, not {size}.")
+    if interpolation not in {"linear", "closest"}:
+        raise ValueError('interpolation is "linear" or "closest" (pixel art).')
+    return guarded(
+        _call("_joinery_add_map", material, image, role, size, interpolation),
+        materials=(material,),
+        images=(image,),
     )
 
 

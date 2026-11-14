@@ -197,6 +197,7 @@ def test_each_part_lists_the_operations_that_change_it() -> None:
     assert "bake_height_to_normal" in height.ops
     assert report.find({"material": "Steel"}).ops == (
         "set_material_value",
+        "add_painted_map",
         "split_material",
     )
     assert report.find({"object": "Head.001", "shape_key": "Dent"}).ops == (
@@ -500,3 +501,56 @@ def test_material_maker_takes_a_preimage_by_its_content(tmp_path: Path) -> None:
     (tmp_path / seed).write_bytes(b"changed")
     with pytest.raises(ValueError, match="no joinery.lock entry"):
         material_maker.image_inputs(tmp_path, graph, "art/m.ptex", "art/out")
+
+
+def test_add_painted_map_wires_a_new_map_then_makes_it_a_krita_document(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stage, edit = _project(tmp_path, monkeypatch)
+    _pick(stage, part_kind="material", material="Steel")
+    seen: list[tuple[Any, ...]] = []
+
+    async def editable(*args: Any) -> dict[str, Any]:
+        seen.append(args)
+        return {"status": "staged", "editable": "art/sources/maps/hammer/x.kra"}
+
+    monkeypatch.setattr("servers.blender_ops.ops.make_map_editable", editable)
+    result = _call(
+        stage,
+        "add_painted_map",
+        {"material": "Steel", "size": 64, "interpolation": "closest"},
+    )
+    assert not result.is_error, result.content[0].text
+    (added,) = edit.await_args_list
+    assert added.args[1:3] == ("blender", SOURCE)
+    code = added.args[3]
+    assert (
+        "_joinery_add_map('Steel', 'Steel_base_color', 'base_color', 64, 'closest')"
+        in code
+    )
+    assert "set(['image:Steel_base_color', 'material:Steel']) | _joinery_also" in code
+    assert added.args[4] == [MODEL]
+    assert seen and seen[0][2:5] == ("Steel", "Steel_base_color", "krita")
+
+
+def test_add_painted_map_refuses_a_material_outside_the_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stage, edit = _project(tmp_path, monkeypatch)
+    _pick(stage, part_kind="material", material="Steel")
+    result = _call(stage, "add_painted_map", {"material": "Wood"})
+    assert result.is_error
+    assert not edit.await_args_list
+    with pytest.raises(ValueError, match="power of two"):
+        blender_parts.add_map_code("Steel", "x", "base_color", 100)
+
+
+def test_a_new_map_is_sized_from_the_bible(tmp_path: Path) -> None:
+    from joinery.bible_presets import rules_block
+    from servers.blender_ops.ops import bible_map_size
+
+    assert bible_map_size(tmp_path, SOURCE) == 512
+    (tmp_path / "art").mkdir()
+    block = rules_block(None, {"look": "pixel-art textures, 64x64 px"})
+    (tmp_path / "art/bible.md").write_text(f"# Look\n\n```toml\n{block}```\n")
+    assert bible_map_size(tmp_path, SOURCE) == 64

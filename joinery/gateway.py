@@ -105,6 +105,7 @@ OP_APPS: dict[str, tuple[str, ...]] = {
     # Plus its editor: Krita, or Material Maker.
     "make_map_editable": ("blender",),
     "paint_map": ("blender", "krita"),
+    "add_painted_map": ("blender", "krita"),
     "replace_map": ("blender",),
     "split_material": ("blender",),
     "edit_bone": ("blender",),

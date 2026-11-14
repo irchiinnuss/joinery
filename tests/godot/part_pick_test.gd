@@ -123,7 +123,10 @@ func _check_targets(model: Node3D) -> void:
 		),
 		"A listed part keeps the operations `joinery parts` gave it"
 	)
-	_check(CHIP.for_part(material)["ops"] == "set_material_value,split_material", "Material ops")
+	_check(
+		CHIP.for_part(material)["ops"] == "set_material_value,add_painted_map,split_material",
+		"Material ops"
+	)
 	_check(
 		str(target["tooltip"]).begins_with("Hammer › Head.001 › Steel › Roughness"),
 		target["tooltip"]
