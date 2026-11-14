@@ -427,6 +427,18 @@ func _console_fix(backend: Node, tasks: Control, transcript: Object, group: Dict
 		await process_frame
 		var again := card.find_child("Cause", true, false) as Label
 		_check(again != null and again.visible, "The cause stays open across lists")
+	# Nothing left to fix: the card can be closed, and stays closed until a new error.
+	var close := card.get("_close") as Button
+	_check(close != null and close.is_visible_in_tree(), "A settled card offers to close")
+	if close != null:
+		close.pressed.emit()
+		_check(not card.visible, "Closing hides it")
+		backend.call("_handle", {"kind": "errors", "mode": "auto", "groups": [fixing, editor]})
+		_check(not card.visible, "The same errors don't bring it back")
+		var fresh := editor.duplicate()
+		fresh.merge({"id": "g-new", "title": "player.gd:9 — Oops", "status": "open"}, true)
+		backend.call("_handle", {"kind": "errors", "mode": "auto", "groups": [fixing, fresh]})
+		_check(card.visible, "A new error brings it back")
 	backend.call("_handle", {"kind": "errors", "mode": "auto", "groups": []})
 
 

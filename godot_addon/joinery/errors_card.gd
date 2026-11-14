@@ -67,6 +67,9 @@ var _tasks: Dictionary = {}
 ## Fixing rows' captions, by task id, so the step and timer change in place.
 var _live: Dictionary = {}
 var _last_second := -1
+## The rows' ids when the user closed the card: it stays away until a new error comes.
+var _dismissed: Dictionary = {}
+var _close: Button
 
 
 func _init() -> void:
@@ -102,6 +105,11 @@ func _init() -> void:
 	UI_MOTION.press_feedback(fix_all)
 	fix_all.pressed.connect(_on_fix_all)
 	head.add_child(fix_all)
+	# Once nothing is left to deal with, the card can be closed until a new error comes.
+	_close = UI.icon_button("close", "Close until a new error comes")
+	_close.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_close.pressed.connect(dismiss)
+	head.add_child(_close)
 	_rows = VBoxContainer.new()
 	_rows.theme_type_variation = "JoineryTight"
 	column.add_child(_rows)
@@ -151,7 +159,22 @@ func open_count() -> int:
 
 
 func has_rows() -> bool:
-	return not _groups.is_empty() and mode != "off"
+	if _groups.is_empty() or mode == "off":
+		return false
+	for group: Dictionary in _groups:
+		if not _dismissed.has(str(group.get("id", ""))):
+			return true
+	return false
+
+
+## Close the card; it comes back with the next error it has not shown.
+func dismiss() -> void:
+	for group: Dictionary in _groups:
+		_dismissed[str(group.get("id", ""))] = true
+	hide()
+	var tasks := get_parent()
+	if tasks != null and tasks.has_method("sync_visible"):
+		tasks.call("sync_visible")
 
 
 ## The rows' titles as shown, for tests.
@@ -176,7 +199,7 @@ func caption_texts() -> PackedStringArray:
 func _render() -> void:
 	var count := open_count()
 	headline.text = (
-		"No errors to fix"
+		"Nothing to fix"
 		if count == 0
 		else "1 console error" if count == 1 else "%d console errors" % count
 	)
@@ -186,6 +209,7 @@ func _render() -> void:
 		if str(group.get("status", "")) in ["open", "stopped"]:
 			fixable += 1
 	fix_all.visible = mode == "ask" and fixable > 1
+	_close.visible = count == 0
 	for row: Node in _rows.get_children():
 		row.queue_free()
 	_live.clear()
