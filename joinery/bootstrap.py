@@ -448,6 +448,8 @@ def transactions(
                 "reviewer": tx.reviewer,
                 # Kept without the user's Accept (joinery.auto_accept).
                 "auto_accepted": tx.auto_accepted,
+                # What it said beside "Accepted automatically" (auto_accept.shown_notes).
+                "auto_notes": tx.auto_notes,
                 # What the change cost to make, when it was measured (joinery.metrics).
                 "cost": metrics.cost(project, tx.id),
                 "file_count": len(tx.changes),

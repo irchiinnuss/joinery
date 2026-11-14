@@ -219,6 +219,10 @@ class ChatRecorder:
             }
             if event.get("auto_accepted"):
                 change["auto"] = True
+                # Shown under "Accepted automatically" when the chat is reopened.
+                notes = [str(n) for n in event.get("notes") or [] if str(n).strip()]
+                if notes:
+                    change["notes"] = notes
             self._flush()
             self._save(lambda: chats.append(self.project, self.chat_id, change))
         elif kind == "done":

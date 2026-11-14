@@ -310,7 +310,10 @@ func render(entries: Array) -> void:
 				if card != null and not id.is_empty():
 					card.set("transaction_id", id)
 					_changes[id] = [
-						card, str(entry.get("state", "review")), bool(entry.get("auto", false))
+						card,
+						str(entry.get("state", "review")),
+						bool(entry.get("auto", false)),
+						_notes(entry.get("notes", [])),
 					]
 			"turn":
 				var outcome := str(entry.get("outcome", "done"))
@@ -353,7 +356,11 @@ func _apply(id: String, state: String, revertible: bool) -> void:
 		return
 	var spec: Array = STATES.get(state, ["error", "This change didn't finish"])
 	if state == "accepted" and _changes[id].size() > 2 and bool(_changes[id][2]):
-		spec = AUTO
+		# What the reviewer noted stays under the line, one per line (ADR 0085).
+		var lines := PackedStringArray([AUTO[1]])
+		if _changes[id].size() > 3:
+			lines.append_array(_changes[id][3])
+		spec = [AUTO[0], "\n".join(lines)]
 	card.call("set_outcome", spec[0], spec[1])
 	if state == "accepted":
 		card.call("set_revertible", revertible)
@@ -386,6 +393,9 @@ func show_states(report: Dictionary) -> void:
 		var revertible := bool(entry.get("revertible", true))
 		if bool(entry.get("auto_accepted", false)) and _changes[id].size() > 2:
 			_changes[id][2] = true
+			var notes := _notes(entry.get("auto_notes", []))
+			if not notes.is_empty() and _changes[id].size() > 3:
+				_changes[id][3] = notes
 		if state != str(_changes[id][1]):
 			_apply(id, state, revertible)
 		elif state == "accepted" and is_instance_valid(_changes[id][0]):
@@ -393,6 +403,16 @@ func show_states(report: Dictionary) -> void:
 
 
 # --- Helpers -----------------------------------------------------------------------------------
+
+
+## A kept change's notes as saved or listed: the non-empty lines.
+static func _notes(value: Variant) -> PackedStringArray:
+	var notes := PackedStringArray()
+	if value is Array:
+		for note: Variant in value:
+			if not str(note).strip_edges().is_empty():
+				notes.append(str(note))
+	return notes
 
 
 ## The message's chips again: its scene targets, and its images when they are still saved.

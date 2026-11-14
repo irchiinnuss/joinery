@@ -347,6 +347,8 @@ class FileTransaction:
             data["reviewer"] = self.reviewer
         if self.auto_accepted:
             data["auto_accepted"] = True
+        if self.auto_notes:
+            data["auto_notes"] = self.auto_notes
         if self.state in PENDING:
             # The full inventory is only needed until the decision.
             data["base"] = self.base
@@ -747,6 +749,9 @@ class FileTransaction:
         reviewer = raw.get("reviewer")
         transaction.reviewer = dict(reviewer) if isinstance(reviewer, dict) else {}
         transaction.auto_accepted = raw.get("auto_accepted") is True
+        transaction.auto_notes = [
+            note for note in raw.get("auto_notes") or [] if isinstance(note, str)
+        ]
         # Never accept journal paths outside this project, even after local tampering.
         for path in transaction.base:
             _safe(path)

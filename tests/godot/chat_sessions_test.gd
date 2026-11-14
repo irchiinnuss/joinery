@@ -69,7 +69,13 @@ func _fixtures() -> void:
 		[
 			{"type": "user", "text": "Make the lamps flicker"},
 			{"type": "agent", "text": "They flicker."},
-			{"type": "change", "transaction_id": PRUNED, "state": "accepted", "auto": true},
+			{
+				"type": "change",
+				"transaction_id": PRUNED,
+				"state": "accepted",
+				"auto": true,
+				"notes": ["Reviewer: the flicker never stops"],
+			},
 			{"type": "turn", "outcome": "done", "total_ms": 3000},
 		],
 		3 * 86400
@@ -198,8 +204,14 @@ func _run() -> void:
 	_check(transcript.get("_cards").size() == 1, "Its own transcript is shown")
 	var kept: Control = transcript.get("_cards")[0]
 	_check(
-		kept.get("_outcome_text").text == "Accepted automatically",
-		"A change kept without asking says so: " + str(kept.get("_outcome_text").text)
+		(
+			kept.get("_outcome_text").text
+			== "Accepted automatically\nReviewer: the flicker never stops"
+		),
+		(
+			"A change kept without asking says so, notes and all: "
+			+ str(kept.get("_outcome_text").text)
+		)
 	)
 	_check((kept.get("_revert") as Button).text == "Undo", "With Undo")
 	sessions.call("continue_chat")

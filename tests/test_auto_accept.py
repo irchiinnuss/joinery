@@ -509,12 +509,30 @@ def test_a_saved_chat_remembers_the_change_was_kept_without_asking(
             "accepted": True,
             "auto_accepted": True,
             "summary": "A script",
+            "notes": ["Reviewer: the timer never stops", " "],
         }
     )
     _, entries = chats.read(tmp_path, recorder.chat_id)
     (change,) = [e for e in entries if e["type"] == "change"]
     assert change["state"] == "accepted" and change["auto"] is True
     assert change["summary"] == "A script"
+    # A reopened chat shows the notes under "Accepted automatically".
+    assert change["notes"] == ["Reviewer: the timer never stops"]
+
+
+def test_a_kept_change_keeps_its_notes_in_the_transaction(tmp_path: Path) -> None:
+    from joinery.bootstrap import transactions
+
+    (tmp_path / "project.godot").write_text("config_version=5\n")
+    tx = FileTransaction(tmp_path)
+    tx.begin("A script")
+    tx.auto_accepted = True
+    tx.auto_notes = ["Reviewer: the timer never stops"]
+    tx._record()
+    saved = FileTransaction.load(tmp_path, tx.id)
+    assert saved.auto_notes == ["Reviewer: the timer never stops"]
+    (listed,) = transactions(tmp_path, "list")
+    assert listed["auto_notes"] == ["Reviewer: the timer never stops"]
 
 
 def test_the_agent_says_it_was_kept_and_never_asks_for_an_accept() -> None:
