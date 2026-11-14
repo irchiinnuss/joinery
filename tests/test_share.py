@@ -362,6 +362,31 @@ def test_candidates_skip_the_first_moments_and_the_end() -> None:
     assert all(f >= 90 for f in frames)
 
 
+def test_candidates_move_off_views_blocked_up_close() -> None:
+    # The bot lists frames whose view was against a wall or prop; a screenshot
+    # moment there moves to the next open view, or is dropped.
+    report = {
+        "played_seconds": 40,
+        "moments": [{"label": "goal", "frame": 900}, {"label": "hit", "frame": 1500}],
+        "blocked_views": [885, 900, 915, *range(1440, 1700, 15)],
+    }
+    frames = share_media.candidates(report)
+    assert 900 not in frames and 945 in frames
+    assert not any(1425 <= f <= 1700 for f in frames)
+    assert share_media.candidates({**report, "blocked_views": []}).count(900) == 1
+
+
+
+def test_the_cover_comes_from_a_shot_with_something_in_the_middle() -> None:
+    thumbs = {300: _thumb(9), 900: _thumb(40, stripes=1), 1500: _thumb(20, stripes=8)}
+    # Without framed moments the most detailed shot wins (900); with them, the
+    # framed one does, even if a wall up close looks busier.
+    assert share_media.cover_frame([300, 900, 1500], thumbs, {}) == 900
+    report = {"framed_views": [1485, 1500]}
+    assert share_media.cover_frame([300, 900, 1500], thumbs, report) == 1500
+    assert 1500 in share_media.candidates({"played_seconds": 40, **report})
+
+
 def test_trailer_is_silent_unless_all_audio_is_tool_made(tmp_path: Path) -> None:
     project = make_project(tmp_path)
     assert share_media.game_audio(project)[0] is False

@@ -36,8 +36,22 @@ const PITCH_LOW := -0.22
 const PITCH_HIGH := 0.12
 ## The most the view turns per physics frame (radians): about 150 degrees a second.
 const TURN := 0.045
+## Every this many frames the view is checked for something right in front of it.
+const BLOCK_EVERY := 15
+## Nearer than this (metres) along the centre of the view, the picture is a wall or a
+## prop up close, not the game: those frames are listed so no screenshot is taken there.
+const BLOCKED := 2.0
+## An enemy this close to the centre of the view (radians), and this far away (metres),
+## makes a well framed picture: the frames are listed so the cover is one of them.
+const FRAMED_ANGLE := 0.2
+const FRAMED_NEAR := 3.0
+const FRAMED_FAR := 20.0
 
 var tree: SceneTree
+## Frames (every BLOCK_EVERY) whose view was blocked up close, for the report.
+var blocked: Array[int] = []
+## Frames (every BLOCK_EVERY) with an enemy near the centre of the view.
+var framed: Array[int] = []
 var _target: Node3D = null
 var _open_yaw: float = NAN
 var _next_pick: int = 0
@@ -53,6 +67,11 @@ func step(frame: int, player: Node) -> void:
 	var camera := tree.root.get_viewport().get_camera_3d()
 	if body == null or camera == null or not body.is_inside_tree():
 		return
+	if frame % BLOCK_EVERY == 0:
+		if _blocked(camera, body):
+			blocked.append(frame)
+		elif _framed(camera, body):
+			framed.append(frame)
 	if frame >= _next_pick or (_target != null and not _usable(_target)):
 		_pick(camera, body)
 		_next_pick = frame + RETARGET
@@ -155,6 +174,34 @@ func _open_direction(camera: Camera3D, body: Node3D) -> float:
 			best_length = length
 			best = yaw
 	return wrapf(best, -PI, PI)
+
+
+## Whether something solid stands closer than BLOCKED along the centre of the view.
+func _blocked(camera: Camera3D, body: Node3D) -> bool:
+	var eye := camera.global_position
+	var query := PhysicsRayQueryParameters3D.create(eye, eye - camera.global_basis.z * BLOCKED)
+	query.exclude = _rids(body)
+	return not body.get_world_3d().direct_space_state.intersect_ray(query).is_empty()
+
+
+## Lists [param frame] as no picture (a menu covers the view), once per BLOCK_EVERY.
+func cover_up(frame: int) -> void:
+	if frame % BLOCK_EVERY == 0 and not blocked.has(frame):
+		blocked.append(frame)
+
+
+## Whether the current enemy target sits near the centre of the view, neither too near nor
+## too far, with nothing in front of it.
+func _framed(camera: Camera3D, body: Node3D) -> bool:
+	if _target == null or not _usable(_target) or not _is_enemy(_target):
+		return false
+	var eye := camera.global_position
+	var aim := _aim_point(_target) - eye
+	var distance := aim.length()
+	if distance < FRAMED_NEAR or distance > FRAMED_FAR:
+		return false
+	var forward := -camera.global_basis.z
+	return forward.angle_to(aim) < FRAMED_ANGLE and _visible(eye, _target, body)
 
 
 func _rids(body: Node3D) -> Array[RID]:

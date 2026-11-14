@@ -462,6 +462,9 @@ def test_a_media_replay_keeps_the_framer(
         options, [60, 120], tmp_path / "shots", (Path("godot"), {}), full_size=True
     )
     assert "--media" in seen[0]
+    # The same length as the run: the bot plans its pause check by it, so a
+    # shorter replay would pause at another frame (a pause menu in a shot).
+    assert "--seconds=10" in seen[0]
     plain = playtest.Options(project=tmp_path, seconds=10, seed=7)
     playtest.replay_shots(plain, [60], tmp_path / "shots", (Path("godot"), {}))
     assert "--media" not in seen[1]

@@ -493,6 +493,8 @@ def build(
             if key in perf
         },
         "moments": (bot or {}).get("moments", []),
+        "blocked_views": (bot or {}).get("blocked_views", []),
+        "framed_views": (bot or {}).get("framed_views", []),
         "route": (bot or {}).get("route", []) or [],
         "coverage": coverage,
         "reach": [r for r in (bot or {}).get("reach", []) or [] if isinstance(r, dict)],

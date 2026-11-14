@@ -425,7 +425,9 @@ def replay_shots(
     frames = sorted(set(frames))
     replay = Options(
         project=project,
-        seconds=min(options.seconds, frames[-1] / 60 + 1),
+        # The whole run's length: the bot plans its pause and save checks by it, so
+        # a shorter replay pauses at another frame. It stops after the last shot.
+        seconds=options.seconds,
         seed=options.seed,
         scene=options.scene,
         focus=options.focus,

@@ -200,6 +200,9 @@ func _tick(play: bool) -> void:
 		drive.call(&"step", frame)
 		if framer != null and player is Node3D:
 			framer.call(&"step", frame, player)
+	if framer != null and (paused or (menus != null and bool(menus.call(&"is_open")))):
+		# A pause menu or any open menu is no store picture either.
+		framer.call(&"cover_up", frame)
 	var found: Array = watch.call(
 		&"observe", frame, drive.call(&"moving"), paused, _state(), drive.get(&"interactive")
 	)
@@ -209,6 +212,10 @@ func _tick(play: bool) -> void:
 			await _recover()
 	if shots.has(frame):
 		_shot(str(shots[frame]))
+		# The replay plays the whole run's plan (its checks fall at the same frames)
+		# and stops once the last picture is taken.
+		if frame >= int(shots.keys().max()):
+			_finish()
 	if frame % fps == 0:
 		print("PLAYTEST " + JSON.stringify({"t": frame / fps, "frame": frame}))
 	if frame % (fps * 5) == 0:
@@ -722,6 +729,8 @@ func _write(done: bool) -> void:
 		"findings": findings,
 		"checks": checks,
 		"moments": moments,
+		"blocked_views": framer.get(&"blocked") if framer != null else [],
+		"framed_views": framer.get(&"framed") if framer != null else [],
 		"deaths": deaths,
 		"route": walker.get(&"results") if walker != null else [],
 		"coverage": cover.call(&"summary"),

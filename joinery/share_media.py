@@ -198,6 +198,17 @@ def pick(thumbs: dict[int, bytes]) -> list[int]:
     return sorted(chosen)
 
 
+def cover_frame(
+    chosen: list[int], thumbs: dict[int, bytes], report: dict[str, Any]
+) -> int:
+    """The shot the cover is made from: one where the bot had an enemy near the
+    middle of the view (it lists those frames), else any; the most detailed
+    of them, so more of the game and less wall."""
+    framed = [int(f) for f in report.get("framed_views", []) or []]
+    near = [c for c in chosen if any(abs(c - f) <= BLOCK_EVERY for f in framed)]
+    return max(near or chosen, key=lambda f: detail(thumbs[f]))
+
+
 def candidates(report: dict[str, Any], fps: int = 60) -> list[int]:
     """Frames worth a look: the run's notable moments and even steps through it."""
     played = float(
@@ -209,7 +220,29 @@ def candidates(report: dict[str, Any], fps: int = 60) -> list[int]:
         if m.get("label") != "end"
     }
     frames |= {int(played * fps * step / 11) for step in range(1, 11)}
-    return sorted(f for f in frames if f >= fps * 1.5)[:16]
+    # A few moments the bot had an enemy in the middle of the view.
+    framed = [int(f) for f in report.get("framed_views", []) or []]
+    frames |= {framed[i * len(framed) // 4] for i in range(4)} if framed else set()
+    blocked = [int(f) for f in report.get("blocked_views", []) or []]
+    kept: set[int] = set()
+    for frame in frames:
+        moved = _unblocked(frame, blocked, int(played * fps))
+        if moved is not None:
+            kept.add(moved)
+    return sorted(f for f in kept if f >= fps * 1.5)[:16]
+
+
+#: The bot checks for a blocked view every this many frames (``bot_frame.gd``).
+BLOCK_EVERY = 15
+
+
+def _unblocked(frame: int, blocked: list[int], last: int) -> int | None:
+    """``frame``, or the next moment after it when the view was up against a wall or
+    prop (the bot lists those frames); None when it stays blocked for 3 seconds."""
+    for later in range(frame, min(last, frame + 180) + 1, BLOCK_EVERY):
+        if not any(abs(later - b) <= BLOCK_EVERY for b in blocked):
+            return later
+    return None
 
 
 async def _thumbnails(project: Path, shots: dict[int, Path]) -> dict[int, bytes]:
@@ -279,8 +312,7 @@ async def screenshots(project: Path, seed: int, say: Progress) -> dict[str, Any]
         target = project / SHOTS / f"shot-{index:02d}.png"
         shutil.copyfile(taken[frame], target)
         kept.append(target.relative_to(project).as_posix())
-    # The cover shows the most detailed view: more of the game, less wall.
-    busiest = max(chosen, key=lambda f: detail(thumbs[f]))
+    busiest = cover_frame(chosen, thumbs, report)
     sizes = [png_size(project / path) for path in kept]
     result: dict[str, Any] = {
         "seed": seed,
