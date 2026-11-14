@@ -37,6 +37,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from joinery import console_errors as expected_noise
 from joinery.runner import Result
 
 FORMAT = "joinery-replay"
@@ -276,7 +277,7 @@ def outcome(name: str, console: str, code: int | None, replay: Replay) -> Outcom
                 continue
             if isinstance(parsed, dict):
                 data = parsed
-    console_errors = [line.strip() for line in console.splitlines() if _ERROR.match(line)]
+    console_errors = expected_noise.error_lines(console, _ERROR)
     if data is None:
         tail = "\n".join(console.strip().splitlines()[-8:])
         return Outcome(
@@ -291,10 +292,15 @@ def outcome(name: str, console: str, code: int | None, replay: Replay) -> Outcom
         )
     ticks = replay.ticks
     divergence = data.get("divergence") or {}
-    errors = [
-        f"{e.get('message', '')} ({e.get('where', '')}, frame {e.get('frame', '?')})"
+    game_errors = [
+        e
         for e in data.get("errors", [])
         if isinstance(e, dict)
+        and not expected_noise.expected(str(e.get("message", "")), console)
+    ]
+    errors = [
+        f"{e.get('message', '')} ({e.get('where', '')}, frame {e.get('frame', '?')})"
+        for e in game_errors
     ] or console_errors[:10]
     result = Outcome(
         name,
@@ -326,7 +332,7 @@ def outcome(name: str, console: str, code: int | None, replay: Replay) -> Outcom
     if errors and result.status == "passed" and int(replay.end.get("errors", 0)) == 0:
         result.status = "errors"
         result.detail = "The replay hit errors the recording didn't."
-        result.frame = _first_frame(data.get("errors", []))
+        result.frame = _first_frame(game_errors)
         if result.frame is not None:
             result.seconds = round(result.frame / max(ticks, 1), 2)
     result.errors = errors[:10]
@@ -378,7 +384,7 @@ def run(project: Path, path: Path, *, godot: Path | None = None) -> Outcome:
                 replay.name,
                 "failed",
                 f"The replay didn't finish in {limit:.0f} s; the game may be frozen.",
-                errors=[line for line in out.splitlines() if _ERROR.match(line)][:5],
+                errors=expected_noise.error_lines(out, _ERROR, 5),
             )
     return outcome(replay.name, done.stdout + done.stderr, done.returncode, replay)
 

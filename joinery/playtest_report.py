@@ -21,6 +21,8 @@ import re
 from collections.abc import Iterable
 from typing import Any
 
+from joinery import console_errors
+
 SEVERITIES = ("critical", "high", "medium", "low", "note")
 
 #: Console lines Godot starts an error or warning with.
@@ -32,12 +34,6 @@ _CRASH = re.compile(
     r"(Program crashed with signal \d+|CrashHandlerException|handle_crash:|Segmentation fault)"
 )
 _RES_LINE = re.compile(r"(res://[^\s:()]+):(\d+)")
-#: Engine noise every headless run prints; never a finding.
-_NOISE = (
-    "ObjectDB instances leaked at exit",
-    "resources still in use at exit",
-    "Pages in use exist at exit",
-)
 
 _KIND_SEVERITY = {
     "crash": "critical",
@@ -95,7 +91,7 @@ def console_entries(output: str) -> list[dict[str, Any]]:
         if found is None:
             continue
         message = found.group("message").strip()
-        if any(noise in message for noise in _NOISE):
+        if console_errors.expected(line, output):
             continue
         label = found.group("kind")
         kind = (
@@ -151,7 +147,10 @@ def repro(options: dict[str, Any], t: float | None, where: str = "") -> str:
 
 
 def _merge_logs(
-    bot_log: Iterable[dict[str, Any]], console: Iterable[dict[str, Any]], fps: int
+    bot_log: Iterable[dict[str, Any]],
+    console: Iterable[dict[str, Any]],
+    fps: int,
+    output: str = "",
 ) -> list[dict[str, Any]]:
     """One entry per distinct problem, counted, with the first time it happened.
 
@@ -162,7 +161,7 @@ def _merge_logs(
     merged: dict[tuple[str, str], dict[str, Any]] = {}
     for entry in bot_log:
         message = str(entry.get("message", "")).strip()
-        if not message or any(noise in message for noise in _NOISE):
+        if not message or console_errors.expected(message, output):
             continue
         key = (message, str(entry.get("where", "")))
         if key in merged:
@@ -424,7 +423,7 @@ def build(
                 "t": played,
             }
         )
-    for entry in _merge_logs((bot or {}).get("log", []), console_entries(output), fps):
+    for entry in _merge_logs((bot or {}).get("log", []), console_entries(output), fps, output):
         count = int(entry["count"])
         detail = entry["message"] + (f" (×{count})" if count > 1 else "")
         raw.append(

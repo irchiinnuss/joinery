@@ -32,7 +32,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from joinery import export_templates, playtest, playtest_report
+from joinery import console_errors, export_templates, playtest, playtest_report
 from joinery.brief import (
     action_label,
     input_actions,
@@ -537,8 +537,10 @@ def _run(
 
 
 def _first_error(log: str) -> str:
+    """The log's first error line, leaving out expected engine noise (a VR build with
+    no OpenXR runtime that starts on the desktop)."""
     for line in log.splitlines():
-        if _ERRORS.match(line.strip()):
+        if _ERRORS.match(line.strip()) and not console_errors.expected(line.strip(), log):
             return line.strip()[:300]
     return ""
 

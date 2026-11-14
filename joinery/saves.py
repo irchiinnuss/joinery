@@ -48,6 +48,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from joinery import console_errors
 from joinery.runner import Result
 
 FOLDER = Path("tests") / "saves"
@@ -350,7 +351,7 @@ def judge(save: Kept, console: str, code: int | None = None) -> Outcome:
                 continue
             if isinstance(parsed, dict):
                 raw = parsed
-    errors = [line.strip() for line in console.splitlines() if _ERROR.match(line)][:10]
+    errors = console_errors.error_lines(console, _ERROR)
     outcome = Outcome(save.name, save.relative, "failed", errors=errors)
     if raw is None:
         tail = "\n".join(console.strip().splitlines()[-6:])

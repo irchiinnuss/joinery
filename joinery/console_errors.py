@@ -76,6 +76,14 @@ NOISE = (
     "Orphan StringName",
     "was leaked at exit",
 )
+#: A VR game on a machine with no OpenXR runtime logs these while the engine starts,
+#: then plays on the desktop. They are expected there, never an error: but only when
+#: the engine said it fell back (``_XR_FALLBACK``), so a real XR failure still counts.
+_XR_LINE = re.compile(
+    r"^\s*(?:(?:USER\s+)?(?:ERROR|WARNING):\s*)?"
+    r"(?:OpenXR[:\s]|Error \[[^\]]*OpenXR-Loader\])"
+)
+_XR_FALLBACK = "Godot will start in normal mode"
 
 #: Group states. ``open`` waits for a fix; ``queued`` waits for a free agent;
 #: ``fixing`` and ``in_review`` follow its task; ``fixed`` was accepted; ``ignored``
@@ -364,12 +372,40 @@ def group_id(entry: Entry) -> str:
     return hashlib.sha1(key.encode("utf-8")).hexdigest()[:12]
 
 
+def desktop_fallback(console: str) -> bool:
+    """The engine couldn't start OpenXR and went on in normal (desktop) mode."""
+    return _XR_FALLBACK in console
+
+
+def expected(message: str, console: str) -> bool:
+    """An engine line that is no error on this run: the shared classifier of expected
+    engine noise that playtests, done-when checks, replays, save checks and the share
+    build's boot check all use. ``message`` is the line (its ``ERROR:`` label or not);
+    ``console`` is the run's output, which says whether the engine fell back."""
+    if any(noise in message for noise in NOISE):
+        return True
+    return bool(_XR_LINE.match(message)) and desktop_fallback(console)
+
+
+def error_lines(console: str, pattern: re.Pattern[str], limit: int = 10) -> list[str]:
+    """The console's lines ``pattern`` calls errors, stripped, without expected noise."""
+    found: list[str] = []
+    for line in console.splitlines():
+        if pattern.match(line) and not expected(line.strip(), console):
+            found.append(line.strip())
+            if len(found) >= limit:
+                break
+    return found
+
+
 def ignored(entry: Entry, patterns: Iterable[str] = ()) -> bool:
     """Engine noise and the project's ``ignore_errors``: each pattern matches anywhere
     in the message or place, case aside, ``*`` for any text. Joinery's own lines are
     not ignored: :func:`triage` lists them as a Joinery bug."""
     text = f"{entry.message} {entry.where} {entry.line}"
     if any(noise in text for noise in NOISE):
+        return True
+    if expected(entry.line or entry.message, entry.context):
         return True
     lower = text.lower()
     for pattern in patterns:
