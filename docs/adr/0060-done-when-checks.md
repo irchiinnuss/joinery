@@ -32,8 +32,10 @@ verify, and a moment to check it before the user sees the change.
    - `look`: only the user can judge; always Inconclusive.
    The agent is told (`TODO_GUIDE`) to propose a to-do for requests with several steps and to
    skip it for small ones.
-2. **Go, when the user's setting asks.** `[agents] todo_go` in `joinery.toml`: `"multi"` (the
-   default) waits for Go when the to-do has two steps or more, `"always"` waits for every
+2. **Go, when the user's setting asks.** `[agents] todo_go` in `joinery.toml`: `"auto"` (the
+   default since ADR 0085's amendment) waits like `"multi"` unless nobody can press Go
+   (auto-accept on, or `joinery run`); `"multi"` waits for Go when the to-do has two steps
+   or more, `"always"` waits for every
    to-do, `"never"` never waits. A to-do proposed after the agent already changed something
    never waits. Waiting does not hold a tool call open (provider tool timeouts differ): the
    tool returns `waiting_for_go`, every change is refused until then (`WAITING_FOR_GO`), and

@@ -98,3 +98,68 @@ and Joinery's own state sit beside them.
 - A change with anything to say still waits, so turning this on never hides a
   warning, a failed done-when item or a reviewer's note.
 - The before/after renders of a kept change are not made: nobody reviews them.
+
+## Amendment (2026-11-14): what holds a change
+
+In a real session auto-accept fired once in about fourteen changes. Four
+things held nearly every change, none of which needed the user: a reviewer
+`warn` on almost every change, done-when `test` items that were always
+inconclusive, any edit of `design/brief.md`, and a to-do waiting for a Go
+nobody could press. The rule now reads as follows.
+
+**Reviewer levels.** The reviewer reports three levels:
+
+- `block`: the change is wrong and its author must fix it (it doesn't do what
+  was asked, breaks the art bible, the brief or the game, or loses work). It
+  goes back to the author as before; one still left when the review opens
+  always holds the change.
+- `warn`: a real risk the user should decide on before keeping it. It holds
+  the change when the project sets `[agents] auto_accept_hold = "warn"`, and
+  always when its rule is `broken` or `work_lost`. With the default,
+  `auto_accept_hold = "block"`, any other warning is shown with the kept change.
+- `info` (a note): style, polish, suggestions and things not made yet ("no
+  Krita texture yet", "the HUD sits near the screen edge"). It never holds a
+  change and is shown with it.
+
+The reviewer's prompt and the `report_review` tool describe these levels and
+ask for a rule on every `block` and `warn`. The hold level is set with
+`joinery auto-accept --hold-on block|warn` or the **Hold reviewer warnings**
+switch under **Accept changes automatically** in Settings, which shows only
+while auto-accept is on. A kept change's `file_decision` carries the notes
+that didn't hold it (`notes`), and its card lists them under **Accepted
+automatically**, so turning auto-accept on still hides nothing.
+
+**Done-when tests.** The project's tests are GUT tests when the project has
+GUT, and SceneTree tests either way: a script under `tests/` (or `test/`)
+that `extends SceneTree`, checks in `_initialize()`, and calls `quit(0)` on a
+pass or prints `FAIL: <why>` and calls `quit(1)`. Joinery's tests check runs
+each one headless after the import (`godot -s`, up to 20, two minutes each)
+and fails on a non-zero exit, a `FAIL` line, a script or parse error, or a
+script that never quits. Engine lines that aren't the test's own (`ERROR:` from
+a missing XR runtime) don't fail it. A done-when `test` item whose target is
+such a test, or a GUT test, passes when the tests check ran and passed.
+Journeyman's instructions and `propose_todo` describe this one convention. A
+`look` item still holds the change (only the user can judge it), and
+Journeyman is told so, so it prefers a checkable item.
+
+**The game brief.** The art bible, its references and `.joinery/` still
+always hold a change. The brief holds it only when its direction changes:
+the title, Pitch, Genre and references, Audience and content, Player fantasy,
+Core loop, Monetisation, or Scope and milestones sections, or the facts
+`genre`, `dimension`, `online`, `max_players`, `monetisation` and
+`rating_target` (`brief.direction_changes`); adding or removing the brief
+counts too. Routine edits (controls, verbs, camera, saving, open questions,
+a renamed action) are kept, with a note naming the sections edited. The brief
+was excluded with the bible because teammates re-approve it; that approval
+covers what the game is, which is exactly the direction checked here.
+
+**The to-do's Go.** `[agents] todo_go` gains `"auto"`, now the default: it
+waits for Go on two steps or more only while someone can press it. With
+auto-accept on, or in `joinery run` (the host's `headless`), the agent carries
+on with its to-do and the done-when items are checked as usual. An explicit
+`"multi"`, `"always"` or `"never"` is the project's own choice and holds either
+way.
+
+Everything else in the rule is unchanged: failed or inconclusive done-when
+items, notes on the submit, art gates, unsaved scenes, live edits a task
+can't keep, Joinery's own last-chance submit and variants all still hold.
