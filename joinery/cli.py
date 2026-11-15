@@ -1170,10 +1170,13 @@ def _parser() -> argparse.ArgumentParser:
         help="inspect, accept, reject, recover or revert project changes",
     )
     tx_cmd.add_argument(
-        "action", choices=["list", "accept", "reject", "recover", "revert"]
+        "action", choices=["list", "show", "accept", "reject", "recover", "revert"]
     )
     tx_cmd.add_argument("--project", type=Path, required=True)
     tx_cmd.add_argument("--id", default="")
+    tx_cmd.add_argument(
+        "--text", action="store_true", help="show: plain lines instead of JSON"
+    )
     hook_cmd = commands.add_parser(
         "hook", help="PreToolUse policy hook (reads JSON on stdin)"
     )
@@ -1704,7 +1707,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command in {"bootstrap", "update-addon", "transactions"}:
         from joinery.bootstrap import setup as setup_runtime
-        from joinery.bootstrap import transactions, update_addon
+        from joinery.bootstrap import transaction_lines, transactions, update_addon
 
         if args.command == "bootstrap":
             return _refresh_tools(
@@ -1729,6 +1732,16 @@ def main(argv: list[str] | None = None) -> int:
                     raise ValueError(
                         "Choose one accepted transaction with --id before reverting."
                     )
+                if args.action == "show":
+                    if not args.id:
+                        raise ValueError("Choose the transaction with --id.")
+                    shown = transactions(args.project.resolve(), "list", args.id)[0]
+                    print(
+                        "\n".join(transaction_lines(shown))
+                        if args.text
+                        else json.dumps(shown)
+                    )
+                    return 0
                 outcome = {
                     "transactions": transactions(
                         args.project.resolve(), args.action, args.id

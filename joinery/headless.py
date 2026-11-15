@@ -125,6 +125,10 @@ class Outcome:
     auto_accepted: bool = False
     #: What an auto-accepted change says to the user (the card's notes).
     notes: list[str] = field(default_factory=list)
+    #: What the agent assumed that the user didn't say, and where it departed from
+    #: the request and why (submit_for_review's guessed and not_as_asked).
+    guessed: list[str] = field(default_factory=list)
+    not_as_asked: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return {"kind": "run_result", **asdict(self)}
@@ -406,6 +410,10 @@ async def _follow(
             outcome.transaction_id = str(event.get("transaction_id", ""))
             outcome.summary = str(event.get("summary", ""))
             outcome.state = "review"
+            outcome.guessed = [str(line) for line in event.get("guessed") or []]
+            outcome.not_as_asked = [
+                str(line) for line in event.get("not_as_asked") or []
+            ]
         elif kind == "task":
             _task(tasks, event)
         elif kind == "timing" and not event.get("task_id"):
@@ -677,6 +685,7 @@ def finish(outcome: Outcome, project: Path, as_json: bool) -> int:
     """Print the result; 0 when the run finished (with or without a change)."""
     from joinery import metrics
 
+    _departures_from_journal(outcome, project)
     data = outcome.as_dict()
     if outcome.transaction_id:
         data["cost"] = metrics.cost(project, outcome.transaction_id)
@@ -702,6 +711,10 @@ def finish(outcome: Outcome, project: Path, as_json: bool) -> int:
                 print("Note: " + note)
         elif not waiting and outcome.state != "failed":
             print("Nothing changed.")
+        for line in outcome.guessed:
+            print(f"Guessed: {line}")
+        for line in outcome.not_as_asked:
+            print(f"Not as asked: {line}")
         if outcome.auto_accept_held and outcome.state == "review":
             print("Not accepted automatically: " + "; ".join(outcome.auto_accept_held) + ".")
         if outcome.note:
@@ -719,6 +732,20 @@ def finish(outcome: Outcome, project: Path, as_json: bool) -> int:
         if outcome.error:
             print(outcome.error, file=sys.stderr)
     return 1 if outcome.state == "failed" else 0
+
+
+def _departures_from_journal(outcome: Outcome, project: Path) -> None:
+    """The change's guessed and not-as-asked lines as recorded with it, when the
+    run didn't see its review (a kept change, an accept by the host)."""
+    if not outcome.transaction_id or outcome.guessed or outcome.not_as_asked:
+        return
+    from joinery.transactions import FileTransaction
+
+    try:
+        tx = FileTransaction.load(project, outcome.transaction_id)
+    except (OSError, ValueError, KeyError):
+        return
+    outcome.guessed, outcome.not_as_asked = list(tx.guessed), list(tx.not_as_asked)
 
 
 def run(args: argparse.Namespace) -> int:

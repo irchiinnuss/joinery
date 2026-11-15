@@ -223,6 +223,11 @@ class ChatRecorder:
                 if event.get("accepted")
                 else "rejected",
             }
+            for key in ("guessed", "not_as_asked"):
+                # What the agent guessed and where it departed, shown again on reopen.
+                lines = [str(n) for n in event.get(key) or [] if str(n).strip()]
+                if lines:
+                    change[key] = lines
             if event.get("auto_accepted"):
                 change["auto"] = True
                 # Shown under "Accepted automatically" when the chat is reopened.

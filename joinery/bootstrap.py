@@ -470,6 +470,9 @@ def transactions(
                 "auto_accepted": tx.auto_accepted,
                 # What it said beside "Accepted automatically" (auto_accept.shown_notes).
                 "auto_notes": tx.auto_notes,
+                # What the agent guessed and where it departed from the request.
+                "guessed": tx.guessed,
+                "not_as_asked": tx.not_as_asked,
                 # What the change cost to make, when it was measured (joinery.metrics).
                 "cost": metrics.cost(project, tx.id),
                 "file_count": len(tx.changes),
@@ -482,6 +485,22 @@ def transactions(
             }
         )
     return result
+
+
+def transaction_lines(entry: dict[str, Any]) -> list[str]:
+    """One transaction from :func:`transactions`, as plain lines for a person."""
+    lines = [f"{entry['summary'] or 'Project changes'}  ({entry['state']})"]
+    lines += [f"  Guessed: {line}" for line in entry.get("guessed") or []]
+    lines += [f"  Not as asked: {line}" for line in entry.get("not_as_asked") or []]
+    if entry.get("auto_accepted"):
+        lines.append("  Accepted automatically")
+    lines += [
+        f"  {item['change']:<9} {item['path']}" for item in entry.get("files") or []
+    ]
+    more = int(entry.get("file_count", 0)) - len(entry.get("files") or [])
+    if more > 0:
+        lines.append(f"  and {more} more")
+    return lines
 
 
 def _change_kind(change: dict[str, str]) -> str:

@@ -226,6 +226,18 @@ class SubmitResult:
 #: The request checklist (``submit_for_review``'s done): items, characters each.
 DONE_ITEMS = 8
 DONE_CHARS = 120
+#: What the agent guessed and where it departed from the request: items, characters each.
+DEPARTURE_ITEMS = 4
+DEPARTURE_CHARS = 160
+
+
+def departures(lines: list[str]) -> list[str]:
+    """The agent's guessed or not-as-asked lines, tidied: one space between words,
+    blanks and repeats dropped, each line and the list kept short."""
+    kept = [" ".join(line.split())[:DEPARTURE_CHARS] for line in lines]
+    return list(dict.fromkeys(line for line in kept if line))[:DEPARTURE_ITEMS]
+
+
 #: The note on a change a headless run kept after the agent failed mid-turn.
 CRASH_NOTE = (
     "The agent stopped with an error before this change was finished; Joinery's "
@@ -380,6 +392,10 @@ class TurnController:
         self._crossed: list[keep_avoid.Flag] = []
         #: Each part of the request and what was done about it, for the card's list.
         self._done_items: list[str] = []
+        #: What the agent assumed that the user didn't say, and where it departed
+        #: from the request and why (submit_for_review's guessed and not_as_asked).
+        self._guessed: list[str] = []
+        self._not_as_asked: list[str] = []
         #: The agent's own one line naming its change, from its last submit.
         self._named = ""
         #: The reviewer agent that reads each submitted change (None: no reviewer).
@@ -479,6 +495,8 @@ class TurnController:
         self._facts = []
         self._crossed = []
         self._done_items = []
+        self._guessed = []
+        self._not_as_asked = []
         self._named = ""
         self.review_rounds = 0
         self._peer = self._peer_print = None
@@ -823,6 +841,9 @@ class TurnController:
         origin: Literal["agent", "joinery"] = "agent",
         facts: list[str] | None = None,
         done: list[str] | None = None,
+        *,
+        guessed: list[str] | None = None,
+        not_as_asked: list[str] | None = None,
     ) -> SubmitResult:
         """Check the turn's change and, when it passes, put it in front of the user.
 
@@ -833,6 +854,10 @@ class TurnController:
         what visibly changed ("door 20% wider"); the review shows them in one line.
         ``done`` is each part of the request and what was done ("Put it on Table in
         kitchen.tscn"); the request's card lists them when the change opens.
+        ``guessed`` is what the agent assumed that the user didn't say, and
+        ``not_as_asked`` where it departed from the request and why
+        (:func:`departures`): kept with the change, shown on its review, and a
+        departure holds auto-accept.
         """
         turn = self.turn_id
         if origin == "agent" and summary.strip():
@@ -843,6 +868,10 @@ class TurnController:
             self._done_items = [
                 " ".join(d.split())[:DONE_CHARS] for d in done or [] if d.strip()
             ][:DONE_ITEMS]
+        if guessed is not None or origin == "agent":
+            self._guessed = departures(guessed or [])
+        if not_as_asked is not None or origin == "agent":
+            self._not_as_asked = departures(not_as_asked or [])
         result = await self._submit(summary, origin)
         if self.turn_id == turn:
             self.last_result = result
@@ -1113,7 +1142,7 @@ class TurnController:
                 next=NEXT_STOP,
             )
         self.review_open = True
-        done = {"done": list(self._done_items)} if self._done_items else None
+        done = self._card_lines() or None
         mode = self._auto_mode(preview, notes, peer)
         if mode == "editor":
             # Live scene edits only the editor can keep: it accepts the change with
@@ -1192,6 +1221,7 @@ class TurnController:
             owned=auto_accept.owned_changes(
                 project, [str(c.get("path", "")) for c in changes]
             ),
+            not_as_asked=self._not_as_asked,
         )
         if held:
             self.emit({"kind": "auto_accept_held", "reasons": held})
@@ -1200,6 +1230,7 @@ class TurnController:
         if tx is not None:
             # Shown with the kept change: what didn't hold it but is worth knowing.
             tx.auto_notes = [
+                *auto_accept.guessed_notes(self._guessed),
                 *auto_accept.shown_notes(peer, hold_on, sections),
                 *self._passed.get("info", []),
             ]
@@ -1515,8 +1546,7 @@ class TurnController:
         self.review_open = True
         if preview is not None:
             self.emit(preview)
-        done = {"done": list(self._done_items)} if self._done_items else {}
-        self._to(TurnState.IN_REVIEW, extra={**done, "held_checks": True})
+        self._to(TurnState.IN_REVIEW, extra={**self._card_lines(), "held_checks": True})
         self.gateway.start_media(self.emit)
         return self._result(
             "in_review",
@@ -1559,7 +1589,10 @@ class TurnController:
         if tx is not None:
             # Recorded with the change, so `joinery transactions list` shows them.
             tx.review_notes, tx.reviewer = notes, reviewer
+            tx.guessed, tx.not_as_asked = list(self._guessed), list(self._not_as_asked)
         preview = self.gateway.open_review(summary.strip() or self._named)
+        # What the agent assumed and where it departed, in the review and the chat.
+        preview.update(self._departure_fields())
         # The review panel's notes line reads review_notes and reviewer_status.
         preview["review_notes"] = notes
         preview["reviewer"] = reviewer
@@ -1583,6 +1616,17 @@ class TurnController:
             preview["facts"] = facts[:3]
         self.review_id = str(preview["transaction_id"])
         return preview
+
+    def _departure_fields(self) -> dict[str, list[str]]:
+        """The non-empty ``guessed`` and ``not_as_asked`` lines of this submit."""
+        fields = {"guessed": self._guessed, "not_as_asked": self._not_as_asked}
+        return {key: list(lines) for key, lines in fields.items() if lines}
+
+    def _card_lines(self) -> dict[str, list[str]]:
+        """What the request's card lists when the change opens: each part of the
+        request done, and what the agent guessed or did not as asked."""
+        lines = {"done": list(self._done_items)} if self._done_items else {}
+        return {**lines, **self._departure_fields()}
 
     def _unchanged_failure(self) -> SubmitResult | None:
         """The last submit's fixable failure, when nothing changed since it."""

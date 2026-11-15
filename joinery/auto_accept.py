@@ -17,7 +17,10 @@ fantasy, core loop, scope, features, Keep, Avoid, monetisation, or those facts)
 waits. A change that crosses one of the brief's Keep or Avoid lines (moves a pinned
 value, adds something to avoid; ``joinery.keep_avoid``) waits too. A change to a
 file Joinery owns in the game (the shared core and test harness,
-``joinery.core_update.owned``) always waits, with a note.
+``joinery.core_update.owned``) always waits, with a note. A change the agent says
+it made differently from the request (submit_for_review's ``not_as_asked``)
+waits too ("differs from your request"); what it only guessed is shown with the
+kept change.
 
 The rule lives here and is applied by the turn (``joinery.turn``), so every agent
 (Claude Code, Codex, Gemini CLI, opencode) and every parallel task is judged the
@@ -155,6 +158,7 @@ def held(
     brief_direction: Sequence[str] | None = None,
     owned: Sequence[str] = (),
     crossed: Sequence[str] = (),
+    not_as_asked: Sequence[str] = (),
 ) -> list[str]:
     """Why a change that reached review waits for the user; empty when it may be
     kept without asking. Each reason is a short plain line, for logs and metrics.
@@ -175,6 +179,9 @@ def held(
     Joinery-owned files it changes (``owned_changes``): always a hold.
     ``crossed`` the brief's Keep/Avoid lines it crosses (``keep_avoid.check``, as
     ``Flag.reason``): always a hold, naming the lines.
+    ``not_as_asked`` are the agent's own lines on where it departed from the
+    request: any one holds the change (:data:`DEPARTED`). What it only guessed
+    never holds it; it is shown with the kept change (:func:`guessed_notes`).
     """
     reasons: list[str] = []
     paths = [str(c.get("path", "")) for c in changes]
@@ -197,6 +204,8 @@ def held(
             + "; ".join(crossed[:3])
             + ")"
         )
+    if any(line.strip() for line in not_as_asked):
+        reasons.append(DEPARTED)
     if owned:
         reasons.append(OWNED_REASON + " (" + ", ".join(owned[:3]) + ")")
     if notes:
@@ -226,6 +235,17 @@ def held(
     if "" in live:
         reasons.append("a scene it changes isn't saved yet")
     return reasons
+
+
+#: Why a change the agent made differently from the request waits.
+DEPARTED = "differs from your request"
+#: What a kept change says about each thing the agent guessed.
+GUESSED = "Guessed: "
+
+
+def guessed_notes(guessed: Sequence[str]) -> list[str]:
+    """The agent's guesses as notes shown with a kept change ("Guessed: oak")."""
+    return [GUESSED + line.strip() for line in guessed if line.strip()]
 
 
 #: Why a change to Joinery's own game files waits, in the held reasons.

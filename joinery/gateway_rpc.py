@@ -502,8 +502,23 @@ class GatewayRPC:
                     raise ValueError(
                         "done is a list of short lines, one per part of the request."
                     )
+                guessed = params.get("guessed") or []
+                not_as_asked = params.get("not_as_asked") or []
+                for name, lines in (
+                    ("guessed", guessed),
+                    ("not_as_asked", not_as_asked),
+                ):
+                    if not isinstance(lines, list) or not all(
+                        isinstance(line, str) for line in lines
+                    ):
+                        raise ValueError(f"{name} is a list of short lines.")
                 submitted = await self.gateway.turn.submit(
-                    summary, "agent", facts, done
+                    summary,
+                    "agent",
+                    facts,
+                    done,
+                    guessed=guessed,
+                    not_as_asked=not_as_asked,
                 )
                 data = submitted.as_tool_result()
             elif method == "precheck":

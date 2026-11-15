@@ -294,6 +294,10 @@ class FileTransaction:
         self.auto_accepted = False
         #: What a kept change says beside "Accepted automatically" (auto_accept.shown_notes).
         self.auto_notes: list[str] = []
+        #: What the agent assumed that the user didn't say, and where it departed from
+        #: the request and why (submit_for_review's guessed and not_as_asked).
+        self.guessed: list[str] = []
+        self.not_as_asked: list[str] = []
 
     @property
     def original(self) -> Path:
@@ -353,6 +357,10 @@ class FileTransaction:
             data["auto_accepted"] = True
         if self.auto_notes:
             data["auto_notes"] = self.auto_notes
+        if self.guessed:
+            data["guessed"] = self.guessed
+        if self.not_as_asked:
+            data["not_as_asked"] = self.not_as_asked
         if self.state in PENDING:
             # The full inventory is only needed until the decision.
             data["base"] = self.base
@@ -523,6 +531,27 @@ class FileTransaction:
 
         try:
             skills.refresh(self.project)
+        except (OSError, ValueError):
+            pass
+
+    def _stamp_unplayed(self, changes: list[dict[str, str]]) -> None:
+        """Stamp a change to the game "not yet played by you" (joinery.played).
+        Bookkeeping: never fails a decision already made."""
+        from joinery import played  # Late: played writes through this module.
+
+        try:
+            played.stamp(
+                self.project,
+                self.id,
+                self.summary,
+                [
+                    change["path"]
+                    for change in changes
+                    if DIRECTORY not in {change["before"], change["after"]}
+                ],
+                commit=self.timeline.get("commit", ""),
+                when=self.decided,
+            )
         except (OSError, ValueError):
             pass
 
@@ -786,6 +815,12 @@ class FileTransaction:
         transaction.auto_accepted = raw.get("auto_accepted") is True
         transaction.auto_notes = [
             note for note in raw.get("auto_notes") or [] if isinstance(note, str)
+        ]
+        transaction.guessed = [
+            line for line in raw.get("guessed") or [] if isinstance(line, str)
+        ]
+        transaction.not_as_asked = [
+            line for line in raw.get("not_as_asked") or [] if isinstance(line, str)
         ]
         # Never accept journal paths outside this project, even after local tampering.
         for path in transaction.base:

@@ -251,12 +251,20 @@ def make_server(socket: Path, role: str | None = None) -> MCPServer[Any]:
         summary: Annotated[str, Field(min_length=1, max_length=160)],
         facts: Annotated[list[str], Field(max_length=3)] | None = None,
         done: Annotated[list[str], Field(max_length=8)] | None = None,
+        guessed: Annotated[list[str], Field(max_length=4)] | None = None,
+        not_as_asked: Annotated[list[str], Field(max_length=4)] | None = None,
     ) -> dict[str, Any]:
-        """Hand your finished change to Joinery. Joinery checks it (art bible rules, Godot import, missing res:// files, asset provenance, project tests). status 'in_review': the user now sees it; make no more changes this turn. 'failed' and not final: fix every problem listed and submit again (attempts_left). 'needs_user', or final: stop and tell the user plainly what failed. summary: one short line in the user's words naming what changed. facts: optional, up to 3 tiny plain phrases of what visibly changed, with numbers when known ('door 20% wider', 'wood darker'). done: each part of the user's request and what you did about it, one short line each ('Made the mug in Blender', 'Put it on Table in kitchen.tscn'); a part you couldn't do is listed too, saying so, never dropped. The request's card shows the list. notes in the result: say them in your reply."""
+        """Hand your finished change to Joinery. Joinery checks it (art bible rules, Godot import, missing res:// files, asset provenance, project tests). status 'in_review': the user now sees it; make no more changes this turn. 'failed' and not final: fix every problem listed and submit again (attempts_left). 'needs_user', or final: stop and tell the user plainly what failed. summary: one short line in the user's words naming what changed. facts: optional, up to 3 tiny plain phrases of what visibly changed, with numbers when known ('door 20% wider', 'wood darker'). done: each part of the user's request and what you did about it, one short line each ('Made the mug in Blender', 'Put it on Table in kitchen.tscn'); a part you couldn't do is listed too, saying so, never dropped. The request's card shows the list. guessed: optional, what you assumed that the user didn't say, one short line each ('Made it oak; no wood was named'). not_as_asked: optional, where you departed from the request and why, one short line each ('Door 1.2 m, not 3 m: the wall is only 2.5 m high'); a change with one waits for the user. Fill both honestly and briefly; leave them empty when there's nothing to say. notes in the result: say them in your reply."""
         return await rpc(
             socket,
             "submit",
-            {"summary": summary, "facts": facts or [], "done": done or []},
+            {
+                "summary": summary,
+                "facts": facts or [],
+                "done": done or [],
+                "guessed": guessed or [],
+                "not_as_asked": not_as_asked or [],
+            },
         )
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True))
