@@ -215,6 +215,7 @@ func _wizard(create: Button) -> void:
 	_check(next.text == "Create project", "The last step offers Create project")
 	await _shot("setup-3-art", dialog)
 	await _references(dialog, folder + "-material")
+	await _round(dialog)
 
 	# Never register or open the project: the suite only looks at the pages.
 	for connection: Dictionary in dialog.get_signal_connection_list("project_created"):
@@ -437,6 +438,37 @@ func _label_visible(parent: Node, text: String) -> bool:
 		if (node as Label).text == text and (node as Label).is_visible_in_tree():
 			return true
 	return false
+
+
+## Step 3's optional "How it plays" round: closed until opened, then one picker per question
+## with the starting point's suggestion selected and Skip last.
+func _round(dialog: Window) -> void:
+	var toggle: Button = null
+	for node: Node in dialog.find_children("*", "Button", true, false):
+		var button := node as Button
+		if button.text.begins_with("Answer ") and button.is_visible_in_tree():
+			toggle = button
+	_check(toggle != null, "Step 3 offers the starting point's questions")
+	if toggle == null:
+		return
+	_check(_label_visible(dialog, "How it plays"), "The questions have their own section")
+	_check(_picker(dialog, "What fills most of the time?") == null, "The questions start closed")
+	toggle.button_pressed = true
+	await _frames()
+	var focus := _picker(dialog, "What fills most of the time?")
+	_check(focus != null, "Opening shows a picker per question")
+	if focus != null:
+		_check(
+			focus.get_item_text(focus.selected).ends_with("(suggested)"),
+			"The suggestion is selected and says so"
+		)
+		_check(
+			focus.get_item_metadata(focus.item_count - 1) == "skip", "Every question can be skipped"
+		)
+	await _scroll_to(dialog, toggle.get_parent().get_child(0) as Control)
+	await _shot("setup-3-round", dialog)
+	toggle.button_pressed = false
+	await _frames()
 
 
 ## Step 3's reference images and design documents, dropped on the window: thumbnails with a

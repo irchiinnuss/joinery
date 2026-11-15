@@ -210,6 +210,7 @@ STARTUP_SCREENS = (
     "setup-2-steam-error",
     "setup-2-steam-too-big",
     "setup-3-art",
+    "setup-3-round",
     "setup-failed",
     "setup-creating",
 )

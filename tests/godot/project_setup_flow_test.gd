@@ -448,6 +448,8 @@ func _wizard(create: Button) -> void:
 	await process_frame
 	_check((first_field as TextEdit).text.contains("retained"), "Back must retain answers")
 	var material := await _drop_material(dialog)
+	var round_script := load(get_script().resource_path.get_base_dir() + "/wizard_round.gd")
+	_check(round_script.call("answer", dialog).is_empty(), "Answer the how-it-plays round")
 	if _failed:
 		return
 	# Create only the temporary fixture; do not register it or launch an editor.
@@ -474,6 +476,7 @@ func _wizard(create: Button) -> void:
 		return
 	_check(FileAccess.file_exists(project.path_join("project.godot")), "Create a Godot project")
 	_check_material(project, material)
+	_check(round_script.call("check", project).is_empty(), "The brief marks each answer")
 	_check(FileAccess.file_exists(project.path_join("joinery.toml")), "Custom choices must save")
 	# Windows writes the file with CRLF line ends.
 	var config := FileAccess.get_file_as_string(project.path_join("joinery.toml")).replace(

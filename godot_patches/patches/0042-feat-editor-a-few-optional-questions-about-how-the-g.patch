@@ -1,0 +1,222 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ninjacornix <milanvrankic@gmail.com>
+Date: Sun, 15 Nov 2026 15:11:35 +0100
+Subject: [PATCH] feat(editor): a few optional questions about how the game
+ plays
+
+Joinery-only, not for upstream. Step 3 gets a How it plays section from
+the starting point's questions in joinery blueprints --json: closed by
+default (the round is skipped), and once opened one picker per question
+with the suggestion selected and named so, and Skip last. Picking a choice,
+the suggestion included, makes it the user's answer; a suggestion left
+standing is sent as default, and the brief marks it as not confirmed.
+---
+ editor/project_manager/project_dialog.cpp | 134 +++++++++++++++++++++-
+ editor/project_manager/project_dialog.h   |  14 +++
+ 2 files changed, 147 insertions(+), 1 deletion(-)
+
+diff --git a/editor/project_manager/project_dialog.cpp b/editor/project_manager/project_dialog.cpp
+index a58b1ce..2756ca0 100644
+--- a/editor/project_manager/project_dialog.cpp
++++ b/editor/project_manager/project_dialog.cpp
+@@ -1043,6 +1043,7 @@ void ProjectDialog::_joinery_reset_pages() {
+ 	// A fresh dialog starts from the starting point's defaults again.
+ 	joinery_features_for = String();
+ 	joinery_preset_for = String();
++	joinery_round_for = String();
+ }
+ 
+ int ProjectDialog::_joinery_total_steps() const {
+@@ -1062,6 +1063,7 @@ void ProjectDialog::_joinery_show_step(int p_step) {
+ 	} else if (p_step == JOINERY_PAGE_LOOK) {
+ 		_joinery_select_preset();
+ 		_joinery_fill_brief_defaults();
++		_joinery_build_round();
+ 		Object::cast_to<Control>(joinery_brief_fields->get_parent())->set_visible(!joinery_brief_keys.is_empty());
+ 		Object::cast_to<Control>(joinery_look_fields->get_parent())->set_visible(!joinery_bible_keys.is_empty());
+ 	}
+@@ -3430,6 +3432,113 @@ void ProjectDialog::_joinery_fill_brief_defaults() {
+ 	}
+ }
+ 
++// The starting point's "How it plays" round: one picker per question, its
++// suggested choice selected and named so, and Skip last. Rebuilt, and closed,
++// when the starting point changes.
++void ProjectDialog::_joinery_build_round() {
++	const Dictionary blueprint = _joinery_current_blueprint();
++	const String id = blueprint.get("id", "");
++	if (id == joinery_round_for) {
++		return;
++	}
++	joinery_round_for = id;
++	while (joinery_round_fields->get_child_count() > 0) {
++		Node *child = joinery_round_fields->get_child(0);
++		joinery_round_fields->remove_child(child);
++		memdelete(child);
++	}
++	joinery_round_pickers.clear();
++	joinery_round_keys.clear();
++	const Dictionary round = blueprint.get("questions", Dictionary());
++	const Array questions = round.get("questions", Array());
++	joinery_round_toggle->set_pressed_no_signal(false);
++	_joinery_toggle_round(false);
++	joinery_round_box->set_visible(!questions.is_empty());
++	if (questions.is_empty()) {
++		return;
++	}
++	joinery_round_toggle->set_text(vformat(TTR("Answer %d short questions"), questions.size()));
++	joinery_round_intro->set_text(round.get("intro", ""));
++	const int control_height = _joinery_control_h(2.5);
++	for (int i = 0; i < questions.size(); i++) {
++		const Dictionary question = questions[i];
++		VBoxContainer *field = memnew(VBoxContainer);
++		field->add_theme_constant_override("separation", _joinery_space(1));
++		joinery_round_fields->add_child(field);
++
++		Label *label = memnew(Label);
++		label->set_theme_type_variation(SNAME("JoineryLabel"));
++		label->set_text(question.get("ask", ""));
++		label->set_auto_translate_mode(AUTO_TRANSLATE_MODE_DISABLED);
++		field->add_child(label);
++
++		OptionButton *picker = memnew(OptionButton);
++		picker->set_theme_type_variation(SNAME("JoineryFieldPicker"));
++		picker->set_h_size_flags(Control::SIZE_EXPAND_FILL);
++		picker->set_custom_minimum_size(Size2(0, control_height));
++		picker->set_auto_translate_mode(AUTO_TRANSLATE_MODE_DISABLED);
++		picker->set_accessibility_name(label->get_text());
++		// Picking the suggestion again counts: that confirms it.
++		picker->set_allow_reselect(true);
++		const String suggested = question.get("default", "");
++		const Array choices = question.get("choices", Array());
++		int selected = 0;
++		for (int c = 0; c < choices.size(); c++) {
++			const Dictionary choice = choices[c];
++			const String choice_id = choice.get("id", "");
++			String text = choice.get("label", "");
++			if (choice_id == suggested) {
++				text = vformat(TTR("%s (suggested)"), text);
++				selected = picker->get_item_count();
++			}
++			const int item = picker->get_item_count();
++			picker->add_item(text);
++			picker->set_item_metadata(item, choice_id);
++			picker->set_item_tooltip(item, choice.get("brief", ""));
++		}
++		picker->add_separator();
++		const int skip = picker->get_item_count();
++		picker->add_item(TTR("Skip"));
++		picker->set_item_metadata(skip, String("skip"));
++		picker->set_item_tooltip(skip, TTR("Leave this open in the brief."));
++		picker->select(selected);
++		picker->connect(SceneStringName(item_selected), callable_mp(this, &ProjectDialog::_joinery_round_picked).bind(i));
++		field->add_child(picker);
++		joinery_round_pickers.push_back(picker);
++		joinery_round_keys.push_back(question.get("key", ""));
++	}
++}
++
++void ProjectDialog::_joinery_toggle_round(bool p_open) {
++	_joinery_set_disclosure(joinery_round_toggle, p_open);
++	joinery_round_fields->set_visible(p_open);
++	joinery_round_intro->set_visible(p_open && !joinery_round_intro->get_text().is_empty());
++}
++
++void ProjectDialog::_joinery_round_picked(int p_index, int p_row) {
++	if (p_row >= 0 && p_row < joinery_round_pickers.size()) {
++		joinery_round_pickers[p_row]->set_meta("picked", true);
++	}
++}
++
++// Per question: the choice the user picked, "skip", or "default" for a
++// suggestion left standing (written into the brief as not confirmed).
++Dictionary ProjectDialog::_joinery_round_answers() const {
++	Dictionary answers;
++	for (int i = 0; i < joinery_round_pickers.size() && i < joinery_round_keys.size(); i++) {
++		const OptionButton *picker = joinery_round_pickers[i];
++		const String choice = picker->get_selected() >= 0 ? String(picker->get_item_metadata(picker->get_selected())) : String();
++		if (choice == "skip") {
++			answers[joinery_round_keys[i]] = "skip";
++		} else if (bool(picker->get_meta("picked", false)) && !choice.is_empty()) {
++			answers[joinery_round_keys[i]] = choice;
++		} else {
++			answers[joinery_round_keys[i]] = "default";
++		}
++	}
++	return answers;
++}
++
+ Dictionary ProjectDialog::_joinery_field_values(const Vector<Control *> &p_inputs, const Vector<String> &p_keys) const {
+ 	Dictionary values;
+ 	for (int i = 0; i < p_inputs.size() && i < p_keys.size(); i++) {
+@@ -3687,7 +3796,11 @@ void ProjectDialog::_joinery_begin_create() {
+ 		answers["_preset"] = joinery_preset_picker->get_item_metadata(joinery_preset_picker->get_selected());
+ 	}
+ 	joinery_job_answers = joinery_bible_keys.is_empty() ? String() : JSON::stringify(answers);
+-	const Dictionary brief = _joinery_field_values(joinery_brief_inputs, joinery_brief_keys);
++	Dictionary brief = _joinery_field_values(joinery_brief_inputs, joinery_brief_keys);
++	// The round, only when the user opened it: closed means skipped.
++	if (joinery_round_toggle && joinery_round_toggle->is_pressed() && !joinery_round_keys.is_empty()) {
++		brief["questions"] = _joinery_round_answers();
++	}
+ 	joinery_job_brief = joinery_brief_keys.is_empty() ? String() : JSON::stringify(brief);
+ 	Array references;
+ 	for (int i = 0; i < joinery_ref_paths.size(); i++) {
+@@ -5432,6 +5545,25 @@ ProjectDialog::ProjectDialog() {
+ 	joinery_look_page->move_child(joinery_references_box, 0);
+ 	joinery_look_page->move_child(Object::cast_to<Node>(joinery_look_fields->get_parent()), 1);
+ 	_joinery_build_imports(brief_section);
++	// How it plays: the starting point's few optional questions, closed until
++	// the user opens them. Filled when the step opens (_joinery_build_round).
++	joinery_round_box = section(TTRC("How it plays"));
++	joinery_round_toggle = memnew(Button);
++	joinery_round_toggle->set_theme_type_variation(SNAME("JoineryTextButton"));
++	joinery_round_toggle->set_toggle_mode(true);
++	joinery_round_toggle->set_h_size_flags(Control::SIZE_SHRINK_BEGIN);
++	joinery_round_toggle->set_tooltip_text(TTRC("Optional. Each answer goes into the brief marked as yours. A question left as suggested stays a suggestion, and Skip leaves it open."));
++	joinery_round_toggle->connect(SceneStringName(toggled), callable_mp(this, &ProjectDialog::_joinery_toggle_round));
++	joinery_round_box->add_child(joinery_round_toggle);
++	joinery_round_intro = _joinery_caption("");
++	joinery_round_intro->set_auto_translate_mode(AUTO_TRANSLATE_MODE_DISABLED);
++	joinery_round_intro->hide();
++	joinery_round_box->add_child(joinery_round_intro);
++	joinery_round_fields = memnew(VBoxContainer);
++	joinery_round_fields->add_theme_constant_override(SNAME("separation"), _joinery_space(4));
++	joinery_round_fields->hide();
++	joinery_round_box->add_child(joinery_round_fields);
++	joinery_round_box->hide();
+ 	joinery_preset_box = section(TTRC("Starting rules"));
+ 	joinery_preset_picker = memnew(OptionButton);
+ 	joinery_preset_picker->set_theme_type_variation(SNAME("JoineryFieldPicker"));
+diff --git a/editor/project_manager/project_dialog.h b/editor/project_manager/project_dialog.h
+index ec9ec26..8f01b22 100644
+--- a/editor/project_manager/project_dialog.h
++++ b/editor/project_manager/project_dialog.h
+@@ -252,6 +252,16 @@ private:
+ 	// What the brief fields were last filled with, so a value the user typed
+ 	// is never replaced when they go back and change step 1.
+ 	Dictionary joinery_brief_filled;
++	// Step 3: the starting point's optional "How it plays" questions, from
++	// `questions` in `joinery blueprints --json`. Closed, the round is skipped;
++	// open, a question left as suggested is written as an unconfirmed default.
++	VBoxContainer *joinery_round_box = nullptr;
++	Button *joinery_round_toggle = nullptr;
++	VBoxContainer *joinery_round_fields = nullptr;
++	Label *joinery_round_intro = nullptr;
++	Vector<OptionButton *> joinery_round_pickers;
++	Vector<String> joinery_round_keys;
++	String joinery_round_for;
+ 	// Step 3: the user's own reference images and design documents. Picked
+ 	// with Add… or dropped on the window; each image has a one-line note.
+ 	// `joinery game apply` copies them in (setup_imports.py), from a file
+@@ -494,6 +504,10 @@ private:
+ 
+ 	// Step 3: preset and brief defaults.
+ 	void _joinery_fill_brief_defaults();
++	void _joinery_build_round();
++	void _joinery_toggle_round(bool p_open);
++	void _joinery_round_picked(int p_index, int p_row);
++	Dictionary _joinery_round_answers() const;
+ 	void _joinery_select_preset();
+ 	Dictionary _joinery_field_values(const Vector<Control *> &p_inputs, const Vector<String> &p_keys) const;
+ 	bool _joinery_write_project_file();
