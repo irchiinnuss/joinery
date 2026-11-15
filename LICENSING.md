@@ -14,7 +14,7 @@ does not apply to them, and neither does the AGPL apply to a game because it was
 made with Joinery or contains the MIT-licensed parts above.
 
 Godot and other bundled components keep their own licences; see
-[licenses/](licenses/). The official application logos in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [licenses/](licenses/). The official application logos in
 `godot_addon/joinery/icons/apps/` are not covered by the add-on's MIT licence: each keeps its
 own (CC BY, CC BY-SA, MIT or GPL) and stays a trademark of its owner; see
 [licenses/tool-logos.md](licenses/tool-logos.md). The creative tools (Blender, Krita, Surge XT and others)
