@@ -27,6 +27,7 @@ from bridge.instructions import (
     CHECK_PROMPT,
     DEBUGGER_PROMPT,
     DESIGN_PROMPT,
+    ECONOMY_GUIDE,
     PLAYTEST_PROMPT,
     REVIEWER_PROMPT,
     SOUND_DESIGNER_PROMPT,
@@ -134,6 +135,20 @@ def test_instructions_lead_and_the_turn_ends() -> None:
     assert text.index("Editor context:") < text.index("This turn:")
     assert text.index('"scene_revision": "7"') > text.index("This turn:")
     assert text.endswith("Make the door red")
+
+
+def test_every_agent_is_told_to_work_in_few_calls() -> None:
+    # The same economy rules for every provider: Claude's system prompt, the ACP
+    # agents' first block, Codex's developer instructions (codex_session).
+    assert ECONOMY_GUIDE in INSTRUCTIONS
+    assert ECONOMY_GUIDE in prompt_text(turn("hello", 1))
+    source = Path("bridge/codex_session.py").read_text(encoding="utf-8")
+    assert "+ ECONOMY_GUIDE" in source
+    for rule in ("in one message", "never read a file you already read", "tool_schema"):
+        assert rule in ECONOMY_GUIDE
+    # One spelling of each rule: the live-scene rule lives in OBJECT_GUIDE only.
+    assert INSTRUCTIONS.count("unsaved edits change live with edit_scene") == 0
+    assert INSTRUCTIONS.count("read game_brief, game_setup and art_direction") == 1
 
 
 def test_claude_turns_leave_the_instructions_to_the_system_prompt() -> None:

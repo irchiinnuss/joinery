@@ -122,10 +122,10 @@ KIT_GUIDE = (
 #: The game: read the brief and setup with the art direction, extend the game
 #: through its extension points, and only ever suggest a feature.
 GAME_GUIDE = (
-    "Read game_brief and game_setup with art_direction; extend the game through "
-    "game_setup.extension_points and each added feature's guide (game_setup.feature_guides); "
-    "suggest /feature add, never apply it. "
-    "At the start of a session read game_brief, game_setup and art_direction once. "
+    "At the start of a session read game_brief, game_setup and art_direction once, "
+    "together in one message; extend the game through game_setup.extension_points and "
+    "each added feature's guide (game_setup.feature_guides); suggest /feature add, "
+    "never apply it. "
     "When their suggestions fit what the user is doing, offer one at a time, in one "
     "short line, and never act on a suggestion the user has not asked for. "
     "Read the user's design documents in design/docs/ (game_brief.design_documents; "
@@ -426,6 +426,27 @@ DESIGN_PROMPT = RolePrompt(
     "Joinery already found these:\n{found}",
 )
 
+#: How to spend few model calls. Every call re-sends the whole conversation, so a
+#: request's tokens grow with its number of calls and the size of what they return.
+ECONOMY_GUIDE = (
+    "Work in few calls: every call re-sends the whole conversation. Make independent "
+    "calls together in one message (several reads, searches, call_tool writes or "
+    "paint_map strokes at once), not one per message. Find before you read: the project "
+    "map lists scenes, scripts, classes and assets; search_project finds code and text; "
+    "then Read only the lines you need (offset and limit; scenes are long, search them "
+    "for the node first) and never read a file you already read this turn unless it "
+    "changed. The shell is for plain read-only commands only (rg, grep, sed -n, cat, ls, "
+    "find, head, wc, git log/diff/show): no loops, awk, xargs or $( ). Godot runs only "
+    "through precheck, playtest and run_project; don't look for its binary. "
+    "discover_tools lists each tool's arguments: call tool_schema only when they are "
+    "unclear, and only once per tool. game_brief, game_setup and art_direction are "
+    "joinery-registry tools for call_tool. JOURNEYMAN.md is in this prompt when it "
+    "holds anything; don't read it or the CLAUDE.md/AGENTS.md pointer to it. "
+    "Long results arrive as a summary with a details ref: read only the parts you "
+    "need, several paths in one details call. A refused call needs no apology or "
+    "mention: take the permitted route and carry on. "
+)
+
 #: How the user decides, in the words the editor shows.
 REVIEW_GUIDE = (
     TASK_GUIDE
@@ -458,8 +479,6 @@ REVIEW_GUIDE = (
     "say in plain words what the user can decide. "
     "If it returns needs_user or final, stop and do what its next field says; Joinery "
     "itself tells the user when a change failed. "
-    "The scene on screen and scenes with unsaved edits change live with edit_scene; "
-    "other scenes change through the staged Godot tools. "
     "To approve art direction the user types /art and clicks Approve look; "
     "accepting a saved draft alone is not approval."
 )

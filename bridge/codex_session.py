@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from bridge.connect_errors import ConnectError, ProviderGone, StderrTail
-from bridge.instructions import GAME_GUIDE, REVIEW_GUIDE
+from bridge.instructions import ECONOMY_GUIDE, GAME_GUIDE, REVIEW_GUIDE
 from bridge.models import ModelChoice
 from bridge.protocol import (
     AgentEvent,
@@ -289,6 +289,7 @@ class CodexSession:
                 "Avoid redundant inspection or validation calls. Asset export does not place a scene instance; create one if the user requested placement. "
                 "Raw bpy/Lua/sclang is allowed only through the logged offline document operator, not an unrecorded host script. "
                 "A missing or unapproved art bible requires the user to complete and approve its actual content before asset creation. "
+                + ECONOMY_GUIDE
                 + REVIEW_GUIDE
                 + " "
                 "Never claim a preview is accepted or saved. A successful tool result means the preview exists. "

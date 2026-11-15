@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from bridge.connect_errors import ConnectError
-from bridge.instructions import GAME_GUIDE, REVIEW_GUIDE
+from bridge.instructions import ECONOMY_GUIDE, GAME_GUIDE, REVIEW_GUIDE
 from bridge.protocol import Prompt
 from joinery import memory
 from joinery.agents import get
@@ -29,23 +29,18 @@ from joinery.wiring import _command_str
 INSTRUCTIONS = (
     "You operate Joinery's current Godot project. Use the connected joinery-registry MCP gateway: "
     "inspect_editor for live scene identities, edit_scene for reversible live node changes, and "
-    "discover_tools/tool_schema/call_tool for native creative apps and staged saved-file edits. "
+    "discover_tools/call_tool for native creative apps and staged saved-file edits. "
     "Do not give manual editor steps when a connected tool can do the requested work. "
-    "Raw project files are read-only in this agent process. The gateway owns mutations and user review. "
-    "Keep unsaved live scenes separate from saved files and game_* runtime calls. "
+    "Raw project files are read-only in this agent process. The gateway owns mutations and user review; "
+    "never claim staged changes are accepted or saved. "
     "Inspect existing sources before editing; preserve named parts. No creative asset work before user-approved art direction. "
+    "Never generate or fetch assets: operate actual tools. A Rule Zero STOP halts the turn. "
+    + ECONOMY_GUIDE
     + REVIEW_GUIDE
-    + " Never claim staged changes are accepted or saved. "
-    "Find before you read: the project map lists scenes, scripts, classes and assets; search_project (or a read-only "
-    "shell search: rg, grep, ls, find, git log/diff) finds code and text in one call; then read only the lines you need "
-    "(Read with offset and limit), never folders file by file. Cache discovered schemas and write compact native scripts. "
-    "A refused tool call needs no apology or mention: take the permitted route and carry on. "
-    "Document operators automatically export, import and record provenance; precheck runs the same checks early without submitting; submit_for_review runs the final checks and opens the review. "
-    "Avoid repeating those checks after every call. If the user asks to place an asset in their scene, create the scene instance too. "
-    "Long tool results arrive as summaries with a details ref: read more with details only when you need it. "
+    + " Document operators export, import and record provenance themselves. "
+    "If the user asks to place an asset in their scene, create the scene instance too. "
     "Before making a new asset, find_recipe shows this project's closest accepted recipe to start from. "
-    "To change part of a file, send find/replace patch pairs rather than the whole file. "
-    "Never generate assets or fetch assets. Operate actual tools. A Rule Zero STOP halts the turn. "
+    "To change part of a file, send find/replace patch pairs rather than the whole file; keep native scripts compact. "
     + GAME_GUIDE
 )
 

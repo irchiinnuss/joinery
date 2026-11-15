@@ -68,7 +68,7 @@ def test_every_agent_prompt_reads_the_game_brief() -> None:
     # (tests/test_codex_chat.py).
     text = prompt_text(Prompt(text="hello", project_dir="/tmp/game"))
     for prompt in (INSTRUCTIONS, text):
-        assert "Read game_brief and game_setup with art_direction" in prompt
+        assert "read game_brief, game_setup and art_direction once" in prompt
         assert "extend the game through game_setup.extension_points" in prompt
         assert "suggest /feature add, never apply it" in prompt
         assert "Approve look" in prompt
