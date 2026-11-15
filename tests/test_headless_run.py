@@ -39,6 +39,7 @@ say({"kind": "check_problems", "attempt": 1, "final": False, "problems": []})
 say({"kind": "usage", "input_tokens": 10, "output_tokens": 2})
 say({"kind": "message_delta", "text": "Made it ", "new_message": True})
 say({"kind": "message_delta", "text": "red."})
+say({"kind": "auto_accept_held", "reasons": ["it has notes for the user"]})
 say({"kind": "file_preview", "transaction_id": "tx1", "summary": "Red door"})
 say({"kind": "task", "task_id": "k1", "title": "Lamp", "state": "working",
      "transaction_id": ""})
@@ -137,6 +138,10 @@ def test_the_cli_streams_json_and_ends_with_the_result(
     result = lines[-1]
     assert result["kind"] == "run_result" and result["state"] == "review"
     assert result["transaction_id"] == "tx1" and result["cost"] is None
+    # Why auto-accept held the change streams as it happens and ends in the result.
+    (held,) = [line for line in lines if line["kind"] == "auto_accept_held"]
+    assert held["reasons"] == ["it has notes for the user"]
+    assert result["auto_accept_held"] == ["it has notes for the user"]
     # No agent pinned and none used before: say how to choose one.
     assert cli_main(args) == 1
     assert "--agent" in json.loads(capsys.readouterr().out)["error"]

@@ -74,6 +74,7 @@ EVENTS = frozenset(
         "quiet",
         "chat",
         "kept",
+        "auto_accept_held",
     }
 )
 NO_EDITOR = "No editor is open in this run; stage saved files."
@@ -118,6 +119,8 @@ class Outcome:
     todo_waiting: str = ""
     #: The change waits unfinished: the host kept it when the turn failed or stopped.
     kept: bool = False
+    #: Why auto-accept left the change for the user ("it has notes for the user", …).
+    auto_accept_held: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return {"kind": "run_result", **asdict(self)}
@@ -346,6 +349,10 @@ async def _follow(
             outcome.chat_id = str(event["chat_id"])
         elif kind == "kept":
             _note_kept(outcome, event)
+        elif kind == "auto_accept_held" and not event.get("task_id"):
+            for why in event.get("reasons") or []:
+                if str(why) not in outcome.auto_accept_held:
+                    outcome.auto_accept_held.append(str(why))
         elif kind == "todo" and not event.get("task_id"):
             state = str(event.get("state", ""))
             waiting = event if state == "waiting" else None
@@ -655,6 +662,8 @@ def finish(outcome: Outcome, project: Path, as_json: bool) -> int:
             )
         if not waiting and outcome.state != "failed":
             print("Nothing changed.")
+        if outcome.auto_accept_held and outcome.state == "review":
+            print("Not accepted automatically: " + "; ".join(outcome.auto_accept_held) + ".")
         if outcome.note:
             print(outcome.note)
         if outcome.todo_waiting:
