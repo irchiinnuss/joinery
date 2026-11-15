@@ -79,6 +79,10 @@ var _reach_nodes: Dictionary = {}
 var _reach_looked: int = -REACH_LOOK_EVERY
 ## The scene the reach nodes were found in (its instance id): a reload makes a new one.
 var _reach_scene: int = 0
+## Where each reach node really is, by instance id: {"box": AABB, "spot": Vector3}. A
+## grouping node often sits at the origin with its contents far away, so its place is the
+## combined bounds of what it holds (or a marker inside it), not its own origin.
+var _reach_places: Dictionary = {}
 
 
 func _init(scene_tree: SceneTree, generator: RandomNumberGenerator) -> void:
@@ -207,7 +211,7 @@ func _walk(frame: int) -> void:
 	var mapped := cover != null and bool(cover.get(&"built"))
 	if _target != null:
 		var aim: Vector3 = (
-			cover.call(&"route", _where(_player), _where(_target)) if mapped else _where(_target)
+			cover.call(&"route", _where(_player), _aim(_target)) if mapped else _aim(_target)
 		)
 		direction = _toward_point(aim)
 	elif mapped:
@@ -275,7 +279,7 @@ func _reach_target() -> Node:
 		if bool(entry["reached"]):
 			continue
 		for node: Node in _live_reach_nodes(str(entry["target"])):
-			var distance := _where(node).distance_to(_where(_player))
+			var distance := _reach_distance(node, _where(_player))
 			if distance < best_distance:
 				best_distance = distance
 				best = node
@@ -308,7 +312,7 @@ func _check_reach(frame: int) -> void:
 		if bool(entry["reached"]):
 			continue
 		for node: Node in _live_reach_nodes(str(entry["target"])):
-			var distance := _flat_distance(_where(node), at)
+			var distance := _reach_distance(node, at)
 			if entry["closest"] == null or distance < float(entry["closest"]):
 				entry["closest"] = snappedf(distance, 0.01)
 			if (
@@ -366,6 +370,7 @@ static func reach_matches(node_name: String, word: String) -> bool:
 
 func _find_reach_nodes() -> void:
 	_reach_nodes.clear()
+	_reach_places.clear()
 	var scene := tree.current_scene
 	_reach_scene = scene.get_instance_id() if scene != null else 0
 	if scene == null:
@@ -415,6 +420,94 @@ func _inside(node: Node, at: Vector3) -> bool:
 	return false
 
 
+## Where to head for [param node]: a reach node's place (its contents), else its origin.
+func _aim(node: Node) -> Vector3:
+	if _reach_places.has(node.get_instance_id()):
+		return _reach_place(node)["spot"]
+	return _where(node)
+
+
+## How far [param at] is from reach node [param node], on the ground: from the edge of the
+## bounds of what it holds (zero inside them), or from its origin when it holds nothing.
+func _reach_distance(node: Node, at: Vector3) -> float:
+	var place := _reach_place(node)
+	var box: AABB = place["box"]
+	if box.size != Vector3.ZERO:
+		return flat_box_distance(box, at, _player is Node3D or _player == null)
+	return _flat_distance(place["spot"], at)
+
+
+## [param node]'s place, worked out once per look (rooms don't move).
+func _reach_place(node: Node) -> Dictionary:
+	var id := node.get_instance_id()
+	if not _reach_places.has(id):
+		_reach_places[id] = reach_place(node)
+	return _reach_places[id]
+
+
+## Where [param node] is in the world, for reaching it: a Marker3D/Marker2D child marks
+## the spot; else the combined world bounds of its visual and collision descendants (or
+## itself), the spot at their centre; else (a leaf) its own origin with empty bounds.
+## 2D bounds use x, y with zero depth.
+static func reach_place(node: Node) -> Dictionary:
+	for child: Node in node.get_children():
+		if child is Marker3D or child is Marker2D:
+			return {"box": AABB(), "spot": _where(child)}
+	var box := content_bounds(node)
+	if box.size != Vector3.ZERO:
+		return {"box": box, "spot": box.get_center()}
+	return {"box": AABB(), "spot": _where(node)}
+
+
+## The combined world-space bounds of [param node]'s meshes, sprites and collision shapes,
+## itself included; an empty AABB when it has none.
+static func content_bounds(node: Node) -> AABB:
+	var total := AABB()
+	var any := false
+	var parts: Array[Node] = [node]
+	parts.append_array(node.find_children("*", "", true, false))
+	for part: Node in parts:
+		var box := AABB()
+		if part is VisualInstance3D:
+			box = (part as Node3D).global_transform * (part as VisualInstance3D).get_aabb()
+		elif part is CollisionShape3D and (part as CollisionShape3D).shape != null:
+			var mesh := (part as CollisionShape3D).shape.get_debug_mesh()
+			if mesh == null:
+				continue
+			box = (part as Node3D).global_transform * mesh.get_aabb()
+		elif part is CollisionShape2D and (part as CollisionShape2D).shape != null:
+			var rect := (part as CollisionShape2D).shape.get_rect()
+			box = _flat_box((part as Node2D).global_transform * rect)
+		elif part is Sprite2D:
+			box = _flat_box((part as Node2D).global_transform * (part as Sprite2D).get_rect())
+		else:
+			continue
+		if box.size == Vector3.ZERO:
+			continue
+		total = box if not any else total.merge(box)
+		any = true
+	return total
+
+
+static func _flat_box(rect: Rect2) -> AABB:
+	return AABB(
+		Vector3(rect.position.x, rect.position.y, 0.0), Vector3(rect.size.x, rect.size.y, 0.0)
+	)
+
+
+## Ground distance from [param at] to [param box] (x/z in 3D, x/y in 2D); zero inside.
+static func flat_box_distance(box: AABB, at: Vector3, three_d: bool) -> float:
+	var low := box.position
+	var high := box.end
+	var dx := maxf(maxf(low.x - at.x, 0.0), at.x - high.x)
+	var other := (
+		maxf(maxf(low.z - at.z, 0.0), at.z - high.z)
+		if three_d
+		else maxf(maxf(low.y - at.y, 0.0), at.y - high.y)
+	)
+	return Vector2(dx, other).length()
+
+
 static func _plain(text: String) -> String:
 	var kept := ""
 	for character: String in text.to_lower():
@@ -460,7 +553,7 @@ func _check_target(frame: int) -> void:
 		goals_reached += 1
 		return
 	var reach := REACH_3D if _player is Node3D else REACH_2D
-	if _where(_target).distance_to(_where(_player)) <= reach:
+	if _aim(_target).distance_to(_where(_player)) <= reach:
 		_done_targets[_target.get_instance_id()] = true
 		goals_reached += 1
 		tap(&"interact", frame)
