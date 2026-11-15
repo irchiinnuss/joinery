@@ -203,7 +203,9 @@ def test_rounds_are_bounded_and_a_reviewer_never_drops_a_change(project: Path) -
             assert preview["review_notes"] == [BLOCK.as_dict()]
             # The unchanged stage kept its review: the reviewer read it once.
             assert len(seen) == 1
-            assert not [e for e in events if e.get("kind") == "notice"]
+            # Only the notice that the change left behind waits for review.
+            notices = [e for e in events if e.get("kind") == "notice"]
+            assert [n.get("about") for n in notices] in ([], ["left_change"])
         finally:
             await gateway.close()
 

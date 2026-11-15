@@ -274,6 +274,9 @@ def test_missing_worker_image_reports_runtime_missing_without_launching_client(
 ) -> None:
     child = SimpleNamespace(
         communicate=AsyncMock(return_value=(b"", b"Error: No such image: x")),
+        # Docker's own liveness probe waits on the same fake: it answers at once.
+        wait=AsyncMock(return_value=1),
+        kill=lambda: None,
         returncode=1,
     )
     spawn = AsyncMock(return_value=child)
@@ -291,11 +294,12 @@ def test_missing_worker_image_reports_runtime_missing_without_launching_client(
     with pytest.raises(ValueError, match="Refresh tools in the Joinery sidebar"):
         asyncio.run(conn.connect())
     # Docker said twice that the image is missing: final, no more waiting.
-    assert spawn.await_count == 2
+    inspects = [c for c in spawn.await_args_list if "inspect" in c.args]
+    assert len(inspects) == 2
     assert conn.readiness.state == "runtime-missing"
     assert not conn.readiness.connected and conn._task is None
     peer.assert_not_called()
-    assert spawn.await_args.args == (
+    assert inspects[-1].args == (
         "docker",
         "image",
         "inspect",

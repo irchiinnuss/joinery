@@ -231,6 +231,11 @@ def test_the_worker_is_killed_at_the_limit_and_its_output_kept(
         return process
 
     monkeypatch.setattr("joinery.authoring.asyncio.create_subprocess_exec", launch)
+
+    async def answering(*_args: Any, **_kwargs: Any) -> bool:
+        return True  # Docker itself answers: the tool is the slow one
+
+    monkeypatch.setattr("joinery.docker_cli.responding_async", answering)
     with pytest.raises(WorkerTimeout) as stopped:
         asyncio.run(run_offline(["godot"], tmp_path, 1, warm=False))
     assert "SCRIPT ERROR: boom" in stopped.value.output

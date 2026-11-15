@@ -538,7 +538,7 @@ async def validate(
         info=found.info,
         failing=found.already_failing,
         current=not importing and godot,
-        note=gateway.progress_detail,
+        note=getattr(gateway, "progress_detail", None),
     )
     return found
 
