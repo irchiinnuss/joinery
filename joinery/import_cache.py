@@ -114,6 +114,24 @@ def stale(project: Path, limit: int = LIMIT) -> list[str]:
     return found
 
 
+def loadable_marks(project: Path) -> dict[str, tuple[int, int]]:
+    """Size and time of every file Godot imports (with its ``.import`` settings)
+    and every script: two marks that differ mean an import has work to do."""
+    marks: dict[str, tuple[int, int]] = {}
+    for path in _files(project):
+        suffix = path.suffix.lower()
+        if suffix in IMPORTED_SUFFIXES or suffix in {".import", ".gd"}:
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            marks[path.relative_to(project).as_posix()] = (
+                stat.st_size,
+                stat.st_mtime_ns,
+            )
+    return marks
+
+
 def run_import(godot: Path, project: Path, env: Mapping[str, str] | None = None) -> None:
     subprocess.run(
         [str(godot), "--headless", "--path", str(project), "--import"],

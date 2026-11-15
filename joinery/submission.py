@@ -33,7 +33,7 @@ from joinery import (
 )
 from joinery.art_approval import approved
 from joinery.art_approval import fingerprint as bible_fingerprint
-from joinery.authoring import run_offline
+from joinery.authoring import WorkerTimeout, run_offline
 from joinery.bible_rules import check_rules, load_rules, ui_resources
 from joinery.bible_schema import REFERENCE_DIR
 from joinery.catalog import load_catalog
@@ -42,7 +42,12 @@ from joinery.lockfile import check_assets
 from joinery.policy import load_denylist
 from joinery.puzzle import check as puzzle_check
 from joinery.runner import Result
-from joinery.transactions import DIRECTORY, FileTransaction, clone_tree
+from joinery.transactions import (
+    DIRECTORY,
+    FileTransaction,
+    clone_tree,
+    seed_import_cache,
+)
 from joinery.turn import Problem, scene_route
 
 if TYPE_CHECKING:
@@ -110,6 +115,8 @@ GODOT_SUFFIXES = frozenset({".gd", ".tscn", ".tres", ".gdshader", ".glb"})
 GUT_RUNNER = "addons/gut/gut_cmdln.gd"
 TEST_DIRS = ("test", "tests")
 OFFLINE_SECONDS = 180
+#: Godot's import of a stage in the offline worker: the whole command.
+IMPORT_ARGV = ("godot", "--headless", "--path", "/work", "--editor", "--import")
 #: SceneTree tests (``extends SceneTree`` under tests/): how many run, and how long each
 #: may take on a worker that runs natively. ``[checks] scene_test_seconds`` sets it.
 SCENE_TESTS_MAX = 20
@@ -521,6 +528,7 @@ async def validate(
         saves_on=saving,
         info=found.info,
         failing=found.already_failing,
+        current=not importing and godot,
     )
     return found
 
@@ -539,6 +547,7 @@ async def checks(
     scene_tests: list[str] | None = None,
     info: list[str] | None = None,
     failing: list[str] | None = None,
+    current: bool = False,
 ) -> list[Problem]:
     """The art bible's measured rules beside Godot's import check, the project's tests,
     its recorded replays and its kept saves.
@@ -546,7 +555,10 @@ async def checks(
     Each runs in the offline worker and takes seconds. The rules mount the stage
     read-only and run alongside; the tests and replays need the import, so they follow it.
     ``imported`` is told when Godot imported the stage cleanly, so the next check
-    of the same stage (a submit after a precheck) can skip that import.
+    of the same stage (a submit after a precheck) can skip that import; ``current``
+    says it did already, so the tests run without importing again. An import past
+    its limit (``import_seconds``) is a problem of its own, never an error that
+    ends the other checks.
     """
 
     def timed(phase: str) -> AbstractContextManager[None]:
@@ -578,13 +590,15 @@ async def checks(
     async def godot_checks() -> list[Problem]:
         found: list[Problem] = []
         testing = bool(tests) or bool(scene_tests)
-        if godot or testing:
-            with timed("review_import"):
-                got = await worker_run(
-                    ["godot", "--headless", "--path", "/work", "--editor", "--import"],
-                    tx.stage,
-                    import_seconds(),
-                )
+        if godot or (testing and not current):
+            limit = import_seconds(tx.project)
+            try:
+                with timed("review_import"):
+                    got = await worker_run(list(IMPORT_ARGV), tx.stage, limit)
+            except WorkerTimeout as stopped:
+                # Said as the import's own problem: the look check still counts.
+                found.append(import_timeout(limit, stopped.output))
+                return found
             worker_ready(got)
             if _broken(got.output, got.ok):
                 found.append(
@@ -648,6 +662,41 @@ async def worker_run(
     return got
 
 
+#: Godot's import of a stage: a stage starts from the project's import cache, so
+#: it redoes only what changed, but a change that adds many maps (three 1024 px PBR
+#: maps took an emulated worker past 180 s) or a project whose cache is behind
+#: still imports a lot.
+IMPORT_SECONDS = 300
+
+
+def import_seconds(project: Path) -> int:
+    """How long one Godot import may take in the offline worker: ``[checks]
+    import_seconds`` when the project sets it, otherwise ``IMPORT_SECONDS``,
+    doubled when the worker runs emulated (an arm64 host running the amd64
+    worker). An import past it is a problem of its own (``import_timeout``)."""
+    setting = _checks_setting(project, "import_seconds")
+    if setting is not None:
+        return setting
+    return IMPORT_SECONDS * (EMULATED_FACTOR if _emulated() else 1)
+
+
+def import_timeout(seconds: int, output: str = "") -> Problem:
+    """Godot's import that ran past its limit, as a problem the other checks
+    stand beside (the tests that need the import did not run)."""
+    tail = output.strip()[-2000:]
+    text = (
+        f"Godot's import ran past {seconds} s in the offline worker, so the tests "
+        "that need it did not run. Raise [checks] import_seconds in joinery.toml "
+        "if the project is just large; a model or texture that takes very long to "
+        "import is worth checking too."
+    )
+    return Problem(
+        "godot_import",
+        text + (f"\nIts last output:\n{tail}" if tail else ""),
+        items=[reasons.import_timeout(seconds)],
+    )
+
+
 def worker_ready(got: Result) -> None:
     """Raise when the offline worker never ran: no change can fix that."""
     if not got.ok and any(sign in got.stderr for sign in WORKER_DOWN):
@@ -684,31 +733,27 @@ async def run_tests(
     ]
 
 
-#: A change's stage has no import cache, so Godot imports every asset in it again
-#: (each texture compressed, each sound converted): it grows with the project.
-IMPORT_SECONDS = 300
-
-
-def import_seconds() -> int:
-    """The time limit of a full stage import, scaled up when the worker runs
-    emulated (an arm64 host running the amd64 worker)."""
-    emulated = platform.machine().lower() in {"arm64", "aarch64"}
-    return IMPORT_SECONDS * (EMULATED_FACTOR if emulated else 1)
-
-
 def scene_test_seconds(project: Path) -> int:
     """Each SceneTree test's time limit: ``[checks] scene_test_seconds`` when the
     project sets it, otherwise the native limit, scaled up when the worker runs
     emulated (an arm64 host running the amd64 worker)."""
+    setting = _checks_setting(project, "scene_test_seconds")
+    if setting is not None:
+        return setting
+    return SCENE_TEST_SECONDS * (EMULATED_FACTOR if _emulated() else 1)
+
+
+def _checks_setting(project: Path, name: str) -> int | None:
+    """A positive whole number of seconds under ``[checks]`` in joinery.toml."""
     try:
         raw = tomllib.loads((project / "joinery.toml").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         raw = {}
     checks = raw.get("checks", {})
-    setting = checks.get("scene_test_seconds") if isinstance(checks, dict) else None
+    setting = checks.get(name) if isinstance(checks, dict) else None
     if isinstance(setting, int) and not isinstance(setting, bool) and setting > 0:
         return setting
-    return SCENE_TEST_SECONDS * (EMULATED_FACTOR if _emulated() else 1)
+    return None
 
 
 def _emulated() -> bool:
@@ -761,15 +806,21 @@ async def run_scene_tests(
         except OSError:
             shutil.rmtree(copy, ignore_errors=True)
             return None
+        # With the project's import cache its import redoes nothing, not everything.
+        await asyncio.to_thread(seed_import_cache, tx.project, copy)
         return copy
 
     async def prepare(root: Path) -> None:
-        got = await worker_run(
-            ["godot", "--headless", "--path", "/work", "--editor", "--import"],
-            root,
-            OFFLINE_SECONDS,
-            warm=False,
-        )
+        try:
+            got = await worker_run(
+                list(IMPORT_ARGV),
+                root,
+                import_seconds(tx.project if tx is not None else stage),
+                warm=False,
+            )
+        except WorkerTimeout:
+            # The copy keeps the project's import cache: its tests still run.
+            return
         worker_ready(got)
 
     with timed("review_scene_tests") if timed is not None else nullcontext():

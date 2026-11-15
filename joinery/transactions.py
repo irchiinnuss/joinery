@@ -216,6 +216,29 @@ def clone_tree(source: Path, target: Path) -> None:
     )
 
 
+#: Godot's import cache: models, textures and sounds as Godot loads them.
+IMPORT_CACHE = ".godot"
+
+
+def seed_import_cache(source: Path, target: Path) -> bool:
+    """Give ``target`` (a copy of the project ``source``) the project's import cache,
+    so Godot's import there redoes only what differs instead of every asset. Files
+    keep their times, so a changed asset is still imported again. The cache is
+    never part of a change (EXCLUDED); a copy that fails leaves the target to
+    import from scratch. True when it copied."""
+    cache = source / IMPORT_CACHE
+    if not cache.is_dir() or cache.is_symlink() or (target / IMPORT_CACHE).exists():
+        return False
+    try:
+        shutil.copytree(
+            cache, target / IMPORT_CACHE, symlinks=True, copy_function=_copy_entry
+        )
+    except (OSError, shutil.Error):
+        shutil.rmtree(target / IMPORT_CACHE, ignore_errors=True)
+        return False
+    return True
+
+
 def tree_bytes(root: Path) -> int:
     """Apparent size of every regular file below ``root``."""
     total = 0
@@ -316,6 +339,8 @@ class FileTransaction:
         self.directory.mkdir(parents=True, mode=0o700)
         try:
             clone_tree(self.project, self.stage)
+            # The first import of the stage then redoes only what the change made.
+            seed_import_cache(self.project, self.stage)
             for path in CARRIED:
                 if (self.project / path).is_file():
                     copy_file(self.project / path, self.directory / CARRIED_BASE / path)

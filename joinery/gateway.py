@@ -857,8 +857,7 @@ class ProjectGateway:
             if not readonly and self.claims.contended():
                 self._watch_stage()
             if server == "godot" and not readonly:
-                # The stage starts without Godot's import cache: a staged scene
-                # that instances a model (new in this change or not) needs it.
+                # A staged scene that instances a model needs its import there.
                 await self._import_for(staged_assets.loaded_paths(arguments, bare=True))
         if server == "godot" and tool == "run_project":
             self._prepare_runtime()
@@ -883,6 +882,11 @@ class ProjectGateway:
         ):
             # The tool server of this stage reads the prompt's part targets.
             part_targets.write_targets(self.transaction.stage, self.target_context)
+        loadable_before = (
+            await asyncio.to_thread(import_cache.loadable_marks, self.transaction.stage)
+            if tool in NATIVE_OPS and self.transaction is not None
+            else {}
+        )
         apps = op_apps(tool, arguments) if tool in NATIVE_OPS else ()
         if apps:
             names = [self.slots.app_name(app) for app in apps]
@@ -952,7 +956,13 @@ class ProjectGateway:
         ):
             # Subsequent saved-scene operations can immediately reference the
             # new portable resources; import must precede their first load.
-            await self.import_stage(self.transaction)
+            # An operation that changed nothing Godot loads (only its .blend)
+            # needs no import, unless the stage's cache is behind already.
+            stage = self.transaction.stage
+            loadable_after = await asyncio.to_thread(import_cache.loadable_marks, stage)
+            behind = await asyncio.to_thread(import_cache.stale, stage, 1)
+            if loadable_after != loadable_before or behind:
+                await self.import_stage(self.transaction)
         if custom is not None and self.transaction is not None and not result.is_error:
             root = self.transaction.stage
             after = inventory(root)
@@ -1471,15 +1481,18 @@ class ProjectGateway:
     async def import_stage(self, tx: FileTransaction) -> None:
         """Import the stage in Godot (offline worker), so its files can be loaded.
 
-        The stage starts without Godot's import cache, so a model or texture the
-        change made, or one the project had, loads in the stage only after this.
+        The stage starts with a copy of the project's import cache, so Godot
+        imports only what the change made or changed. It runs in a worker of its
+        own: the warm one keeps Blender running beside it, whose memory grows over
+        a long run of paint operations and slowed every import after it.
         """
         self.progress("Importing the result into Godot…")
         with self.span("import"):
             imported = await run_offline(
-                ["godot", "--headless", "--path", "/work", "--editor", "--import"],
+                list(submission.IMPORT_ARGV),
                 tx.stage,
-                submission.import_seconds(),
+                submission.import_seconds(self.project),
+                warm=False,
             )
         if (
             not imported.ok

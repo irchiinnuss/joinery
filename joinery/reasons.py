@@ -361,6 +361,19 @@ def tests(output: str) -> list[Reason]:
     ]
 
 
+def import_timeout(seconds: int) -> Reason:
+    """Godot's import in the offline worker that ran past its limit."""
+    return Reason(
+        "godot_import.timed_out",
+        measured=f"still importing after {seconds} s",
+        expected="the import finishes in time",
+        fix=(
+            "Raise [checks] import_seconds in joinery.toml if the project is large, "
+            "or check for a model or texture that takes very long to import."
+        ),
+    )
+
+
 def test_timeout(script: str, seconds: int) -> list[Reason]:
     """A SceneTree test that never finished, on two tries."""
     return [
