@@ -131,6 +131,14 @@ class ContextMeter:
         return self.window > 0 and self.used >= COMPACT_AT * self.window
 
 
+def error_text(error: BaseException) -> str:
+    """An error as words that are never blank: its type, then its message when it
+    has one (``str(TimeoutError())`` is empty)."""
+    message = str(error).strip()
+    name = type(error).__name__
+    return f"{name}: {message}" if message else name
+
+
 @dataclass
 class Problem:
     """One thing a submitted change fails, in words the agent can act on."""
@@ -634,7 +642,7 @@ class TurnController:
                         c.id,
                         c.text,
                         "inconclusive",
-                        f"Joinery couldn't check it: {error}",
+                        f"Joinery couldn't check it: {error_text(error)}",
                     )
                     for c in todo.done_when
                 ]
@@ -985,7 +993,7 @@ class TurnController:
             problems = [
                 Problem(
                     "checks",
-                    f"Joinery could not run its checks: {error}",
+                    f"Joinery could not run its checks: {error_text(error)}",
                     fixable=False,
                 )
             ]
@@ -1098,7 +1106,7 @@ class TurnController:
                 problems=[
                     Problem(
                         "review",
-                        f"Joinery could not open the review: {exc}",
+                        f"Joinery could not open the review: {error_text(exc)}",
                         fixable=False,
                     )
                 ],
@@ -1264,7 +1272,7 @@ class TurnController:
             self.emit(
                 {
                     "kind": "auto_accept_held",
-                    "reasons": [f"the accept didn't go through: {exc}"],
+                    "reasons": [f"the accept didn't go through: {error_text(exc)}"],
                 }
             )
             return False
@@ -1303,7 +1311,7 @@ class TurnController:
             except (OSError, RuntimeError, ValueError, TimeoutError) as error:
                 problem = Problem(
                     "checks",
-                    f"Joinery could not run its checks: {error}",
+                    f"Joinery could not run its checks: {error_text(error)}",
                     fixable=False,
                 )
                 attrs[metrics.OUTCOME] = "error"
@@ -1498,7 +1506,7 @@ class TurnController:
                     *problems,
                     Problem(
                         "review",
-                        f"Joinery could not open the review: {exc}",
+                        f"Joinery could not open the review: {error_text(exc)}",
                         fixable=False,
                     ),
                 ],
