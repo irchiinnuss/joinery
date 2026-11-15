@@ -160,3 +160,31 @@ def test_the_blockout_records_the_script_it_writes(tmp_path: Path) -> None:
     data = json.loads((stage / core_update.RECORD).read_text())
     # The stage's record keeps what the project's had (accept carries it in).
     assert data["files"] == {"other.gd": _sha(b"x"), SCRIPT: _sha(b"script")}
+
+
+def test_feature_overlay_files_update_too_and_edited_ones_are_kept(tmp_path: Path) -> None:
+    project = tmp_path / "fps"
+    project.mkdir()
+    (project / "project.godot").write_text("config_version=5\n")
+    blueprints.apply(project, "first-person-3d", ["behaviour"])
+    agent = "features/behaviour/behaviour_agent.gd"
+    checks = "tests/features/behaviour/behaviour_checks.gd"
+    path = project / blueprints.MANIFEST
+    manifest = json.loads(path.read_text())
+    for rel in (agent, checks):
+        (project / rel).write_bytes(OLD)
+        manifest["units"]["behaviour"]["files"][rel] = _sha(OLD)
+    path.write_text(json.dumps(manifest))
+    (project / checks).write_bytes(OLD + b"# my own check\n")
+    found = core_update.plan(project)
+    assert agent in found.update and checks in found.edited
+    tx = core_update.stage(project, found=found)
+    assert tx is not None
+    tx.accept()
+    assert (project / agent).read_bytes() == found.files[agent]
+    assert (project / checks).read_bytes() == OLD + b"# my own check\n"
+    # Recorded under the feature's own unit, so the next update knows it.
+    units = json.loads(path.read_text())["units"]
+    assert units["behaviour"]["files"][agent] == _sha(found.files[agent])
+    assert agent not in units[core_update.CORE_UNIT]["files"]
+    assert core_update.plan(project).update == []

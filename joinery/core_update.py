@@ -2,11 +2,14 @@
 
 A game keeps its own copies of the files Joinery owns: the game core
 (``blueprints/_core/overlay``: ``core/replays/*``, menus, settings, the sound
-nodes) and the blockout level script (``game/blockout/blockout_level.gd``).
+nodes), each feature's overlay it has (``features/<id>/...``: the behaviour
+agent, the camera rigs, online play) and the blockout level script
+(``game/blockout/blockout_level.gd``).
 After a Joinery update those copies are older than the ones it ships.
 
 ``plan`` compares each copy with the current version and with the version
-Joinery installed: the game manifest records the core's files at install, and
+Joinery installed: the game manifest records the core's and each feature's
+files at install, and
 ``RECORD`` (``.joinery/core-files.json``) the other files Joinery writes once.
 For a file installed before either record existed, the project's git history
 gives the version first committed. A copy that still matches what was installed
@@ -77,15 +80,38 @@ class CorePlan:
         }
 
 
+def owners(project: Path) -> dict[str, str]:
+    """Each file of the core's and the project's features' overlays -> its unit in the
+    game manifest (``_core`` or the feature's id). The blueprint's own files are the
+    game's to change, so they are not here."""
+    found: dict[str, str] = {}
+    record = blueprints.read_record(project)
+    if record is None:
+        return found
+    resolution = blueprints.resolve(record.blueprint, record.features)
+    for unit in blueprints._units(resolution):
+        if unit.kind == "core":
+            found.update(dict.fromkeys(unit.files, CORE_UNIT))
+        elif unit.kind == "feature":
+            found.update(dict.fromkeys(unit.files, unit.id))
+    return found
+
+
+def _sources(project: Path) -> dict[str, Path]:
+    record = blueprints.read_record(project)
+    if record is None:
+        return {}
+    resolution = blueprints.resolve(record.blueprint, record.features)
+    sources: dict[str, Path] = {}
+    for unit in blueprints._units(resolution):
+        if unit.kind in {"core", "feature"}:
+            sources.update(unit.files)
+    return sources
+
+
 def owned(project: Path) -> dict[str, bytes]:
     """The current version of every Joinery-owned file this project has."""
-    files: dict[str, bytes] = {}
-    record = blueprints.read_record(project)
-    if record is not None:
-        resolution = blueprints.resolve(record.blueprint, record.features)
-        if resolution.core is not None:
-            overlay = blueprints._overlay(resolution.core.dir / "overlay")
-            files.update({rel: path.read_bytes() for rel, path in overlay.items()})
+    files = {rel: path.read_bytes() for rel, path in _sources(project).items()}
     if (project / BLOCKOUT_SCRIPT).is_file():
         files[BLOCKOUT_SCRIPT] = blockout_build.SCRIPT_SOURCE.read_bytes()
     return files
@@ -158,8 +184,13 @@ def _first_committed(project: Path, rel: str) -> str | None:
 def installed(project: Path) -> dict[str, str]:
     """The hash each Joinery-owned file had when Joinery installed it, where known."""
     units = _manifest(project).get("units", {})
-    core = units.get(CORE_UNIT, {}) if isinstance(units, dict) else {}
-    known = {str(k): str(v) for k, v in dict(core.get("files", {})).items()}
+    known: dict[str, str] = {}
+    if isinstance(units, dict):
+        for unit_id in {CORE_UNIT, *owners(project).values()}:
+            unit = units.get(unit_id)
+            files = unit.get("files") if isinstance(unit, dict) else None
+            if isinstance(files, dict):
+                known.update({str(k): str(v) for k, v in files.items()})
     known.update(_record(project, project))
     return known
 
@@ -187,16 +218,20 @@ def plan(project: Path) -> CorePlan:
 
 
 def _write_records(stage: Path, project: Path, files: dict[str, bytes]) -> None:
-    """The new installed hashes: the core's in the game manifest, the rest in RECORD."""
+    """The new installed hashes: the core's and the features' in the game manifest
+    (under their unit), the rest in RECORD."""
     manifest = _manifest(project)
     units = manifest.get("units")
-    core = units.get(CORE_UNIT) if isinstance(units, dict) else None
-    tracked = core.get("files") if isinstance(core, dict) else None
+    unit_of = owners(project)
     rest = dict(files)
-    if isinstance(tracked, dict):
-        for rel in list(rest):
-            if rel != BLOCKOUT_SCRIPT:
-                tracked[rel] = _sha(rest.pop(rel))
+    changed = False
+    for rel in list(rest):
+        unit = units.get(unit_of.get(rel, "")) if isinstance(units, dict) else None
+        tracked = unit.get("files") if isinstance(unit, dict) else None
+        if rel != BLOCKOUT_SCRIPT and isinstance(tracked, dict):
+            tracked[rel] = _sha(rest.pop(rel))
+            changed = True
+    if changed:
         target = stage / blueprints.MANIFEST
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(blueprints._manifest_text(manifest), encoding="utf-8")
