@@ -17,7 +17,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from joinery import warm_blender
+from joinery import docker_cli, warm_blender
 from joinery.runner import Result
 from joinery.worker_identity import docker_owner_args
 
@@ -70,6 +70,9 @@ async def _command(argv: list[str], timeout: int) -> Result:
         except TimeoutError:
             from joinery.authoring import WorkerTimeout
 
+            if argv[:1] == ["docker"] and not await docker_cli.responding_async():
+                # A hung Docker, not a slow tool.
+                raise docker_cli.DockerNotResponding(" ".join(argv[:3])) from None
             # A bare TimeoutError reads as an empty error to the agent.
             raise WorkerTimeout(timeout) from None
         return Result(

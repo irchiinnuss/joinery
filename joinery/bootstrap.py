@@ -13,7 +13,15 @@ import time
 from pathlib import Path
 from typing import Any
 
-from joinery import metrics, played, readiness, references, team, tool_refresh
+from joinery import (
+    docker_cli,
+    metrics,
+    played,
+    readiness,
+    references,
+    team,
+    tool_refresh,
+)
 from joinery.catalog import ROOT, load_catalog, load_project_tools, selection_ids
 from joinery.platform_support import bash_script_argv, editor_running
 from joinery.server_install import install
@@ -41,12 +49,14 @@ def _current(tag: str, revision: str) -> bool:
     An image from before per-image revisions counts only when the whole
     sandbox is unchanged since it was built.
     """
-    done = subprocess.run(
-        ["docker", "image", "inspect", "--format", "{{json .Config.Labels}}", tag],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        done = docker_cli.run(
+            ["docker", "image", "inspect", "--format", "{{json .Config.Labels}}", tag],
+            capture_output=True,
+            text=True,
+        )
+    except docker_cli.DockerNotResponding as exc:
+        raise ValueError(str(exc)) from None
     if done.returncode:
         return False
     try:
@@ -103,9 +113,7 @@ def _build_runtime(revision: str, progress: tool_refresh.Progress) -> None:
     progress.begin(RUNTIME)
     words = tool_refresh.IMAGE_WORDS[RUNTIME]
     tool_refresh.run(
-        bash_script_argv(
-            [str(ROOT / "sandbox/build.sh"), "--all", "--tag", RUNTIME]
-        ),
+        bash_script_argv([str(ROOT / "sandbox/build.sh"), "--all", "--tag", RUNTIME]),
         progress,
         cwd=ROOT,
         timeout=3600,
@@ -131,9 +139,7 @@ def _build_runtime(revision: str, progress: tool_refresh.Progress) -> None:
     )
 
 
-def setup(
-    project: Path, emit: tool_refresh.Emit | None = None
-) -> dict[str, Any]:
+def setup(project: Path, emit: tool_refresh.Emit | None = None) -> dict[str, Any]:
     """Build the offline workers and install the pinned servers for a project.
 
     While it builds, `~/.cache/joinery/setup.json` names the image in progress,
@@ -164,14 +170,20 @@ def _setup(project: Path, emit: tool_refresh.Emit | None) -> dict[str, Any]:
             "Joinery's apps run offline in Docker. Install Docker Desktop and "
             "start it, then try again."
         )
-    result = subprocess.run(["docker", "info"], capture_output=True, check=False)
+    try:
+        result = docker_cli.run(["docker", "info"], capture_output=True)
+    except docker_cli.DockerNotResponding as exc:
+        raise ValueError(str(exc)) from None
     if result.returncode:
         raise ValueError("Docker isn't running. Start Docker Desktop, then try again.")
     revision = readiness.sandbox_revision()
     os.environ["JOINERY_SANDBOX_REV"] = revision
-    image = subprocess.run(
-        ["docker", "image", "inspect", RUNTIME], capture_output=True, check=False
-    )
+    try:
+        image = docker_cli.run(
+            ["docker", "image", "inspect", RUNTIME], capture_output=True
+        )
+    except docker_cli.DockerNotResponding as exc:
+        raise ValueError(str(exc)) from None
     first = image.returncode != 0
     workers = [
         "joinery-" + TOOL_WORKERS[tool] + "-worker"

@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from joinery import tools
+from joinery import docker_cli, tools
 from joinery.catalog import load_catalog, load_project_tools, selection_ids
 from joinery.locking import write_lock
 from joinery.mcp_runtime import validate_arguments
@@ -214,6 +214,9 @@ async def run_offline(
             printed = (out + err).decode(errors="replace")
             if watcher is not None and watcher in done:
                 raise WorkerStalled(stall, printed)
+            if not await docker_cli.responding_async():
+                # A hung Docker, not a slow tool: say what to do about it.
+                raise docker_cli.DockerNotResponding("docker run")
             raise WorkerTimeout(timeout, printed)
         finished.result()
         return Result(

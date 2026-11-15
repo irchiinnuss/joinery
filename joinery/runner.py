@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from joinery import docker_cli
 from joinery.worker_identity import docker_owner_args
 
 SANDBOX_IMAGE = "joinery-creative-worker"
@@ -83,9 +84,11 @@ def _timed(cmd: list[str], timeout: int, cwd: Path | None = None) -> Result:
             cwd=cwd,
         )
     except subprocess.TimeoutExpired:
-        return Result(
-            False, "", f"timed out after {timeout}s", time.monotonic() - start
-        )
+        why = f"timed out after {timeout}s"
+        if cmd[:1] == ["docker"] and not docker_cli.responding():
+            # A hung Docker, not a slow tool: say what to do about it.
+            why = docker_cli.NOT_RESPONDING
+        return Result(False, "", why, time.monotonic() - start)
     except OSError as exc:
         return Result(False, "", str(exc), time.monotonic() - start)
     return Result(
@@ -103,7 +106,11 @@ class SandboxRunner:
     def available(self) -> bool:
         if shutil.which("docker") is None:
             return False
-        got = _timed(["docker", "image", "inspect", self.image], timeout=60)
+        got = _timed(
+            ["docker", "image", "inspect", self.image], timeout=docker_cli.QUICK
+        )
+        if got.stderr == docker_cli.NOT_RESPONDING:
+            raise docker_cli.DockerNotResponding("docker image inspect")
         return got.ok
 
     def run(

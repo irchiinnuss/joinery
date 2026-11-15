@@ -20,6 +20,7 @@ from mcp.client.stdio import stdio_client
 from mcp.types import CallToolResult, TextContent, Tool
 from pydantic import BaseModel, ConfigDict, Field
 
+from joinery import docker_cli
 from joinery.hook import mcp_violation
 from joinery.policy import Severity, command_violation, load_denylist, normalise
 
@@ -374,6 +375,10 @@ class MCPConnection:
         # missing tool, and one late answer must not end the turn.
         if self.spec.worker_image and not await image_ready(self.spec.worker_image):
             self.readiness.state = "runtime-missing"
+            if not await docker_cli.responding_async():
+                # Not a missing tool: Docker itself stopped answering.
+                self.readiness.detail = docker_cli.NOT_RESPONDING
+                raise ValueError(self.readiness.detail)
             self.readiness.detail = (
                 "This app's offline tools aren't available right now: Docker "
                 "may not be running, or the tools need a refresh after an "

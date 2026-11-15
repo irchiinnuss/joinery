@@ -52,6 +52,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
+from joinery import docker_cli
 from joinery import tools as tool_modules
 from joinery.catalog import (
     load_catalog,
@@ -385,6 +386,8 @@ class DockerHost:
                 timeout=15,
                 check=False,
             )
+        except subprocess.TimeoutExpired:
+            return docker_cli.NOT_RESPONDING
         except (OSError, subprocess.SubprocessError):
             return "Docker is not running."
         return "" if done.returncode == 0 else "Docker is not running."
