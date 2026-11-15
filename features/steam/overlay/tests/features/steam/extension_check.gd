@@ -8,6 +8,7 @@ extends SceneTree
 const SERVICE := "res://features/steam/steam_service.gd"
 const SINGLETON := "Steam"
 const PEER_CLASS := &"SteamMultiplayerPeer"
+const ADDON := "res://addons/godotsteam"
 
 var _failures: int = 0
 
@@ -17,6 +18,10 @@ func _initialize() -> void:
 
 
 func _run() -> void:
+	if not _installed():
+		print("steam extension: skipped, GodotSteam isn't installed")
+		quit(0)
+		return
 	var service: GDScript = load(SERVICE) as GDScript
 	var names: Dictionary = service.get_script_constant_map() if service != null else {}
 	_expect(not names.is_empty(), "the Steam service script loads")
@@ -53,6 +58,15 @@ func _run() -> void:
 			ClassDB.class_has_method(PEER_CLASS, method), "SteamMultiplayerPeer has %s" % method
 		)
 	_finish()
+
+
+func _installed() -> bool:
+	if not DirAccess.dir_exists_absolute(ADDON):
+		return false
+	for file: String in DirAccess.get_files_at(ADDON):
+		if file.ends_with(".gdextension"):
+			return true
+	return false
 
 
 func _expect(condition: bool, what: String) -> void:

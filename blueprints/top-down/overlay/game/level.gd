@@ -253,7 +253,11 @@ func _set_controls(on: bool) -> void:
 		player.set(&"controls_enabled", on and int(player.get(&"health")) > 0)
 
 
+## Binds the HUD and the level to a player. A player scene without the arena
+## player's signals (a stand-in a test spawns) is left alone.
 func _bind_player(player: Node) -> void:
+	if not player.has_signal(&"died") or not player.has_signal(&"health_changed"):
+		return
 	if not player.is_connected(&"died", _on_player_died):
 		player.connect(&"died", _on_player_died)
 	if player.is_multiplayer_authority():

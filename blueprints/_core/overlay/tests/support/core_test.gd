@@ -1,11 +1,16 @@
 extends SceneTree
 ## Checks the game core on whatever starting point the project uses: menus by
 ## keyboard and mouse, pause, settings on disk, sessions, spawning, actions,
-## and saving and restoring world state.
+## and saving and restoring world state. Features add their own menu entries
+## and settings pages, so the core's are checked in order among whatever else
+## the project installs.
 ## Run: godot --headless --fixed-fps 60 --script res://tests/support/core_test.gd
 ##        -- --settings-path=<file>
 
 const PROBE := "res://tests/support/probe.gd"
+const CORE_MAIN: Array[String] = ["start", "settings", "quit"]
+const CORE_PAUSE: Array[String] = ["resume", "restart", "settings", "report_bug", "main_menu"]
+const CORE_PAGES: Array[String] = ["Video", "Audio", "Accessibility"]
 const NO_PAUSE_SESSION := """extends GameSession
 
 func can_pause() -> bool:
@@ -51,12 +56,11 @@ func _run() -> void:
 func _menus_by_keyboard() -> void:
 	var menus: Node = play.menus
 	var ids: Array[String] = _ids(menus.entries(&"main"))
-	play.expect(ids == ["start", "settings", "quit"], "core main entries %s" % [ids])
+	var installed: int = ids.size()
+	play.expect(_only(ids, CORE_MAIN) == CORE_MAIN, "core main entries %s" % [ids])
+	play.expect(ids[0] == "start", "Play comes first %s" % [ids])
 	ids = _ids(menus.entries(&"pause"))
-	play.expect(
-		ids == ["resume", "restart", "settings", "report_bug", "main_menu"],
-		"core pause entries %s" % [ids]
-	)
+	play.expect(_only(ids, CORE_PAUSE) == CORE_PAUSE, "core pause entries %s" % [ids])
 	var calls: Array[int] = [0]
 	menus.add_entry(&"main", &"extra", "Extra", func() -> void: calls[0] += 1, 50)
 	menus.add_entry(
@@ -68,9 +72,8 @@ func _menus_by_keyboard() -> void:
 		func() -> bool: return false
 	)
 	ids = _ids(menus.entries(&"main"))
-	play.expect(
-		ids == ["start", "extra", "locked", "settings", "quit"], "entries sort by order %s" % [ids]
-	)
+	var sorted_ids: Array[String] = ["start", "extra", "locked", "settings", "quit"]
+	play.expect(_only(ids, sorted_ids) == sorted_ids, "entries sort by order %s" % [ids])
 	menus.open_main()
 	play.expect(play.focused_text() == "Play", "the first entry takes focus")
 	var locked: Button = menus.current_page().find_child("locked", true, false) as Button
@@ -82,7 +85,7 @@ func _menus_by_keyboard() -> void:
 	play.expect(play.focused_text() == "Settings", "focus skips the disabled entry")
 	menus.remove_entry(&"main", &"extra")
 	menus.remove_entry(&"main", &"locked")
-	play.expect(_ids(menus.entries(&"main")).size() == 3, "remove_entry drops entries")
+	play.expect(_ids(menus.entries(&"main")).size() == installed, "remove_entry drops entries")
 
 	menus.add_settings_page(&"probe", "Probe page", _probe_page, 40)
 	menus.open_main()
@@ -94,9 +97,8 @@ func _menus_by_keyboard() -> void:
 	var pages: Array[String] = []
 	for page: Dictionary in menus.settings_pages():
 		pages.append(str(page["label"]))
-	play.expect(
-		pages == ["Video", "Audio", "Accessibility", "Probe page"], "settings pages %s" % [pages]
-	)
+	play.expect(_only(pages, CORE_PAGES) == CORE_PAGES, "settings pages %s" % [pages])
+	play.expect(pages.has("Probe page"), "a page added by a feature is listed %s" % [pages])
 	for label: String in pages:
 		play.expect(await play.focus_button(label), "%s is reachable" % label)
 		var opened: Dictionary = play.watch(play.events.menu_opened)
@@ -257,12 +259,23 @@ func _spawn_actions_and_state() -> void:
 	a.queue_free()
 	b.queue_free()
 
+	# A feature may have a toast of its own up already (VR's "no headset").
+	var toasts: Node = play.menus.find_child("Toasts", true, false)
+	var shown: Array[Node] = toasts.get_children() if toasts != null else []
 	play.menus.toast("Saved", 0.1)
 	await play.process_frames(2)
-	var toasts: Node = play.menus.find_child("Toasts", true, false)
-	play.expect(toasts != null and toasts.get_child_count() == 1, "toast shows a message")
+	var added: Array[Node] = []
+	if toasts != null:
+		for child: Node in toasts.get_children():
+			if child not in shown:
+				added.append(child)
+	play.expect(added.size() == 1, "toast shows a message")
 	await play.physics_frames(30)
-	play.expect(toasts != null and toasts.get_child_count() == 0, "the toast goes away")
+	var left: int = 0
+	for child: Node in added:
+		if is_instance_valid(child) and child.is_inside_tree():
+			left += 1
+	play.expect(left == 0, "the toast goes away")
 
 
 func _players_and_pending_state() -> void:
@@ -317,7 +330,11 @@ func _restart_and_leave() -> void:
 	await play.tap(&"ui_accept")
 	await play.wait_watched(started, 120)
 	play.expect(not paused, "restart unpauses")
-	play.expect(play.game.players().is_empty(), "restart rebuilds the level")
+	# The probe player is gone; the project's own player scene, if any, is back.
+	var own: int = (
+		0 if str(ProjectSettings.get_setting("game/hooks/player_scene", "")).is_empty() else 1
+	)
+	play.expect(play.game.players().size() == own, "restart rebuilds the level")
 	var to_menu: Dictionary = play.watch(play.events.menu_opened)
 	play.game.quit_to_menu()
 	await play.wait_watched(to_menu, 120)
@@ -339,6 +356,15 @@ func _probe_scene() -> PackedScene:
 	packed.pack(node)
 	node.free()
 	return packed
+
+
+## The items of `items` that are in `wanted`, in the order `items` has them.
+func _only(items: Array[String], wanted: Array[String]) -> Array[String]:
+	var kept: Array[String] = []
+	for item: String in items:
+		if wanted.has(item):
+			kept.append(item)
+	return kept
 
 
 func _ids(entries: Array) -> Array[String]:

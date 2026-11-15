@@ -6,8 +6,10 @@ extends SceneTree
 ## and that leaving returns to a local game. Also the address and argument
 ## parsing helpers.
 ##
-## Run with --port=<n> --lan-port=<m> --lan-broadcast=127.0.0.1 so hosting
-## stays on this machine.
+## Not with --autostart: that makes the host ready at once. Free ports keep two
+## runs on one machine apart.
+## Run: godot --headless --fixed-fps 60 --script res://tests/features/online-play/lobby_test.gd
+##        -- [--port=<n> --lan-port=<m>] --lan-broadcast=127.0.0.1 --settings-path=<file>
 
 var play: PlayHarness
 var net: Node
@@ -67,7 +69,9 @@ func _run() -> void:
 		await play.wait_watched(menu, 600)
 	play.expect(not bool(net.call(&"is_online")), "Leave game ends the online session")
 	play.expect(not play.game.session().is_online(), "the menu runs a local session again")
-	play.expect((lobby.get(&"players") as Dictionary).is_empty(), "the lobby is empty after leaving")
+	play.expect(
+		(lobby.get(&"players") as Dictionary).is_empty(), "the lobby is empty after leaving"
+	)
 	play.expect(_entry(&"pause", &"leave").is_empty(), "Leave game is gone offline")
 	play.finish()
 

@@ -118,9 +118,20 @@ func _check_reduced_motion() -> void:
 	h.expect(Accessibility.flashes_reduced(), "reduced motion reduces flashes")
 	var player: Node = tree.get_first_node_in_group(&"player")
 	if player != null and player.has_method(&"shake") and "_shake" in player:
-		player.call(&"shake", 1.0)
+		# shake() or shake(strength): each blueprint's player has its own.
+		if player.get_method_argument_count(&"shake") > 0:
+			player.call(&"shake", 1.0)
+		else:
+			player.call(&"shake")
 		await h.physics_frames(2)
-		h.expect(float(player.get(&"_shake")) == 0.0, "the camera doesn't shake")
+		# A 2D player may keep its shake timer and scale the offset by the
+		# setting instead: then the camera's offset shows it (y only, as x
+		# may lead the view).
+		var camera: Variant = player.get(&"camera")
+		if camera is Camera2D:
+			h.expect((camera as Camera2D).offset.y == 0.0, "the camera doesn't shake")
+		else:
+			h.expect(float(player.get(&"_shake")) == 0.0, "the camera doesn't shake")
 	Settings.set_value("access", "reduced_motion", false)
 	h.expect_near(Settings.screen_shake(), 0.8, 0.001, "screen shake comes back")
 	Settings.set_value("access", "reduce_flashes", true)

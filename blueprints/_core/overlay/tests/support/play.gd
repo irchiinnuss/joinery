@@ -47,7 +47,22 @@ func _init(scene_tree: SceneTree, test_name: String) -> void:
 	menus = tree.root.get_node_or_null(^"Menus")
 	settings = tree.root.get_node_or_null(^"Settings")
 	events = tree.root.get_node_or_null(^"GameEvents")
+	_size_headless_window()
 	expect(game != null and menus != null, "the core autoloads are loaded")
+
+
+## Headless Godot gives the window 64 x 64 px. A project without a stretch mode
+## (the 3D blueprints) then lays its menus out past the window's edge, where no
+## click reaches them, so the window takes the project's own size.
+func _size_headless_window() -> void:
+	if DisplayServer.get_name() != "headless":
+		return
+	var wanted: Vector2i = Vector2i(
+		int(ProjectSettings.get_setting("display/window/size/viewport_width", 1152)),
+		int(ProjectSettings.get_setting("display/window/size/viewport_height", 648))
+	)
+	if tree.root.size.x < wanted.x or tree.root.size.y < wanted.y:
+		tree.root.size = wanted
 
 
 ## Loads the main scene. With `autostart` it waits for the level to start;

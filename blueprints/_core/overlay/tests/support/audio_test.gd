@@ -70,6 +70,7 @@ func _run() -> void:
 	# process_frame comes before the nodes' _process, so this is last frame's clock.
 	process_frame.connect(_remember_clock)
 	await play.boot(true)
+	_quiet_level()
 	world = Node3D.new()
 	world.name = "AudioTestWorld"
 	world.position = Vector3(1000, 0, 0)
@@ -92,6 +93,18 @@ func _run() -> void:
 
 
 # --- helpers -------------------------------------------------------------------
+
+
+## The game's own level has players and enemies of its own (a top-down arena
+## starts with enemies near the player), which move the music. The level stops
+## and its actors leave the groups the music reads, so only this test's probes do.
+func _quiet_level() -> void:
+	var level: Node = play.game.call(&"current_level")
+	if level != null:
+		level.process_mode = Node.PROCESS_MODE_DISABLED
+	for group: StringName in [&"player", &"enemy"]:
+		for node: Node in get_nodes_in_group(group):
+			node.remove_from_group(group)
 
 
 ## A sine wave of `seconds`, 16-bit mono; looping over the whole file if asked.
