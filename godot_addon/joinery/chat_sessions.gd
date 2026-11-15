@@ -309,6 +309,12 @@ func render(entries: Array) -> void:
 				var id := str(entry.get("transaction_id", ""))
 				if card != null and not id.is_empty():
 					card.set("transaction_id", id)
+					if entry.has("guessed") or entry.has("not_as_asked"):
+						card.call(
+							"set_departures",
+							Array(_notes(entry.get("guessed", []))),
+							Array(_notes(entry.get("not_as_asked", [])))
+						)
 					_changes[id] = [
 						card,
 						str(entry.get("state", "review")),

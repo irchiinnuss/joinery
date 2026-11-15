@@ -90,18 +90,38 @@ func live_waiting() -> bool:
 
 
 func _on_turn_state(event: Dictionary) -> void:
-	if str(event.get("state", "")) == "in_review" and event.get("done") is Array:
-		_show_done(event["done"])
+	if str(event.get("state", "")) == "in_review":
+		if event.get("done") is Array:
+			_show_done(event["done"])
+		if event.has("guessed") or event.has("not_as_asked"):
+			_show_departures(event)
 	if _live_owner.is_empty():
 		_follow(event)
 
 
 ## The request's card lists what was done for each part of it (submit_for_review's done).
 func _show_done(items: Array) -> void:
-	var dock: Variant = _plugin.get("_dock")
-	var card: Variant = (dock as Object).call("_card") if dock is Object else null
+	var card: Variant = _request_card()
 	if card is Object and (card as Object).has_method("set_done"):
 		(card as Object).call("set_done", items)
+
+
+## The request's card says what the agent guessed and where it didn't do as asked.
+func _show_departures(event: Dictionary) -> void:
+	var card: Variant = _request_card()
+	if card is Object and (card as Object).has_method("set_departures"):
+		var guessed: Variant = event.get("guessed", [])
+		var differs: Variant = event.get("not_as_asked", [])
+		(card as Object).call(
+			"set_departures",
+			guessed if guessed is Array else [],
+			differs if differs is Array else []
+		)
+
+
+func _request_card() -> Variant:
+	var dock: Variant = _plugin.get("_dock")
+	return (dock as Object).call("_card") if dock is Object else null
 
 
 ## A task's events: the turn of the task whose live edit is on screen moves its review.

@@ -80,6 +80,7 @@ CASES = {
     "tour_test.gd": "tour: ok",
     "update_dialog_test.gd": "update dialog: ok",
     "setup_notice_test.gd": "setup notice: ok",
+    "departures_test.gd": "departures: ok",
     # Last: it puts the shared disposable project under git.
     "timeline_test.gd": "timeline: ok",
     # After the timeline: it shares the same project through a local bare remote.

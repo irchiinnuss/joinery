@@ -38,6 +38,8 @@ extends VBoxContainer
 ## which the transcript moves into the card's status line ([method adopt_timing]); opening it
 ## shows the steps again with the timing details.
 ##
+## Under the done list: what was guessed and what isn't as asked (sidebar_departures.gd).
+##
 ## States: sending, failed (not sent), working, gated, ready, applying, accepted, rejected,
 ## reverted, stopped, done.
 
@@ -65,6 +67,7 @@ const INDICATOR := preload("activity_indicator.gd")
 const ATTACHMENT_ROW := preload("sidebar_attachments.gd")
 const REVIEW_ROW := preload("sidebar_review_row.gd")
 const ART_GATE := preload("sidebar_art_gate.gd")
+const DEPARTURES := preload("sidebar_departures.gd")
 ## Apps recognised in step text; the card shows each one it sees once.
 const APPS := ["Blender", "Krita", "GIMP", "Material Maker", "Surge XT", "SuperCollider", "Godot"]
 ## Shown instead of Revert once the change's restore data is gone.
@@ -138,6 +141,7 @@ var _retry_allowed := true
 var _steps: VBoxContainer
 ## Each part of the request and what was done about it, ticked (set_done).
 var _done_list: VBoxContainer
+var _departures: DEPARTURES
 ## The ready change: picture, one line, Discard / Accept or Review.
 var _ready_row: REVIEW_ROW
 var _outcome: HBoxContainer
@@ -277,6 +281,9 @@ func _init(text := "", context: Array = []) -> void:
 	_done_list.accessibility_name = "What was done"
 	_done_list.hide()
 	_column.add_child(_done_list)
+	_departures = DEPARTURES.new()
+	_departures.visibility_changed.connect(_sync_activity)
+	_column.add_child(_departures)
 	_ready_row = REVIEW_ROW.new()
 	_ready_row.other_ways_pressed.connect(_try_other_ways)
 	_column.add_child(_ready_row)
@@ -564,6 +571,12 @@ func done_lines() -> PackedStringArray:
 	for row: Node in _done_list.get_children():
 		lines.append((row.get_child(1) as Label).text)
 	return lines
+
+
+## What the agent [param guessed] and where it did something [param not_as_asked], with why:
+## one compact line that opens to each (sidebar_departures.gd). Both empty hide it.
+func set_departures(guessed: Array, not_as_asked: Array) -> void:
+	_departures.set_lines(guessed, not_as_asked)
 
 
 ## "Try other ways": a few more versions of this request beside this change (sidebar_variants.gd).

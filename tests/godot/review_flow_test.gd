@@ -57,6 +57,7 @@ class FakeCard:
 	var state := "ready"
 	var media: Array = []
 	var done: Array = []
+	var departures: Array = []
 	var transaction_id := ""
 	var outcome: Array = []
 	var undo_live := Callable()
@@ -69,6 +70,9 @@ class FakeCard:
 
 	func set_done(items: Array) -> void:
 		done = items
+
+	func set_departures(guessed: Array, not_as_asked: Array) -> void:
+		departures = [guessed, not_as_asked]
 
 
 ## The sidebar (journeyman_dock.gd).
@@ -167,10 +171,16 @@ func _run() -> void:
 	chat.turn_state.emit({"state": "submitting"})
 	_check(plugin.calls.is_empty(), "Nothing opens before the change is in review")
 	var parts := ["Made the lamp in Blender", "Put it on Desk"]
-	chat.turn_state.emit({"state": "in_review", "done": parts})
+	chat.turn_state.emit(
+		{"state": "in_review", "done": parts, "guessed": ["Made it brass"], "not_as_asked": []}
+	)
 	_check(plugin.calls == [["open", "Rename the lamp"]], "in_review opens the live review")
 	_check(not flow.live_waiting(), "Opened once")
 	_check(plugin._dock.card.done == parts, "The card lists what was done for each part")
+	_check(
+		plugin._dock.card.departures == [["Made it brass"], []],
+		"The card says what was guessed and what isn't as asked"
+	)
 
 	plugin.calls.clear()
 	plugin._edits.waiting = true

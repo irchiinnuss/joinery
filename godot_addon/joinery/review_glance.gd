@@ -71,6 +71,31 @@ static func facts_line(review: Dictionary, measured: Array = []) -> String:
 	return " · ".join(parts)
 
 
+## The one compact line for what the agent guessed and where it didn't do as asked
+## (submit_for_review's guessed and not_as_asked): "Differs from your request · 2 guesses",
+## "Differs from your request in 2 ways", "1 guess". "" when there is nothing to say.
+static func departures_line(guessed: Array, not_as_asked: Array) -> String:
+	var differs := _said(not_as_asked)
+	var guesses := _said(guessed)
+	var parts := PackedStringArray()
+	if differs == 1:
+		parts.append("Differs from your request")
+	elif differs > 1:
+		parts.append("Differs from your request in %d ways" % differs)
+	if guesses > 0:
+		parts.append("%d guess%s" % [guesses, "" if guesses == 1 else "es"])
+	var line := " · ".join(parts)
+	return line.substr(0, 1).to_upper() + line.substr(1)
+
+
+static func _said(lines: Array) -> int:
+	return (
+		lines
+		. filter(func(line: Variant) -> bool: return not str(line).strip_edges().is_empty())
+		. size()
+	)
+
+
 ## The changed files by name: the lead asset's own file (its source when there is one, so
 ## door.blend over door.glb), then the other assets counted by kind: "door.blend · +1 sound".
 ## Without assets, the plain counts ("3 files").
