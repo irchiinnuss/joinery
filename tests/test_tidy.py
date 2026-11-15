@@ -655,3 +655,62 @@ def test_the_card_remove_is_a_reviewed_change_without_an_agent(hosted: Path) -> 
         await test.gateway.close()
 
     asyncio.run(go())
+
+
+def _glb(images: list[str]) -> bytes:
+    body = json.dumps(
+        {"asset": {"version": "2.0"}, "images": [{"uri": u} for u in images]}
+    ).encode()
+    body += b" " * (-len(body) % 4)
+    chunk = len(body).to_bytes(4, "little") + b"JSON" + body
+    size = (12 + len(chunk)).to_bytes(4, "little")
+    return b"glTF" + (2).to_bytes(4, "little") + size + chunk
+
+
+def test_maps_painted_for_a_used_model_are_used(tmp_path: Path) -> None:
+    """Krita maps, a model's external images and a recipe's other outputs and
+    inputs are used through the model that is used, never "unused"."""
+    project = tmp_path / "game"
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
+    files: dict[str, str | bytes] = {
+        "project.godot": (
+            'config_version=5\n\n[application]\n\nrun/main_scene="res://game/main.tscn"\n'
+        ),
+        "game/main.tscn": (
+            "[gd_scene load_steps=2 format=3]\n\n"
+            '[ext_resource type="PackedScene" path="res://art/gun.glb" id="1"]\n\n'
+            '[node name="Main" type="Node3D"]\n\n'
+            '[node name="Gun" parent="." instance=ExtResource("1")]\n'
+        ),
+        "art/gun.glb": _glb(["textures/gun/gun_ext.png"]),
+        "art/textures/gun/gun_ext.png": png,
+        "art/textures/gun/gun_wood_albedo.png": png,
+        "art/textures/gun/gun_steel_albedo.png": png,
+        "art/sources/maps/gun/gun_wood_albedo.png": png,
+        "art/textures/stray.png": png,
+        "recipes/model.toml": (
+            'tool = "blender"\nscript = "recipes/model.py"\n'
+            'outputs = ["art/gun.glb", "art/textures/gun/gun_wood_albedo.png"]\n'
+            'sources = ["art/sources/maps/gun/gun_wood_albedo.png"]\n'
+        ),
+        "recipes/model.py": "pass\n",
+        "joinery.lock": (
+            "[[asset]]\n"
+            'path = "art/textures/gun/gun_steel_albedo.png"\n'
+            f'sha256 = "{_sha(png)}"\n'
+            'origin = "tool-created"\ntool = "blender"\n'
+            'recipe = "recipes/model.toml"\n'
+        ),
+    }
+    for rel, data in files.items():
+        _write(project, rel, data)
+    found = _by(tidy_report.check(project))
+    for used in (
+        "art/gun.glb",
+        "art/textures/gun/gun_ext.png",
+        "art/textures/gun/gun_wood_albedo.png",
+        "art/textures/gun/gun_steel_albedo.png",
+        "art/sources/maps/gun/gun_wood_albedo.png",
+    ):
+        assert used not in found, (used, found.get(used))
+    assert found["art/textures/stray.png"].confidence == "unused"

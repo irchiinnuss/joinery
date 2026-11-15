@@ -23,7 +23,9 @@ nothing and attached scripts that add nothing are found the same way
 from __future__ import annotations
 
 import hashlib
+import json
 import os
+import posixpath
 import re
 import tomllib
 from collections import defaultdict
@@ -31,6 +33,7 @@ from dataclasses import dataclass, field
 from functools import cache
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal
+from urllib.parse import unquote
 
 from pydantic import BaseModel, ConfigDict
 
@@ -118,6 +121,11 @@ TEXT = frozenset(
 )
 #: Godot's binary scenes and resources: read for the path strings they keep.
 BINARY = frozenset({".scn", ".res"})
+#: Models read for the image files they name (a .glb's external images, a .blend's
+#: image nodes).
+MODELS = frozenset({".glb", ".blend"})
+#: Larger models are not read for image paths.
+MAX_BLEND = 256 << 20
 #: Data a script may read by a path it builds (levels, dialogue, puzzles): a root.
 DATA = frozenset({".json", ".dlg", ".csv", ".cfg", ".toml", ".txt"})
 CODE = frozenset({".gd", ".cs"})
@@ -525,6 +533,84 @@ def _binary_refs(graph: Graph, rel: str) -> Refs:
     return found
 
 
+_IMAGE = r"[\x21-\x7e]+?\.(?:png|jpe?g|webp|exr|hdr|tga|bmp|kra|ktx2?|dds)"
+
+
+def _model_refs(graph: Graph, rel: str) -> Refs:
+    """The image files a model names: a .glb's ``images[].uri`` (relative to it), or
+    the ``//``-relative and project paths a .blend keeps for its image nodes."""
+    found = Refs()
+    path = graph.project / rel
+    folder = PurePosixPath(rel).parent
+    try:
+        if path.stat().st_size > MAX_BLEND:
+            return found
+        data = path.read_bytes()
+    except OSError:
+        return found
+    names: list[str] = []
+    if rel.endswith(".glb") and data[:4] == b"glTF" and len(data) >= 20:
+        length = int.from_bytes(data[12:16], "little")
+        try:
+            doc = json.loads(data[20 : 20 + length])
+        except ValueError:
+            doc = {}
+        images = doc.get("images", []) if isinstance(doc, dict) else []
+        names = [
+            str(image["uri"])
+            for image in images
+            if isinstance(image, dict)
+            and isinstance(image.get("uri"), str)
+            and not str(image["uri"]).startswith("data:")
+        ]
+    elif rel.endswith(".blend"):
+        text = data.decode("latin-1")
+        names = [m.group(1) for m in re.finditer(rf"//({_IMAGE})(?![\w.])", text)]
+    for name in names:
+        name = unquote(name).replace("\\", "/")
+        if name.startswith("res://"):
+            target = _clean(name.removeprefix("res://"))
+        else:
+            target = _clean(posixpath.normpath(str(folder / name)))
+        if target in graph.present and target != rel:
+            found.files.add(target)
+    return found
+
+
+def _recipe_groups(graph: Graph) -> dict[str, set[str]]:
+    """Output -> what goes with it: a recipe's other outputs and its source inputs,
+    from ``recipes/*.toml`` and the ``joinery.lock`` entries made by each recipe. A
+    used model keeps the maps painted for it and the files it was built from."""
+    groups: dict[str, tuple[set[str], set[str]]] = {}
+    recipes = graph.project / "recipes"
+    for path in sorted(recipes.glob("*.toml")) if recipes.is_dir() else []:
+        try:
+            raw = tomllib.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        outputs = {str(o) for o in raw.get("outputs", []) if isinstance(o, str)}
+        expect = raw.get("expect", {})
+        if isinstance(expect, dict):
+            outputs |= {str(k) for k in expect}
+        sources = {str(s) for s in raw.get("sources", []) if isinstance(s, str)}
+        groups[f"recipes/{path.name}"] = (outputs, sources)
+    try:
+        from joinery.lockfile import read_assets
+
+        entries = read_assets(graph.project)
+    except (OSError, ValueError):
+        entries = []
+    for entry in entries:
+        recipe = getattr(entry, "recipe", "")
+        if isinstance(recipe, str) and recipe:
+            groups.setdefault(recipe, (set(), set()))[0].add(entry.path)
+    edges: dict[str, set[str]] = defaultdict(set)
+    for outputs, sources in groups.values():
+        for output in outputs:
+            edges[output] |= (outputs | sources) - {output}
+    return edges
+
+
 def owned(project: Path) -> tuple[str, ...]:
     """core/ and each applied feature's folder, from the ``[game]`` record."""
     try:
@@ -553,6 +639,11 @@ def build(project: Path) -> Graph:
             continue
         if suffix(rel) in BINARY:
             graph.refs[rel] = _binary_refs(graph, rel)
+            continue
+        if suffix(rel) in MODELS:
+            graph.refs.setdefault(rel, Refs()).files.update(
+                _model_refs(graph, rel).files
+            )
             continue
         if rel.endswith(".import") and rel.removesuffix(".import") in present:
             # Import settings can save an asset's materials or meshes to their own
@@ -670,8 +761,12 @@ def _reach(graph: Graph) -> None:
     the tests."""
     queue = list(graph.roots)
     graph.used = dict.fromkeys(graph.roots, "")
+    groups = _recipe_groups(graph)
     for rel in queue:
-        for target in sorted(graph.refs.get(rel, Refs()).files):
+        # What the same recipe made with a used file, and what it was made from
+        # (the maps painted for a model), is used through it.
+        made_with = groups.get(rel, set()) & graph.present
+        for target in sorted(graph.refs.get(rel, Refs()).files) + sorted(made_with):
             if target not in graph.used:
                 graph.used[target] = rel
                 queue.append(target)
