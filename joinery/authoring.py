@@ -61,6 +61,16 @@ def confined(project: Path, relative: str) -> Path:
     return target
 
 
+class WorkerTimeout(TimeoutError):
+    """An offline run past its time limit (the worker is killed), with what it
+    printed until then."""
+
+    def __init__(self, seconds: float, output: str = "") -> None:
+        super().__init__(f"the offline worker ran past {seconds:g} s")
+        self.seconds = seconds
+        self.output = output
+
+
 async def run_offline(
     argv: list[str],
     project: Path,
@@ -107,12 +117,27 @@ async def run_offline(
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
+    out, err = bytearray(), bytearray()
+
+    async def pump(stream: asyncio.StreamReader | None, into: bytearray) -> None:
+        while stream is not None and (chunk := await stream.read(65536)):
+            into.extend(chunk)
+
     try:
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout)
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(
+                    pump(process.stdout, out), pump(process.stderr, err), process.wait()
+                ),
+                timeout,
+            )
+        except TimeoutError:
+            # What it printed before the limit says why it never finished.
+            raise WorkerTimeout(timeout, (out + err).decode(errors="replace")) from None
         return Result(
             process.returncode == 0,
-            stdout.decode(errors="replace"),
-            stderr.decode(errors="replace"),
+            out.decode(errors="replace"),
+            err.decode(errors="replace"),
             asyncio.get_running_loop().time() - start,
         )
     finally:

@@ -367,7 +367,7 @@ def test_timeout(script: str, seconds: int) -> list[Reason]:
         Reason(
             "tests.timed_out",
             file=script,
-            measured=f"still running after {seconds} s, twice",
+            measured=f"still running after {seconds} s",
             expected="the test ends with quit() in time",
             fix=(
                 "Make the test call quit() on every path (a script error stops it "

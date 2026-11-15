@@ -314,13 +314,29 @@ Runner = Callable[[Path, str], Awaitable[Result]]
 Importer = Callable[[Path], Awaitable[None]]
 
 
-def timeout_text(seconds: int) -> str:
-    """What a test that never finished says, in place of its output."""
-    return (
-        f"timed out after {seconds} s, twice: it never called quit(), or it needs "
-        "longer than that here. End it with quit(), or raise "
-        "[checks] scene_test_seconds in joinery.toml."
-    )
+#: What Godot prints when a script error stops a function: a SceneTree test whose
+#: ``_run`` stops there never reaches its quit(), so it hangs until killed.
+SCRIPT_ERROR = "SCRIPT ERROR:"
+
+
+def timeout_text(seconds: int, output: str = "", tries: int = 2) -> str:
+    """What a test that never finished says, in place of its output; ``output`` is
+    what it printed before it was stopped."""
+    times = "twice" if tries > 1 else "once"
+    if SCRIPT_ERROR in output:
+        said = (
+            f"timed out after {seconds} s: a script error stopped it before it "
+            "called quit(). Fix the error (the test's own code or the game's), and "
+            "make the test quit on every path."
+        )
+    else:
+        said = (
+            f"timed out after {seconds} s, {times}: it never called quit(), or it "
+            "needs longer than that here. End it with quit(), or raise "
+            "[checks] scene_test_seconds in joinery.toml."
+        )
+    tail = output.strip()[-_FAIL_TAIL:]
+    return f"{said}\nIts last output:\n{tail}" if tail else said
 
 
 async def _run_all(
@@ -330,19 +346,27 @@ async def _run_all(
     passed: Callable[[Result], bool],
     seconds: int,
 ) -> dict[str, Outcome]:
-    """Run each test; one that times out runs once more before it counts, and a
-    second time-out is that test's result alone: the others still count."""
+    """Run each test; one that times out runs once more before it counts (unless a
+    script error stopped it: that hangs again), and a time-out is that test's
+    result alone: the others still count."""
     gate = asyncio.Semaphore(PARALLEL)
 
     async def one(script: str) -> tuple[str, Outcome]:
-        for _try in range(2):
+        printed = ""
+        tries = 0
+        while tries < 2:
+            tries += 1
             try:
                 async with gate:
                     got = await run(root, script)
-            except TimeoutError:
+            except TimeoutError as stopped:
+                printed = str(getattr(stopped, "output", "") or "")
+                if SCRIPT_ERROR in printed:
+                    break
                 continue
             return script, Outcome(passed(got), got.output[-_FAIL_TAIL:].strip())
-        return script, Outcome(False, timeout_text(seconds), timed_out=True)
+        text = timeout_text(seconds, printed, tries)
+        return script, Outcome(False, text, timed_out=True)
 
     tasks = [asyncio.ensure_future(one(s)) for s in scripts]
     try:

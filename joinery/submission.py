@@ -115,7 +115,7 @@ OFFLINE_SECONDS = 180
 SCENE_TESTS_MAX = 20
 SCENE_TEST_SECONDS = 120
 #: The worker is linux/amd64; on an arm64 host it runs emulated, several times slower.
-EMULATED_FACTOR = 3
+EMULATED_FACTOR = 2
 _SCENE_TREE = re.compile(
     r'^[ \t]*(?:class_name[ \t]+\w+[ \t]+)?extends[ \t]+"?SceneTree"?[ \t]*(?:#.*)?$',
     re.MULTILINE,

@@ -5,16 +5,20 @@ result, and never ends the other checks with a blank reason."""
 from __future__ import annotations
 
 import asyncio
+import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from joinery import scene_tests, submission
+from joinery.authoring import WorkerTimeout, run_offline
 from joinery.runner import Result
 from joinery.transactions import FileTransaction
 from joinery.turn import error_text
 from tests.test_scene_tests_baseline import _project
+
+TEST_HANGS = "extends SceneTree\n\nfunc _initialize() -> void:\n\tpass\n"
 
 
 class Hangs:
@@ -161,3 +165,57 @@ def test_error_text_is_never_blank() -> None:
     assert error_text(RuntimeError("Docker isn't running")) == (
         "RuntimeError: Docker isn't running"
     )
+
+
+def test_a_test_a_script_error_stopped_is_not_run_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # As in a live run: the test's _run hit a script error, so quit() never came.
+    tx = _transaction(tmp_path)
+    (tx.stage / "tests/test_gun.gd").write_text(TEST_HANGS)
+    runs: list[str] = []
+
+    async def offline(argv: list[str], root: Path, seconds: int, **_k: Any) -> Result:
+        if "--import" in argv:
+            return Result(True, "", "", 0.0)
+        script = argv[argv.index("-s") + 1].removeprefix("res://")
+        runs.append(script)
+        if script == "tests/test_gun.gd":
+            raise WorkerTimeout(
+                seconds,
+                "SCRIPT ERROR: Attempt to call function 'null::_from_3 (Callable)' "
+                "on a null instance.\n   at: _run (res://tests/test_gun.gd:118)\n",
+            )
+        return Result(True, "PASS", "", 0.0)
+
+    monkeypatch.setattr("joinery.submission.run_offline", offline)
+    (problem,) = _run(tx, [])
+    assert runs.count("tests/test_gun.gd") == 1
+    assert "a script error stopped it before it called quit()" in problem.message
+    assert "test_gun.gd:118" in problem.message
+
+
+def test_the_worker_is_killed_at_the_limit_and_its_output_kept(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    launched: list[asyncio.subprocess.Process] = []
+    real = asyncio.create_subprocess_exec
+
+    async def launch(*argv: str, **options: Any) -> asyncio.subprocess.Process:
+        if argv[:2] == ("docker", "rm"):
+            return await real(sys.executable, "-c", "pass", **options)
+        process = await real(
+            sys.executable,
+            "-c",
+            "import sys, time; print('SCRIPT ERROR: boom', flush=True); time.sleep(30)",
+            **options,
+        )
+        launched.append(process)
+        return process
+
+    monkeypatch.setattr("joinery.authoring.asyncio.create_subprocess_exec", launch)
+    with pytest.raises(WorkerTimeout) as stopped:
+        asyncio.run(run_offline(["godot"], tmp_path, 1, warm=False))
+    assert "SCRIPT ERROR: boom" in stopped.value.output
+    assert str(stopped.value)  # never a blank reason
+    assert launched[0].returncode is not None  # the hung process was killed

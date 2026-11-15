@@ -79,9 +79,8 @@ def test_linux_native_document_launch_and_readonly_mount(
 
     class Process:
         returncode = 0
-
-        async def communicate(self) -> tuple[bytes, bytes]:
-            return b"", b""
+        stdout = None
+        stderr = None
 
         async def wait(self) -> int:
             return 0
