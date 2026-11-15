@@ -191,6 +191,18 @@ def limit_notice(words: str) -> dict[str, Any]:
 def continuation(prompt: Prompt, result: SubmitResult) -> Prompt:
     """The same turn, asked once more: fix what the checks found and submit."""
     problems = "\n".join(f"- {p.check}: {p.message}" for p in result.problems)
+    unprovenanced = sorted(
+        {path for p in result.problems if p.check == "assets" for path in p.paths}
+    )
+    if unprovenanced:
+        # A render cut short (a stalled worker) has no recipe or lock entry: make
+        # exactly those again with their tool; the rest of the change stays.
+        problems += (
+            "\nRedo exactly these renders with the tool that makes them, so each "
+            "gets its recipe and joinery.lock entry: "
+            + ", ".join(unprovenanced)
+            + ". Leave the rest of the change as it is."
+        )
     return prompt.model_copy(
         update={
             "text": CONTINUE_AFTER_FAILED_SUBMIT.format(problems=problems),

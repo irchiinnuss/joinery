@@ -295,6 +295,50 @@ def test_a_failed_auto_submit_asks_once_then_holds_it_with_the_failure(
     assert "in_review" in kinds and kinds.index("file_preview") < kinds.index("done")
 
 
+def test_a_render_without_provenance_is_blocked_and_the_rest_waits(
+    host: Host, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (host.root / "joinery.lock").write_text("version = 1\n")
+
+    def provenance(stage: Path, _catalog: Any) -> list[str]:
+        gem = stage / "art/gem.png"
+        return ["art/gem.png: no joinery.lock entry"] if gem.exists() else []
+
+    monkeypatch.setattr("joinery.submission.check_assets", provenance)
+
+    async def agent(bridge: Any) -> AsyncIterator[Any]:
+        # A worker stalled mid-render: the PNG is there, its recipe never written.
+        host.stage({"a.gd": "extends Node\n", "art/gem.png": "half a png"})
+        yield Message(text="Made the gem and its script.")
+        yield Done(ok=True)
+
+    async def still_stalled(bridge: Any) -> AsyncIterator[Any]:
+        yield Message(text="The render didn't finish.")
+        yield Done(ok=True)
+
+    host.run(agent, still_stalled)
+    # The agent is told to redo exactly that render.
+    follow = host.prompts[1].text
+    assert "Redo exactly these renders" in follow and "art/gem.png" in follow
+    kinds = host.kinds()
+    assert "file_preview" in kinds and "in_review" in kinds
+    preview = host.events[kinds.index("file_preview")]
+    # The rest waits for review; the refused file can't be accepted with it.
+    assert [c["path"] for c in preview["changes"]] == ["a.gd"]
+    blocked = next(c for c in preview["failed_checks"] if c["check"] == "assets")
+    assert blocked["paths"] == ["art/gem.png"]
+    assert blocked["message"].startswith(
+        "Blocked, not part of this change: art/gem.png"
+    )
+    assert "Redo exactly this render" in blocked["message"]
+    assert host.gateway is not None
+    notice = next(e for e in host.events if e.get("about") == "left_change")
+    assert "an asset has no valid provenance record" in notice["text"]
+    assert "Nothing was changed" not in " ".join(
+        str(e.get("text", "")) for e in host.events if e.get("kind") == "notice"
+    )
+
+
 def test_the_continuation_can_fix_the_change(host: Host) -> None:
     async def agent(bridge: Any) -> AsyncIterator[Any]:
         host.stage({"scenes/ashtray.tscn": SCENE})

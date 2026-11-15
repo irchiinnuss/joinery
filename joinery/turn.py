@@ -25,6 +25,7 @@ from joinery import (
     keep_avoid,
     look_preview,
     metrics,
+    provenance_hold,
     reasons,
 )
 from joinery.claims import LEAD_BUSY, MAIN, live_refusal
@@ -1513,6 +1514,43 @@ class TurnController:
         self._peer, self._peer_print = peer, printed
         return peer
 
+    async def _hold_without_unprovenanced(self, result: SubmitResult) -> SubmitResult:
+        """A finished change refused only for assets without provenance (and checks
+        that hold a change): the refused files leave the stage and the rest waits
+        for review, the blocked files listed (``provenance_hold``). Rule Zero stands:
+        unless the stage then passes the provenance check, ``result`` is returned
+        unchanged and the change is dropped as before."""
+        refused = [p for p in result.problems if p.check == "assets"]
+        others = [p for p in result.problems if p.check != "assets"]
+        tx = self.gateway.transaction
+        if not refused or (others and not held(others)) or tx is None:
+            return result
+        blocked = sorted(
+            {
+                path
+                for problem in refused
+                for path in problem.paths
+                if path and not Path(path).is_absolute() and path != "joinery.lock"
+            }
+        )
+        if not blocked:
+            return result
+        try:
+            remaining = await asyncio.to_thread(
+                provenance_hold.block, tx.stage, tx.original, blocked
+            )
+            found = tx.diff()
+        except (OSError, ValueError):
+            return result  # the change is dropped as before: nothing unchecked kept
+        if remaining or not found:
+            return result
+        line = provenance_hold.note(blocked)
+        problems = [*others, Problem("assets", line, blocked, fixable=False)]
+        changes = [{"path": c["path"], "change": c["change"]} for c in found]
+        return await self._hold(
+            self.request[:160], found, "joinery", changes, problems, [line]
+        )
+
     async def _hold(
         self,
         summary: str,
@@ -1672,6 +1710,14 @@ class TurnController:
                 result = unchanged or await self.submit(self._named, "joinery")
             finally:
                 self._last_chance = False
+            if (
+                result.status == "failed"
+                and not result.final
+                and last
+                and self._staged()
+                and not held(result.problems)
+            ):
+                result = await self._hold_without_unprovenanced(result)
             if (
                 result.status == "failed"
                 and not result.final
