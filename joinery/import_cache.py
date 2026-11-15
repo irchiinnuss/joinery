@@ -20,7 +20,7 @@ import os
 import re
 import subprocess
 import threading
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from pathlib import Path
 
 from joinery.staged_assets import IMPORTED_SUFFIXES
@@ -152,11 +152,14 @@ def after_accept(
     *,
     wait: bool = False,
     godot: Path | None = None,
+    then: Callable[[], object] | None = None,
 ) -> threading.Thread | None:
     """Bring the cache up to date after a change was accepted, so the next playtest,
     media run or replay plays what was accepted. Only a project that has a cache
     (one Godot opened) is imported; without one the next run makes it. Runs in the
-    background unless ``wait``; returns the thread, or None when nothing needs it."""
+    background unless ``wait``; returns the thread, or None when nothing needs it.
+    ``then`` runs once the import is done (it commits the ``.uid`` and ``.import``
+    files Godot wrote: FileTransaction.commit_generated)."""
     if not (project / CACHE).is_dir():
         return None
     if not touches_imports(str(c.get("path", "")) for c in changes):
@@ -171,11 +174,15 @@ def after_accept(
     if not godot.is_file():
         return None
     binary = godot
-    if wait:
+
+    def run() -> None:
         ensure(binary, project)
+        if then is not None:
+            then()
+
+    if wait:
+        run()
         return None
-    thread = threading.Thread(
-        target=ensure, args=(binary, project), name="joinery-import", daemon=True
-    )
+    thread = threading.Thread(target=run, name="joinery-import", daemon=True)
     thread.start()
     return thread

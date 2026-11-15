@@ -718,7 +718,9 @@ def _transaction_decision(project: Path, identifier: str, accept: bool) -> int:
         if accept:
             changes = tx.accept()
             steps = game_setup.after_accept(tx.project, game_setup.follow_up(tx))
-            import_cache.after_accept(tx.project, changes, wait=True)
+            import_cache.after_accept(
+                tx.project, changes, wait=True, then=tx.commit_generated
+            )
         else:
             added = references.created(tx.changes)
             tx.reject()

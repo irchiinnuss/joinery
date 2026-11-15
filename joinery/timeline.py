@@ -57,6 +57,13 @@ START_MARKER = ".joinery/timeline-start.json"
 START_WINDOW = 15 * 60
 #: Cached before/after images of a file, for the Timeline tab to show.
 CACHE = ".joinery/timeline"
+#: Accepted changes whose files couldn't be committed yet, committed with the next.
+OWED = ".joinery/timeline-owed.json"
+#: Files Godot writes beside a source file.
+GENERATED_SUFFIXES = (".uid", ".import")
+#: Tries, and the first wait between them, when git is busy.
+COMMIT_TRIES = 3
+COMMIT_WAIT = 0.2
 #: The ignore rules a Joinery project needs: the editor's cache and Joinery's
 #: restore data stay out; the game record and the art approval are kept.
 IGNORE_MARKER = "# Joinery: restore data and caches stay out of git"
@@ -520,10 +527,104 @@ def commit_paths(project: Path, paths: Sequence[str], message: str) -> str:
     return _head(project)
 
 
+def generated_beside(project: Path, paths: Sequence[str]) -> list[str]:
+    """Godot's own files beside ``paths`` that are on disk: an asset's import
+    record (``x.png.import``) and a script's or shader's id (``x.gd.uid``)."""
+    found: list[str] = []
+    for path in paths:
+        if not path or path.endswith(GENERATED_SUFFIXES):
+            continue
+        for suffix in GENERATED_SUFFIXES:
+            if (project / (path + suffix)).is_file():
+                found.append(path + suffix)
+    return found
+
+
+def stray_generated(project: Path) -> list[str]:
+    """Generated files (``.uid``, ``.import``) git doesn't track yet whose source it
+    does: Godot wrote them for work already in the timeline (an open editor imports
+    after an accept), so they belong there too. Never the user's own files."""
+    out = _git(
+        project, "status", "--porcelain=v1", "-z", "--untracked-files=all"
+    ).stdout
+    new = [
+        entry[3:]
+        for entry in _split_z(out)
+        if entry.startswith("?? ") and entry.endswith(GENERATED_SUFFIXES)
+    ]
+    if not new:
+        return []
+    sources = {path.rsplit(".", 1)[0]: path for path in new}
+    tracked = _split_z(_git(project, "ls-files", "-z", "--", *sources).stdout)
+    return sorted(sources[source] for source in tracked if source in sources)
+
+
+def uncommitted(project: Path, paths: Sequence[str]) -> list[str]:
+    """Which of ``paths`` still differ from the newest entry: new, changed, deleted,
+    or staged but not committed. Paths git ignores are left out."""
+    wanted = sorted({to_git_path(path) for path in paths if path})
+    if not wanted:
+        return []
+    out = _git(
+        project,
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--untracked-files=all",
+        "--no-renames",
+        "--",
+        *wanted,
+    ).stdout
+    return sorted({entry[3:] for entry in _split_z(out) if len(entry) > 3})
+
+
+def _owed(project: Path) -> list[dict[str, Any]]:
+    """Earlier accepted changes whose files couldn't be committed then."""
+    try:
+        data = json.loads((project / OWED).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    if not isinstance(data, list):
+        return []
+    return [
+        {"paths": [str(p) for p in item["paths"]], "message": str(item["message"])}
+        for item in data
+        if isinstance(item, dict)
+        and isinstance(item.get("paths"), list)
+        and item.get("message")
+    ]
+
+
+def _save_owed(project: Path, owed: list[dict[str, Any]]) -> None:
+    path = project / OWED
+    if not owed:
+        path.unlink(missing_ok=True)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(owed, indent=1), encoding="utf-8")
+
+
+def _commit_retrying(project: Path, paths: Sequence[str], message: str) -> str:
+    """:func:`commit_paths`, tried again while git is busy (another git command,
+    a sync or an editor holding the index for a moment)."""
+    for attempt in range(COMMIT_TRIES - 1):
+        try:
+            return commit_paths(project, paths, message)
+        except TimelineError:
+            time.sleep(COMMIT_WAIT * (attempt + 1))
+    return commit_paths(project, paths, message)
+
+
 def record(
     project: Path, paths: Sequence[str], summary: str, reverted: bool = False
 ) -> dict[str, str]:
     """Add one decided change to the timeline, if this project keeps one.
+
+    Everything the change wrote is committed: its files, Godot's ``.uid`` and
+    ``.import`` files beside them (:func:`generated_beside`, :func:`stray_generated`),
+    and the files of an earlier change that couldn't be committed then. None may
+    be left uncommitted afterwards (:func:`uncommitted`): any that is is named in
+    the ``failed`` message and owed to the next accepted change.
 
     Returns ``{"state": ...}``: ``committed`` (with ``commit``), ``unchanged``,
     ``off`` (switched off in joinery.toml), a :func:`state` that has no
@@ -537,15 +638,91 @@ def record(
         if current["state"] != "ready":
             return current
         _drop_marker(project)
-        commit = commit_paths(project, paths, message_for(summary, reverted))
+        mine = [*paths, *generated_beside(project, paths), *stray_generated(project)]
     except (OSError, TimelineError) as exc:
         return {
             "state": "failed",
             "message": f"Couldn't add this to the Timeline. {exc}",
         }
+    message = message_for(summary, reverted)
+    queue = [*_owed(project), {"paths": sorted(set(mine)), "message": message}]
+    commit, reason = "", ""
+    still: list[dict[str, Any]] = []
+    for item in queue:
+        made = ""
+        try:
+            made = _commit_retrying(project, item["paths"], item["message"])
+            left = uncommitted(project, item["paths"])
+        except (OSError, TimelineError) as exc:
+            reason = reason or str(exc)
+            left = list(item["paths"])
+        if left:
+            still.append({"paths": left, "message": item["message"]})
+        commit = made
+    try:
+        _save_owed(project, still)
+    except OSError:
+        pass
+    if still:
+        names = sorted({path for item in still for path in item["paths"]})
+        more = f" and {len(names) - 5} more" if len(names) > 5 else ""
+        return {
+            "state": "failed",
+            "message": "Couldn't add this to the Timeline. "
+            + (f"{reason} " if reason else "")
+            + f"Not committed yet: {', '.join(names[:5])}{more}. Joinery commits "
+            "them with the next accepted change.",
+        }
     if not commit:
         return {"state": "unchanged"}
     return {"state": "committed", "commit": commit}
+
+
+def add_generated(
+    project: Path, paths: Sequence[str], commit: str, message: str
+) -> dict[str, str]:
+    """Commit the ``.uid`` and ``.import`` files Godot wrote beside ``paths`` once
+    their change was accepted (the import runs after the commit). They join that
+    change's entry while it is the newest, else they get their own. Never raises;
+    returns {} when there was nothing to add.
+    """
+    project = project.resolve()
+    try:
+        if not auto_commit(project) or state(project)["state"] != "ready":
+            return {}
+        found = uncommitted(project, generated_beside(project, paths))
+        if not found:
+            return {}
+        if commit and _head(project) == commit:
+            _git(project, "add", "-A", "--", *found)
+            _git(
+                project,
+                "commit",
+                "--no-verify",
+                "-q",
+                "--amend",
+                "--no-edit",
+                "--only",
+                "--",
+                *found,
+                identity=identity(project),
+            )
+            made = _head(project)
+        else:
+            made = _commit_retrying(project, found, message)
+        left = uncommitted(project, found)
+    except (OSError, TimelineError) as exc:
+        return {
+            "state": "failed",
+            "message": f"Couldn't add this to the Timeline. {exc}",
+        }
+    if left:
+        return {
+            "state": "failed",
+            "message": "Couldn't add this to the Timeline. Not committed yet: "
+            + ", ".join(left[:5]),
+        }
+    return {"state": "committed", "commit": made}
 
 
 # --- Reading the timeline ---------------------------------------------------------

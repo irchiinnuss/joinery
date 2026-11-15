@@ -1459,7 +1459,9 @@ class ProjectGateway:
             if not self.editor_context:
                 # The next playtest, media run or replay plays what was just accepted.
                 # An open editor rescans and imports on its own.
-                import_cache.after_accept(self.project, changes)
+                import_cache.after_accept(
+                    self.project, changes, then=tx.commit_generated
+                )
         if not accept:
             added = references.created(tx.changes)
             tx.reject()

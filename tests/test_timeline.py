@@ -249,6 +249,69 @@ def test_a_failed_commit_never_fails_the_change(tmp_path: Path) -> None:
     assert tx.timeline["message"].startswith("Couldn't add this to the Timeline.")
 
 
+def test_a_failed_commit_is_owed_to_the_next_accept(tmp_path: Path) -> None:
+    project = started(tmp_path / "game")
+    (project / ".git/index.lock").write_text("")
+    first = accept(project, "Add a crate", {"crate.gd": "extends Node3D\n"})
+    assert first.timeline["state"] == "failed"
+    assert "Not committed yet: crate.gd" in first.timeline["message"]
+    assert timeline.uncommitted(project, ["crate.gd"]) == ["crate.gd"]
+    (project / ".git/index.lock").unlink()
+    second = accept(project, "Add a barrel", {"barrel.gd": "extends Node3D\n"})
+    assert second.timeline["state"] == "committed"
+    # The owed change keeps its own entry, ahead of the new one.
+    assert git(project, "log", "--format=%s").splitlines()[:2] == [
+        "Add a barrel",
+        "Add a crate",
+    ]
+    assert files_of(project, "HEAD~1") == {"crate.gd"}
+    assert timeline.uncommitted(project, ["crate.gd", "barrel.gd"]) == []
+    assert not (project / timeline.OWED).exists()
+
+
+def test_godot_files_beside_a_change_are_committed_with_it(tmp_path: Path) -> None:
+    project = started(tmp_path / "game")
+    # Godot wrote an id for a script already in the timeline (an open editor).
+    (project / "main.gd.uid").write_text("uid://main\n")
+    # The tools' import of the new texture, written beside it before the accept.
+    tx = FileTransaction(project)
+    tx.begin("Add a crate")
+    (tx.stage / "crate.gd").write_text("extends Node3D\n")
+    (tx.stage / "crate.png").write_bytes(b"png")
+    tx.review()
+    tx.accept()
+    (project / "crate.png.import").write_text("[remap]\n")
+    assert tx.timeline["state"] == "committed"
+    # Godot imports after the commit: its .uid joins the same entry.
+    (project / "crate.gd.uid").write_text("uid://crate\n")
+    tx.commit_generated()
+    assert tx.timeline["state"] == "committed"
+    assert len(git(project, "log", "--format=%s").splitlines()) == 2
+    assert files_of(project) == {
+        "crate.gd",
+        "crate.gd.uid",
+        "crate.png",
+        "crate.png.import",
+        "main.gd.uid",
+    }
+    assert tx.timeline["commit"] == git(project, "rev-parse", "HEAD").strip()
+    assert git(project, "status", "--porcelain") == ""
+
+
+def test_godot_files_after_a_newer_entry_get_their_own(tmp_path: Path) -> None:
+    project = started(tmp_path / "game")
+    tx = accept(project, "Add a crate", {"crate.gd": "extends Node3D\n"})
+    accept(project, "Add a barrel", {"barrel.gd": "extends Node3D\n"})
+    (project / "crate.gd.uid").write_text("uid://crate\n")
+    tx.commit_generated()
+    assert git(project, "log", "--format=%s").splitlines()[:3] == [
+        "Add a crate",
+        "Add a barrel",
+        "Add a crate",
+    ]
+    assert files_of(project) == {"crate.gd.uid"}
+
+
 def test_messages_keep_a_short_subject() -> None:
     long = "Make " + "the lamp brighter " * 10
     message = timeline.message_for(long)

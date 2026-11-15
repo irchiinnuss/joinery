@@ -530,12 +530,38 @@ class FileTransaction:
         """
         from joinery import timeline  # Late: timeline stages restores through here.
 
-        paths = [
+        self.timeline = timeline.record(
+            self.project, self._timeline_paths(changes), self.summary, reverted
+        )
+
+    def _timeline_paths(self, changes: list[dict[str, str]]) -> list[str]:
+        return [
             change["path"]
             for change in [*changes, *self.carried]
             if DIRECTORY not in {change["before"], change["after"]}
         ]
-        self.timeline = timeline.record(self.project, paths, self.summary, reverted)
+
+    def commit_generated(self) -> None:
+        """Once Godot has imported an accepted change, commit the ``.uid`` and
+        ``.import`` files it wrote beside the change's files, so nothing the change
+        brought is left out of the timeline. Bookkeeping: never fails the decision."""
+        from joinery import timeline
+
+        if self.state != "accepted" or self.timeline.get("state") not in {
+            "committed",
+            "unchanged",
+        }:
+            return
+        outcome = timeline.add_generated(
+            self.project,
+            self._timeline_paths(self.changes),
+            self.timeline.get("commit", ""),
+            timeline.message_for(self.summary),
+        )
+        if outcome.get("state") == "committed":
+            self.timeline = outcome
+        elif outcome:
+            self.timeline = {**self.timeline, **outcome}
 
     def _carry(self) -> None:
         """Copy the stage's CARRIED records into the project, keeping the old ones.
