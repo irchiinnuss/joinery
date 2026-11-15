@@ -18,10 +18,11 @@ from pathlib import Path
 
 import pytest
 
-from joinery import bug_reports, replays
+from joinery import blueprints, bug_reports, playtest, replays
 from tests.blueprints.godot_run import (
     boot,
     godot_binary,
+    import_project,
     make_project,
     needs_godot,
     run_godot,
@@ -210,3 +211,29 @@ def test_only_a_person_s_editor_run_is_reported_as_played(tmp_path: Path) -> Non
         project, "res://tests/play_report_check.gd", timeout=120, marker="play report"
     )
     assert "play report: ok" in result.output
+
+
+@needs_godot
+def test_a_recorded_playtest_replays_on_first_person_3d_with_every_feature(
+    tmp_path: Path,
+) -> None:
+    """``joinery playtest --seed 4242 --record`` -> ``replay add`` -> ``replay run``,
+    with nothing changed in between: the replay passes. The bot turns the view with
+    analog look presses; one it left in Input's buffer reached the recording a frame
+    late, so the replay looked round a frame late and diverged at its first
+    checkpoint ("saved player: changed")."""
+    features = sorted(
+        f.id for f in blueprints.list_features() if f.supports("first-person-3d")
+    )
+    if blueprints.resolve("first-person-3d", features).problems:
+        features = list(blueprints.describe("first-person-3d")["default_features"])
+    project = make_project(tmp_path, "first-person-3d", features)
+    import_project(project)
+    report = playtest.run(
+        playtest.Options(project=project, seconds=20, seed=4242, record=True, fight="on")
+    )
+    assert report["status"] == "played", report
+    kept = replays.add(project, Path(report["replay"]), "playtest")
+    played = _replay(project, kept)
+    assert played.ok, played.line()
+    assert played.checks == replays.read(kept).checks >= 15

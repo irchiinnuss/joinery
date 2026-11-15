@@ -855,7 +855,11 @@ func _press_look(stick: Vector2) -> void:
 		event.action = action
 		event.pressed = strength > 0.0
 		event.strength = strength
+		# Delivered now, in this physics frame, as the press above already is: left in
+		# Input's buffer it would reach a recording a frame later than the game felt it,
+		# and its replay would look round a frame late.
 		Input.parse_input_event(event)
+		Input.flush_buffered_events()
 
 
 func _release_looks() -> void:
