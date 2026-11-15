@@ -8,6 +8,10 @@ extends Node
 ## with mouse, keyboard or pad and a notice says so once; nothing fails.
 ## `-- --vr-simulate` carries the rig without a headset (tests).
 ##
+## A project that starts its own XR session (WebXR in a web export, where
+## Godot has no OpenXR) hands it over with `adopt_interface()` once it runs,
+## and calls `release_interface()` when it ends.
+##
 ## Player settings (section `vr` in `Settings`, see DEFAULTS):
 ##   smooth_move  bool   walk with the move stick
 ##   move_speed   float  metres a second, 1-3
@@ -50,7 +54,8 @@ const ComfortPage := preload("res://features/vr/comfort_page.gd")
 const MenuPanel := preload("res://features/vr/menu_panel.gd")
 
 var mode: StringName = DESKTOP
-## Godot's OpenXR interface, or null when the engine has none.
+## Godot's OpenXR interface (null when the engine has none), or the interface
+## handed over with adopt_interface() until release_interface().
 var interface: XRInterface = null
 ## The rig carried on the local player, or null.
 var rig: Node3D = null
@@ -96,33 +101,80 @@ func panel() -> Node3D:
 	return _panel
 
 
+## Takes over an XR interface that something else started (a WebXR session,
+## for example): the game renders to it, the menu panel is made, the rig is
+## carried on the local player when a level is running, and `mode_changed`
+## fires once. Whoever started the session keeps it. Handing over the
+## interface already in use does nothing.
+func adopt_interface(started: XRInterface) -> void:
+	if started == null or (mode == XR and interface == started):
+		return
+	interface = started
+	print("VR: headset ready through %s" % started.get_name())
+	_switch(XR, "")
+	var level: Node = Game.current_level()
+	if level != null:
+		var player: Node3D = Game.local_player() as Node3D
+		attach_rig(player if player != null else level as Node3D)
+
+
+## Leaves XR after a session that was started elsewhere has ended: back to the
+## desktop with the player's own controls and camera, no rig and no menu
+## panel, and `mode_changed` fires once. `why` becomes `reason`. Does nothing
+## when the game is not in XR.
+func release_interface(why: String = "") -> void:
+	if mode != XR:
+		return
+	if is_instance_valid(rig):
+		rig.call(&"put_down")
+		rig.queue_free()
+	rig = null
+	interface = null
+	# The player has just taken the headset off: no "no headset" notice.
+	_noticed = true
+	var text: String = why if not why.is_empty() else "the XR session ended"
+	print("VR: %s; playing on the desktop" % text)
+	_switch(DESKTOP, text)
+
+
 func _start() -> void:
 	interface = XRServer.find_interface("OpenXR")
 	if interface != null and interface.is_initialized():
-		mode = XR
-		reason = ""
-		get_viewport().use_xr = true
 		# The headset paces frames; the window's vsync would slow it down.
 		DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
 		_match_refresh_rate()
 		print("VR: headset ready through %s" % interface.get_name())
+		_switch(XR, "")
 	elif SIMULATE_ARG in OS.get_cmdline_user_args():
-		mode = SIMULATED
-		reason = "simulated"
 		print("VR: simulated rig, no headset")
+		_switch(SIMULATED, "simulated")
 	else:
-		mode = DESKTOP
-		reason = (
+		var why: String = (
 			"no OpenXR interface in this engine"
 			if interface == null
 			else "no OpenXR runtime or headset"
 		)
+		print("VR: %s; playing on the desktop" % why)
+		_switch(DESKTOP, why)
 
-		print("VR: %s; playing on the desktop" % reason)
-	if is_active():
+
+## The one place the mode changes: in XR the game renders to the headset, the
+## menu panel lives while the rig is in use, and listeners hear of it once.
+func _switch(to: StringName, why: String) -> void:
+	var was_xr: bool = mode == XR
+	mode = to
+	reason = why
+	if mode == XR:
+		get_viewport().use_xr = true
+	elif was_xr:
+		get_viewport().use_xr = false
+	if is_active() and _panel == null:
 		_panel = MenuPanel.new()
 		_panel.name = "MenuPanel"
 		add_child(_panel)
+	elif not is_active() and _panel != null:
+		_panel.queue_free()
+		_panel = null
 	mode_changed.emit(mode)
 
 

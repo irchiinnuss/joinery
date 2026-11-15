@@ -1176,6 +1176,12 @@ and says so once; Godot's own log notes that OpenXR could not start. Tests
 pass `-- --vr-simulate` to run the rig without a headset; see ADR 0039 for
 what was and was not tested on real hardware.
 
+A web export has no OpenXR, but a game can start its own WebXR session and
+hand it to the feature: `VR.adopt_interface(interface)` once the session runs
+puts the game in VR (headset view, menu panel, the rig on the player), and
+`VR.release_interface(why)` when it ends gives the player their desktop
+controls and camera back.
+
 ### References and design documents
 
 Your own pictures and design documents can come with a new game, or be added
