@@ -31,6 +31,6 @@ Scope: primitive scene scaffolding and selected Node3D transforms. Arbitrary
 files, finished art assets, Blender modelling, and cross-tool transactions remain
 unimplemented. No existing game assets are modified by the tests.
 
-The installed addon in `/Users/ninjacornix/test-proj` was backed up before updating.
+The installed addon in the test project was backed up before updating.
 The original failed request is posted visibly on the updated editor launch, with
 no automatic acceptance or scene save.

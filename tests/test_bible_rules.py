@@ -1137,7 +1137,7 @@ def test_ui_resources_in_ui_folders_are_checked(tmp_path: Path) -> None:
 GODOT = Path(
     os.environ.get(
         "JOINERY_TEST_GODOT",
-        "/Users/ninjacornix/joinery/.tools/Godot.app/Contents/MacOS/Godot",
+        str(Path(__file__).resolve().parents[1] / ".tools/Godot.app/Contents/MacOS/Godot"),
     )
 )
 
