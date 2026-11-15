@@ -41,6 +41,12 @@ const SCRIPTS := [
 	"bot_fight.gd",
 ]
 const SAVE_SLOT := 2
+## Saved values whose key holds one of these are angles in radians, compared round the circle.
+const ANGLE_WORDS: Array[String] = [
+	"yaw", "pitch", "roll", "angle", "rotation", "heading", "facing"
+]
+## How far a saved angle may come back off (radians), like the 0.6 m for a position.
+const ANGLE_DRIFT := 0.6
 const SHOT_WIDTH := 480
 const LIMIT_EVENTS := 300
 ## Nodes that report their own state to the playtester (see _states()).
@@ -442,13 +448,18 @@ func _check_save_load() -> void:
 		if int(goals["levels_started"]) > started:
 			break
 		await _tick(false)
+	# Compared as soon as the save is back in, and once more half a second on: what the
+	# game moves by itself in that moment (a Drudge walking, turning) is live and isn't
+	# held to the saved value; everything else must match.
 	await _wait(1)
 	var after: Dictionary = game.call(&"capture_state")
+	await _wait(maxi(fps / 2, 1))
+	var later: Dictionary = game.call(&"capture_state")
 	var differences: Array[String] = []
 	for id: Variant in before:
 		if not after.has(id):
 			differences.append("%s is missing" % id)
-		elif not _same(before[id], after[id]):
+		elif not _same_settled(before[id], after[id], later.get(id, after[id])):
 			differences.append("%s came back different (%s)" % [id, _diff(before[id], after[id])])
 	if not differences.is_empty():
 		_save_problem(
@@ -521,30 +532,60 @@ static func _diff(a: Variant, b: Variant, path: String = "") -> String:
 		for key: Variant in a:
 			if not (b as Dictionary).has(key):
 				return "%s%s missing" % [path, key]
-			if not _same(a[key], b[key]):
+			if not _same(a[key], b[key], str(key)):
 				return _diff(a[key], b[key], "%s%s." % [path, key])
 	return "%s %s -> %s" % [path.trim_suffix("."), str(a).left(40), str(b).left(40)]
 
 
-## Saved and loaded values match: numbers and vectors within a little physics drift.
-static func _same(a: Variant, b: Variant) -> bool:
+## Whether a saved value named [param key] is an angle (radians): compared round the circle,
+## so a yaw of 3.15 and one of -3.05 are 0.08 apart, not 6.2.
+static func _is_angle(key: String) -> bool:
+	var name := key.to_lower()
+	for word: String in ANGLE_WORDS:
+		if name.contains(word):
+			return true
+	return false
+
+
+## The short way round the circle between two angles, in radians; [param scale] turns the
+## values into radians first (180/PI for degrees).
+static func _angle_gap(a: float, b: float, scale: float) -> float:
+	return absf(angle_difference(a / scale, b / scale))
+
+
+## Saved and loaded values match: numbers and vectors within a little physics drift, angles
+## (by their key: yaw, rotation, heading...) the short way round the circle.
+static func _same(a: Variant, b: Variant, key: String = "") -> bool:
 	if a is Dictionary and b is Dictionary:
 		if (a as Dictionary).size() != (b as Dictionary).size():
 			return false
-		for key: Variant in a:
-			if not (b as Dictionary).has(key) or not _same(a[key], b[key]):
+		for item: Variant in a:
+			if not (b as Dictionary).has(item) or not _same(a[item], b[item], str(item)):
 				return false
 		return true
 	if a is Array and b is Array:
 		if (a as Array).size() != (b as Array).size():
 			return false
 		for index: int in (a as Array).size():
-			if not _same(a[index], b[index]):
+			if not _same(a[index], b[index], key):
 				return false
 		return true
+	var angle := _is_angle(key)
+	# rotation_degrees and the like: the same, in degrees.
+	var scale := 180.0 / PI if angle and key.to_lower().contains("deg") else 1.0
 	if (a is float or a is int) and (b is float or b is int):
+		if angle:
+			return _angle_gap(float(a), float(b), scale) <= ANGLE_DRIFT
 		return absf(float(a) - float(b)) <= maxf(0.6, absf(float(a)) * 0.02)
 	if a is Vector3 and b is Vector3:
+		if angle:
+			var x := a as Vector3
+			var y := b as Vector3
+			return (
+				_angle_gap(x.x, y.x, scale) <= ANGLE_DRIFT
+				and _angle_gap(x.y, y.y, scale) <= ANGLE_DRIFT
+				and _angle_gap(x.z, y.z, scale) <= ANGLE_DRIFT
+			)
 		return (a as Vector3).distance_to(b) <= 0.6
 	if a is Vector2 and b is Vector2:
 		return (a as Vector2).distance_to(b) <= 24.0
@@ -555,8 +596,52 @@ static func _same(a: Variant, b: Variant) -> bool:
 	if a is Transform2D and b is Transform2D:
 		var x := a as Transform2D
 		var y := b as Transform2D
-		return _same(x.origin, y.origin) and absf(x.get_rotation() - y.get_rotation()) < 0.1
+		return (
+			_same(x.origin, y.origin)
+			and absf(angle_difference(x.get_rotation(), y.get_rotation())) < 0.1
+		)
 	return a == b
+
+
+## Saved and loaded values match, leaving out what the game moves on its own: [param later]
+## is the loaded state a moment after [param loaded], and a value that changed between those
+## two (an enemy walking, turning) is live, so it can't be held to the saved one.
+static func _same_settled(
+	saved: Variant, loaded: Variant, later: Variant, key: String = ""
+) -> bool:
+	if saved is Dictionary and loaded is Dictionary and later is Dictionary:
+		if (saved as Dictionary).size() != (loaded as Dictionary).size():
+			return false
+		for item: Variant in saved:
+			if not (loaded as Dictionary).has(item):
+				return false
+			var next: Variant = (later as Dictionary).get(item, loaded[item])
+			if not _same_settled(saved[item], loaded[item], next, str(item)):
+				return false
+		return true
+	if saved is Array and loaded is Array and later is Array:
+		if (saved as Array).size() != (loaded as Array).size():
+			return false
+		if (later as Array).size() != (loaded as Array).size():
+			return _same(saved, loaded, key)
+		for index: int in (saved as Array).size():
+			if not _same_settled(saved[index], loaded[index], later[index], key):
+				return false
+		return true
+	if _is_live(loaded, later):
+		return true
+	return _same(saved, loaded, key)
+
+
+## A value the game changed by itself in the moment after loading: a number or vector that
+## moved, by any amount.
+static func _is_live(loaded: Variant, later: Variant) -> bool:
+	if typeof(loaded) != typeof(later):
+		return false
+	match typeof(loaded):
+		TYPE_FLOAT, TYPE_VECTOR2, TYPE_VECTOR3, TYPE_TRANSFORM2D, TYPE_TRANSFORM3D, TYPE_QUATERNION:
+			return loaded != later
+	return false
 
 
 static func _near_basis(a: Basis, b: Basis) -> bool:
