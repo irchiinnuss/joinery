@@ -93,6 +93,62 @@ def test_wizard_answers_make_an_approved_bible(tmp_path: Path) -> None:
     assert art_direction(project)["approved"] is True
 
 
+@pytest.mark.parametrize(
+    ("variable", "value"),
+    [
+        ("CLAUDECODE", "1"),
+        ("CODEX_SANDBOX", "seatbelt"),
+        ("GEMINI_CLI", "1"),
+        ("OPENCODE", "1"),
+        ("JOINERY_AGENT_ROLE", "builder"),
+        ("JOINERY_STAGE", "-"),
+    ],
+)
+def test_an_agent_running_setup_leaves_the_bible_drafted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, variable: str, value: str
+) -> None:
+    """Answers an agent wrote (answer files + game apply) are not the user's
+    approval: the bible is drafted and waits for the user's Approve in /art."""
+    from joinery.art_approval import DRAFTED_BY_AGENT
+
+    project = new(tmp_path)
+    monkeypatch.setenv(variable, value)
+    step = apply(project, ANSWERS)
+    # The setup itself still runs: only the approval is withheld.
+    assert step["state"] == "done" and step["message"] == DRAFTED_BY_AGENT
+    assert (project / "art/bible.md").is_file()
+    assert not approved(project)
+    assert not (project / ".joinery/art-approval.json").exists()
+    assert art_direction(project)["approved"] is False
+
+
+def test_an_agent_rendering_answers_with_joinery_bible_does_not_approve(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    project = tmp_path / "game"
+    project.mkdir()
+    (project / "project.godot").write_text("config_version=5\n")
+    (project / ".joinery-bible-answers.json").write_text(json.dumps(ANSWERS))
+    monkeypatch.setenv("CLAUDECODE", "1")
+    assert main(["bible", "--project", str(project)]) == 0
+    assert "agents never approve" in capsys.readouterr().out
+    assert (project / "art/bible.md").is_file() and not approved(project)
+
+
+def test_the_agent_signals_match_what_the_hook_reads() -> None:
+    from joinery.agents import JOINERY_AGENT_ENV, running_agent
+    from joinery.roles import ROLE_ENV
+    from joinery.stage_access import STAGE_ENV
+
+    assert JOINERY_AGENT_ENV == (ROLE_ENV, STAGE_ENV)
+    assert running_agent({}) == ""
+    assert running_agent({"CLAUDECODE": "1"}) == "claude"
+    assert running_agent({"CODEX_THREAD_ID": "t"}) == "codex"
+    assert running_agent({"JOINERY_STAGE": "-"}) == "joinery"
+
+
 def test_editing_the_bible_lapses_the_approval_until_the_user_approves(
     tmp_path: Path,
 ) -> None:

@@ -1112,7 +1112,11 @@ licence (the addon ships inside your game) and the plugin turned on. With a
 blueprint it also gets the game, `design/brief.md` with the controls the game
 really binds, and an `art/bible.md` draft whose technical sections come from the
 blueprint's preset, marked as suggestions. That bible is approved at creation,
-with any skipped sections left open to fill in later. A bad feature mix is refused before any folder is made.
+with any skipped sections left open to fill in later. Only when you run the
+setup yourself: when an agent runs it (its own answer files and
+`joinery game apply`, or `joinery bible`), the bible is drafted but not
+approved, because agents never approve. Review it and click Approve in `/art`.
+A bad feature mix is refused before any folder is made.
 
 With Steam on, Joinery writes `[game.steam]` (app ID and how players connect)
 and downloads the pinned GodotSteam extension into the project, checked against
@@ -1201,7 +1205,9 @@ uv run joinery references add --project /path/to/game \
   "note"}], "design_docs": ["gdd.md"]}`. The brief and bible objects are the
   ones the wizard writes for `game apply`, and paths are relative to the
   file. The look drafted from them is approved at creation, as in the wizard,
-  so only you can pass them. An agent running `--answers` is refused.
+  so only you can pass them. An agent running `--answers` is refused, and an
+  agent that writes the answer files and runs `game apply` itself gets a drafted
+  look that waits for your Approve in `/art`.
 
 Journeyman reads `design/docs/` with the brief (`game_brief` returns each
 document, with the text of Markdown and text ones) and sees the pictures on the

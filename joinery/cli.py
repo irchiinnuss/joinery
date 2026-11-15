@@ -808,9 +808,11 @@ def _bible(project: Path) -> int:
     if written is None:
         print("bible: no answers file to read; nothing written")
         return 0
+    from joinery.agents import running_agent
     from joinery.art_approval import (
         APPROVED_AT_CREATION,
         APPROVED_FROM_PRESET,
+        DRAFTED_BY_AGENT,
         approve_at_creation,
     )
 
@@ -819,6 +821,8 @@ def _bible(project: Path) -> int:
         print(f"bible: {APPROVED_AT_CREATION if answered else APPROVED_FROM_PRESET}")
         return 0
     print(f"bible: wrote {written}")
+    if running_agent():
+        print(f"bible: {DRAFTED_BY_AGENT}")
     return 0
 
 

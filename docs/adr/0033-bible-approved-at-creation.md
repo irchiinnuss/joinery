@@ -29,6 +29,20 @@ click in `/art`. Approving remains a user act only: it happens in the
 command-line setup path at creation, never through a model tool. The gateway
 RPC and the registry still have no approval operation.
 
+### Amendment: only the user's own setup approves (2026-11-15)
+
+An agent could write the answers files and run `joinery game apply` (or
+`joinery bible`) itself, so the approval recorded "the user's own answers" for
+words the agent wrote. Setup now approves at creation only when the user runs
+it. When an agent does, the bible is written as a draft and left unapproved for
+the user's Approve in `/art`; `game apply` itself still runs. The check lives in
+the shared core (`agents.running_agent`, called by
+`art_approval.approve_at_creation`) and reads the same signals the hook goes by:
+the role and stage Joinery gives each agent it starts (`JOINERY_AGENT_ROLE`,
+`JOINERY_STAGE`), and the variable each supported agent sets in its own shell
+(`Agent.shell_env`: Claude Code, Codex, Gemini CLI, opencode). The hook still
+refuses `joinery new --answers` from an agent.
+
 ## Consequences
 
 - Art and audio work can start in a fresh project without a separate review.

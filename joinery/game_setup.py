@@ -277,7 +277,7 @@ def write_bible(
         report,
         "bible",
         "done",
-        "Wrote a draft of the look. Finish and approve it before asset work.",
+        art_approval.drafted_note(),
         board_rows=rows,
     )
 

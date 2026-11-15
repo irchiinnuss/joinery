@@ -149,6 +149,23 @@ APPROVED_FROM_PRESET = (
 )
 
 
+#: What setup says when an agent ran it: the look is drafted, not approved.
+DRAFTED_BY_AGENT = (
+    "Wrote a draft of the look. An agent ran this setup, so the look isn't "
+    "approved: agents never approve. Review it and click Approve in /art before "
+    "art and audio work."
+)
+#: What setup says when the drafted look still needs the user's approval.
+DRAFTED = "Wrote a draft of the look. Finish and approve it before asset work."
+
+
+def drafted_note() -> str:
+    """Why a bible drafted at creation was left unapproved."""
+    from joinery.agents import running_agent
+
+    return DRAFTED_BY_AGENT if running_agent() else DRAFTED
+
+
 def approve_at_creation(project: Path) -> bool:
     """Approve the bible drafted when the project is made.
 
@@ -156,7 +173,16 @@ def approve_at_creation(project: Path) -> bool:
     model tool. Records what the Approve button records. Sections the user
     skipped stay open to fill in later; the bible counts as approved as drafted
     (the user's decision, 2026-11-10). Returns whether it is approved.
+
+    Only when the user runs setup: answers an agent passes (an answers file and
+    `joinery game apply`, or `joinery bible`) are the agent's words, and agents
+    never approve (agents.running_agent, the hook's own signals). The bible is
+    then left drafted for the user's Approve in /art.
     """
+    from joinery.agents import running_agent
+
+    if running_agent():
+        return False
     try:
         approve(project, AT_CREATION, allow_open=True)
     except (OSError, ValueError):

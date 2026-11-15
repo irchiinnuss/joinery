@@ -17,6 +17,8 @@ bypass. See docs/adr/0006-agent-agnostic-enforcement.md.
 
 from __future__ import annotations
 
+import os
+from collections.abc import Mapping
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -80,6 +82,9 @@ class Agent(BaseModel):
     memory_file: str = "AGENTS.md"
     # How a judged read-only shell search is let through (see AllowMode).
     allow_mode: AllowMode = "none"
+    # Variables this agent sets in the shell its commands run in, so a Joinery
+    # command can tell it was run by the agent rather than typed by the user.
+    shell_env: tuple[str, ...] = ()
 
 
 CLAUDE = Agent(
@@ -96,6 +101,7 @@ CLAUDE = Agent(
     blocking_hook=True,
     memory_file="CLAUDE.md",
     allow_mode="json",
+    shell_env=("CLAUDECODE",),
     gate_limits=(
         "The hook is a guard rail, not a sandbox: offline workers are the real boundary.",
     ),
@@ -113,6 +119,7 @@ CODEX = Agent(
     project_dir_env="",  # No guaranteed env var; hooks run in the session cwd.
     stop_mode="exit",
     blocking_hook=True,
+    shell_env=("CODEX_SANDBOX", "CODEX_SANDBOX_NETWORK_DISABLED", "CODEX_THREAD_ID"),
     gate_limits=(
         (
             "Hosted WebSearch does not reach a PreToolUse hook. It stays allowed: "
@@ -140,6 +147,7 @@ GEMINI = Agent(
     stop_mode="json",
     blocking_hook=True,
     memory_file="GEMINI.md",
+    shell_env=("GEMINI_CLI",),
     gate_limits=(
         (
             "A Rule Zero hit stops the turn via `continue: false`; an ordinary "
@@ -160,6 +168,7 @@ OPENCODE = Agent(
     project_dir_env="",  # The plugin passes directory in its payload.
     stop_mode="exit",
     blocking_hook=True,
+    shell_env=("OPENCODE",),
     gate_limits=(
         (
             "tool.execute.before does not intercept subagent tool calls (issue "
@@ -188,3 +197,25 @@ def display_name(agent_id: str) -> str:
 
 def all_agents() -> tuple[Agent, ...]:
     return AGENTS
+
+
+#: Set by Joinery in every agent process it starts, and read by `joinery hook`:
+#: the agent's role (joinery.roles.ROLE_ENV) and its stage (stage_access.STAGE_ENV).
+#: Named here, not imported, so this module stays free of the policy modules.
+JOINERY_AGENT_ENV = ("JOINERY_AGENT_ROLE", "JOINERY_STAGE")
+
+
+def running_agent(env: Mapping[str, str] | None = None) -> str:
+    """The agent this process runs under ("claude", "joinery"), or "" for the user.
+
+    The same signals the hook goes by: the role and stage Joinery gives every agent
+    it starts ("joinery"), and the variables each supported agent sets in its own
+    shell (``Agent.shell_env``). One shared check, so every agent is covered alike.
+    """
+    env = os.environ if env is None else env
+    if any(env.get(name) for name in JOINERY_AGENT_ENV):
+        return "joinery"
+    for agent in AGENTS:
+        if any(env.get(name) for name in agent.shell_env):
+            return agent.id
+    return ""
