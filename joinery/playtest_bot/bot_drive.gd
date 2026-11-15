@@ -59,6 +59,9 @@ var reach: PackedStringArray = PackedStringArray()
 var reach_results: Array[Dictionary] = []
 ## Playing for store media: bot_frame.gd aims the view, so no random look keys.
 var media: bool = false
+## The fight (bot_fight.gd), set by the bot with --fight: while it steers, this leaves the
+## keys alone.
+var fighter: RefCounted
 
 var _player: Node = null
 var _held: Dictionary = {}
@@ -132,6 +135,8 @@ func step(frame: int) -> void:
 	if _player != null and is_instance_valid(_player) and _player.is_inside_tree():
 		_map(frame)
 		_check_reach(frame)
+		if fighter != null and bool(fighter.call(&"step", frame, _player)):
+			return
 		_check_stuck(frame)
 		_check_target(frame)
 	var away := _player != null and not (is_instance_valid(_player) and _player.is_inside_tree())

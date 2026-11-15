@@ -6,7 +6,7 @@ extends SceneTree
 ##   [--scene=res://…] [--softlock=<seconds>] [--focus=word,word] [--shots=f,f,…]
 ##   [--shot-width=<px>]
 ##   [--route=<file>] [--probe=perf|access] [--luma] [--reach=word,word]
-##   [--media]
+##   [--media] [--fight=auto|on|off]
 ##   --settings-path=<file>
 ##
 ## It loads the game's main scene (or --scene), starts the level the way the game core's
@@ -24,6 +24,8 @@ extends SceneTree
 ## It maps the level as it plays (bot_cover.gd) and explores toward the parts it hasn't seen,
 ## reporting the share it reached under "coverage" and a map of it as <out>/coverage.png.
 ## With --reach it heads for the nodes those words name first, results under "reach".
+## --fight (auto by default: on once the game shows enemies and has an attack action) has it
+## fight and follow the level's keys, doors and exit (bot_fight.gd), results under "fight".
 ##
 ## The bot never writes inside the project: everything goes to --playtest-out, and the
 ## game's user:// is wherever the caller's HOME points.
@@ -36,6 +38,7 @@ const SCRIPTS := [
 	"bot_probe.gd",
 	"bot_cover.gd",
 	"bot_frame.gd",
+	"bot_fight.gd",
 ]
 const SAVE_SLOT := 2
 const SHOT_WIDTH := 480
@@ -65,6 +68,9 @@ var probe: RefCounted
 ## --media: play for store media, the view aimed at what is worth seeing (bot_frame.gd).
 var media: bool = false
 var framer: RefCounted
+## --fight=auto|on|off, and the fight once it runs (bot_fight.gd).
+var fight_mode: String = "auto"
+var fighter: RefCounted
 var fps: int = 60
 var frame: int = 0
 var rng: RandomNumberGenerator = RandomNumberGenerator.new()
@@ -114,6 +120,12 @@ func _initialize() -> void:
 	drive.set(&"reach", reach)
 	cover = (load(base.path_join(SCRIPTS[5])) as GDScript).new(self)
 	drive.set(&"cover", cover)
+	if route.is_empty() and not media:
+		fighter = (load(base.path_join(SCRIPTS[7])) as GDScript).new(
+			self, drive, seed_value, fight_mode
+		)
+		fighter.set(&"cover", cover)
+		drive.set(&"fighter", fighter)
 	if media:
 		drive.set(&"media", true)
 		framer = (load(base.path_join(SCRIPTS[6])) as GDScript).new(self)
@@ -735,6 +747,7 @@ func _write(done: bool) -> void:
 		"route": walker.get(&"results") if walker != null else [],
 		"coverage": cover.call(&"summary"),
 		"reach": drive.get(&"reach_results"),
+		"fight": fighter.call(&"summary") if fighter != null else {},
 		"perf": watch.call(&"summary"),
 		"probe": probe.call(&"result") if probe != null and done else {},
 		"log": logger.call(&"entries"),
@@ -786,6 +799,8 @@ func _parse_args() -> void:
 			probe_kind = value
 		elif arg == "--luma":
 			luma = true
+		elif arg.begins_with("--fight="):
+			fight_mode = value if value in ["auto", "on", "off"] else "auto"
 		elif arg == "--media":
 			media = true
 		elif arg.begins_with("--shot-width="):
