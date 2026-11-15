@@ -1452,7 +1452,7 @@ class ProjectGateway:
             imported = await run_offline(
                 ["godot", "--headless", "--path", "/work", "--editor", "--import"],
                 tx.stage,
-                180,
+                submission.import_seconds(),
             )
         if (
             not imported.ok

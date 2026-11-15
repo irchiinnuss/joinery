@@ -138,6 +138,17 @@ def test_the_limit_is_set_by_the_project_or_scales_under_emulation(
     assert submission.scene_test_seconds(tmp_path) > 0
 
 
+def test_a_full_stage_import_gets_more_time_under_emulation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The stage imports every asset again; three 1024 px PBR maps took the
+    # emulated worker past the old 180 s.
+    monkeypatch.setattr("joinery.submission.platform.machine", lambda: "x86_64")
+    assert submission.import_seconds() == submission.IMPORT_SECONDS
+    monkeypatch.setattr("joinery.submission.platform.machine", lambda: "arm64")
+    assert submission.import_seconds() == submission.IMPORT_SECONDS * 2 > 180
+
+
 def test_a_worker_error_elsewhere_cancels_the_other_runs(tmp_path: Path) -> None:
     started: list[str] = []
     cancelled: list[str] = []

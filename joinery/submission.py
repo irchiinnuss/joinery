@@ -580,7 +580,7 @@ async def checks(
                 got = await worker_run(
                     ["godot", "--headless", "--path", "/work", "--editor", "--import"],
                     tx.stage,
-                    OFFLINE_SECONDS,
+                    import_seconds(),
                 )
             worker_ready(got)
             if _broken(got.output, got.ok):
@@ -679,6 +679,18 @@ async def run_tests(
             items=reasons.tests(got.output),
         )
     ]
+
+
+#: A change's stage has no import cache, so Godot imports every asset in it again
+#: (each texture compressed, each sound converted): it grows with the project.
+IMPORT_SECONDS = 300
+
+
+def import_seconds() -> int:
+    """The time limit of a full stage import, scaled up when the worker runs
+    emulated (an arm64 host running the amd64 worker)."""
+    emulated = platform.machine().lower() in {"arm64", "aarch64"}
+    return IMPORT_SECONDS * (EMULATED_FACTOR if emulated else 1)
 
 
 def scene_test_seconds(project: Path) -> int:
