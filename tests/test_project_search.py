@@ -33,6 +33,9 @@ use("b", "rg x .")
 result("b", True, "Blocked by Joinery policy: no")
 use("c", "ls")
 result("c", False, "game")
+say({"type": "assistant", "message": {"content": [
+    {"type": "tool_use", "id": "d", "name": "Edit", "input": {"file_path": "x"}}]}})
+result("d", True, "Claude wanted to write to x but this session can't")
 say({"type": "result", "subtype": "success", "is_error": False})
 """
 
@@ -68,8 +71,9 @@ def test_claude_activity_follows_what_each_call_really_did(tmp_path: Path) -> No
     finally:
         cs.readonly_command = real
     # "a" looked refused (an unjudged '&') but ran; "b" looked allowed but was refused;
-    # "c" said allowed and ran: no second event.
-    assert seen == [("a", False), ("a", True), ("b", True), ("b", False), ("c", True)]
+    # "c" ran; "d" was refused in words the gate doesn't know: refused. One event
+    # per call, with what really happened.
+    assert seen == [("a", True), ("b", False), ("c", True), ("d", False)]
 
 
 def project(tmp_path: Path) -> Path:

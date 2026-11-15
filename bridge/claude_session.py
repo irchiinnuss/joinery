@@ -562,9 +562,10 @@ class ClaudeSession:
         stderr = asyncio.create_task(self.process.stderr.read())
         streamed = False
         ok = False
-        #: Each call's name and what its activity said (allowed or not), by id,
-        #: until its result shows what really happened.
-        calls: dict[str, tuple[str, bool]] = {}
+        #: Each call's name and the gate's guess (its refusal, "" to run), by id,
+        #: until its result shows what really happened: one activity per call,
+        #: with the outcome it really had.
+        calls: dict[str, tuple[str, str]] = {}
         try:
             while line := await self.process.stdout.readline():
                 try:
@@ -594,19 +595,22 @@ class ClaudeSession:
                             reason = permitted(
                                 name, part.get("input"), self.inspection_only
                             )
-                            calls[call_id] = (name, not reason)
+                            if call_id:
+                                calls[call_id] = (name, reason)
+                                continue
                             yield ToolActivity(
                                 server="claude",
                                 tool=name,
                                 allowed=not reason,
                                 reason=reason,
-                                call_id=call_id,
                             )
                     streamed = False
                 elif kind == "user":
-                    # The call's result corrects its activity: refused after all
+                    # The call's result says what happened: refused after all
                     # (the policy hook, a rule of Claude Code's own), or run after
-                    # all (a command Claude Code itself knows only reads).
+                    # all (a command Claude Code itself knows only reads). A call
+                    # the gate refused that comes back as an error was refused,
+                    # whatever words Claude Code used.
                     content = event.get("message", {}).get("content", [])
                     for part in content if isinstance(content, list) else []:
                         if not isinstance(part, dict):
@@ -614,16 +618,17 @@ class ClaudeSession:
                         call_id = str(part.get("tool_use_id", ""))
                         if call_id not in calls:
                             continue
-                        name, said = calls.pop(call_id)
+                        name, guess = calls.pop(call_id)
                         reason = refusal(part)
-                        if said == bool(reason):
-                            yield ToolActivity(
-                                server="claude",
-                                tool=name,
-                                allowed=not reason,
-                                reason=reason,
-                                call_id=call_id,
-                            )
+                        if guess and part.get("is_error") and not reason:
+                            reason = guess
+                        yield ToolActivity(
+                            server="claude",
+                            tool=name,
+                            allowed=not reason,
+                            reason=reason,
+                            call_id=call_id,
+                        )
                 elif kind == "result":
                     ok = (
                         not event.get("is_error", False)
@@ -639,6 +644,16 @@ class ClaudeSession:
                             ),
                             level="warn",
                         )
+            # Calls the stream ended without a result for: the gate's guess.
+            for call_id, (name, guess) in calls.items():
+                yield ToolActivity(
+                    server="claude",
+                    tool=name,
+                    allowed=not guess,
+                    reason=guess,
+                    call_id=call_id,
+                )
+            calls.clear()
             await self.process.wait()
             if self.process.returncode and not ok:
                 details = tail((await stderr).decode("utf-8", "replace"))

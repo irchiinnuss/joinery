@@ -93,8 +93,8 @@ class ToolActivity(_Msg):
     tool: str
     allowed: bool = True
     reason: str = ""
-    #: The provider's id for the call, when it has one: a later event with the same
-    #: id and ``allowed`` false says the call was refused after all.
+    #: The provider's id for the call, when it has one. A call with an id is
+    #: reported once, with the outcome it really had.
     call_id: str = ""
 
 
