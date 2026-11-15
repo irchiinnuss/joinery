@@ -1,4 +1,4 @@
-"""A light check for requests to reproduce a specific existing game (ADR 0089).
+"""A light check for requests to reproduce a specific existing game (ADR 0087).
 
 "Make Super Mario Bros", "recreate the first level of Celeste", "copy Stardew Valley's
 art". Journeyman's shared instructions already say what to do then: ask once whether

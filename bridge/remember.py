@@ -34,7 +34,7 @@ async def start(
     """Start the addition as a scripted task; its change waits in Review.
 
     ``for game/ai/**: <rule>`` is a rule for those files only: it goes under
-    "## When working on game/ai/**" (``joinery.scoped_rules``, ADR 0088)."""
+    "## When working on game/ai/**" (``joinery.scoped_rules``, ADR 0087)."""
     scoped = scoped_rules.parse_remember(str(data.get("text", "")))
     if scoped is not None:
         globs, line = scoped

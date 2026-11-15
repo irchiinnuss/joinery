@@ -1,4 +1,4 @@
-"""Project rules for some files only, given to the agent when it touches them (ADR 0088).
+"""Project rules for some files only, given to the agent when it touches them (ADR 0087).
 
 Most of ``JOURNEYMAN.md`` holds for the whole project and sits in every turn's stable
 prefix (ADR 0077). Some rules only matter in one corner of the game ("enemies use the

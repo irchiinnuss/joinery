@@ -102,7 +102,7 @@ def nearby(prompt: Prompt) -> str:
 
 
 def scoped(prompt: Prompt) -> str:
-    """The project's rules for the selected files and the open scene (ADR 0088):
+    """The project's rules for the selected files and the open scene (ADR 0087):
     per turn, never in the stable prefix, so a rule changes no cached bytes."""
     if not prompt.project_dir:
         return ""

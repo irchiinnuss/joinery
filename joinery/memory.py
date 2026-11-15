@@ -9,7 +9,7 @@ the user owns. Every agent reads it:
   (``bridge.provider_process.turn_text``, ADR 0056). Comments and empty sections are
   left out, and a file that is still only the template adds nothing. Sections for
   some files only ("## When working on game/ai/**") are left out too: the agent gets
-  them when it works on those files (``joinery.scoped_rules``, ADR 0088).
+  them when it works on those files (``joinery.scoped_rules``, ADR 0087).
 * ``joinery.wiring.write_memory_stubs`` writes small ``CLAUDE.md`` / ``AGENTS.md`` /
   ``GEMINI.md`` files pointing at it (only where the project has none), so a coding
   agent run by hand in the project follows the same rules.
@@ -105,7 +105,7 @@ def block(project: Path) -> str:
     """The prompt block for ``project``: "" when the file is missing, empty or still
     the template; cut at ``LIMIT`` characters on a line, with a note."""
     # Rules for some files only are not in the prefix: the gateway gives them when
-    # the agent works on those files (joinery.scoped_rules, ADR 0088).
+    # the agent works on those files (joinery.scoped_rules, ADR 0087).
     text = scoped_rules.strip(read(project))
     if not text or _template_only(text):
         return ""

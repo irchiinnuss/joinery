@@ -341,7 +341,7 @@ class ProjectGateway:
         #: The prompt's attached images (a sketch to build a blockout from).
         self.attachments: tuple[str, ...] = ()
         #: The project's rules for some files only, each given once per turn when a
-        #: call names a matching file (joinery.scoped_rules, ADR 0088).
+        #: call names a matching file (joinery.scoped_rules, ADR 0087).
         self._rules_shown = scoped_rules.Shown()
         #: Joinery's own review facts and media for a staged change, by transaction id.
         self.review_extras: dict[str, dict[str, Any]] = {}
