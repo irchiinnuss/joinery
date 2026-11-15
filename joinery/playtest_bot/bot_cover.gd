@@ -22,11 +22,18 @@ const MAX_SPAN := 96
 ## height above the start a floor may be and still count (higher is a roof or a tower top).
 const STEP_3D := 1.6
 const ABOVE_3D := 6.0
+## 3D: the highest step a route climbs from one cell to the next (lower than STEP_3D: a route
+## takes the ramp, not the side of it).
+const CLIMB_3D := 1.1
 ## Side-on: how many cells below an empty cell the ground may be (jump height).
 const GROUND_CELLS := 3
 ## Frames heading for a cell before it is given up for a while, and how long that is.
 const TRY_FRAMES := 360
 const SKIP_FRAMES := 1800
+## The four ways out of a cell, in the order of the wall bits.
+const DIRS: Array[Vector2i] = [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
+## Heights above the higher floor where a wall between two cells is looked for.
+const WALL_LIFTS: Array[float] = [0.7, 1.5]
 ## Pixels a cell takes in the map picture, at most and at least.
 const MAP_WIDTH := 320
 
@@ -47,6 +54,9 @@ var built: bool = false
 
 var _tree: SceneTree
 var _floor: PackedFloat32Array = PackedFloat32Array()
+## 3D, per cell: a bit per way out that a wall or a shut door blocks (DIRS order; +4 for the
+## short jump over the next cell).
+var _walls: PackedByteArray = PackedByteArray()
 var _skip: Dictionary = {}
 var _goal: int = -1
 var _goal_since: int = 0
@@ -164,9 +174,101 @@ func route(at: Vector3, target: Vector3) -> Vector3:
 		return target
 	var goal := _index(_cell_of(_plane(target)))
 	if goal < 0 or navigable[goal] == 0:
-		return target
+		# A target off the grid (a switch, a doorway): the way to the cell beside it.
+		var cells := way(at, target)
+		return cells[0] if cells.size() > 1 else target
 	var step: Variant = _step_toward(at, goal)
 	return step if step is Vector3 else target
+
+
+## Whether the grid joins [param at] to [param target], or to a navigable cell next to it (a
+## marker in a doorway or on a ledge edge). True when nothing is mapped: the bot can't tell.
+func reachable(at: Vector3, target: Vector3) -> bool:
+	if not built or _index(_cell_of(_plane(at))) < 0:
+		return true
+	return not way(at, target).is_empty() or _cell_of(_plane(at)) == _cell_of(_plane(target))
+
+
+## The cells from [param at] to [param target] (or a navigable cell next to it), as world
+## positions, the first step first; empty when the grid doesn't join them.
+func way(at: Vector3, target: Vector3) -> Array[Vector3]:
+	var found: Array[Vector3] = []
+	if not built:
+		return found
+	var first := _index(_cell_of(_plane(at)))
+	var goal := _cell_of(_plane(target))
+	var ends := {}
+	for dx: int in [-1, 0, 1]:
+		for dy: int in [-1, 0, 1]:
+			var index := _index(goal + Vector2i(dx, dy))
+			if index >= 0 and navigable[index] != 0:
+				ends[index] = true
+	if first < 0 or ends.is_empty():
+		return found
+	var parent := {first: -1}
+	var queue: Array[int] = [first]
+	var head := 0
+	var end := -1
+	while head < queue.size():
+		var index := queue[head]
+		head += 1
+		if ends.has(index):
+			end = index
+			break
+		for next: int in _neighbours(index):
+			if not parent.has(next):
+				parent[next] = index
+				queue.append(next)
+	var cell_index := end
+	while cell_index >= 0 and cell_index != first:
+		found.push_front(_world(cell_index, at))
+		cell_index = int(parent[cell_index])
+	return found
+
+
+## Probes the floor and the walls again within [param radius] of [param at] (a door just
+## opened, a bridge came down), then joins what that opens up to the rest of the grid.
+func reprobe(player: Node, at: Vector3, radius: float) -> void:
+	if not built or mode != "3d" or not player is Node3D:
+		return
+	var centre := _cell_of(_plane(at))
+	var reach := ceili(radius / cell)
+	var player_y := _where(player).y
+	var area: Array[int] = []
+	for dx: int in range(-reach, reach + 1):
+		for dy: int in range(-reach, reach + 1):
+			var at_cell := centre + Vector2i(dx, dy)
+			var index := _index(at_cell)
+			if index < 0:
+				continue
+			area.append(index)
+			if navigable[index] != 0:
+				continue
+			var middle := origin + (Vector2(at_cell) + Vector2(0.5, 0.5)) * cell
+			var height: Variant = _floor_at(player, middle, player_y)
+			if height is float:
+				_floor[index] = height
+	# What was a shut door is a doorway now: look for the walls around here again.
+	var open := PackedByteArray()
+	open.resize(cols * rows)
+	for index: int in cols * rows:
+		open[index] = 1 if not is_nan(_floor[index]) else 0
+	for index: int in area:
+		if open[index] != 0:
+			_find_walls(player, index, open)
+	# Everything the doorway joins to the navigable cells counts now, beyond it too.
+	var queue: Array[int] = []
+	for index: int in cols * rows:
+		if navigable[index] != 0:
+			queue.append(index)
+	var head := 0
+	while head < queue.size():
+		var index := queue[head]
+		head += 1
+		for next: int in _joined(index, open):
+			if navigable[next] == 0:
+				navigable[next] = 1
+				queue.append(next)
 
 
 ## {mode, cell, origin, cols, rows, start, navigable, visited, percent, grid, dwell}: the
@@ -268,6 +370,12 @@ func _map(player: Node) -> void:
 				_:
 					var free := _free_2d(player, centre)
 					open[index] = 1 if free and _ground_below(player, centre) else 0
+	_walls = PackedByteArray()
+	_walls.resize(cols * rows)
+	if mode == "3d":
+		for index: int in cols * rows:
+			if open[index] != 0:
+				_find_walls(player, index, open)
 	_flood(open, player_y)
 	# The visited cells were stood in: they are navigable whatever the probes say.
 	for index: int in visited.size():
@@ -310,15 +418,85 @@ func _joined(index: int, open: PackedByteArray) -> Array[int]:
 		var next := _index(here + direction)
 		if next < 0:
 			continue
+		var way := DIRS.find(direction)
 		if open[next] != 0:
-			if mode != "3d" or absf(_floor[next] - _floor[index]) <= STEP_3D:
+			if (
+				mode != "3d"
+				or absf(_floor[next] - _floor[index]) <= STEP_3D and not _walled(index, way)
+			):
 				found.append(next)
 		elif mode == "3d":
 			# A gap of one cell: a short jump to the floor beyond it.
 			var beyond := _index(here + direction * 2)
-			if beyond >= 0 and open[beyond] != 0 and absf(_floor[beyond] - _floor[index]) <= 1.2:
+			if (
+				beyond >= 0
+				and open[beyond] != 0
+				and absf(_floor[beyond] - _floor[index]) <= 1.2
+				and not _walled(index, way + 4)
+			):
 				found.append(beyond)
 	return found
+
+
+## Whether the way [param way] (DIRS index, +4 for the jump) out of [param index] is walled.
+func _walled(index: int, way: int) -> bool:
+	return index < _walls.size() and (_walls[index] >> way) & 1 == 1
+
+
+## Looks for walls (and shut doors) between [param index] and each neighbour with a floor,
+## and the floor two cells away (a short jump), setting the wall bits both ways.
+func _find_walls(player: Node, index: int, open: PackedByteArray) -> void:
+	var here := Vector2i(index % cols, index / cols)
+	for way: int in DIRS.size():
+		var next := _index(here + DIRS[way])
+		if next < 0:
+			continue
+		var target := next
+		var bit := way
+		if open[next] == 0:
+			target = _index(here + DIRS[way] * 2)
+			bit = way + 4
+			if target < 0 or open[target] == 0:
+				continue
+		var back := (way ^ 1) + (bit - way)
+		var blocked := _wall_between(player, index, target)
+		_set_wall(index, bit, blocked)
+		_set_wall(target, back, blocked)
+
+
+func _set_wall(index: int, bit: int, blocked: bool) -> void:
+	if blocked:
+		_walls[index] |= 1 << bit
+	else:
+		_walls[index] &= ~(1 << bit) & 0xFF
+
+
+## A solid between the centres of cells [param a] and [param b] above the higher floor (bodies
+## that move about, an enemy or a crate, don't count).
+func _wall_between(player: Node, a: int, b: int) -> bool:
+	if is_nan(_floor[a]) or is_nan(_floor[b]):
+		return false
+	var space := (player as Node3D).get_world_3d().direct_space_state
+	var from := _world(a, Vector3.ZERO)
+	var to := _world(b, Vector3.ZERO)
+	var top := maxf(_floor[a], _floor[b])
+	for lift: float in WALL_LIFTS:
+		var exclude := _exclude(player)
+		for _attempt: int in 3:
+			var query := PhysicsRayQueryParameters3D.create(
+				Vector3(from.x, top + lift, from.z), Vector3(to.x, top + lift, to.z)
+			)
+			query.collision_mask = _mask(player)
+			query.exclude = exclude
+			var hit := space.intersect_ray(query)
+			if hit.is_empty():
+				break
+			var collider: Object = hit["collider"]
+			if collider is CharacterBody3D or collider is RigidBody3D:
+				exclude.append(hit["rid"])
+				continue
+			return true
+	return false
 
 
 ## Breadth-first from the player's cell over the navigable grid to the nearest cell nobody has
@@ -370,21 +548,36 @@ func _step_toward(at: Vector3, goal: int) -> Variant:
 	while int(parent[path[-1]]) != first and int(parent[path[-1]]) >= 0:
 		path.append(int(parent[path[-1]]))
 	path.reverse()
-	return _world(path[mini(1, path.size() - 1)], at)
+	# Two cells ahead; in 3D round a corner one cell at a time (a door's jamb, a catwalk).
+	var ahead := 0
+	if path.size() > 1 and (mode != "3d" or path[1] - path[0] == path[0] - first):
+		ahead = 1
+	return _world(path[ahead], at)
 
 
 func _neighbours(index: int) -> Array[int]:
 	var found: Array[int] = []
 	var here := Vector2i(index % cols, index / cols)
-	for direction: Vector2i in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
-		var next := _index(here + direction)
+	for way: int in DIRS.size():
+		var next := _index(here + DIRS[way])
 		if next >= 0 and navigable[next] != 0:
-			found.append(next)
+			if not _walled(index, way) and _climbable(index, next):
+				found.append(next)
 		elif mode == "3d" and next >= 0:
-			var beyond := _index(here + direction * 2)
+			var beyond := _index(here + DIRS[way] * 2)
 			if beyond >= 0 and navigable[beyond] != 0:
-				found.append(beyond)
+				if not _walled(index, way + 4) and _climbable(index, beyond):
+					found.append(beyond)
 	return found
+
+
+## 3D: from cell [param a] the player can get onto cell [param b]: down any drop, up a step.
+func _climbable(a: int, b: int) -> bool:
+	if mode != "3d" or a >= _floor.size() or b >= _floor.size():
+		return true
+	if is_nan(_floor[a]) or is_nan(_floor[b]):
+		return true
+	return _floor[b] - _floor[a] <= CLIMB_3D
 
 
 # --- Probing the level ------------------------------------------------------------------------
