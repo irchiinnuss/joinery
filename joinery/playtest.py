@@ -83,6 +83,9 @@ class Options:
     #: Play for store media: the bot aims the view at goals, enemies or open space
     #: (bot_frame.gd) instead of looking about at random.
     media: bool = False
+    #: Fight and follow the level's keys, doors and exit (bot_fight.gd): "auto" (on once the
+    #: game shows enemies and has an attack action), "on" or "off".
+    fight: str = "auto"
 
     def public(self) -> dict[str, Any]:
         data = asdict(self)
@@ -222,6 +225,8 @@ def _bot_args(
         args.append("--luma")
     if options.media:
         args.append("--media")
+    if options.fight in {"on", "off"}:
+        args.append(f"--fight={options.fight}")
     return args
 
 
@@ -512,6 +517,8 @@ def for_agent(report: dict[str, Any], limit: int = 25) -> dict[str, Any]:
         }
     if report.get("reach"):
         data["reach"] = report["reach"]
+    if (report.get("fight") or {}).get("active"):
+        data["fight"] = report["fight"]
     heat = report.get("heat") or {}
     if heat:
         data["heat"] = {
@@ -539,6 +546,28 @@ def reach_line(place: dict[str, Any]) -> str:
     return "not reached" + (
         f" (closest {float(closest):g})" if closest is not None else ""
     )
+
+
+def fight_line(fight: dict[str, Any]) -> str:
+    """'Fight: 2 keys, 2 doors opened, 9 of 12 enemies killed, 1 death; reached the exit…'"""
+    keys = len(fight.get("keys") or [])
+    doors = len(fight.get("doors") or [])
+    deaths = int(fight.get("deaths") or 0)
+    parts = [
+        f"{keys} key{'s' * (keys != 1)}",
+        f"{doors} door{'s' * (doors != 1)} opened",
+        f"{fight.get('kills', 0)} of {fight.get('enemies', 0)} enemies killed",
+        f"{deaths} death{'s' * (deaths != 1)}",
+    ]
+    if fight.get("finished"):
+        end = f"finished the level at {playtest_report.stamp(float(fight.get('finished_t') or 0))}"
+    elif fight.get("reached_exit"):
+        end = f"reached the exit at {playtest_report.stamp(float(fight.get('exit_t') or 0))}"
+    else:
+        end = "did not reach the exit: " + str(
+            fight.get("obstacle") or "no reason found"
+        )
+    return "Fight: " + ", ".join(parts) + "; " + end
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -573,6 +602,23 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default=[],
         help="a place to head for first: a node's whole name ('key room' is KeyRoom, not "
         "KeyRoomDoor), or a glob ('key room*'); repeat for more",
+    )
+    fight = parser.add_mutually_exclusive_group()
+    fight.add_argument(
+        "--fight",
+        dest="fight",
+        action="store_const",
+        const="on",
+        default="auto",
+        help="fight enemies and follow keys, doors and the exit (default: when the game "
+        "has enemies and an attack action)",
+    )
+    fight.add_argument(
+        "--no-fight",
+        dest="fight",
+        action="store_const",
+        const="off",
+        help="never fight",
     )
     parser.add_argument(
         "--record",
@@ -624,6 +670,7 @@ def main(args: argparse.Namespace) -> int:
         route=args.route,
         reach=[str(r) for r in args.reach],
         record=bool(getattr(args, "record", False)),
+        fight=str(getattr(args, "fight", "auto")),
     )
 
     def show(t: float, total: float) -> None:
@@ -659,6 +706,8 @@ def main(args: argparse.Namespace) -> int:
         )
     for place in report.get("reach", []):
         print(f"- {place['target']}: {reach_line(place)}")
+    if (report.get("fight") or {}).get("active"):
+        print(fight_line(report["fight"]))
     print(f"Report: {report['out']}/report.json")
     if report.get("replay"):
         print(

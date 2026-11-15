@@ -248,6 +248,43 @@ def test_bot_arguments_keep_the_run_outside_the_project(tmp_path: Path) -> None:
     )
 
 
+def test_fight_is_auto_unless_asked_and_its_line_says_how_far_it_got(
+    tmp_path: Path,
+) -> None:
+    parser = argparse.ArgumentParser()
+    playtest.add_arguments(parser)
+    assert parser.parse_args(["--project", "p"]).fight == "auto"
+    assert parser.parse_args(["--project", "p", "--fight"]).fight == "on"
+    assert parser.parse_args(["--project", "p", "--no-fight"]).fight == "off"
+    auto = playtest._bot_args(playtest.Options(project=tmp_path), tmp_path / "out")
+    assert not any(a.startswith("--fight") for a in auto)
+    off = playtest.Options(project=tmp_path, fight="off")
+    assert "--fight=off" in playtest._bot_args(off, tmp_path / "out")
+    fight = {
+        "active": True,
+        "keys": ["RedKey"],
+        "doors": [],
+        "kills": 3,
+        "enemies": 5,
+        "deaths": 1,
+        "obstacle": "BlueDoor needs BlueKey, and the bot found no way to it.",
+    }
+    assert playtest.fight_line(fight) == (
+        "Fight: 1 key, 0 doors opened, 3 of 5 enemies killed, 1 death; did not reach "
+        "the exit: BlueDoor needs BlueKey, and the bot found no way to it."
+    )
+    done = {**fight, "finished": True, "finished_t": 61.0}
+    assert playtest.fight_line(done).endswith("finished the level at 1:01")
+    report = playtest_report.build(
+        {"finished": True, "seconds_played": 5, "fps": 60, "fight": fight},
+        "",
+        0,
+        options=OPTIONS,
+    )
+    assert report["fight"] == fight
+    assert playtest.for_agent(report)["fight"] == fight
+
+
 def test_for_agent_trims_the_report() -> None:
     report = playtest_report.build(
         _bot(findings=[{"kind": "softlock", "detail": "x", "frame": 1, "t": 0.0}]),

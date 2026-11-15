@@ -251,7 +251,13 @@ def balance_notes(bot: dict[str, Any]) -> list[dict[str, Any]]:
     notes: list[dict[str, Any]] = []
     if completed:
         fastest = min(float(c.get("level_time", c.get("t", 0)) or 0) for c in completed)
-        line = f"A bot pressing keys at random finished the level in {stamp(fastest)}"
+        fought = bool((bot.get("fight") or {}).get("active"))
+        who = (
+            "A bot fighting its way to the exit (keys before doors)"
+            if fought
+            else "A bot pressing keys at random"
+        )
+        line = f"{who} finished the level in {stamp(fastest)}"
         if fastest < 20:
             notes.append(
                 {"detail": line + ": it may be too easy.", "t": completed[0]["t"]}
@@ -498,6 +504,7 @@ def build(
         "route": (bot or {}).get("route", []) or [],
         "coverage": coverage,
         "reach": [r for r in (bot or {}).get("reach", []) or [] if isinstance(r, dict)],
+        "fight": _fight((bot or {}).get("fight")),
         "states": _states((bot or {}).get("states")),
         "screenshots": [],
     }
@@ -548,6 +555,11 @@ def _item(index: int, entry: dict[str, Any], options: dict[str, Any]) -> dict[st
         "repro": repro(options, t_value, where),
         "shot": "",
     }
+
+
+def _fight(value: Any) -> dict[str, Any]:
+    """The bot's fight (bot_fight.gd): keys, doors, kills, deaths, whether it got out."""
+    return value if isinstance(value, dict) else {}
 
 
 def summary_line(report: dict[str, Any]) -> str:
