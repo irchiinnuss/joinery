@@ -31,6 +31,7 @@ from joinery.catalog import load_catalog
 from joinery.lockfile import check_assets
 from joinery.recipe import rebuild_one
 from joinery.runner import SandboxRunner
+from joinery.tools.supercollider import derived_seed, seed_line, seed_patch
 from joinery.transactions import EXCLUDED, FileTransaction, inventory
 from servers.authoring import make_server
 
@@ -281,7 +282,12 @@ async def supercollider() -> None:
         )
         tx.review()
         tx.accept()
-        assert (project / "audio/fixture.scd").read_text() == score(660)
+        # The saved patch is the score with its SynthDef seeded from the path
+        # (no seed given), so the render replays byte for byte; nothing else moves.
+        seed = derived_seed("audio/fixture.scd")
+        saved = (project / "audio/fixture.scd").read_text()
+        assert saved == seed_patch(score(660), seed)
+        assert saved.replace(" " + seed_line(seed), "", 1) == score(660)
         tx.revert()
         assert inventory(project) == before
         print(
