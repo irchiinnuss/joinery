@@ -23,6 +23,15 @@ var h: PlayHarness
 var tree: SceneTree
 
 
+## An XR interface that something other than the VR autoload started, as a
+## WebXR session in a web export is.
+class StartedElsewhere:
+	extends XRInterfaceExtension
+
+	func _get_name() -> StringName:
+		return &"started elsewhere"
+
+
 func run(harness: PlayHarness, scene_tree: SceneTree) -> void:
 	h = harness
 	tree = scene_tree
@@ -59,6 +68,7 @@ func run(harness: PlayHarness, scene_tree: SceneTree) -> void:
 		await _check_turn_is_saved()
 	else:
 		await _check_desktop_fallback()
+		await _check_adopt_and_release()
 
 
 func _arg(prefix: String) -> String:
@@ -340,6 +350,56 @@ func _check_desktop_fallback() -> void:
 		await h.hold(&"move_forward", 30)
 		await h.physics_frames(10)
 		h.expect(player.global_position.distance_to(start) > 0.3, "the desktop controls still play")
+
+
+func _check_adopt_and_release() -> void:
+	var changes: Dictionary = h.watch(VR.mode_changed)
+	var desktop_reason: String = VR.reason
+	VR.release_interface("nothing to release")
+	h.expect(h.fire_count(changes) == 0, "releasing with nothing adopted does nothing")
+	h.expect(VR.mode == VR.DESKTOP and VR.reason == desktop_reason, "and keeps the reason")
+	var started: XRInterface = StartedElsewhere.new()
+	VR.adopt_interface(started)
+	h.expect(VR.mode == VR.XR, "an interface started elsewhere puts the game in XR")
+	h.expect(VR.interface == started and VR.reason.is_empty(), "and is the interface in use")
+	h.expect(tree.root.use_xr, "the game renders to it")
+	var panel: Node3D = VR.panel()
+	h.expect(panel != null and panel.is_inside_tree(), "the headset gets its menu panel")
+	h.expect(h.fire_count(changes) == 1, "mode_changed fires once on adopting")
+	var rig: Node3D = VR.rig
+	h.expect(rig != null and rig.is_inside_tree(), "the running level gets the rig")
+	var player: Node3D = Game.local_player() as Node3D
+	if player != null and rig != null:
+		h.expect(rig.get_parent() == player, "on the local player")
+		h.expect(not player.is_physics_processing(), "which the rig now moves")
+	VR.adopt_interface(started)
+	h.expect(h.fire_count(changes) == 1, "adopting it again fires nothing")
+	h.expect(VR.panel() == panel and VR.rig == rig, "and keeps the panel and the rig")
+	await h.physics_frames(2)
+	VR.release_interface("the session ended")
+	h.expect(VR.mode == VR.DESKTOP, "releasing it returns to the desktop")
+	h.expect(VR.reason == "the session ended", "and records why")
+	h.expect(VR.interface == null and not tree.root.use_xr, "the window renders again")
+	h.expect(VR.panel() == null and VR.rig == null, "without the panel or the rig")
+	h.expect(h.fire_count(changes) == 2, "mode_changed fires once on releasing")
+	VR.release_interface("released twice")
+	h.expect(h.fire_count(changes) == 2, "releasing again fires nothing")
+	h.expect(VR.reason == "the session ended", "and keeps the reason")
+	h.unwatch(changes)
+	await h.process_frames(2)
+	h.expect(not is_instance_valid(panel), "the menu panel is freed")
+	h.expect(not is_instance_valid(rig), "and the rig")
+	var drawn: Variant = Menus.get(&"custom_viewport")
+	h.expect(drawn == null or drawn == tree.root, "the menus draw in the window again")
+	if player == null:
+		return
+	h.expect(player.is_physics_processing(), "the player's own controls come back")
+	var camera: Camera3D = tree.root.get_camera_3d()
+	h.expect(camera != null and player.is_ancestor_of(camera), "and its own camera")
+	var start: Vector3 = player.global_position
+	await h.hold(&"move_forward", 30)
+	await h.physics_frames(10)
+	h.expect(player.global_position.distance_to(start) > 0.3, "the desktop controls play again")
 
 
 # --- the simulated rig -------------------------------------------------------

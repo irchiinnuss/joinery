@@ -7,8 +7,11 @@ rig scene, grabs and throws with a hand, and drives the VR comfort settings
 page. Without `--vr-simulate` the game must be on the desktop with a notice;
 with it, the rig is carried on the player and walks, snaps, teleports,
 points, grabs, opens and clicks the headset menu panel, and (with save-load)
-keeps its turn in a save. Real headsets were not available here: everything
-that needs one is behind the OpenXR interface Godot itself provides.
+keeps its turn in a save. On the desktop it also hands the autoload an XR
+interface started elsewhere (as a WebXR session is) and takes it back: VR
+mode, panel and rig, then the desktop with the player's own controls. Real
+headsets were not available here: everything that needs one is behind the
+OpenXR interface Godot itself provides.
 """
 
 from __future__ import annotations
