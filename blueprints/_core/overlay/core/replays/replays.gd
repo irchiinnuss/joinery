@@ -30,6 +30,7 @@ enum Mode { OFF, RECORD, REPLAY }
 const ReplayEvents := preload("res://core/replays/replay_events.gd")
 const ReplayState := preload("res://core/replays/replay_state.gd")
 const GameLog := preload("res://core/replays/game_log.gd")
+const PlayReport := preload("res://core/replays/play_report.gd")
 
 const FORMAT := "joinery-replay"
 const FORMAT_VERSION := 1
@@ -109,6 +110,8 @@ var _finished: bool = false
 ## Re-recording (`--joinery-rerecord`): play the input, keep fresh checkpoints, compare none.
 var _rerecord: bool = false
 var _recaptured: Array[Dictionary] = []
+## A person's editor run: tells the editor once it has been played (play_report.gd).
+var _play: PlayReport = null
 
 
 func _ready() -> void:
@@ -137,6 +140,9 @@ func _ready() -> void:
 		if recording_allowed() or not _record_to.is_empty():
 			mode = Mode.RECORD
 			get_tree().root.window_input.connect(_on_window_input)
+			var user_args: PackedStringArray = OS.get_cmdline_user_args()
+			if PlayReport.counts(user_args, OS.get_cmdline_args(), NOT_GAME_ARGS):
+				_play = PlayReport.new()
 	seed(seed_value)
 	get_tree().node_added.connect(_on_node_added)
 	var minutes: float = float(ProjectSettings.get_setting(MAX_MINUTES, 30.0))
@@ -145,6 +151,8 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	if _play != null and _play.due():
+		_play.report(_start_scene)
 	if _steady and mode == Mode.RECORD and frame > 0:
 		_steady = absf(delta - 1.0 / Engine.physics_ticks_per_second) < 0.000001
 
@@ -294,6 +302,8 @@ func _on_node_added(node: Node) -> void:
 func _on_window_input(event: InputEvent) -> void:
 	if mode != Mode.RECORD:
 		return
+	if _play != null:
+		_play.heard(event)
 	var data: Dictionary = ReplayEvents.encode(event)
 	if not data.is_empty():
 		_queue(_event_frame(), data)

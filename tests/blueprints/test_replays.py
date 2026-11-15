@@ -199,3 +199,14 @@ def test_a_bug_report_saves_note_log_and_a_replay_that_plays(tmp_path: Path) -> 
     assert data["note"] in text["output"] and str(folder / "replay.replay") in text["output"]
     kept = replays.add(project, folder)
     assert kept.name == "replay.replay"
+
+
+@needs_godot
+def test_only_a_person_s_editor_run_is_reported_as_played(tmp_path: Path) -> None:
+    """The core tells the editor a person played (joinery.played), never a test run."""
+    project = make_project(tmp_path, "blank")
+    shutil.copyfile(HERE / "play_report_check.gd", project / "tests/play_report_check.gd")
+    result = run_godot(
+        project, "res://tests/play_report_check.gd", timeout=120, marker="play report"
+    )
+    assert "play report: ok" in result.output
