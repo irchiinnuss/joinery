@@ -15,7 +15,7 @@ from typing import Any
 from bridge.connect_errors import ConnectError
 from bridge.instructions import ECONOMY_GUIDE, GAME_GUIDE, REVIEW_GUIDE
 from bridge.protocol import Prompt
-from joinery import memory
+from joinery import clone_guard, memory, scoped_rules
 from joinery.agents import get
 from joinery.catalog import ROOT
 from joinery.chat_attachments import listed
@@ -81,19 +81,43 @@ def project_map(prompt: Prompt) -> str:
     )
 
 
-def nearby(prompt: Prompt) -> str:
-    """The files near the selection and the open scene (ADR 0080), as a line after
-    the selection: per turn, so the stable map above keeps its cached bytes."""
-    if not prompt.project_dir:
-        return ""
+def _selected(prompt: Prompt) -> list[str]:
+    """The paths the selection and the open scene name."""
     selected = [
         str(entry.get(key, ""))
         for entry in prompt.target_context
         for key in ("id", "resource", "source")
     ]
     selected.append(str(prompt.editor_context.get("scene_path", "")))
-    line = near_line(Path(prompt.project_dir), [s for s in selected if s])
+    return [s for s in selected if s]
+
+
+def nearby(prompt: Prompt) -> str:
+    """The files near the selection and the open scene (ADR 0080), as a line after
+    the selection: per turn, so the stable map above keeps its cached bytes."""
+    if not prompt.project_dir:
+        return ""
+    line = near_line(Path(prompt.project_dir), _selected(prompt))
     return "\n" + line if line else ""
+
+
+def scoped(prompt: Prompt) -> str:
+    """The project's rules for the selected files and the open scene (ADR 0088):
+    per turn, never in the stable prefix, so a rule changes no cached bytes."""
+    if not prompt.project_dir:
+        return ""
+    try:
+        block = scoped_rules.turn_line(Path(prompt.project_dir), _selected(prompt))
+    except OSError:
+        return ""
+    return "\n" + block if block else ""
+
+
+def clone_check(prompt: Prompt) -> str:
+    """A reminder when the request seems to ask for a copy of an existing game
+    (``joinery.clone_guard``): a question to ask, never a refusal."""
+    note = clone_guard.reminder(prompt.text)
+    return "\n" + note if note else ""
 
 
 def turn_part(prompt: Prompt, images_inline: bool = False) -> str:
@@ -110,6 +134,8 @@ def turn_part(prompt: Prompt, images_inline: bool = False) -> str:
         + "\nSelection:\n"
         + _json(prompt.target_context)
         + nearby(prompt)
+        + scoped(prompt)
+        + clone_check(prompt)
         + "\n\nUser:\n"
         + prompt.text
         + ("" if images_inline else listed(prompt.attachments))

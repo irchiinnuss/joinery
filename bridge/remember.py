@@ -18,7 +18,7 @@ from typing import Any
 
 from bridge.crew import Crew, Task
 from bridge.protocol import Prompt
-from joinery import memory
+from joinery import memory, scoped_rules
 
 
 def plan(project: Path, data: dict[str, Any]) -> str:
@@ -31,7 +31,26 @@ def plan(project: Path, data: dict[str, Any]) -> str:
 async def start(
     crew: Crew, project: Path, data: dict[str, Any], prompt: Prompt
 ) -> Task:
-    """Start the addition as a scripted task; its change waits in Review."""
+    """Start the addition as a scripted task; its change waits in Review.
+
+    ``for game/ai/**: <rule>`` is a rule for those files only: it goes under
+    "## When working on game/ai/**" (``joinery.scoped_rules``, ADR 0088)."""
+    scoped = scoped_rules.parse_remember(str(data.get("text", "")))
+    if scoped is not None:
+        globs, line = scoped
+        scoped_rules.added(memory.read(project), globs, line)  # refuse early
+        return await crew.start_scripted(
+            scoped_rules.summary(globs, line),
+            f"Add to {memory.FILE}, for {', '.join(globs)}: {line}",
+            [],
+            prompt=prompt,
+            targets=[memory.FILE],
+            facts=[
+                f"Adds one rule for {', '.join(globs)} to {memory.FILE}",
+                line[:120],
+            ],
+            edit=lambda stage: scoped_rules.append(stage, globs, line),
+        )
     item = plan(project, data)
     return await crew.start_scripted(
         memory.summary(item),

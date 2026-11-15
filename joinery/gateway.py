@@ -22,6 +22,7 @@ from joinery import (
     references,
     scene_guard,
     scene_variants,
+    scoped_rules,
     script_scope,
     sound_kit,
     staged_assets,
@@ -339,6 +340,9 @@ class ProjectGateway:
         self.target_context: tuple[dict[str, str], ...] = ()
         #: The prompt's attached images (a sketch to build a blockout from).
         self.attachments: tuple[str, ...] = ()
+        #: The project's rules for some files only, each given once per turn when a
+        #: call names a matching file (joinery.scoped_rules, ADR 0088).
+        self._rules_shown = scoped_rules.Shown()
         #: Joinery's own review facts and media for a staged change, by transaction id.
         self.review_extras: dict[str, dict[str, Any]] = {}
         #: Set when a call needed an approved art bible; the turn's end reports it.
@@ -560,10 +564,17 @@ class ProjectGateway:
                 },
             ) as attrs:
                 self._team_notes, self._write_notes, self._call_attrs = [], [], {}
+                named = self._named(arguments)
                 try:
                     result = await self._call(server, tool, arguments, view=view)
                 finally:
                     attrs.update(self._call_attrs)
+                if named and not result.is_error:
+                    # Reads, writes and new files alike: a rule for files that don't
+                    # exist yet still reaches the agent that makes them.
+                    rules = self._rules_shown.note(self.project, named, self.turn)
+                    if rules:
+                        self._write_notes.append(rules)
                 if self._write_notes:
                     result.content = [
                         *result.content,
@@ -579,6 +590,17 @@ class ProjectGateway:
                 if result.is_error:
                     attrs[metrics.ERROR_TYPE] = "tool_error"
                 return result
+
+    def _named(self, arguments: dict[str, Any]) -> set[str]:
+        """The project files a call's arguments name (a path into this gateway's
+        stage counts as the file it stages)."""
+        roots = [self.project]
+        if self.transaction is not None:
+            roots += [self.transaction.stage, self.transaction.stage.resolve()]
+        try:
+            return project_paths(arguments, *roots)
+        except (TypeError, ValueError):
+            return set()
 
     def _project_arguments(
         self, server: str, arguments: dict[str, Any]
