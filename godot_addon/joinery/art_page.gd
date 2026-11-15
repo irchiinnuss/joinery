@@ -266,8 +266,18 @@ func _feature_section(body: String) -> VBoxContainer:
 	check.pressed.connect(_on_check_now)
 	head.add_child(check)
 	item.add_child(head)
-	var state := UI.status(READING, "working")
+	# A status line (UI.status's Dot and Text) whose words wrap: the headline is never cut.
+	var state := HBoxContainer.new()
 	state.name = "State"
+	state.theme_type_variation = "JoineryRowTight"
+	var dot := UI.status_dot("working")
+	dot.name = "Dot"
+	dot.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	state.add_child(dot)
+	var words := UI.label(READING, "JoineryCaption", true)
+	words.name = "Text"
+	words.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	state.add_child(words)
 	item.add_child(state)
 	var rows := VBoxContainer.new()
 	rows.name = "Rows"
@@ -336,9 +346,18 @@ static func feature_row(mark: Dictionary) -> HBoxContainer:
 		glyph = UI.status_icon(str(MARK_ICONS[status]))
 	else:
 		glyph = UI.status_dot("off")
-	glyph.name = "Mark"
-	glyph.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-	row.add_child(glyph)
+	# Every glyph in one icon-wide column, so the words line up whatever the mark.
+	var column := CenterContainer.new()
+	column.name = "Mark"
+	column.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	STYLE.on_theme_overrides(
+		column,
+		func() -> void:
+			var side := float(UI_THEME.icon_px(column))
+			column.custom_minimum_size = Vector2(side, UI_THEME.control_h(column, "xs"))
+	)
+	column.add_child(glyph)
+	row.add_child(column)
 	var words := VBoxContainer.new()
 	words.theme_type_variation = "JoineryTight"
 	words.size_flags_horizontal = Control.SIZE_EXPAND_FILL

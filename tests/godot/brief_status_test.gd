@@ -177,6 +177,43 @@ func _run() -> void:
 		"An error says so and keeps the rows"
 	)
 
+	# A change that crosses a Keep line: the review's notes line names the line it touched.
+	var panel: Control = load("res://addons/joinery/review_panel.gd").new()
+	root.add_child(panel)
+	panel.call(
+		"show_file_review",
+		"Make the jump higher",
+		"-var jump_height := 1.2\n+var jump_height := 1.8",
+		[],
+		[{"path": "player.gd", "change": "modified"}]
+	)
+	var crossed := "Crosses the brief's Keep line “Jump height 1.2 m”: it moves jump_height"
+	(
+		panel
+		. call(
+			"show_glance",
+			{
+				"review_notes":
+				[
+					{"severity": "info", "text": "Reads cleanly."},
+					{
+						"severity": "warn",
+						"rule": "brief",
+						"file": "player.gd",
+						"text": crossed + " from 1.2 to 1.8 in player.gd."
+					},
+				]
+			}
+		)
+	)
+	await process_frame
+	var summary: Object = panel.get("_summary")
+	_check(
+		str(summary.call("notes_text")).begins_with(crossed),
+		"The review leads with the crossed line: %s" % summary.call("notes_text")
+	)
+	panel.queue_free()
+
 	DirAccess.remove_absolute(path)
 	await process_frame
 	print("brief status: ", "FAILED" if _failed else "ok")

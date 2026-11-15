@@ -144,7 +144,10 @@ func _run() -> void:
 	)
 	var rows: Array = card.call("polish_rows")
 	_check(rows.size() == 6, "One row per finding")
-	_check((rows[5] as Control).visible == false, "The rest wait behind Show all")
+	_check(
+		not (rows[3] as Control).visible and (rows[2] as Control).visible,
+		"The first three show; the rest wait behind Show all"
+	)
 	var first := rows[0] as Control
 	_check(first.tooltip_text.contains("fishing.gd:12"), "Where is in the row's tooltip")
 	var words: Array[String] = []

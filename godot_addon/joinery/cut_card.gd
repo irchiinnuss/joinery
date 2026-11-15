@@ -20,7 +20,7 @@ const BLOCKS := preload("ui_blocks.gd")
 const STYLE := preload("sidebar_style.gd")
 const INDICATOR := preload("activity_indicator.gd")
 ## Polish rows shown before "Show all".
-const FIRST_ROWS := 5
+const FIRST_ROWS := 3
 ## Of the window's height, the most the card's list takes before it scrolls.
 const MAX_LIST_SHARE := 0.4
 const REASONS := {
