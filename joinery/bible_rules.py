@@ -31,7 +31,7 @@ import struct
 import tomllib
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from pathlib import Path, PurePosixPath
-from typing import Any, Literal
+from typing import Any, Literal, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -1135,9 +1135,39 @@ _VECTOR3 = re.compile(r"Vector3\(\s*([-\d.e]+)\s*,\s*([-\d.e]+)\s*,\s*([-\d.e]+)
 _MATERIALS = {"StandardMaterial3D", "ORMMaterial3D"}
 
 
+class TexelReading(NamedTuple):
+    """One world-mapped texture's density in a Godot material, and its rule."""
+
+    texture: str
+    material: str
+    density: float
+    rule: TexelRule
+
+    @property
+    def off(self) -> bool:
+        """Outside the rule's tolerance: the same test as :func:`_texel_problem`."""
+        return abs(self.density - self.rule.px_per_m) > (
+            self.rule.tolerance * self.rule.px_per_m
+        )
+
+
 def material_texel_problems(
     path: str, text: str, stage: Path, rules: BibleRules
 ) -> list[str]:
+    """Texel density of textures laid on with world triplanar mapping, as the
+    submit checks it (and `joinery match`, from the same readings)."""
+    problems: list[str] = []
+    for reading in material_texel_readings(text, stage, rules):
+        what = f"{reading.texture} (material {reading.material})"
+        problem = _texel_problem(path, what, reading.density, reading.rule)
+        if problem:
+            problems.append(problem)
+    return problems
+
+
+def material_texel_readings(
+    text: str, stage: Path, rules: BibleRules
+) -> list[TexelReading]:
     """Texel density of textures laid on with world triplanar mapping.
 
     A painted texture on level geometry is usually mapped in world space
@@ -1146,13 +1176,15 @@ def material_texel_problems(
     texel rule for the texture's folder applies to it as it does to a model.
     Materials mapped through a mesh's own UVs are measured on the model.
     """
+    if not rules.models.texel_density:
+        return []
     sections = _sections(text)
     images: dict[str, str] = {}
     for kind, attrs, _values in sections:
         source = attrs.get("path", "")
         if kind == "ext_resource" and source.startswith("res://"):
             images[attrs.get("id", "")] = source.removeprefix("res://")
-    problems: list[str] = []
+    readings: list[TexelReading] = []
     for kind, attrs, values in sections:
         if attrs.get("type") not in _MATERIALS and not (
             kind == "resource" and values.get("albedo_texture")
@@ -1173,11 +1205,10 @@ def material_texel_problems(
             continue
         sx, sy = (float(scale.group(1)), float(scale.group(2))) if scale else (1.0, 1.0)
         density = max(size[0] * abs(sx), size[1] * abs(sy))
-        what = f"{texture} (material {attrs.get('id') or kind})"
-        problem = _texel_problem(path, what, density, rule)
-        if problem:
-            problems.append(problem)
-    return problems
+        readings.append(
+            TexelReading(texture, str(attrs.get("id") or kind), density, rule)
+        )
+    return readings
 
 
 # --- worker output parsing ---------------------------------------------------

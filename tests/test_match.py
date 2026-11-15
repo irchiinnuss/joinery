@@ -312,6 +312,40 @@ def test_lighting_and_ui_findings_carry_godot_fixes(planted: Path) -> None:
     assert (lighting.checked, lighting.failing, lighting.score) == (2, 2, 0)
 
 
+HALL = """[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Texture2D" path="res://art/textures/wall.png" id="1_wall"]
+
+[sub_resource type="StandardMaterial3D" id="Mat_wall"]
+albedo_texture = ExtResource("1_wall")
+uv1_scale = Vector3({scale}, {scale}, {scale})
+uv1_triplanar = true
+uv1_world_triplanar = true
+
+[node name="Hall" type="Node3D"]
+"""
+
+
+@pytest.mark.parametrize(("scale", "off"), [(1.0, True), (4.0, False)])
+def test_match_runs_the_submits_texel_check_on_world_mapped_textures(
+    planted: Path, scale: float, off: bool
+) -> None:
+    """The rerun: the submit failed level materials on texel density while match
+    said Textures 100%. Both now read the same materials the same way."""
+    from joinery.bible_rules import load_rules, material_texel_problems
+
+    text = HALL.format(scale=scale)
+    (planted / "levels/hall.tscn").write_text(text)
+    submitted = material_texel_problems(
+        "levels/hall.tscn", text, planted, load_rules(planted)
+    )
+    found = by(run_audit(planted), "textures").get("levels/hall.tscn", [])
+    assert len(found) == len(submitted) == (1 if off else 0)
+    if off:
+        assert found[0].check == "texel_density" and found[0].subject == "Mat_wall"
+        assert found[0].measured == "64 px/m" and "64 px/m" in submitted[0]
+
+
 def test_what_the_user_protects_is_never_measured(planted: Path) -> None:
     worker = FakeWorker()
     audit = run_audit(planted, worker)

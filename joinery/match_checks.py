@@ -24,6 +24,7 @@ from joinery.bible_rules import (
     delta_e_2000,
     hex_rgb,
     image_size,
+    material_texel_readings,
     measure_glb,
     parse_loudness,
     parse_samples,
@@ -514,6 +515,32 @@ def _godot_fix(audit: _Audit, path: str, issue: match_look.Issue) -> Fix | None:
     )
 
 
+def _world_texels(audit: _Audit, path: str, text: str) -> None:
+    """Textures laid on level geometry in world space: the submit's own readings
+    (bible_rules.material_texel_readings), so `match` and the submit never
+    disagree about the same material."""
+    for reading in material_texel_readings(text, audit.project, audit.rules):
+        audit.checked["textures"].add(path)  # scored per file, as models are
+        if not reading.off:
+            continue
+        rule = reading.rule
+        audit.finding(
+            "textures",
+            path,
+            "texel_density",
+            "high"
+            if abs(reading.density - rule.px_per_m) > 2 * rule.tolerance * rule.px_per_m
+            else "medium",
+            f"{reading.density:.0f} px/m",
+            f"{rule.px_per_m:g} px/m ± {rule.tolerance:.0%}",
+            f"texel density {reading.density:.0f} px/m: {reading.texture} on material "
+            f"{reading.material} (world-mapped, uv1_scale × texture width)",
+            subject=reading.material,
+            needs_you="Set the material's uv1_scale to the look's px/m over the "
+            "texture width, or paint the texture at the size the look asks for.",
+        )
+
+
 def look(audit: _Audit, paths: list[str]) -> None:
     rules = audit.rules
     environment = rules.environment
@@ -543,6 +570,7 @@ def look(audit: _Audit, paths: list[str]) -> None:
         if _suffix(path) not in _GODOT_TEXT:
             continue
         text = (audit.project / path).read_text(encoding="utf-8", errors="replace")
+        _world_texels(audit, path, text)
         if env_wanted and _in_folders(environment.folders, path):
             for section, values in match_look.environments(text):
                 audit.checked["lighting"].add(f"{path}#{section.id}")
