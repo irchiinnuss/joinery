@@ -30,6 +30,7 @@ from joinery.bible_rules import (
     linear_rgb,
     load_rules,
     measure_glb,
+    off_palette_share,
     palette_problems,
     parse_loudness,
     parse_rules,
@@ -249,9 +250,44 @@ def test_palette_counts_opaque_pixels_far_from_every_colour(tmp_path: Path) -> N
     ) == [
         (
             "art/textures/wall.png: 50% of its colours are more than ΔE 12 from the "
-            "palette (allowed 25%)"
+            "palette and not a blend of two of its colours (allowed 25%)"
         )
     ]
+
+
+def test_anti_aliased_edges_between_palette_colours_are_on_the_palette(
+    tmp_path: Path,
+) -> None:
+    root = palette_stage(tmp_path, '["#ff0000", "#0000ff"]')
+    red, blue = "ff0000ff", "0000ffff"
+    # Edge pixels of a red shape on blue: blended in sRGB and in linear light.
+    edges = ("bf003fff", "7f007fff", "3f00bfff", "bc00bcff")
+    shape = samples(red, blue, *edges)
+    assert (
+        asyncio.run(check_rules(root, ["art/textures/wall.png"], measured(shape))) == []
+    )
+    # A third colour is no blend of the two: it still fails.
+    green = "00ff00ff"
+    foreign = samples(red, blue, *edges, green, green, green)
+    assert asyncio.run(
+        check_rules(root, ["art/textures/wall.png"], measured(foreign))
+    ) == [
+        (
+            "art/textures/wall.png: 33% of its colours are more than ΔE 12 from the "
+            "palette and not a blend of two of its colours (allowed 25%)"
+        )
+    ]
+
+
+def test_edges_faded_to_transparency_are_on_the_palette() -> None:
+    palette = ["#ff0000", "#0000ff"]
+    # Premultiplied red and a premultiplied red-blue blend at 60 % alpha, and a
+    # straight-alpha red edge.
+    faded = [(153, 0, 0, 153), (77, 0, 77, 153), (255, 0, 0, 128)]
+    assert off_palette_share(faded, palette, 12) == 0
+    # The same dark red, fully opaque, is a colour of its own.
+    assert off_palette_share([(153, 0, 0, 255)], palette, 12) == 1
+    assert off_palette_share([(153, 0, 0)], palette, 12) == 1
 
 
 def test_normal_and_orm_maps_are_not_held_to_the_palette(tmp_path: Path) -> None:

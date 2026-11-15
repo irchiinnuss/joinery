@@ -317,6 +317,10 @@ COLOUR_MATHS = "\n".join(
                 bible_rules._lab_linear,
                 bible_rules._lab,
                 bible_rules.delta_e_2000,
+                bible_rules._oklab_linear,
+                bible_rules._segment_point,
+                bible_rules._on_blend,
+                bible_rules.is_off_palette,
             )
         ),
     ]
@@ -341,13 +345,18 @@ def _joinery_palette_map(document, name, colours, limit, opacity):
         alpha = data[i + 3]
         if alpha < 8:
             continue
-        key = (data[i + 2] & 0xFC, data[i + 1] & 0xFC, data[i] & 0xFC)
+        key = (data[i + 2] & 0xFC, data[i + 1] & 0xFC, data[i] & 0xFC, alpha | 0x0F)
         hit = cache.get(key, False)
         if hit is False:
-            lab = _lab((key[0] | 2, key[1] | 2, key[2] | 2))
-            distances = [delta_e_2000(lab, p) for p in labs]
-            best = min(range(len(labs)), key=distances.__getitem__)
-            hit = cache[key] = palette[best] if distances[best] > limit else None
+            # Anti-aliased blends of two palette colours stay: the same rule as
+            # the art bible's check.
+            pixel = (key[0] | 2, key[1] | 2, key[2] | 2, min(255, key[3]))
+            hit = None
+            if is_off_palette(pixel, palette, labs, limit):
+                lab = _lab(pixel[:3])
+                distances = [delta_e_2000(lab, p) for p in labs]
+                hit = palette[min(range(len(labs)), key=distances.__getitem__)]
+            cache[key] = hit
         if hit is not None:
             out[i] = hit[2]
             out[i + 1] = hit[1]

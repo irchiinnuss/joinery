@@ -24,10 +24,12 @@ from joinery.bible_rules import (
     delta_e_2000,
     hex_rgb,
     image_size,
+    is_off_palette,
     material_texel_readings,
     measure_glb,
+    off_palette_share,
     parse_loudness,
-    parse_samples,
+    parse_rgba_samples,
     viewport_height,
 )
 from joinery.match import (
@@ -46,30 +48,16 @@ from joinery.music_track import mix_measure_script, section_mixes
 # --- palette and textures ------------------------------------------------------------
 
 
-def _off_share(
-    pixels: list[tuple[int, int, int]],
-    palette: list[tuple[float, float, float]],
-    limit: float,
-) -> float:
-    cache: dict[tuple[int, int, int], bool] = {}
-    far = 0
-    for rgb in pixels:
-        if rgb not in cache:
-            lab = _lab(rgb)
-            cache[rgb] = min(delta_e_2000(lab, p) for p in palette) > limit
-        far += cache[rgb]
-    return far / len(pixels) if pixels else 0.0
-
-
 def _worst_colour(
-    pixels: list[tuple[int, int, int]],
+    pixels: list[tuple[int, int, int, int]],
     palette: list[str],
     labs: list[tuple[float, float, float]],
     limit: float,
 ) -> list[str]:
     """[the most common colour off the palette, the nearest palette colour] as hex, or []."""
     counts: dict[tuple[int, int, int], int] = {}
-    seen: dict[tuple[int, int, int], tuple[int, int, int]] = {}
+    seen: dict[tuple[int, int, int], tuple[int, int, int, int]] = {}
+    rgbs = [hex_rgb(c) for c in palette]
     for rgb in pixels:
         # Neighbouring shades count as one colour (16 steps a channel), shown as the first
         # real pixel of that shade.
@@ -78,9 +66,9 @@ def _worst_colour(
         seen.setdefault(key, rgb)
     for key, _count in sorted(counts.items(), key=lambda item: -item[1]):
         rgb = seen[key]
-        lab = _lab(rgb)
+        lab = _lab(rgb[:3])
         distances = [delta_e_2000(lab, p) for p in labs]
-        if min(distances) > limit:
+        if is_off_palette(rgb, rgbs, labs, limit):
             nearest = palette[distances.index(min(distances))]
             return [f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}", nearest.lower()]
     return []
@@ -177,7 +165,7 @@ async def images(audit: _Audit, paths: list[str]) -> None:
         got = await audit.measure(
             ["sh", "-c", _SAMPLE_IMAGES, "sh", *palette_images], audit.project
         )
-        sampled = parse_samples(got.output) if got.ok else {}
+        sampled = parse_rgba_samples(got.output) if got.ok else {}
     except (OSError, RuntimeError, TimeoutError) as error:
         audit.errors.append(f"Colours could not be measured: {error}")
         sampled = {}
@@ -187,7 +175,7 @@ async def images(audit: _Audit, paths: list[str]) -> None:
         if path not in sampled:
             audit.errors.append(f"{path}: its colours could not be measured")
             continue
-        share = _off_share(sampled[path], labs, rules.palette.max_delta_e)
+        share = off_palette_share(sampled[path], palette, rules.palette.max_delta_e)
         if share <= allowed:
             continue
         owner, why = audit.owner(path, {"krita"})
@@ -220,7 +208,8 @@ async def images(audit: _Audit, paths: list[str]) -> None:
             f"{share:.0%} off-palette",
             f"≤ {allowed:.0%}",
             f"{share:.0%} of its colours are more than ΔE {rules.palette.max_delta_e:g} "
-            f"from the palette (allowed {allowed:.0%})",
+            f"from the palette and not a blend of two of its colours "
+            f"(allowed {allowed:.0%})",
             fix=fix,
             needs_you=why,
             swatches=_worst_colour(

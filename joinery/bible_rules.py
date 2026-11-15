@@ -480,6 +480,108 @@ def delta_e_2000(
     )
 
 
+def _oklab_linear(rgb: Sequence[float]) -> tuple[float, float, float]:
+    """Linear RGB (0-1) to OKLab (Ottosson 2020)."""
+    r, g, b = (min(1.0, max(0.0, c)) for c in rgb[:3])
+    lms = (
+        0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b,
+        0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b,
+        0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b,
+    )
+    l_, m_, s_ = (c ** (1 / 3) for c in lms)
+    return (
+        0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_,
+        1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_,
+        0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_,
+    )
+
+
+def _segment_point(
+    point: Sequence[float], start: Sequence[float], end: Sequence[float]
+) -> list[float]:
+    """The point of the segment start-end nearest to `point` (three components)."""
+    span = [end[i] - start[i] for i in range(3)]
+    length = sum(c * c for c in span)
+    t = 0.0
+    if length:
+        t = sum((point[i] - start[i]) * span[i] for i in range(3)) / length
+        t = min(1.0, max(0.0, t))
+    return [start[i] + t * span[i] for i in range(3)]
+
+
+def _on_blend(
+    rgb: Sequence[float], palette: Sequence[Sequence[int]], tolerance: float
+) -> bool:
+    """Whether `rgb` lies, within `tolerance` in OKLab, on the line between two
+    palette colours: blended in sRGB (most rasterisers), linear light or OKLab."""
+    lin = [_channel_linear(c / 255) for c in rgb]
+    ok = _oklab_linear(lin)
+    for i, first in enumerate(palette):
+        first_lin = [_channel_linear(c / 255) for c in first]
+        first_ok = _oklab_linear(first_lin)
+        for second in palette[i + 1 :]:
+            second_lin = [_channel_linear(c / 255) for c in second]
+            second_ok = _oklab_linear(second_lin)
+            blends = (
+                _oklab_linear(
+                    [
+                        _channel_linear(c / 255)
+                        for c in _segment_point(rgb, first, second)
+                    ]
+                ),
+                _oklab_linear(_segment_point(lin, first_lin, second_lin)),
+                tuple(_segment_point(ok, first_ok, second_ok)),
+            )
+            if any(math.dist(ok, blend) <= tolerance for blend in blends):
+                return True
+    return False
+
+
+def is_off_palette(
+    pixel: Sequence[int],
+    palette: Sequence[Sequence[int]],
+    labs: Sequence[tuple[float, float, float]],
+    limit: float,
+    tolerance: float = 0.03,
+) -> bool:
+    """Whether an (r, g, b[, a]) pixel is off the palette.
+
+    On the palette: within ΔE2000 `limit` of a palette colour, or an anti-aliased
+    blend of two palette colours (within `tolerance` in OKLab of the line between
+    them). A part-transparent pixel may also be a palette colour or blend
+    premultiplied by its alpha, as an edge faded to transparency exports.
+    """
+    alpha = pixel[3] if len(pixel) > 3 else 255
+    candidates = [tuple(pixel[:3])]
+    if 0 < alpha < 255:
+        candidates.append(tuple(min(255, round(c * 255 / alpha)) for c in pixel[:3]))
+    for rgb in candidates:
+        lab = _lab_linear([_channel_linear(c / 255) for c in rgb])
+        if min(delta_e_2000(lab, p) for p in labs) <= limit:
+            return False
+        if _on_blend(rgb, palette, tolerance):
+            return False
+    return True
+
+
+def off_palette_share(
+    pixels: Sequence[Sequence[int]], colours: Sequence[str], limit: float
+) -> float:
+    """Share of sampled (r, g, b[, a]) pixels off the palette; see `is_off_palette`."""
+    if not pixels:
+        return 0.0
+    palette = [hex_rgb(c) for c in colours]
+    labs = [_lab(p) for p in palette]
+    cache: dict[tuple[int, ...], bool] = {}
+    far = 0
+    for pixel in pixels:
+        key = tuple(pixel)
+        if key not in cache:
+            cache[key] = is_off_palette(key, palette, labs, limit)
+        far += cache[key]
+    return far / len(pixels)
+
+
 #: Machado, Oliveira and Fernandes (2009), severity 1.0, applied to linear RGB.
 CVD_MATRICES: dict[str, tuple[tuple[float, float, float], ...]] = {
     "protanopia": (
@@ -1344,7 +1446,15 @@ Measure = Callable[[list[str], Path], Awaitable[Result]]
 
 def parse_samples(output: str) -> dict[str, list[tuple[int, int, int]]]:
     """Opaque RGB samples per file from the sampling script."""
-    samples: dict[str, list[tuple[int, int, int]]] = {}
+    return {
+        path: [(r, g, b) for r, g, b, _a in pixels]
+        for path, pixels in parse_rgba_samples(output).items()
+    }
+
+
+def parse_rgba_samples(output: str) -> dict[str, list[tuple[int, int, int, int]]]:
+    """Mostly opaque (alpha >= 128) RGBA samples per file from the sampling script."""
+    samples: dict[str, list[tuple[int, int, int, int]]] = {}
     current = ""
     for line in output.splitlines():
         if line.startswith("JOINERY_FILE:"):
@@ -1354,7 +1464,7 @@ def parse_samples(output: str) -> dict[str, list[tuple[int, int, int]]]:
         if current and line and re.fullmatch(r"[0-9a-f]+", line) and len(line) % 8 == 0:
             data = bytes.fromhex(line)
             samples[current] = [
-                (data[i], data[i + 1], data[i + 2])
+                (data[i], data[i + 1], data[i + 2], data[i + 3])
                 for i in range(0, len(data), 4)
                 if data[i + 3] >= 128
             ]
@@ -1937,9 +2047,8 @@ async def _image_problems(
     if not images:
         return []
     got = await measure(["sh", "-c", _SAMPLE_IMAGES, "sh", *images], stage)
-    sampled = parse_samples(got.output) if got.ok else {}
+    sampled = parse_rgba_samples(got.output) if got.ok else {}
     problems: list[str] = []
-    palette = [_lab(hex_rgb(c)) for c in colours]
     for path in images:
         if path not in sampled:
             problems.append(f"{path}: colours could not be measured")
@@ -1948,28 +2057,19 @@ async def _image_problems(
         if not pixels:
             continue
         if path in palette_images:
-            cache: dict[tuple[int, int, int], bool] = {}
-            far = 0
-            for rgb in pixels:
-                if rgb not in cache:
-                    lab = _lab(rgb)
-                    cache[rgb] = (
-                        min(delta_e_2000(lab, p) for p in palette)
-                        > palette_rules.max_delta_e
-                    )
-                far += cache[rgb]
-            share = far / len(pixels)
+            share = off_palette_share(pixels, colours, palette_rules.max_delta_e)
             if share > palette_rules.max_off_palette:
                 problems.append(
                     f"{path}: {share:.0%} of its colours are more than ΔE "
-                    f"{palette_rules.max_delta_e:g} from the palette (allowed "
+                    f"{palette_rules.max_delta_e:g} from the palette and not a blend "
+                    f"of two of its colours (allowed "
                     f"{palette_rules.max_off_palette:.0%})"
                 )
         if path in albedo_images and rules.materials.albedo_luminance is not None:
             low, high = rules.materials.albedo_luminance
             outside = sum(
                 not low
-                <= luminance_linear([_channel_linear(c / 255) for c in rgb])
+                <= luminance_linear([_channel_linear(c / 255) for c in rgb[:3]])
                 <= high
                 for rgb in pixels
             )
