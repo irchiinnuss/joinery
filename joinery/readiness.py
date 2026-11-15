@@ -1421,6 +1421,9 @@ def lines(report: Mapping[str, Any]) -> list[str]:
     look = report.get("look") or {}
     if look.get("message"):
         out.append(f"  {look['message']}")
+    unplayed = report.get("unplayed") or {}
+    if unplayed.get("text"):
+        out.append(f"  {unplayed['text']}: play the game to check them.")
     return out
 
 
@@ -1477,6 +1480,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         # A blank or unfinished look, said where the user checks the project.
         report["look"] = completeness(project)
+        from joinery import played
+
+        # Accepted changes no person has played since (joinery.played).
+        report["unplayed"] = played.summary(project)
     if args.quiet:
         return 0
     if args.text:

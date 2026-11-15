@@ -19,6 +19,7 @@ from joinery import (
     import_cache,
     live_game,
     metrics,
+    played,
     references,
     scene_guard,
     scene_variants,
@@ -1561,6 +1562,10 @@ class ProjectGateway:
         }
         if notice:
             event["message"] = "Change discarded. " + notice
+        if accept:
+            # Not yet played by you (joinery.played): the card's quiet line and the
+            # sidebar's count.
+            event["unplayed"] = played.summary(self.project)
         if accept and tx.auto_accepted:
             # Kept without asking (joinery.auto_accept): the card says so, with Undo.
             event["auto_accepted"] = True

@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from joinery import metrics, readiness, references, team, tool_refresh
+from joinery import metrics, played, readiness, references, team, tool_refresh
 from joinery.catalog import ROOT, load_catalog, load_project_tools, selection_ids
 from joinery.platform_support import bash_script_argv, editor_running
 from joinery.server_install import install
@@ -439,6 +439,7 @@ def transactions(
         else sorted((project / ".joinery/transactions").glob("*/journal.json"))
     )
     result: list[dict[str, Any]] = []
+    waiting = set(played.summary(project)["ids"])
     for path in paths:
         tx = FileTransaction.load(project, path.parent.name)
         warning = ""
@@ -473,6 +474,8 @@ def transactions(
                 # What the agent guessed and where it departed from the request.
                 "guessed": tx.guessed,
                 "not_as_asked": tx.not_as_asked,
+                # Accepted, changes the game, and nobody has played it since.
+                "unplayed": tx.state == "accepted" and tx.id in waiting,
                 # What the change cost to make, when it was measured (joinery.metrics).
                 "cost": metrics.cost(project, tx.id),
                 "file_count": len(tx.changes),
@@ -492,6 +495,8 @@ def transaction_lines(entry: dict[str, Any]) -> list[str]:
     lines = [f"{entry['summary'] or 'Project changes'}  ({entry['state']})"]
     lines += [f"  Guessed: {line}" for line in entry.get("guessed") or []]
     lines += [f"  Not as asked: {line}" for line in entry.get("not_as_asked") or []]
+    if entry.get("unplayed"):
+        lines.append(f"  {played.CHANGE_LINE}")
     if entry.get("auto_accepted"):
         lines.append("  Accepted automatically")
     lines += [

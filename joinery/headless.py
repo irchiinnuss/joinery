@@ -129,6 +129,8 @@ class Outcome:
     #: the request and why (submit_for_review's guessed and not_as_asked).
     guessed: list[str] = field(default_factory=list)
     not_as_asked: list[str] = field(default_factory=list)
+    #: Accepted changes no person has played since (joinery.played.summary).
+    unplayed: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {"kind": "run_result", **asdict(self)}
@@ -683,9 +685,10 @@ def pin_from(args: argparse.Namespace, project: Path) -> Pin:
 
 def finish(outcome: Outcome, project: Path, as_json: bool) -> int:
     """Print the result; 0 when the run finished (with or without a change)."""
-    from joinery import metrics
+    from joinery import metrics, played
 
     _departures_from_journal(outcome, project)
+    outcome.unplayed = played.summary(project)
     data = outcome.as_dict()
     if outcome.transaction_id:
         data["cost"] = metrics.cost(project, outcome.transaction_id)
@@ -715,6 +718,8 @@ def finish(outcome: Outcome, project: Path, as_json: bool) -> int:
             print(f"Guessed: {line}")
         for line in outcome.not_as_asked:
             print(f"Not as asked: {line}")
+        if outcome.unplayed.get("text"):
+            print(str(outcome.unplayed["text"]) + ": play the game to check them.")
         if outcome.auto_accept_held and outcome.state == "review":
             print("Not accepted automatically: " + "; ".join(outcome.auto_accept_held) + ".")
         if outcome.note:

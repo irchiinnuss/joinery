@@ -42,6 +42,7 @@ from joinery import (
     match_cli,
     memory,
     metrics,
+    played,
     playtest,
     project_commands,
     project_map,
@@ -1615,6 +1616,7 @@ def _parser() -> argparse.ArgumentParser:
     check.add_argument("--project", type=Path, default=ROOT / "testbed")
     history.register(commands)
     timeline.register(commands)
+    played.register(commands)
     team.register(commands)
     metrics.register(commands)
     idle_runs.register(commands)
@@ -1642,6 +1644,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "timeline":
         return timeline.run(args)
+
+    if args.command == "played":
+        return played.run(args)
 
     if args.command == "metrics":
         return metrics.run(args)

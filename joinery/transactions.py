@@ -520,6 +520,7 @@ class FileTransaction:
             raise
         self._discard(self.stage)
         self._add_to_timeline(changes, reverted=False)
+        self._stamp_unplayed(changes)
         self._index_recipes()
         self._housekeep()
         return changes
@@ -597,6 +598,9 @@ class FileTransaction:
         )
         if outcome.get("state") == "committed":
             self.timeline = outcome
+            from joinery import played
+
+            played.recommit(self.project, self.id, outcome.get("commit", ""))
         elif outcome:
             self.timeline = {**self.timeline, **outcome}
 
@@ -777,6 +781,9 @@ class FileTransaction:
             self._record(changes=changes)
             self._discard(self.stage, self.snapshot)
         self._add_to_timeline(changes, reverted=True)
+        from joinery import played
+
+        played.forget(self.project, self.id)
 
     @classmethod
     def load(cls, project: Path, identifier: str) -> FileTransaction:

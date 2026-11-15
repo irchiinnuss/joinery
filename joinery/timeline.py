@@ -844,15 +844,19 @@ def entries(
         page = list(_log(project, f"--skip={skip}", f"--max-count={limit + 1}"))
     result["more"] = len(page) > limit
     _name, email = identity(project)
-    from joinery import team  # Late: team builds on this module.
+    # Late: team builds on this module, played writes through transactions.
+    from joinery import played, team
 
     pulled = team.last_pulled(project)
+    waiting = set(played.summary(project)["commits"])
     result["entries"] = [
         {
             **{key: value for key, value in entry.items() if key != "paths"},
             # A teammate's entry names them; the last pull's entries are new here.
             "teammate": entry["email"].lower() != email.lower(),
             "pulled": entry["commit"] in pulled,
+            # Accepted here, changes the game, and nobody has played it since.
+            "unplayed": entry["commit"] in waiting,
         }
         for entry in page[:limit]
     ]
@@ -1097,6 +1101,7 @@ def _describe(action: str, data: dict[str, Any]) -> str:
             return str(data.get("message", ""))
         rows = [
             f"{entry['short']}  {entry['subject']}  ({entry['author']}, {entry['files']} files)"
+            + ("  · not played since" if entry.get("unplayed") else "")
             for entry in data["entries"]
         ]
         return "\n".join(rows) or "Nothing matches."
