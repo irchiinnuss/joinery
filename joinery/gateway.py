@@ -27,6 +27,7 @@ from joinery import (
     script_scope,
     sound_kit,
     staged_assets,
+    staged_removal,
     submission,
     team,
 )
@@ -913,6 +914,32 @@ class ProjectGateway:
             raise PolicyStop(result_text(result))
         if check is not None and not result.is_error:
             await self._after_write(*check)
+        if (
+            server == "godot"
+            and tool == "delete_file"
+            and not result.is_error
+            and self.transaction is not None
+            and self.transaction.state == "staging"
+        ):
+            # An asset made earlier in this change, deleted again: its lock
+            # entry, sidecar and recipe go with it.
+            deleted = str(arguments.get("filePath") or "")
+            cleared = staged_removal.forget(
+                self.project, self.transaction.stage, [deleted] if deleted else []
+            )
+            if cleared:
+                result = result.model_copy(
+                    update={
+                        "content": [
+                            *result.content,
+                            TextContent(
+                                type="text",
+                                text="Joinery also removed what this change made with it: "
+                                + ", ".join(cleared),
+                            ),
+                        ]
+                    }
+                )
         if not readonly:
             self._claim_features()
         if not readonly and self.claims.contended():
