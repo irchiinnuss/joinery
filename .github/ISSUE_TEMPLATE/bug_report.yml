@@ -1,0 +1,44 @@
+name: Bug report
+description: Something in Joinery does not work as it should.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. joinery new ~/games/test --blueprint blank
+        2. ...
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: |
+        Output of `uv run joinery diagnostics --project <your project>`.
+        It leaves out secrets, but please check it before posting.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      placeholder: macOS 15 arm64, Ubuntu 24.04, Windows 11 ...
+    validations:
+      required: true
+  - type: input
+    id: agent
+    attributes:
+      label: Agent
+      placeholder: Claude Code, Codex, Gemini CLI or opencode, and its version
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots

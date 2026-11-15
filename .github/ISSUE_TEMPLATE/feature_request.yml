@@ -1,0 +1,23 @@
+name: Feature request
+description: Suggest something Joinery should do.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you are trying to do
+      description: The task or problem, in your own words.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you would like
+      description: How it could work. Which tool (Godot, Blender, Krita, ...) should do the work?
+  - type: checkboxes
+    id: rule-zero
+    attributes:
+      label: Creation, not generation
+      options:
+        - label: This does not need a generative AI model for assets (images, 3D, audio, music, voice, textures).
+          required: true
