@@ -270,3 +270,32 @@ def test_a_native_op_imports_only_when_it_changed_what_godot_loads(
             await gateway.close()
 
     asyncio.run(go())
+
+
+def test_the_stage_import_asks_a_busy_docker_again(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("joinery.submission.WORKER_RETRY_DELAYS", (0.0, 0.0, 0.0))
+    tries: list[int] = []
+
+    async def offline(argv: list[str], root: Path, *_a: Any, **_k: Any) -> Result:
+        tries.append(1)
+        if len(tries) < 3:
+            return Result(False, "", "error during connect: Docker is busy", 0.0)
+        return Result(True, "", "", 0.0)
+
+    monkeypatch.setattr("joinery.gateway.run_offline", offline)
+
+    async def go() -> None:
+        gateway = ProjectGateway(project)
+        tx = FileTransaction(project)
+        tx.begin("Crate")
+        gateway.transaction = tx
+        try:
+            await gateway.import_stage(tx)
+            assert gateway.import_current(tx)
+        finally:
+            await gateway.close()
+
+    asyncio.run(go())
+    assert len(tries) == 3

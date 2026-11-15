@@ -1488,12 +1488,15 @@ class ProjectGateway:
         """
         self.progress("Importing the result into Godot…")
         with self.span("import"):
-            imported = await run_offline(
+            # Its own worker starts each time: a busy Docker is asked again.
+            imported = await submission.worker_run(
                 list(submission.IMPORT_ARGV),
                 tx.stage,
                 submission.import_seconds(self.project),
+                runner=run_offline,
                 warm=False,
             )
+        submission.worker_ready(imported)
         if (
             not imported.ok
             or "SCRIPT ERROR:" in imported.output

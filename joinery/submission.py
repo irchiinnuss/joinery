@@ -14,7 +14,7 @@ import re
 import secrets
 import shutil
 import tomllib
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -658,16 +658,23 @@ WORKER_RETRY_DELAYS = (2.0, 4.0, 8.0)
 
 
 async def worker_run(
-    argv: list[str], root: Path, seconds: int, **options: Any
+    argv: list[str],
+    root: Path,
+    seconds: int,
+    *,
+    runner: Callable[..., Awaitable[Result]] | None = None,
+    **options: Any,
 ) -> Result:
-    """``run_offline``, tried again with backoff while the worker itself can't
-    start: one Docker hiccup must not end a check, or the turn with it."""
-    got = await run_offline(argv, root, seconds, **options)
+    """``run_offline`` (or ``runner``), tried again with backoff while the worker
+    itself can't start: one Docker hiccup must not end a check, or the turn with
+    it. A run that started and then timed out raises as before, never retried."""
+    start = runner if runner is not None else run_offline
+    got = await start(argv, root, seconds, **options)
     for delay in WORKER_RETRY_DELAYS:
         if got.ok or not any(sign in got.stderr for sign in WORKER_DOWN):
             break
         await asyncio.sleep(delay)
-        got = await run_offline(argv, root, seconds, **options)
+        got = await start(argv, root, seconds, **options)
     return got
 
 

@@ -375,3 +375,46 @@ def test_a_stalled_test_is_stopped_once_and_says_why(
     (again,) = _run(tx, [])
     assert "printed nothing new" in again.message
     assert len([s for s, _ in runs if s == "tests/test_gun.gd"]) == 1
+
+
+DOCKER_DOWN = Result(False, "", "Cannot connect to the Docker daemon", 0.0)
+
+
+def test_a_docker_hiccup_is_asked_again_and_never_cached_as_a_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tx = _transaction(tmp_path)
+    (tx.stage / "tests/test_gun.gd").write_text(TEST_HANGS)
+    monkeypatch.setattr("joinery.submission.WORKER_RETRY_DELAYS", (0.0, 0.0, 0.0))
+    runs: list[str] = []
+    down = {"left": 2, "always": 0}
+
+    async def offline(argv: list[str], root: Path, seconds: int, **k: Any) -> Result:
+        if "--import" in argv:
+            return Result(True, "", "", 0.0)
+        script = argv[argv.index("-s") + 1].removeprefix("res://")
+        runs.append(script)
+        if script == "tests/test_gun.gd":
+            if down["always"]:
+                return DOCKER_DOWN
+            if down["left"]:
+                down["left"] -= 1
+                return DOCKER_DOWN
+            raise WorkerStalled(k["stall"], "SCRIPT ERROR: boom\n")
+        return Result(True, "PASS", "", 0.0)
+
+    monkeypatch.setattr("joinery.submission.run_offline", offline)
+    # Two refusals, then the run: the stalled result stands and is cached.
+    (problem,) = _run(tx, [])
+    assert "printed nothing new" in problem.message
+    assert runs.count("tests/test_gun.gd") == 3
+    # Docker stays down for a test whose files changed: the check stops with
+    # Docker's own reason and caches nothing for it.
+    (tx.stage / "tests/test_gun.gd").write_text(TEST_HANGS + "# edited\n")
+    down["always"] = 1
+    with pytest.raises(RuntimeError, match="Docker isn't running"):
+        _run(tx, [])
+    down["always"] = 0
+    runs.clear()
+    _run(tx, [])
+    assert runs.count("tests/test_gun.gd") == 1  # run, not answered from a cache
