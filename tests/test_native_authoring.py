@@ -825,3 +825,41 @@ def test_only_supercollider_takes_a_seed(stage: Path) -> None:
                 seed=3,
             )
         )
+
+
+def test_an_edit_that_renders_the_same_exports_says_so(
+    stage: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sound = stage / "audio/sfx/creak.wav"
+    sound.parent.mkdir(parents=True)
+    sound.write_bytes(b"RIFF same")
+
+    async def execute(*_a: object, **_k: object) -> Result:
+        sound.write_bytes(b"RIFF same")  # a fade longer than the sound: no change
+        return Result(True, "", "", 0.01)
+
+    monkeypatch.setattr(authoring, "run_offline", execute)
+    monkeypatch.setattr(
+        authoring,
+        "_record",
+        AsyncMock(side_effect=lambda *_a, **_k: {"status": "staged"}),
+    )
+    done = asyncio.run(
+        authoring.edit_document(
+            stage, "surge-xt", "audio/sources/creak.json", "{}", ["audio/sfx/creak.wav"]
+        )
+    )
+    assert done["unchanged"] == ["audio/sfx/creak.wav"]
+    assert "byte for byte" in done["note"]
+
+    async def louder(*_a: object, **_k: object) -> Result:
+        sound.write_bytes(b"RIFF louder")
+        return Result(True, "", "", 0.01)
+
+    monkeypatch.setattr(authoring, "run_offline", louder)
+    done = asyncio.run(
+        authoring.edit_document(
+            stage, "surge-xt", "audio/sources/creak.json", "{}", ["audio/sfx/creak.wav"]
+        )
+    )
+    assert "unchanged" not in done

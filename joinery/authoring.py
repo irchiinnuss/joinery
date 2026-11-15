@@ -281,6 +281,8 @@ async def edit_document(
         note=note,
         seed=module.recipe_seed(code),
     )
+    # What the exports held before, to tell an edit that changes nothing.
+    exported_before = _digests(project, exports)
     # Keep the old maps in memory: a failed or refused edit puts them back, so
     # the next edit still finds every output of the recipe it replaces.
     kept = {old: (project / old).read_bytes() for old in textures}
@@ -327,7 +329,30 @@ async def edit_document(
     recorded = await _record(project, recipe, recipe_dir / (identifier + ".toml"))
     if tool == "blender":
         recorded.update(_export_facts(project, exports, result.output))
+    if exported_before and _digests(project, exports) == exported_before:
+        recorded["unchanged"] = list(exports)
+        recorded["note"] = UNCHANGED
     return recorded
+
+
+#: Said when an edit renders every export byte for byte as it was.
+UNCHANGED = (
+    "Every export came out byte for byte as it was: this edit changes nothing "
+    "anyone will see or hear (a fade or trim longer than the sound, a value the "
+    "render ignores, a step on the wrong selection). Look at the code and the "
+    "source's length before submitting; only the recipe changed."
+)
+
+
+def _digests(project: Path, paths: list[str]) -> dict[str, str]:
+    """Each path's SHA-256, or {} when any of them is missing."""
+    found: dict[str, str] = {}
+    for rel in paths:
+        path = project / rel
+        if not path.is_file():
+            return {}
+        found[rel] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return found
 
 
 def _checked_document(
