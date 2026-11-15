@@ -11,7 +11,8 @@ def test_rules_cover_the_formats_projects_actually_store() -> None:
     rules = lfs_rules()
     # These are the native sources and rendered outputs a Joinery project keeps
     # in the repo. Any of them in plain git bloats history permanently.
-    for suffix in ("blend", "wav", "png", "kra", "ogg"):
+    # GIMP .xcf and Audacity .aup3 are binary native sources too.
+    for suffix in ("blend", "wav", "png", "kra", "ogg", "xcf", "aup3"):
         assert f"*.{suffix} filter=lfs" in rules
 
 

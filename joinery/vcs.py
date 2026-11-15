@@ -42,6 +42,8 @@ def lfs_rules() -> str:
         "ogg",
         "glb",
         "sf2",
+        "xcf",
+        "aup3",
     ):
         lines.append(f"*.{suffix} filter=lfs diff=lfs merge=lfs -text")
     return "\n".join(lines) + "\n"
