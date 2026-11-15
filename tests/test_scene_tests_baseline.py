@@ -182,3 +182,14 @@ def test_a_worker_that_did_not_start_is_tried_again(
     answers[:] = [Result(False, "FAIL: door", "", 0.0)]
     assert not asyncio.run(submission.worker_run(["godot"], tmp_path, 10)).ok
     assert slept == [2.0, 4.0]
+
+
+def test_comments_and_path_checks_are_not_dependencies(tmp_path: Path) -> None:
+    _project(tmp_path)
+    (tmp_path / "core/game.gd").write_text(
+        "extends Node\n"
+        "## `res://game/lever.gd` is where the lever lives.\n"
+        'func local(p: String) -> bool:\n\treturn p.begins_with("res://")\n'
+    )
+    door = scene_tests.Tree(tmp_path).dependencies("tests/test_door.gd")
+    assert "game/lever.gd" not in door and "notes.md" not in door

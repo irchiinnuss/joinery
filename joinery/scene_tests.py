@@ -178,12 +178,22 @@ class Tree:
             return known
         found: set[str] = set()
         text = self._text(rel)
+        if rel.endswith((".gd", ".gdshader", ".gdshaderinc")):
+            # A comment line names files but never loads them.
+            text = "\n".join(
+                line
+                for line in text.splitlines()
+                if not line.lstrip().startswith(("#", "//"))
+            )
         for target in _RES.findall(text):
-            target = target.rstrip(".,;:")
+            target = target.rstrip(".,;:`'")
+            # A bare "res://" is a path check (begins_with) or prose, not a load.
+            if not target:
+                continue
             if target in self._set:
                 found.add(target)
             # A folder (or a path built from one): everything under it.
-            prefix = target if target.endswith("/") or not target else target + "/"
+            prefix = target if target.endswith("/") else target + "/"
             if target.endswith("/") or (self.root / target).is_dir():
                 found.update(f for f in self.files if f.startswith(prefix))
             elif target and target not in self._set and "/" in target:
