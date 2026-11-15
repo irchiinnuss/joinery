@@ -575,6 +575,40 @@ func _sound_cue() -> void:
 		)
 	await _seconds(0.7)
 	play.expect(sound == null or not is_instance_valid(sound), "the cue frees itself when done")
+	await _cue_beside_a_player()
+
+
+## A player's hurt sound plays beside it, in the level's Players node: it takes nothing
+## from the game's seeded random numbers and isn't counted as a player (a kept replay
+## of the game before the sound plays the same after it).
+func _cue_beside_a_player() -> void:
+	var game: Node = root.get_node(^"Game")
+	var level: Node3D = Node3D.new()
+	level.name = "CueLevel"
+	world.add_child(level)
+	var spawn_root: Node3D = Node3D.new()
+	spawn_root.name = "Players"
+	level.add_child(spawn_root)
+	var hero: CharacterBody3D = CharacterBody3D.new()
+	hero.add_to_group(&"player")
+	spawn_root.add_child(hero)
+	var hurt: SoundCue = SoundCue.new()
+	hurt.name = "HurtSound"
+	hurt.stream = _wav(0.3, 440.0, false)
+	hero.add_child(hurt)
+	seed(4242)
+	var expected: float = randf()
+	seed(4242)
+	var sound: Node = hurt.play()
+	play.expect(randf() == expected, "a cue's pitch jitter leaves the game's randf() alone")
+	play.expect(sound != null and sound.get_parent() == spawn_root, "it plays beside the player")
+	var kept: Variant = game.get(&"_level")
+	game.set(&"_level", level)
+	var found: Array = game.call(&"players")
+	game.set(&"_level", kept)
+	play.expect(found == [hero], "the sound beside the player is not a player (%s)" % [found])
+	level.queue_free()
+	await play.process_frames(2)
 
 
 func _footsteps_and_ambience() -> void:
@@ -600,6 +634,10 @@ func _footsteps_and_ambience() -> void:
 	world.add_child(zone)
 	zone.position = Vector3(20, 1, 0)
 	play.expect(zone.reverb_bus_enabled and zone.reverb_bus_name == &"Ambience", "zone reverb")
+	# Its shape joins physics after the level around it, never ahead of its bodies.
+	play.expect(zone_shape.disabled, "the zone's shape waits while the level goes in")
+	await play.process_frames(1)
+	play.expect(not zone_shape.disabled, "and joins physics once it is in")
 
 	var script: GDScript = GDScript.new()
 	script.source_code = WALKER_SOURCE

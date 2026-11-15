@@ -158,6 +158,9 @@ func actor_id() -> int:
 	return _actor
 
 
+## The players in the level's `Players` node: those made from the player scene or
+## in group `player`. Other things that land there are not players: a sound a
+## player's SoundCue plays beside it, a spawner, a timer.
 func players() -> Array[Node]:
 	var found: Array[Node] = []
 	if not is_instance_valid(_level):
@@ -165,13 +168,29 @@ func players() -> Array[Node]:
 	var spawn_root: Node = _level.get_node_or_null(^"Players")
 	if spawn_root == null:
 		return found
+	var player_path: String = str(ProjectSettings.get_setting(PLAYER_SETTING, ""))
+	var others: Array[Node] = []
 	for child: Node in spawn_root.get_children():
-		if child is MultiplayerSpawner or child is MultiplayerSynchronizer:
+		if child.is_queued_for_deletion() or not _maybe_player(child):
 			continue
-		if child.is_queued_for_deletion():
-			continue
-		found.append(child)
-	return found
+		var made: bool = not player_path.is_empty() and child.scene_file_path == player_path
+		if made or child.is_in_group(&"player"):
+			found.append(child)
+		else:
+			others.append(child)
+	# A game whose players are neither (another scene, no group): the rest.
+	return found if not found.is_empty() else others
+
+
+static func _maybe_player(node: Node) -> bool:
+	return not (
+		node is MultiplayerSpawner
+		or node is MultiplayerSynchronizer
+		or node is AudioStreamPlayer
+		or node is AudioStreamPlayer2D
+		or node is AudioStreamPlayer3D
+		or node is Timer
+	)
 
 
 ## The player this game instance controls, or null.

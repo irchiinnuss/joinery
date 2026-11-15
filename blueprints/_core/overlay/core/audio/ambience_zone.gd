@@ -30,6 +30,33 @@ func _init() -> void:
 	reverb_bus_amount = 0.4
 
 
+## Its shapes join the physics world only once the level around it is in: a zone
+## that goes into a level (a sound pass) then doesn't come before the level's own
+## bodies, so it can't change the order physics handles them in, and the game plays
+## exactly as it did without it (a kept replay still matches).
+func _enter_tree() -> void:
+	for shape: CollisionShape3D in _own_shapes():
+		if not shape.disabled:
+			shape.disabled = true
+			shape.set_meta(&"_ambience_held", true)
+	_join_physics.call_deferred()
+
+
+func _join_physics() -> void:
+	for shape: CollisionShape3D in _own_shapes():
+		if shape.has_meta(&"_ambience_held"):
+			shape.remove_meta(&"_ambience_held")
+			shape.disabled = false
+
+
+func _own_shapes() -> Array[CollisionShape3D]:
+	var shapes: Array[CollisionShape3D] = []
+	for child: Node in get_children():
+		if child is CollisionShape3D:
+			shapes.append(child as CollisionShape3D)
+	return shapes
+
+
 func _ready() -> void:
 	_player = AudioStreamPlayer.new()
 	_player.name = "Ambience"

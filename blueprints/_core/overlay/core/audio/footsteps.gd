@@ -119,5 +119,5 @@ func _play(stream: AudioStream) -> void:
 		return
 	_player.set(&"stream", stream)
 	_player.set(&"volume_db", volume_db)
-	_player.set(&"pitch_scale", 1.0 + randf_range(-pitch_jitter, pitch_jitter))
+	_player.set(&"pitch_scale", 1.0 + SoundCue.pitch_rng.randf_range(-pitch_jitter, pitch_jitter))
 	_player.call(&"play")

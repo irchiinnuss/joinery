@@ -12,6 +12,11 @@ extends Node
 
 signal played(player: Node)
 
+## The pitch jitter's own random numbers (footsteps share it): a sound never takes
+## from the game's seeded `randf()`, so adding one doesn't change how enemies move
+## or what drops, and a kept replay still plays the same.
+static var pitch_rng: RandomNumberGenerator = RandomNumberGenerator.new()
+
 @export var stream: AudioStream
 @export var bus: StringName = &"SFX"
 ## A signal on the parent node.
@@ -89,4 +94,4 @@ func _host(parent: Node) -> Node:
 
 
 func _pitch() -> float:
-	return 1.0 + randf_range(-pitch_jitter, pitch_jitter)
+	return 1.0 + pitch_rng.randf_range(-pitch_jitter, pitch_jitter)
