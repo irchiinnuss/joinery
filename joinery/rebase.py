@@ -10,6 +10,7 @@ redo that file on top of the accepted version, never silently merged.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import tomllib
@@ -204,6 +205,18 @@ def _settle(base: dict[str, str], path: str, now: str) -> None:
         base[path] = now
     else:
         base.pop(path, None)
+
+
+def lock_moved(tx: FileTransaction) -> bool:
+    """The project's joinery.lock is no longer the one this change began from:
+    another change was accepted meanwhile, perhaps by another process (the CLI,
+    a second editor), which this session's own bookkeeping never sees."""
+    change = next((c for c in tx.changes if c["path"] == LOCK), None)
+    if change is None:
+        return False
+    path = tx.project / LOCK
+    now = hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else ""
+    return now != change["before"]
 
 
 def refresh_review(tx: FileTransaction) -> list[str]:

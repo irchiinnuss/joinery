@@ -64,7 +64,7 @@ from joinery.mcp_runtime import (
 )
 from joinery.mcp_runtime import map_paths as _map_paths
 from joinery.read_access import read_only
-from joinery.rebase import Rebase, rebase, refresh_review
+from joinery.rebase import Rebase, lock_moved, rebase, refresh_review
 from joinery.review import Render, plan, render
 from joinery.server_install import configured
 from joinery.stage_watch import StageWatch
@@ -1554,7 +1554,7 @@ class ProjectGateway:
         if accept:
             # A pull from the Timeline may have moved this change on disk.
             self._reload_review(tx)
-        if accept and self._synced < self.claims.generation:
+        if accept and (self._synced < self.claims.generation or lock_moved(tx)):
             # Another change was accepted since this one was staged.
             refresh_review(tx)
         changes = tx.accept() if accept else []

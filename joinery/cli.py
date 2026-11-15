@@ -726,6 +726,11 @@ def _transaction_decision(project: Path, identifier: str, accept: bool) -> int:
             raise ValueError("Choose the change with --id.")
         tx = FileTransaction.load(project.resolve(), identifier)
         if accept:
+            from joinery.rebase import refresh_review
+
+            # Another change accepted since this one was staged moved the lock:
+            # bring it up to date, as the editor does, rather than refuse.
+            refresh_review(tx)
             changes = tx.accept()
             steps = game_setup.after_accept(tx.project, game_setup.follow_up(tx))
             import_cache.after_accept(
