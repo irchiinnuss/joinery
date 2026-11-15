@@ -26,6 +26,7 @@ from joinery.bible_rules import (
     delta_e_2000,
     glb_triangles,
     image_size,
+    is_data_map,
     linear_rgb,
     load_rules,
     measure_glb,
@@ -168,9 +169,7 @@ def test_models_use_the_most_specific_folder_budget(tmp_path: Path) -> None:
     problems = asyncio.run(
         check_rules(root, ["art/props/crate.glb", "art/hall.glb"], measured(""))
     )
-    assert problems == [
-        "art/props/crate.glb: 12 triangles, over the look's 10 budget"
-    ]
+    assert problems == ["art/props/crate.glb: 12 triangles, over the look's 10 budget"]
 
 
 def test_audio_peak_and_loudness_violations_are_named(tmp_path: Path) -> None:
@@ -253,6 +252,16 @@ def test_palette_counts_opaque_pixels_far_from_every_colour(tmp_path: Path) -> N
             "palette (allowed 25%)"
         )
     ]
+
+
+def test_normal_and_orm_maps_are_not_held_to_the_palette(tmp_path: Path) -> None:
+    root = palette_stage(tmp_path, '["#ff0000"]')
+    maps = ["art/textures/wall_normal.png", "art/textures/wall_orm.png"]
+    for path in maps:
+        (root / path).write_bytes(b"x")
+    # Their pixels are directions and packed values: never sampled for colour.
+    assert asyncio.run(check_rules(root, maps, measured("", ok=False))) == []
+    assert is_data_map("art/a_Normal.png") and not is_data_map("art/a_albedo.png")
 
 
 def test_empty_palette_checks_no_images(tmp_path: Path) -> None:
@@ -1137,7 +1146,10 @@ def test_ui_resources_in_ui_folders_are_checked(tmp_path: Path) -> None:
 GODOT = Path(
     os.environ.get(
         "JOINERY_TEST_GODOT",
-        str(Path(__file__).resolve().parents[1] / ".tools/Godot.app/Contents/MacOS/Godot"),
+        str(
+            Path(__file__).resolve().parents[1]
+            / ".tools/Godot.app/Contents/MacOS/Godot"
+        ),
     )
 )
 

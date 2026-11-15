@@ -55,6 +55,24 @@ _RULES_HEADING = re.compile(
 _AUDIO = {".wav", ".ogg"}
 _MODELS = {".glb", ".blend"}
 _IMAGES = {".png", ".jpg", ".jpeg", ".webp"}
+#: Texture stems whose pixels are data, not colour: surface directions, packed
+#: occlusion/roughness/metallic, heights, masks. A palette says nothing about them.
+DATA_MAP_SUFFIXES = (
+    "_normal",
+    "_normalmap",
+    "_orm",
+    "_arm",
+    "_roughness",
+    "_metallic",
+    "_metalness",
+    "_occlusion",
+    "_ao",
+    "_height",
+    "_depth",
+    "_displacement",
+    "_bump",
+    "_mask",
+)
 _UI_RESOURCES = {".tres", ".tscn"}
 _HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
 #: Images are sampled on a grid, nearest pixel, so no blended colour appears.
@@ -1749,6 +1767,12 @@ def _is_albedo(path: str, rules: MaterialRules) -> bool:
     )
 
 
+def is_data_map(path: str) -> bool:
+    """A texture that stores data (a normal or ORM map), not colours."""
+    stem = PurePosixPath(path).stem.lower()
+    return stem.endswith(DATA_MAP_SUFFIXES)
+
+
 def _excluded(path: str, rules: BibleRules) -> bool:
     return _in_folders(rules.exclude, path)
 
@@ -1901,7 +1925,10 @@ async def _image_problems(
     palette_images = [
         p
         for p in paths
-        if colours and _suffix(p) in _IMAGES and _in_folders(palette_rules.folders, p)
+        if colours
+        and _suffix(p) in _IMAGES
+        and _in_folders(palette_rules.folders, p)
+        and not is_data_map(p)
     ]
     albedo_images = [
         p for p in paths if _suffix(p) in _IMAGES and _is_albedo(p, rules.materials)
