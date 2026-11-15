@@ -652,6 +652,18 @@ class SlowOps(FakeConnection):
         return CallToolResult(content=[TextContent(type="text", text="ok")])
 
 
+async def until(done: Callable[[], bool], seconds: float = 30.0) -> None:
+    """Wait for ``done`` to hold. The gateway reads the stage in a worker thread
+    before it takes a slot, so a fixed number of loop turns is not enough on a
+    busy machine; the deadline only bounds a real hang."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + seconds
+    while not done():
+        if loop.time() > deadline:
+            raise AssertionError(f"still waiting after {seconds:g} s")
+        await asyncio.sleep(0.005)
+
+
 def test_a_krita_edit_waits_for_another_tasks_map_paint(
     project: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -681,10 +693,7 @@ def test_a_krita_edit_waits_for_another_tasks_map_paint(
                     {"source": "art/sources/crate.blend", "material": "Wood"},
                 )
             )
-            for _ in range(200):
-                if "paint_map in" in SlowOps.log or paint.done():
-                    break
-                await asyncio.sleep(0)
+            await until(lambda: "paint_map in" in SlowOps.log or paint.done())
             if paint.done():
                 paint.result()
             assert "paint_map in" in SlowOps.log
@@ -695,8 +704,10 @@ def test_a_krita_edit_waits_for_another_tasks_map_paint(
                     {"tool": "krita", "source": "art/sources/sign.kra"},
                 )
             )
-            for _ in range(20):
-                await asyncio.sleep(0)
+            waiting = ("t2", "Waiting for Krita: another task is using it…")
+            await until(lambda: waiting in said or edit.done())
+            if edit.done():
+                edit.result()
             assert ("t1", "Working in Blender and Krita…") in said
             assert ("t2", "Waiting for Krita: another task is using it…") in said
             assert "operate_document in" not in SlowOps.log
