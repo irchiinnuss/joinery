@@ -47,12 +47,14 @@ from pydantic import (
     model_validator,
 )
 
-from joinery import bible_writing
+from joinery import bible_writing, genre_questions
 from joinery.catalog import ROOT
 
 TEMPLATE = ROOT / "templates" / "game_brief.md"
 BRIEF_PATH = Path("design") / "brief.md"
 ANSWERS_FILE = ".joinery-brief-answers.json"
+#: The answers file's object of question-round answers (``genre_questions``).
+QUESTIONS_KEY = "questions"
 UNSET = "_Not decided yet._"
 EDIT_HINT = "Changing the brief is a reviewed edit of design/brief.md."
 FACTS_SCHEMA = 1
@@ -878,6 +880,7 @@ def draft(
     features: Sequence[str],
     *,
     actions: Mapping[str, Mapping[str, Sequence[object]]] | None = None,
+    questions: Sequence[genre_questions.Answer] = (),
 ) -> str:
     """Render the brief template; no `{{token}}` survives.
 
@@ -885,7 +888,8 @@ def draft(
     `features` the chosen feature ids. `actions` is the applied input map
     (`input_actions(project)`); without it the controls come from the
     blueprint description, with pad bindings only when the controller feature
-    is chosen.
+    is chosen. `questions` are the answers of the optional question round
+    (`genre_questions.resolve`), each written into its section with its mark.
     """
     chosen = set(features)
     facts = draft_facts(blueprint, features)
@@ -942,6 +946,7 @@ def draft(
         "\n".join(f"- {q}" for q in asked) if asked else "None yet."
     )
     values["facts"] = facts_toml(facts)
+    values = genre_questions.into(values, list(questions))
 
     for key, value in answers.items():
         cleaned = str(value or "").strip()
@@ -982,8 +987,12 @@ def write_brief(
     answers: Mapping[str, str],
     blueprint: Mapping[str, Any] | None,
     features: Sequence[str],
+    questions: object = None,
 ) -> Path:
     """Write `<project>/design/brief.md`. Refuses to overwrite an existing brief.
+
+    `questions` is the question round's answers object (`genre_questions.resolve`);
+    None when the round was skipped.
 
     Controls come from the project's applied input map when it has one, so
     they show exactly what the features bound (gamepad buttons included).
@@ -999,7 +1008,16 @@ def write_brief(
         name = project_name(project)
         if name:
             filled["title"] = name
-    text = draft(filled, blueprint, features, actions=input_actions(project) or None)
+    asked = genre_questions.resolve(
+        str(blueprint.get("id") or "") if blueprint else "", questions
+    )
+    text = draft(
+        filled,
+        blueprint,
+        features,
+        actions=input_actions(project) or None,
+        questions=asked,
+    )
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(text, encoding="utf-8")
     return destination
@@ -1028,9 +1046,13 @@ def write_from_answers_file(
         # A ValueError like the JSON error above: both are a bad answers file.
         raise ValueError(f"{source}: expected a JSON object of answers")  # noqa: TRY004
     answers = {
-        str(k): str(v) for k, v in raw.items() if isinstance(v, str | int | float)
+        str(k): str(v)
+        for k, v in raw.items()
+        if isinstance(v, str | int | float) and k != QUESTIONS_KEY
     }
-    return write_brief(project, answers, blueprint, features)
+    return write_brief(
+        project, answers, blueprint, features, questions=raw.get(QUESTIONS_KEY)
+    )
 
 
 # --------------------------------------------------------------------------
@@ -1310,6 +1332,9 @@ def summary(project: Path, game: Mapping[str, Any] | None) -> dict[str, Any]:
     suggestions += [f"Open question in the brief: {q}" for q in brief.open_questions]
     suggestions += _gap_prompts(brief.gaps)
     suggestions += _wording(brief.text)
+    standing = genre_questions.suggestion(brief.text)
+    if standing:
+        suggestions.append(standing)
     return {
         "path": BRIEF_PATH.as_posix(),
         "exists": True,

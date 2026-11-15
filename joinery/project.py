@@ -8,7 +8,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from joinery import bible, brief, game_setup, memory, setup_imports
+from joinery import bible, brief, game_setup, genre_questions, memory, setup_imports
 from joinery.catalog import ROOT, Catalog
 from joinery.installer import Selection, write_mcp_config, write_selection
 from joinery.wiring import write_agent_wiring, write_memory_stubs
@@ -145,6 +145,9 @@ def create_project(
             "References and design documents go on the look and the game brief, "
             "which come with a starting point. Add --blueprint (blank is an empty game)."
         )
+    if answers and blueprint is not None and "brief" in answers:
+        # The question round is checked whole before the project gets anything.
+        genre_questions.resolve(blueprint, answers["brief"].get(brief.QUESTIONS_KEY))
     existed = path.exists()
     path.mkdir(parents=True, exist_ok=True)
     try:

@@ -28,6 +28,7 @@ from joinery import (
     design_cli,
     done_when,
     game_setup,
+    genre_questions,
     godotsteam,
     headless,
     history,
@@ -745,9 +746,15 @@ def _transaction_decision(project: Path, identifier: str, accept: bool) -> int:
     return 0
 
 
-def _brief(project: Path, questions: bool, as_json: bool = False) -> int:
+def _brief(
+    project: Path, questions: bool, as_json: bool = False, blueprint: str = ""
+) -> int:
     if questions:
-        print(json.dumps({"pages": brief.grouped()}, indent=2))
+        data: dict[str, Any] = {"pages": brief.grouped()}
+        if blueprint:
+            # The optional "How it plays" round of that starting point.
+            data["round"] = genre_questions.as_json(blueprint)
+        print(json.dumps(data, indent=2))
         return 0
     if as_json:
         try:
@@ -1455,6 +1462,11 @@ def _parser() -> argparse.ArgumentParser:
         help="print the setup questions as JSON, for a UI front end",
     )
     brief_cmd.add_argument(
+        "--blueprint",
+        metavar="ID",
+        help="with --questions: also the starting point's optional question round",
+    )
+    brief_cmd.add_argument(
         "--json",
         action="store_true",
         help="print the brief's summary and suggestions as JSON",
@@ -1861,7 +1873,7 @@ def main(argv: list[str] | None = None) -> int:
         _timeline_begin(args.project, fresh=False)
         return code
     if args.command == "brief":
-        code = _brief(args.project, args.questions, args.json)
+        code = _brief(args.project, args.questions, args.json, args.blueprint or "")
         if not (args.questions or args.json):
             _timeline_begin(args.project, fresh=False)
         return code

@@ -24,7 +24,15 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, Literal
 
-from joinery import art_approval, bible, blueprints, brief, godotsteam, setup_imports
+from joinery import (
+    art_approval,
+    bible,
+    blueprints,
+    brief,
+    genre_questions,
+    godotsteam,
+    setup_imports,
+)
 from joinery.catalog import ROOT
 from joinery.transactions import FileTransaction, clone_tree, inventory
 
@@ -350,6 +358,8 @@ def apply_choices(
     chosen, app_id, how = check_choices(blueprint, features, steam_app_id, connect)
     if not (project / "project.godot").is_file():
         raise ValueError(f"No project.godot in {project}")
+    # The brief's question round, before anything is written.
+    genre_questions.check_file(project / brief.ANSWERS_FILE, blueprint)
     # Before the addon or anything else is written: never merge a starting
     # point into a game someone already made.
     refusal = blueprints.existing_game(project, blueprint, chosen)
