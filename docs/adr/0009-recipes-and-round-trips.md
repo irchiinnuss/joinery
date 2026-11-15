@@ -5,7 +5,7 @@ Status: accepted, 2026-11-07
 ## Context
 Rule Zero says an asset that cannot be rebuilt from its recipe does not ship.
 That needs a recipe format, a way to replay it, and a way to decide whether the
-replay produced the same asset. Phase 0 also has to prove each tool round-trip
+replay produced the same asset. The first release also has to prove each tool round-trip
 in the asset table with a real asset and a measured latency.
 
 ## Decision

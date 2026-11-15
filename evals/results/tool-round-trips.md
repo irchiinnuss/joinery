@@ -1,9 +1,9 @@
-# Phase 0 report
+# Tool round-trip report
 
 Date: 2026-11-07. Sandbox runner, amd64 emulated on an arm64 host, so the
 timings below are an upper bound on native CI.
 
-## Gate
+## Goal
 
 > Every Testbed asset rebuilds from its recipe in CI; editing each source
 > updates the running Godot editor.
@@ -27,7 +27,7 @@ produce, so an asset cannot change without its lock entry.
 **Second half: partly met.** Godot imports every source headlessly and
 reimports on change, which is the mechanism the editor uses. That it updates a
 *running editor window* is unproven: there is no sidebar or plugin yet, and
-nothing GUI has been exercised. Suggested split in the plan below.
+nothing GUI has been exercised. Suggested split below.
 
 ## What works
 
@@ -51,7 +51,7 @@ ADR 0008.
 ## What is missing
 
 **MPFB2 character with rigify.** Not attempted. It is the heaviest asset in the
-list and wants the typed-op layer that Phase 3 is for.
+list and wants the typed-op layer, which came later.
 
 **The 2D asset (Krita UI panel).** Not delivered, and the reason is structural
 rather than a missing hour:
@@ -77,12 +77,12 @@ So the 3D, audio and engine pipelines are proven and the 2D one is not. Called
 out rather than papered over, per the honest-refusal rule.
 
 **Material Maker.** Not used: ADR 0003 already makes Blender the material tool
-for now, so the material is shader nodes plus a bake. The plan's asset table
+for now, so the material is shader nodes plus a bake. The roadmap.s asset table
 still says Material Maker.
 
 **MCP servers.** Still stubs. Round-trips were proven by driving the tools
-directly, which was the point of a spike; the typed-op layer on top is later
-phases.
+directly, which was the point of a spike; the typed-op layer on top comes
+later.
 
 ## What reproducibility cost
 
@@ -101,26 +101,26 @@ rebuild twice rather than by reasoning:
 Determinism is not free: the material bake went from 7.6 s to 29.5 s once it
 rendered single-threaded.
 
-## Recommended plan changes
+## Recommended roadmap changes
 
 1. **Asset table: materials.** Replace the Material Maker row with Blender
    shader nodes plus bake, matching ADR 0003, and move Material Maker to the
-   phase where its server actually exists.
-2. **Asset table: music.** The plan wants `.mid` plus SoundFont. SuperCollider
+   work where its server actually exists.
+2. **Asset table: music.** The roadmap wants `.mid` plus SoundFont. SuperCollider
    covers composition and rendering today with one enabled tool, and FluidSynth
    with the GM SoundFont is proven in the image. Allow either, and defer the
-   MIDI-first path to the sound phase with `servers/sound`.
+   MIDI-first path to the sound work with `servers/sound`.
 3. **2D path.** Decide between: wrap Krita's GUI process under xvfb (keeps the
    intended tool, costs a live-process server), or make Inkscape the headless
    2D path and keep Krita for live manual work. This blocks the 2D pipeline
-   either way and is worth settling before the 2D phase.
-4. **Character.** Move MPFB2 plus rigify out of Phase 0 and into the Blender
-   phase, where the op library and the character work already live.
+   either way and is worth settling before the 2D pipeline work.
+4. **Character.** Move MPFB2 plus rigify out of this report and into the Blender
+   work, where the op library and the character work already live.
 5. **Add a reproducibility rule to the conventions.** Recipes must be
    deterministic: seed every RNG, pin thread counts where output depends on
    them, and declare a camera render explicitly so its looser check is visible.
    This is cheap to state and was the single biggest source of rework here.
-6. **Split the gate wording.** "Editing a source updates the running editor"
+6. **Split the goal wording.** "Editing a source updates the running editor"
    should be two items: headless reimport, verifiable in CI now, and live
    editor reimport, which belongs with the sidebar work.
 7. **Note the Godot/Blender coupling.** Native `.blend` import needs the

@@ -4,7 +4,7 @@ Status: accepted, 2026-11-07
 
 ## Context
 The Journeyman sidebar must drive whichever agent the user runs without knowing
-which one it is. PLAN.md §3 called for an "agent-agnostic interface" over a
+which one it is. The design called for an agent-agnostic interface over a
 local socket; ADR 0006 made enforcement agent-agnostic, and the bridge is the
 matching seam for the sidebar.
 
@@ -31,5 +31,5 @@ The adapters are declared seams, not finished transports. `ready` is `False` for
 all of them, and the bridge will not pretend an agent can run. The socket
 transport to the Godot side and the real per-agent transports (Claude via the
 Agent SDK, Codex via its app-server protocol, Gemini and opencode via their
-CLIs/APIs) are Phase 2; the contract and the fail-closed check exist now so they
+CLIs/APIs) come later; the contract and the fail-closed check exist now so they
 hold for every agent from the start.

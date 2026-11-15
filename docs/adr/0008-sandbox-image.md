@@ -6,7 +6,7 @@ Status: accepted, 2026-11-07
 ADR 0002 and ADR 0006 both end at the same place: the per-agent hooks are a
 guard rail, and the offline sandbox worker is what actually guarantees Rule
 Zero. A hook matches text and can be talked around; a process with no network
-cannot reach a generative service at all. Phase 0 also needs the creative tools
+cannot reach a generative service at all. The first round-trips also need the creative tools
 installed somewhere reproducible before any round-trip can be measured.
 
 ## Decision
@@ -26,7 +26,7 @@ that can run a Godot project and render audio and video.
 fluidsynth and xvfb come from Debian, which pins and GPG-verifies them. Only
 four artifacts are downloaded directly. Every package name was checked against
 Debian trixie rather than assumed; Krita is 5.2.9 and SuperCollider 3.13.0,
-both above what PLAN requires.
+both above the required versions.
 
 **A tool that the OS does not package is replaced, not forced.** (The Surge XT
 example below was wrong; see [ADR 0021](0021-surge-xt.md).) Surge XT is
@@ -87,9 +87,9 @@ Aseprite is deliberately absent: its licence forbids redistribution, so it
 was removed from the catalog (ADR 0025) and Krita is the pixel-art path.
 
 Building needs network and several gigabytes of disk; running does not need
-network and must not have it. `surgepy`, which PLAN names for rendering notes
+network and must not have it. `surgepy`, once named for rendering notes
 through Surge XT, is therefore not installed either; the SuperCollider path
-replaces it, and PLAN's sound stage should be read that way.
+replaces it.
 
 The image is amd64 because Blender and Material Maker publish no Linux arm64
 build, which also matches CI. On an arm64 host it runs emulated, where a long
