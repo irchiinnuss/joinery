@@ -227,6 +227,23 @@ def test_joinery_submits_a_change_the_agent_left(host: Host) -> None:
     assert preview["origin"] == "joinery" and preview["summary"] == "Add a.gd"
 
 
+def test_the_chat_says_a_change_the_agent_left_waits_for_review(host: Host) -> None:
+    async def agent(bridge: Any) -> AsyncIterator[Any]:
+        host.stage({"a.gd": "extends Node\n"})
+        yield Message(text="Nothing was saved, so there is nothing to review.")
+        yield Done(ok=True)
+
+    host.run(agent)
+    kinds = host.kinds()
+    # Joinery's own line comes after the agent's words and before the turn ends.
+    positions = order(kinds, "message", "file_preview", "notice", "done")
+    assert positions == sorted(positions)
+    notice = host.events[kinds.index("notice")]
+    assert notice["about"] == "left_change" and notice["level"] == "info"
+    assert notice["text"].startswith("A change is waiting for your review · ")
+    assert notice["text"].endswith("It holds a.gd (created).")
+
+
 def test_a_change_the_agent_left_keeps_its_own_name(host: Host) -> None:
     async def agent(bridge: Any) -> AsyncIterator[Any]:
         tx = host.stage({"scenes/ashtray.tscn": SCENE})
@@ -267,8 +284,9 @@ def test_a_failed_auto_submit_asks_once_then_holds_it_with_the_failure(
     preview = host.events[kinds.index("file_preview")]
     assert [c["check"] for c in preview["failed_checks"]] == ["references"]
     notice = host.events[kinds.index("notice")]
-    assert notice["level"] == "warn"
-    assert notice["text"].startswith("Waiting for your review, but it failed a check · ")
+    assert notice["level"] == "warn" and notice["about"] == "left_change"
+    assert notice["text"].startswith("A change is waiting for your review · ")
+    assert "It holds scenes/ashtray.tscn (created)." in notice["text"]
     assert "ashtray.tscn uses a file the change doesn't include" in notice["text"]
     assert "Not submitted" not in notice["text"], "The agent's wording stays with it"
     assert notice["text"].endswith("Look at the failed checks before you accept it.")

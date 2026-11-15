@@ -78,6 +78,9 @@ EVENTS = frozenset(
     }
 )
 NO_EDITOR = "No editor is open in this run; stage saved files."
+#: A notice's ``about`` when Joinery submitted the change the agent left
+#: (``bridge.turn_runner.left_notice``): the run's reply ends with it.
+LEFT_CHANGE = "left_change"
 #: Seconds a run may go without any event from the host before it is stopped.
 TIMEOUT = 900.0
 #: Seconds the host gets, once a run stops, to keep what it applied and close.
@@ -358,6 +361,8 @@ async def _follow(
 
     sent = False
     reply: list[str] = []
+    #: Joinery's own lines that belong at the end of the reply (``_with_notices``).
+    joinery_says: list[str] = []
     tasks: dict[str, dict[str, str]] = {}
     waiting: dict[str, Any] | None = None
     while True:
@@ -408,6 +413,14 @@ async def _follow(
             reply.append(str(event.get("text", "")))
         elif kind == "message" and not event.get("task_id"):
             outcome.reply = str(event.get("text", "")).strip() or outcome.reply
+        elif (
+            kind == "notice"
+            and event.get("about") == LEFT_CHANGE
+            and not event.get("task_id")
+        ):
+            # Joinery submitted the change the agent left: the reply says so, even
+            # when the agent said there was nothing to review.
+            joinery_says.append(str(event.get("text", "")).strip())
         elif kind == "file_preview" and not event.get("task_id"):
             outcome.transaction_id = str(event.get("transaction_id", ""))
             outcome.summary = str(event.get("summary", ""))
@@ -420,7 +433,9 @@ async def _follow(
             _task(tasks, event)
         elif kind == "timing" and not event.get("task_id"):
             outcome.outcome = str(event.get("outcome", ""))
-            outcome.reply = outcome.reply or "".join(reply).strip()
+            outcome.reply = _with_notices(
+                outcome.reply or "".join(reply).strip(), joinery_says
+            )
             if outcome.outcome not in {"done", ""} and outcome.state == "none":
                 outcome.state = "failed"
             if waiting is not None and outcome.outcome == "done":
@@ -451,12 +466,22 @@ async def _follow(
             outcome.state = "accepted" if event.get("accepted") else "rejected"
             return outcome
         elif kind == "quiet":
-            outcome.reply = outcome.reply or "".join(reply).strip()
+            outcome.reply = _with_notices(
+                outcome.reply or "".join(reply).strip(), joinery_says
+            )
             outcome.tasks = [t for t in tasks.values() if t["transaction_id"]]
             return outcome
     if outcome.kept:
         return outcome  # a crash after the host kept the change: nothing is lost
     raise HostClosed("The chat host closed before the request finished.")
+
+
+def _with_notices(reply: str, notices: list[str]) -> str:
+    """The agent's reply with Joinery's own lines after it, each once."""
+    for notice in notices:
+        if notice and notice not in reply:
+            reply = f"{reply}\n\nJoinery: {notice}" if reply else f"Joinery: {notice}"
+    return reply
 
 
 def _says_go(go: GoPolicy, todo: dict[str, Any]) -> bool:
@@ -721,7 +746,11 @@ def finish(outcome: Outcome, project: Path, as_json: bool) -> int:
         if outcome.unplayed.get("text"):
             print(str(outcome.unplayed["text"]) + ": play the game to check them.")
         if outcome.auto_accept_held and outcome.state == "review":
-            print("Not accepted automatically: " + "; ".join(outcome.auto_accept_held) + ".")
+            print(
+                "Not accepted automatically: "
+                + "; ".join(outcome.auto_accept_held)
+                + "."
+            )
         if outcome.note:
             print(outcome.note)
         if outcome.todo_waiting:

@@ -292,3 +292,38 @@ def test_an_accepting_run_does_not_decide_an_auto_accepted_change_again(
     )
     assert outcome.state == "accepted" and outcome.transaction_id == "tx9"
     assert not seen.exists()  # no decision was sent
+
+
+#: A host whose agent says there is nothing to review while Joinery submits the change
+#: it left (``bridge.turn_runner.left_notice``).
+LEFT_HOST = """
+import json, sys
+def say(event):
+    print(json.dumps(event), flush=True)
+say({"kind": "connection", "state": "connected"})
+sys.stdin.readline()
+say({"kind": "message", "text": "Nothing was saved, so there is nothing to review."})
+say({"kind": "file_preview", "transaction_id": "tx3", "summary": "Rust material"})
+say({"kind": "notice", "level": "info", "about": "left_change",
+     "text": "A change is waiting for your review · It holds art/rust.png (created)."})
+say({"kind": "timing", "outcome": "done"})
+sys.stdin.readline()
+say({"kind": "quiet"})
+sys.stdin.readline()
+"""
+
+
+def test_the_reply_says_when_joinery_put_the_agents_change_up(tmp_path: Path) -> None:
+    command, _seen = fake(tmp_path, LEFT_HOST)
+    outcome = asyncio.run(
+        headless.drive(
+            command(tmp_path, headless.Pin("claude")),
+            [{"kind": "prompt", "text": "Rust"}],
+            timeout=30,
+        )
+    )
+    assert outcome.state == "review" and outcome.transaction_id == "tx3"
+    assert outcome.reply == (
+        "Nothing was saved, so there is nothing to review.\n\nJoinery: A change is "
+        "waiting for your review · It holds art/rust.png (created)."
+    )

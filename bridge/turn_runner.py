@@ -31,6 +31,7 @@ from bridge.protocol import (
 )
 from joinery import done_when, metrics
 from joinery.fallback import is_quota
+from joinery.headless import LEFT_CHANGE
 from joinery.timing import TurnTiming
 from joinery.turn import MAX_CONTINUATIONS, Problem, SubmitResult, TurnController
 
@@ -116,10 +117,60 @@ def held_notice(result: SubmitResult) -> dict[str, Any]:
     if reasons:
         detail = "; ".join(reasons[:2])
         text += (
-            "\n" + detail[:1].upper() + detail[1:] + ". Look at the failed checks before "
+            "\n"
+            + detail[:1].upper()
+            + detail[1:]
+            + ". Look at the failed checks before "
             "you accept it."
         )
     return {"kind": "notice", "level": "warn", "text": text}
+
+
+def _contents(result: SubmitResult, limit: int = 4) -> str:
+    """The change's files in a line: "a.gd (new), b.png (changed) and 2 more"."""
+    paths = [c["path"] for c in result.changes if c.get("path")]
+    files = [
+        f"{c['path']} ({c['change']})" if c.get("change") else c["path"]
+        for c in result.changes
+        if c.get("path")
+        # A folder the change made shows through its files.
+        and not any(p.startswith(c["path"].rstrip("/") + "/") for p in paths)
+    ]
+    shown = ", ".join(files[:limit])
+    if len(files) > limit:
+        shown += f" and {len(files) - limit} more"
+    if result.live_edits:
+        edits = f"{result.live_edits} live edit" + "s" * (result.live_edits > 1)
+        shown = f"{shown} and {edits}" if shown else edits
+    return shown or "its staged files"
+
+
+def left_notice(result: SubmitResult) -> dict[str, Any] | None:
+    """Joinery's own line when it submitted the change the agent left and that change
+    waits for review, or was kept automatically. The agent may have said there was
+    nothing to review, so the chat says what there is. None otherwise."""
+    if result.status == "accepted":
+        text = (
+            "Change kept automatically · Journeyman stopped without submitting it, "
+            "so Joinery checked it and auto-accept kept it\nIt holds "
+        )
+    elif result.status == "in_review":
+        text = (
+            "A change is waiting for your review · Journeyman stopped without "
+            "submitting it, so Joinery put it up for review\nIt holds "
+        )
+    else:
+        return None
+    text += _contents(result) + "."
+    if result.problems:
+        reasons = [r for r in dict.fromkeys(map(_plain, result.problems)) if r]
+        text += (
+            " It failed a check"
+            + (": " + "; ".join(reasons[:2]) if reasons else "")
+            + ". Look at the failed checks before you accept it."
+        )
+    level = "warn" if result.problems else "info"
+    return {"kind": "notice", "level": level, "text": text, "about": LEFT_CHANGE}
 
 
 def continuation(prompt: Prompt, result: SubmitResult) -> Prompt:
@@ -544,8 +595,12 @@ async def _run_turn(
     dropped = (
         last is not None and last.final and last.status in {"failed", "needs_user"}
     )
+    # The agent may have said there is nothing to review: the chat says what is.
+    said = left_notice(result) if result is not None and result is last else None
     if last is not None and last.status == "failed" and last.final:
         emit(failure_notice(last))
+    elif said is not None:
+        emit(said)
     elif last is not None and last.status == "in_review" and last.problems:
         emit(held_notice(last))
     emit(Done(ok=ok).model_dump())
