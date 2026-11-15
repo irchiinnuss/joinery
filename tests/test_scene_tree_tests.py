@@ -140,3 +140,38 @@ def test_tests_that_cannot_run_alone_are_left_out_and_the_games_come_first(
         "tests/unit/test_lever.gd",
         "tests/features/online/a_test.gd",
     ]
+
+
+#: What Godot printed for a live run's test that names BehaviourAgent.
+COMPILED_EARLY = (
+    "SCRIPT ERROR: Compile Error: Identifier not found: Replays\n"
+    "          at: GDScript::reload (res://features/behaviour/behaviour_agent.gd:113)\n"
+    "SCRIPT ERROR: Compile Error: Failed to compile depended scripts.\n"
+)
+
+
+def test_a_test_that_cannot_see_an_autoload_is_told_how_to_reach_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tx = _stage(tmp_path)
+    (tx.stage / "project.godot").write_text(
+        'config_version=5\n\n[autoload]\n\nReplays="*res://core/replays/replays.gd"\n'
+        'Game="*res://core/game.gd"\n\n[display]\n\nwindow/size/mode=0\n'
+    )
+    assert submission.autoloads(tx.stage) == ["Replays", "Game"]
+    hint = submission.autoload_hint(tx.stage, COMPILED_EARLY)
+    assert "Replays is an autoload" in hint
+    assert 'root.get_node(^"/root/Replays")' in hint and "play.replays" in hint
+    # Another unknown name is the test's own mistake: no hint.
+    assert submission.autoload_hint(tx.stage, "Identifier not found: Lever") == ""
+
+    async def offline(argv: list[str], _root: Path, *_a: Any, **_k: Any) -> Result:
+        if "--import" in argv:
+            return Result(True, "", "", 0.0)
+        return Result(False, COMPILED_EARLY, "", 0.0)
+
+    monkeypatch.setattr("joinery.submission.run_offline", offline)
+    problems = asyncio.run(
+        submission.run_scene_tests(tx.stage, ["tests/test_door.gd"], tx=None)
+    )
+    assert "Replays is an autoload" in problems[0].message

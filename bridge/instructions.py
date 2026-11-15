@@ -313,7 +313,10 @@ TODO_GUIDE = (
     "res://tests/test_<name>.gd that extends SceneTree, checks in _initialize() and "
     "ends with quit(0) on pass or prints FAIL: <why> and quit(1), reaching a quit on "
     "every path (keep in a variable any object whose methods or Callables you use, "
-    "never chain .new().call(...)); Joinery runs both "
+    "never chain .new().call(...); it is compiled before the autoloads exist, so "
+    'reach core singletons with root.get_node(^"/root/Replays") or PlayHarness '
+    '(play.game, play.replays, PlayHarness.autoload(self, "Name")) and put checks '
+    "naming game classes in a script it load()s once it runs); Joinery runs both "
     "kinds with the project's tests), check, or look when only the user can judge "
     "(a look item keeps the change waiting for the user, so prefer a checkable one). "
     "Pass after when some steps need nothing before them (two separate models): "

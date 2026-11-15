@@ -146,6 +146,10 @@ _RUN_LINE = re.compile(r"^##\s*Run:\s*(.*)$")
 #: One half of a test that needs a second game process (``## Client: --join=...``).
 _PAIR_LINE = re.compile(r"^##\s*(?:Host|Client|Server):", re.MULTILINE)
 _OPENXR_ON = re.compile(r"^openxr/enabled=true$", re.MULTILINE)
+#: A script that names something Godot doesn't know when it compiles it.
+_UNKNOWN_NAME = re.compile(r"Identifier not found: (\w+)")
+#: The autoloads a project declares, by name.
+_AUTOLOAD_LINE = re.compile(r'^(\w+)="\*?res://', re.MULTILINE)
 
 
 def is_reference(path: str) -> bool:
@@ -865,8 +869,41 @@ async def run_scene_tests(
                 else reasons.tests(output)
             ),
         )
-        for script, output in verdict.broken.items()
+        for script, said in verdict.broken.items()
+        for output in [said + autoload_hint(stage, said)]
     ]
+
+
+def autoloads(stage: Path) -> list[str]:
+    """The names of the project's autoloads (``[autoload]`` in project.godot)."""
+    try:
+        text = (stage / "project.godot").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    section = re.search(
+        r"^\[autoload\]\s*$(.*?)(?=^\[|\Z)", text, re.MULTILINE | re.DOTALL
+    )
+    return _AUTOLOAD_LINE.findall(section.group(1)) if section else []
+
+
+def autoload_hint(stage: Path, output: str) -> str:
+    """Why a SceneTree test can't see an autoload, when its output says so.
+
+    Godot compiles a ``-s`` script, and every class it names, before it adds the
+    autoloads' names: a test that names ``Replays``, or a game class whose script
+    does, fails with "Identifier not found" though the autoload is running."""
+    names = set(autoloads(stage))
+    missing = sorted({n for n in _UNKNOWN_NAME.findall(output) if n in names})
+    if not missing:
+        return ""
+    listed = ", ".join(missing)
+    return (
+        f"\n{listed} is an autoload, and Godot compiles a SceneTree test (and every "
+        "class it names) before the autoloads' names exist. In the test file reach "
+        f'it with root.get_node(^"/root/{missing[0]}") or PlayHarness '
+        f'(play.replays, PlayHarness.autoload(self, "{missing[0]}")), and put '
+        "checks that name game classes in a script the test load()s once it runs."
+    )
 
 
 def scene_test_passed(got: Result) -> bool:

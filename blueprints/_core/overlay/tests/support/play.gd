@@ -8,9 +8,14 @@ extends RefCounted
 ##        -- --autostart --settings-path=/tmp/settings.cfg
 ##
 ## The `--script` file is compiled before the autoloads exist, so it cannot name
-## `Game`, `Menus`, `Settings` or `GameEvents` directly. Use `play.game`,
-## `play.menus`, `play.settings` and `play.events` there instead; scripts the
-## test loads later (and every game script) can use the autoload names.
+## `Game`, `Menus`, `Settings`, `GameEvents` or `Replays` directly. Use
+## `play.game`, `play.menus`, `play.settings`, `play.events` and `play.replays`
+## there instead, or `PlayHarness.autoload(self, "Name")` for any other. Nor can
+## it name a game class (`class_name`) whose script uses an autoload, such as
+## `BehaviourAgent` (it uses `Replays`): that fails with "Identifier not found".
+## Put such checks in a second script the test `load()`s once it runs, as the
+## feature tests' `*_checks.gd` do; scripts loaded then (and every game script)
+## can use the autoload names.
 
 var tree: SceneTree
 var name: String
@@ -20,6 +25,7 @@ var game: Node
 var menus: Node
 var settings: Node
 var events: Node
+var replays: Node
 
 
 ## Holds the process to at most `fps` frames a second. `Engine.max_fps` does
@@ -27,6 +33,12 @@ var events: Node
 ## headless test otherwise runs thousands of frames a second and its game
 ## clock races far ahead of real time: of real-time waits, and of a second
 ## game process that is still starting up.
+## The autoload named [param autoload_name] ("Replays", "Dialogue"), or null: for
+## the `--script` file, which cannot name it.
+static func autoload(scene_tree: SceneTree, autoload_name: String) -> Node:
+	return scene_tree.root.get_node_or_null(NodePath(autoload_name))
+
+
 static func pace(scene_tree: SceneTree, fps: int) -> void:
 	var frame_usec: int = 1000000 / maxi(fps, 1)
 	var due: Array[int] = [Time.get_ticks_usec()]
@@ -47,6 +59,7 @@ func _init(scene_tree: SceneTree, test_name: String) -> void:
 	menus = tree.root.get_node_or_null(^"Menus")
 	settings = tree.root.get_node_or_null(^"Settings")
 	events = tree.root.get_node_or_null(^"GameEvents")
+	replays = tree.root.get_node_or_null(^"Replays")
 	_size_headless_window()
 	expect(game != null and menus != null, "the core autoloads are loaded")
 
