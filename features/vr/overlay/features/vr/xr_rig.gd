@@ -69,7 +69,7 @@ func carry(player: Node3D) -> void:
 		ray.clear_exceptions()
 		if body is CollisionObject3D:
 			ray.add_exception(body as CollisionObject3D)
-	if body != null:
+	if is_instance_valid(body):
 		body.set_physics_process(false)
 		body.set_process_unhandled_input(false)
 	_apply_settings()
@@ -105,7 +105,7 @@ func pointer_hand() -> XRController3D:
 func teleport_to(point: Vector3) -> void:
 	var feet: Vector3 = _feet()
 	var offset: Vector3 = point - feet
-	if body != null:
+	if is_instance_valid(body):
 		body.global_position += offset
 		if body is CharacterBody3D:
 			(body as CharacterBody3D).velocity = Vector3.ZERO
@@ -164,21 +164,21 @@ func _speed() -> float:
 func _can_move() -> bool:
 	if Menus.is_open():
 		return false
-	if body != null and "controls_enabled" in body:
+	if is_instance_valid(body) and "controls_enabled" in body:
 		return bool(body.get(&"controls_enabled"))
 	return true
 
 
 func _feet() -> Vector3:
 	var head: Vector3 = camera.global_position
-	var base: Vector3 = body.global_position if body != null else global_position
+	var base: Vector3 = body.global_position if is_instance_valid(body) else global_position
 	return Vector3(head.x, base.y, head.z)
 
 
 ## Keeps the body under the head when the player walks in their room: the
 ## body moves, and the rig moves back the same amount so the view stays.
 func _follow_head() -> void:
-	if body == null:
+	if not is_instance_valid(body):
 		return
 	var offset: Vector3 = camera.global_position - body.global_position
 	offset.y = 0.0
@@ -199,7 +199,7 @@ func _move(velocity: Vector3, delta: float) -> void:
 		fall = 0.0 if character.is_on_floor() else fall - _gravity * delta
 		character.velocity = Vector3(velocity.x, fall, velocity.z)
 		character.move_and_slide()
-	elif body != null:
+	elif is_instance_valid(body):
 		body.global_position += velocity * delta
 	else:
 		global_position += velocity * delta
@@ -331,7 +331,8 @@ func _tint(mesh: MeshInstance3D, colour: Color) -> void:
 
 
 func _apply_settings() -> void:
-	position.y = Comfort.height_offset(bool(VR.setting("seated"))) if body != null else position.y
+	if is_instance_valid(body):
+		position.y = Comfort.height_offset(bool(VR.setting("seated")))
 
 
 func _on_settings_changed(section: String, _key: String) -> void:

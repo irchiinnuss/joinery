@@ -96,10 +96,13 @@ func spawn(scene: PackedScene, parent: Node, data: Dictionary) -> Node:
 		return null
 	var spawner: MultiplayerSpawner = _spawner_for(parent)
 	if spawner == null:
+		var where: NodePath = (
+			level.get_path_to(parent) if is_instance_valid(level) else parent.get_path()
+		)
 		push_warning(
 			(
 				"Online: %s is not listed in online/spawn_parents, so %s appears only on the server."
-				% [level.get_path_to(parent) if level != null else parent.get_path(), scene.resource_path]
+				% [where, scene.resource_path]
 			)
 		)
 		return GameSession.new().spawn(scene, parent, data)
@@ -114,7 +117,7 @@ func request(target: Node, action: StringName, args: Array) -> void:
 		else:
 			push_warning("Action %s is not available on %s." % [action, target])
 		return
-	if level == null or not is_instance_valid(target) or not _in_level(target):
+	if not is_instance_valid(level) or not is_instance_valid(target) or not _in_level(target):
 		push_warning("Online: %s is not part of the level, so %s cannot run." % [target, action])
 		return
 	_request_action.rpc_id(SERVER, str(level.get_path_to(target)), action, _plain(args))
@@ -122,7 +125,7 @@ func request(target: Node, action: StringName, args: Array) -> void:
 
 ## Server: a peer finished authenticating; pull it into the running level.
 func peer_joined(id: int) -> void:
-	if multiplayer.is_server() and level != null and serial > 0:
+	if multiplayer.is_server() and is_instance_valid(level) and serial > 0:
 		_enter_level.rpc_id(id, serial)
 
 
@@ -349,7 +352,7 @@ func _place(node: Node, index: int) -> void:
 
 
 func _spawner_for(parent: Node) -> MultiplayerSpawner:
-	if level == null or not is_instance_valid(parent):
+	if not is_instance_valid(level) or not is_instance_valid(parent):
 		return null
 	var key: String = str(level.get_path_to(parent))
 	var spawner: Variant = _spawners.get(key)
@@ -362,7 +365,7 @@ func _spawner_for(parent: Node) -> MultiplayerSpawner:
 
 
 func _on_world_changed(node: Node) -> void:
-	if not active() or not multiplayer.is_server() or level == null:
+	if not active() or not multiplayer.is_server() or not is_instance_valid(level):
 		return
 	if not is_instance_valid(node) or not _in_level(node) or _is_player(node):
 		return
@@ -396,7 +399,7 @@ func _snapshot() -> Dictionary:
 
 
 func _apply_state(path: String, state: Variant) -> void:
-	if level == null or not is_instance_valid(level) or not state is Dictionary:
+	if not is_instance_valid(level) or not state is Dictionary:
 		return
 	var node: Node = level.get_node_or_null(NodePath(path))
 	if node != null and node.has_method(&"load_state"):
@@ -417,7 +420,7 @@ func _enter_level(level_serial: int) -> void:
 @rpc("any_peer", "call_remote", "reliable")
 func _level_loaded(level_serial: int) -> void:
 	var sender: int = multiplayer.get_remote_sender_id()
-	if not multiplayer.is_server() or level == null or level_serial != serial:
+	if not multiplayer.is_server() or not is_instance_valid(level) or level_serial != serial:
 		return
 	level_peers[sender] = true
 	_send_level_peers()
@@ -439,20 +442,20 @@ func _request_enter() -> void:
 		)
 		if player != null:
 			player.queue_free()
-	if level != null and serial > 0:
+	if is_instance_valid(level) and serial > 0:
 		_enter_level.rpc_id(sender, serial)
 
 
 @rpc("any_peer", "call_remote", "reliable")
 func _request_restart() -> void:
-	if multiplayer.is_server() and level != null:
+	if multiplayer.is_server() and is_instance_valid(level):
 		Game.restart_level()
 
 
 @rpc("any_peer", "call_remote", "reliable")
 func _request_action(path: String, action: StringName, args: Array) -> void:
 	var sender: int = multiplayer.get_remote_sender_id()
-	if not multiplayer.is_server() or level == null or not level_peers.has(sender):
+	if not multiplayer.is_server() or not is_instance_valid(level) or not level_peers.has(sender):
 		return
 	var target: Node = level.get_node_or_null(NodePath(path))
 	if target == null or (_is_player(target) and target.get_multiplayer_authority() != sender):
@@ -494,7 +497,7 @@ func _visible_to(peer: int) -> bool:
 
 func _in_level(node: Node) -> bool:
 	return (
-		level != null
+		is_instance_valid(level)
 		and is_instance_valid(level)
 		and (node == level or level.is_ancestor_of(node))
 	)
