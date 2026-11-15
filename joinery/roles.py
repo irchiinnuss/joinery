@@ -343,6 +343,14 @@ _READERS = frozenset(
         "diff",
         "tree",
         "true",
+        "which",
+        "paste",
+        "tr",
+        "comm",
+        "column",
+        "basename",
+        "dirname",
+        "realpath",
     }
 )
 _GIT_READS = frozenset({"log", "show", "diff", "status", "blame", "ls-files"})
@@ -402,10 +410,18 @@ def _reads(tokens: list[str]) -> bool:
     return True
 
 
+#: Redirections that write nothing: error output dropped or joined to the output
+#: (``ls x 2>/dev/null``, ``rg y 2>&1 | head``).
+_HARMLESS_REDIRECT = re.compile(
+    r"(?<![\w<>&|])(?:[12]?>\s*/dev/null|2>&1)(?=$|[\s;|)])"
+)
+
+
 def read_only_command(command: str) -> bool:
-    """True when every part of ``command`` only reads: no redirection, no
-    substitution, nothing run in the background, only known readers."""
-    inner = _unwrap(command)
+    """True when every part of ``command`` only reads: no redirection (beyond
+    dropping or joining error output), no substitution, nothing run in the
+    background, only known readers."""
+    inner = _HARMLESS_REDIRECT.sub(" ", _unwrap(command))
     if re.search(r"[<>`]|\$\(|&(?!&)", inner.replace("&&", "")):
         return False
     segments = _segments(inner)

@@ -176,6 +176,18 @@ def test_read_only_roles_reach_audited_reads_only(
         ("joinery bible --approve me", False),
         ("git commit -am x", False),
         ("cat $(echo a)", False),
+        # Commands Journeyman tried and was refused, though they only read.
+        ("ls audio -R 2>/dev/null | head -30", True),
+        ("which godot godot4 2>/dev/null", True),
+        ("rg -n surface game 2>&1 | head", True),
+        ("grep -n node a.tscn | paste - - | cut -f1", True),
+        ("ls x >/dev/null 2>&1", True),
+        # Still refused: a real redirection, a program run for each line, awk.
+        ("ls 2>errors.txt", False),
+        ("ls > /dev/null.txt", False),
+        ("cat a 2>&1 > out.txt", False),
+        ("awk '{print > \"f\"}' a", False),
+        ("ls | xargs rm", False),
     ],
 )
 def test_read_only_roles_run_only_reading_commands(
