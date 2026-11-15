@@ -17,7 +17,7 @@ from __future__ import annotations
 import re
 import shutil
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from mcp.server import MCPServer
 
@@ -28,6 +28,9 @@ from joinery.recipe import HISTORY_DIR, RECIPE_DIR, store_preimage
 from joinery.tools import blender_parts, krita_ops
 from servers.authoring import Step, _exports, _name, run_step
 from servers.errors import tool_errors
+
+if TYPE_CHECKING:
+    from joinery.bible_rules import TexturePlan
 
 #: Where a model's editable maps live: art/sources/maps/<model>/<image>.kra.
 MAPS_DIR = "art/sources/maps"
@@ -237,32 +240,26 @@ async def make_map_editable(
     return await _two_steps(project, (document, picture), seed_krita, link_krita)
 
 
-def bible_map_size(project: Path, source: str) -> int:
-    """A new map's size from the look: its texel density over one metre, capped.
-
-    One texture across a metre of surface is how a size per metre is read in
-    the bible's answers too (`bible_presets.answer_texel_density`); the
-    texture size limit for the folder caps it. 512 without a rule.
-    """
-    from joinery.bible_rules import _folder_value, parse_rules, rules_text
+def bible_texture_plan(project: Path, source: str) -> TexturePlan:
+    """A new map's size and how to lay it on, from the look's texel density and
+    texture size limit for the folder (bible_rules.texture_plan). 512 px with no
+    density when the project has no readable checked rules."""
+    from joinery.bible_rules import TexturePlan, parse_rules, rules_text, texture_plan
 
     path = project / "art" / "bible.md"
     block = rules_text(path.read_text()) if path.is_file() else None
     if block is None:
-        return 512
+        return TexturePlan(512, None, None)
     try:
         rules = parse_rules(block)
     except ValueError:
-        return 512
-    texel = _folder_value(rules.models.texel_density, source)
-    wanted = texel.px_per_m if texel else 512.0
-    size = 8
-    while size < 4096 and size * 1.5 < wanted:
-        size *= 2
-    limit = _folder_value(rules.textures.max_size, source)
-    while limit and size > limit and size > 8:
-        size //= 2
-    return size
+        return TexturePlan(512, None, None)
+    return texture_plan(rules, source)
+
+
+def bible_map_size(project: Path, source: str) -> int:
+    """A new map's size from the look (:func:`bible_texture_plan`)."""
+    return bible_texture_plan(project, source).size
 
 
 async def add_painted_map(
@@ -279,7 +276,9 @@ async def add_painted_map(
     _name(material, "material")
     parts.check_targets(parts.prompt_targets(project, source), material=material)
     image = _clean(image or f"{material}_{role}")
-    chosen = size or bible_map_size(project, source)
+    plan = bible_texture_plan(project, source)
+    chosen = size or plan.size
+    look = plan._replace(size=chosen)
     code = blender_parts.add_map_code(material, image, role, chosen, interpolation)
     document, picture = map_paths(source, image)
 
@@ -297,7 +296,19 @@ async def add_painted_map(
         made = await make_map_editable(
             project, source, material, image, "krita", exports
         )
-        return {**made, "added": added, "size": chosen, "image": image}
+        return {
+            **made,
+            "added": added,
+            "size": chosen,
+            "image": image,
+            # The look's density and how to meet it with this size.
+            "texel": {
+                "px_per_m": look.px_per_m,
+                "max_size": look.max_size,
+                "uv_scale": look.uv_scale,
+                "advice": look.advice(),
+            },
+        }
 
     return await _two_steps(
         project,
@@ -620,7 +631,7 @@ def register(server: MCPServer[Any], project: Path) -> None:
         interpolation: str = "linear",
         exports: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Give a flat-colour material of a Blender model a texture painted in Krita, when the look calls for textures. Adds an image map on one input (role: base_color, roughness, metallic, emission, normal), filled with the input's current colour or value so nothing changes yet; meshes using the material without UVs are unwrapped. The map then becomes a Krita document under art/sources/maps/<model>/ (as make_map_editable), so paint it with paint_map. size defaults to the look's texel density over one metre (capped by its texture size limit); interpolation "closest" keeps pixel art crisp. image defaults to <material>_<role>."""
+        """Give a flat-colour material of a Blender model a texture painted in Krita, when the look calls for textures. Adds an image map on one input (role: base_color, roughness, metallic, emission, normal), filled with the input's current colour or value so nothing changes yet; meshes using the material without UVs are unwrapped. The map then becomes a Krita document under art/sources/maps/<model>/ (as make_map_editable), so paint it with paint_map. size defaults to the look's texel density over one metre (capped by its texture size limit); interpolation "closest" keeps pixel art crisp. image defaults to <material>_<role>. The result's texel says the look's px/m and how to meet it at this size: set_texel_density on the model with that px_per_m, or uv1_scale on a world-mapped material."""
         return await add_painted_map(
             project, source, material, role, image, size, interpolation, exports
         )

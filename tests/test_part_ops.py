@@ -554,3 +554,27 @@ def test_a_new_map_is_sized_from_the_bible(tmp_path: Path) -> None:
     block = rules_block(None, {"look": "pixel-art textures, 64x64 px"})
     (tmp_path / "art/bible.md").write_text(f"# Look\n\n```toml\n{block}```\n")
     assert bible_map_size(tmp_path, SOURCE) == 64
+
+
+def test_a_new_map_reads_the_bibles_density_and_texture_size(tmp_path: Path) -> None:
+    from joinery.bible_presets import rules_block
+    from servers.blender_ops.ops import bible_texture_plan
+
+    (tmp_path / "art").mkdir()
+
+    def plan(look: str, preset: str | None = None) -> Any:
+        block = rules_block(preset, {"look": look})
+        (tmp_path / "art/bible.md").write_text(f"# Look\n\n```toml\n{block}```\n")
+        return bible_texture_plan(tmp_path, SOURCE)
+
+    # A size alone: made at that size, no density to lay it on at.
+    sized = plan("pixel-art textures, 64x64 px")
+    assert (sized.size, sized.px_per_m, sized.uv_scale) == (64, None, None)
+    # The size and its tile: 64 px covering 2 m, so a world-mapped scale of 0.5.
+    tiled = plan("pixel-art textures 64x64 px, one per 2 m tile")
+    assert (tiled.size, tiled.px_per_m, tiled.uv_scale) == (64, 32, 0.5)
+    assert "uv1_scale to 0.5" in tiled.advice()
+    assert "set_texel_density with px_per_m 32" in tiled.advice()
+    # A preset's generous limit only caps: one texture per metre at its density.
+    preset = plan("", "vr-3d")
+    assert (preset.size, preset.px_per_m, preset.uv_scale) == (256, 256, 1.0)

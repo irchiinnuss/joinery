@@ -1135,6 +1135,58 @@ _VECTOR3 = re.compile(r"Vector3\(\s*([-\d.e]+)\s*,\s*([-\d.e]+)\s*,\s*([-\d.e]+)
 _MATERIALS = {"StandardMaterial3D", "ORMMaterial3D"}
 
 
+class TexturePlan(NamedTuple):
+    """How big a new texture is, and how it is laid on to meet the look."""
+
+    #: Width and height in pixels.
+    size: int
+    #: The look's texel density for the texture's folder (None: not checked).
+    px_per_m: float | None
+    #: The folder's texture size limit (None: none).
+    max_size: int | None
+
+    @property
+    def uv_scale(self) -> float | None:
+        """``uv1_scale`` for a world-mapped (triplanar) material: one UV unit is a
+        metre, so the density is the width times the scale."""
+        return None if self.px_per_m is None else self.px_per_m / self.size
+
+    def advice(self) -> str:
+        """One line for the agent: the size, and how to lay it on."""
+        if self.px_per_m is None:
+            return f"{self.size} px; the look sets no texel density."
+        return (
+            f"{self.size} px at the look's {self.px_per_m:g} px/m: one texture covers "
+            f"{self.size / self.px_per_m:g} m. On a model, call set_texel_density "
+            f"with px_per_m {self.px_per_m:g}; on a world-mapped material "
+            f"(uv1_world_triplanar) set uv1_scale to {self.uv_scale:g}."
+        )
+
+
+def texture_plan(rules: BibleRules, path: str) -> TexturePlan:
+    """A new texture's size from the look: one texture per metre of surface at the
+    folder's texel density (512 px when none is set), never over the folder's
+    texture size limit, a power of two.
+
+    A limit close above that size (under 4×) is the texture size the user chose
+    with a tile size ("64x64 px textures, one per 2 m tile": 32 px/m, limit 64),
+    so the texture is made at the limit and covers more than a metre (its
+    ``uv_scale``); the presets' generous limits (4× and more) only cap.
+    """
+    texel = _folder_value(rules.models.texel_density, path)
+    limit = _folder_value(rules.textures.max_size, path)
+    wanted = texel.px_per_m if texel else 512.0
+    size = 8
+    while size < 4096 and size * 1.5 < wanted:
+        size *= 2
+    while limit and size > limit and size > 8:
+        size //= 2
+    if texel and limit and size < limit < 4 * size:
+        while size * 2 <= limit:
+            size *= 2
+    return TexturePlan(size, texel.px_per_m if texel else None, limit)
+
+
 class TexelReading(NamedTuple):
     """One world-mapped texture's density in a Godot material, and its rule."""
 
