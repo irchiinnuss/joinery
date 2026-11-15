@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import importlib
 import json
 import shlex
@@ -747,6 +748,32 @@ def _transaction_decision(project: Path, identifier: str, accept: bool) -> int:
     return 0
 
 
+def _brief_status(project: Path, check: bool, as_json: bool) -> int:
+    """`joinery brief --status [--check]`: each feature's mark and its evidence."""
+    from joinery import brief_status
+
+    try:
+        if not (project / brief.BRIEF_PATH).is_file():
+            raise FileNotFoundError(project / brief.BRIEF_PATH)
+        found = (
+            asyncio.run(brief_status.check(project))
+            if check
+            else brief_status.marks(project)
+        )
+    except FileNotFoundError:
+        message = "This project has no game brief yet (design/brief.md)."
+        print(json.dumps({"error": message}) if as_json else message)
+        return 1
+    except (OSError, ValueError, RuntimeError) as exc:
+        print(json.dumps({"error": str(exc)}) if as_json else f"brief: {exc}")
+        return 1
+    if as_json:
+        print(json.dumps(brief_status.report(project, found)))
+    else:
+        print("\n".join(brief_status.lines(found)))
+    return 0
+
+
 def _brief(
     project: Path, questions: bool, as_json: bool = False, blueprint: str = ""
 ) -> int:
@@ -1472,6 +1499,16 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="print the brief's summary and suggestions as JSON",
     )
+    brief_cmd.add_argument(
+        "--status",
+        action="store_true",
+        help="mark each feature built, missing, broken or not checked, from evidence",
+    )
+    brief_cmd.add_argument(
+        "--check",
+        action="store_true",
+        help="with --status: play the game and run the tests and replays now",
+    )
     auth = commands.add_parser("auth", help="show how to sign an agent in")
     auth.add_argument(
         "agent", nargs="?", choices=[a.id for a in all_agents()], default=None
@@ -1878,6 +1915,8 @@ def main(argv: list[str] | None = None) -> int:
         _timeline_begin(args.project, fresh=False)
         return code
     if args.command == "brief":
+        if args.status or args.check:
+            return _brief_status(args.project.resolve(), args.check, args.json)
         code = _brief(args.project, args.questions, args.json, args.blueprint or "")
         if not (args.questions or args.json):
             _timeline_begin(args.project, fresh=False)
