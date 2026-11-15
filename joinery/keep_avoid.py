@@ -76,8 +76,8 @@ class Flag:
     def text(self) -> str:
         """The review note."""
         head = "Keep" if self.kind == "keep" else "Avoid"
-        where = f" ({self.path})" if self.path and self.path not in self.what else ""
-        return f"Brief {head} line “{self.line}”: {self.what}{where}."
+        where = f" in {self.path}" if self.path and self.path not in self.what else ""
+        return f"Crosses the brief's {head} line “{self.line}”: it {self.what}{where}."
 
     def as_dict(self) -> dict[str, str | int]:
         return {
@@ -222,14 +222,11 @@ def _keep_flags(
             if now is not None and abs(now - line.pin.value) < 1e-6:
                 continue  # back to the pinned value
             if now is None:
-                what = f"{name} {_number(was or 0)} is removed"
+                what = f"removes {name} ({_number(was or 0)})"
             elif was is None:
-                what = f"{name} set to {_number(now)} (the brief pins {line.pin.text})"
+                what = f"sets {name} to {_number(now)}"
             else:
-                what = (
-                    f"{name} {_number(was)} → {_number(now)} "
-                    f"(the brief pins {line.pin.text})"
-                )
+                what = f"moves {name} from {_number(was)} to {_number(now)}"
             flags.append(Flag("keep", line.text, line.line, what, rel))
             break
     return flags
@@ -325,15 +322,13 @@ def check(
         for line in brief.avoid:
             hit = _avoid_hit(line, tokens)
             if hit:
-                add(
-                    Flag("avoid", line.text, line.line, f"the change adds “{hit}”", rel)
-                )
+                add(Flag("avoid", line.text, line.line, f"adds “{hit}”", rel))
     if said.strip():
         tokens = _tokens(said)
         for line in brief.avoid:
             hit = _avoid_hit(line, tokens)
             if hit:
-                add(Flag("avoid", line.text, line.line, f"the change is about “{hit}”"))
+                add(Flag("avoid", line.text, line.line, f"is about “{hit}”"))
     return flags[:MAX_FLAGS]
 
 

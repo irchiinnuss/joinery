@@ -121,9 +121,11 @@ def test_moving_an_exported_value_is_flagged(tmp_path: Path) -> None:
     )
     assert [f.kind for f in flags] == ["keep"]
     assert flags[0].line == "Jump height 1.2 m"
-    assert flags[0].what == "jump_height 1.2 → 1.5 (the brief pins 1.2 m)"
+    assert flags[0].what == "moves jump_height from 1.2 to 1.5"
     assert flags[0].path == "player/player.gd"
-    assert "Keep line “Jump height 1.2 m”" in flags[0].text()
+    assert flags[0].text() == (
+        "Crosses the brief's Keep line “Jump height 1.2 m”: it moves jump_height from 1.2 to 1.5 in player/player.gd."
+    )
 
 
 def test_a_scene_override_and_a_project_setting_are_found(tmp_path: Path) -> None:
@@ -197,8 +199,8 @@ def test_avoid_words_in_what_a_change_adds(tmp_path: Path) -> None:
         },
     )
     assert {(f.line, f.what) for f in flags} == {
-        ("Guns (gun, rifle, pistol)", "the change adds “rifle”"),
-        ("Timers in puzzles", "the change adds “timer puzzle”"),
+        ("Guns (gun, rifle, pistol)", "adds “rifle”"),
+        ("Timers in puzzles", "adds “timer puzzle”"),
     }
 
 
