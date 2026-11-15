@@ -101,7 +101,7 @@ Named setups Journeyman reuses, so every level is lit from the same few recipes.
 {{lighting}}
 
 ## 9. Materials and texel density (checked)
-Roughness range, metallic only on real metal, albedo bounds (no pure black or white), texel density per asset class (models, and textures laid on in world space), texture size limits, power of two, texture naming suffixes. A texture size given at setup ("64 px pixel art") is that many px/m.
+Roughness range, metallic only on real metal, albedo bounds (no pure black or white), texel density per asset class (models, and textures laid on in world space), texture size limits, power of two, texture naming suffixes. A texture size given at setup ("64x64 px pixel art") is the texture size limit; a texel density comes only from a density ("64 px/m") or a texture size with the metres one tile covers ("64 px per 2 m tile" is 32 px/m).
 > e.g. Roughness 0.4–0.95; metallic 0 or 1, only on metal named so; albedo luminance 0.03–0.92; 256 px/m ± 20 % for props, 128 px/m for terrain; textures ≤ 2048 px, power of two; `_albedo`, `_normal`, `_orm`.
 
 {{materials}}

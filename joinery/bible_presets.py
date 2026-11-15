@@ -413,6 +413,17 @@ _PX_PER_M = re.compile(
 _SQUARE = re.compile(r"\b(\d+)\s*[x×]\s*(\d+)\b")
 _PX = re.compile(r"\b(\d+)\s*-?\s*(?:px|pixels?)\b", re.IGNORECASE)
 _TEXTURE_WORDS = re.compile(r"textur|pixel|tile", re.IGNORECASE)
+_METRE = r"(\d+(?:\.\d+)?)\s*-?\s*(?:m|metres?|meters?)\b"
+#: The metres one tile or texture covers: "2 m tiles", "one tile per 2 m",
+#: "each texture spans 2 metres".
+_TILE_METRES = (
+    re.compile(_METRE + r"\s*(?:tiles?|squares?|grid)", re.IGNORECASE),
+    re.compile(
+        r"(?:tile|texture)s?\b[^.;\n]{0,40}?"
+        r"(?:=|per|every|across|covers?|spans?|is|of|over)\s*" + _METRE,
+        re.IGNORECASE,
+    ),
+)
 #: Answers that may describe textures; the palette answer holds colours.
 _LOOK_KEYS = ("look", "materials", "models", "sprites", "vision", "references")
 
@@ -434,31 +445,59 @@ def _power_of_two(value: int) -> bool:
     return 8 <= value <= 4096 and value & (value - 1) == 0
 
 
-def answer_texel_density(answers: dict[str, str]) -> float | None:
-    """Pixels per metre the user's answers ask for, if they give one.
+def _look_texts(answers: dict[str, str]) -> list[str]:
+    return [str(answers.get(key) or "") for key in _LOOK_KEYS]
 
-    "256 px/m" is taken as written. A texture size ("64x64 px pixel-art
-    textures", "32 px tiles") means one texture across a metre of surface,
-    the usual way such a size is meant, so 64 px is 64 px/m.
-    """
-    texts = [str(answers.get(key) or "") for key in _LOOK_KEYS]
-    for text in texts:
-        match = _PX_PER_M.search(text)
-        if match:
-            return float(match.group(1))
-    for text in texts:
+
+def answer_texture_size(answers: dict[str, str]) -> int | None:
+    """The texture size in pixels the user's answers give ("64x64 px pixel-art
+    textures", "32 px tiles"): a size, so it becomes the texture size limit, not a
+    density. A density ("256 px/m") is not a size."""
+    for text in _look_texts(answers):
         if not _TEXTURE_WORDS.search(text):
             continue
+        text = _PX_PER_M.sub(" ", text)
         square = _SQUARE.search(text)
         if (
             square
             and square.group(1) == square.group(2)
             and _power_of_two(int(square.group(1)))
         ):
-            return float(square.group(1))
+            return int(square.group(1))
         for match in _PX.finditer(text):
             if _power_of_two(int(match.group(1))):
+                return int(match.group(1))
+    return None
+
+
+def answer_tile_metres(answers: dict[str, str]) -> float | None:
+    """The metres one tile or texture covers, when the answers say ("2 m tiles",
+    "one texture per 2 m tile")."""
+    for text in _look_texts(answers):
+        for pattern in _TILE_METRES:
+            match = pattern.search(text)
+            if match and float(match.group(1)) > 0:
                 return float(match.group(1))
+    return None
+
+
+def answer_texel_density(answers: dict[str, str]) -> float | None:
+    """Pixels per metre the user's answers ask for, only when they give one.
+
+    "256 px/m" is taken as written. A texture size with the metres one tile
+    covers gives it too: "64x64 px textures, one per 2 m tile" is 32 px/m. A
+    texture size alone ("64x64 px pixel-art textures") says nothing about how
+    much surface one texture covers, so it sets no density
+    (:func:`answer_texture_size` makes it the size limit instead).
+    """
+    texts = _look_texts(answers)
+    for text in texts:
+        match = _PX_PER_M.search(text)
+        if match:
+            return float(match.group(1))
+    size, metres = answer_texture_size(answers), answer_tile_metres(answers)
+    if size is not None and metres is not None:
+        return size / metres
     return None
 
 
@@ -467,39 +506,58 @@ def _number(value: float) -> float | int:
 
 
 def answer_rules(answers: dict[str, str]) -> dict[str, Any]:
-    """Checked rules the user's own answers set: palette colours, texel density."""
+    """Checked rules the user's own answers set: palette colours, the texture size
+    limit, and a texel density only when the answers give one."""
     rules: dict[str, Any] = {}
     colours = answer_colours(answers)
     if colours:
         rules["palette"] = {"colours": colours}
+    size = answer_texture_size(answers)
+    if size is not None:
+        rules["textures"] = {"max_size": {"art": size}}
     density = answer_texel_density(answers)
     if density is not None:
         rules["models"] = {
             "texel_density": {"art": {"px_per_m": _number(density), "tolerance": 0.2}}
         }
+    elif size is not None:
+        # The user said how big a texture is, not how much surface it covers: a
+        # preset's density would contradict their size, so none is checked.
+        rules["models"] = {"texel_density": {}}
     return rules
 
 
 def apply_preset(answers: dict[str, str], preset: str | None) -> dict[str, str]:
     """Preset section bodies under the user's answers; the answers win.
 
-    A density the answers give replaces the preset's in its suggested text
-    too, so the prose and the checked rules say the same number.
+    A density or texture size the answers give replaces the preset's in its
+    suggested text too, so the prose and the checked rules say the same numbers.
 
     Raises ValueError when the preset would fill a taste token.
     """
     chosen = get(preset)
     density = answer_texel_density(answers)
+    size = answer_texture_size(answers)
     preset_density = _lookup(chosen.rules, "models.texel_density.art.px_per_m")
     values: dict[str, str] = {}
     for token, body in chosen.sections.items():
         if bible_schema.is_taste(token):
             raise ValueError(f"preset {chosen.id!r} may not fill {token!r}")
         text = body.strip()
-        if density is not None and preset_density is not None:
+        if preset_density is not None and (density is not None or size is not None):
             text = re.sub(
-                rf"\b{_number(float(preset_density))}\s*px/m",
-                f"{_number(density)} px/m (from your answers)",
+                rf"\b{_number(float(preset_density))}\s*px/m(?:\s*±\s*\d+\s*%)?"
+                if density is None
+                else rf"\b{_number(float(preset_density))}\s*px/m",
+                f"{_number(density)} px/m (from your answers)"
+                if density is not None
+                else f"a texture size of {size} px (from your answers)",
+                text,
+            )
+        if size is not None:
+            text = re.sub(
+                r"\bat most \d+\s*px\b",
+                f"at most {size} px (from your answers)",
                 text,
             )
         values[token] = suggested_line(chosen.name) + "\n\n" + text
@@ -518,6 +576,13 @@ def rules_dict(
     if "models" in given:
         # The user's number holds for every folder, not only where the preset had none.
         rules["models"]["texel_density"] = {}
+    if "textures" in given:
+        # So does their texture size; interface art keeps its own limit.
+        rules["textures"]["max_size"] = {
+            folder: limit
+            for folder, limit in rules["textures"].get("max_size", {}).items()
+            if folder.endswith("/ui")
+        }
     return merge(rules, given)
 
 

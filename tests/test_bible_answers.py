@@ -6,7 +6,12 @@ import json
 from pathlib import Path
 
 from joinery.bible import ANSWERS_FILE, write_from_answers_file
-from joinery.bible_presets import answer_texel_density, rules_dict
+from joinery.bible_presets import (
+    answer_texel_density,
+    answer_texture_size,
+    answer_tile_metres,
+    rules_dict,
+)
 from joinery.bible_rules import (
     BibleRules,
     TexelRule,
@@ -18,7 +23,9 @@ from tests.test_bible import FULL
 
 
 def test_numbers_in_the_answers_become_checked_rules(tmp_path: Path) -> None:
-    """The user's texture size and hex colours win over the preset's numbers."""
+    """The user's texture size and hex colours win over the preset's numbers. A
+    texture size is a size limit, never a texel density: "64x64 px" says nothing
+    about how much surface one texture covers."""
     answers = {
         **FULL,
         "look": "chunky pixel-art textures, 64x64 px, nearest filtering",
@@ -32,18 +39,40 @@ def test_numbers_in_the_answers_become_checked_rules(tmp_path: Path) -> None:
     assert block is not None
     parsed = parse_rules(block)
     assert parsed.palette.colours == ["#8a3b12", "#222222", "#6e7b85"]
-    assert {k: v.px_per_m for k, v in parsed.models.texel_density.items()} == {
-        "art": 64
-    }
-    # The preset's prose says the same number as the rules.
-    assert "512 px/m" not in text
-    assert "64 px/m (from your answers)" in text
+    assert parsed.textures.max_size == {"art": 64, "art/ui": 1024}
+    # No density: the preset's 512 px/m would contradict the user's size.
+    assert parsed.models.texel_density == {}
+    # The preset's prose says the same as the rules.
+    assert "at 512 px/m" not in text and "at most 2048 px" not in text
+    assert "a texture size of 64 px (from your answers)" in text
+    assert "at most 64 px (from your answers)" in text
+
+
+def test_a_texture_size_and_its_tile_in_metres_give_a_density(
+    tmp_path: Path,
+) -> None:
+    """The rerun's answer with the tile it was meant for: 64 px over a 2 m tile."""
+    answers = {**FULL, "look": "pixel-art textures 64x64 px, one per 2 m tile"}
+    (tmp_path / ANSWERS_FILE).write_text(json.dumps(answers))
+    written = write_from_answers_file(tmp_path, "stylised-pbr-3d")
+    assert written is not None
+    block = rules_text(written.read_text())
+    assert block is not None
+    parsed = parse_rules(block)
+    assert parsed.models.texel_density["art"].px_per_m == 32
+    assert parsed.textures.max_size["art"] == 64
+    assert "32 px/m (from your answers)" in written.read_text()
 
 
 def test_px_per_metre_answer_is_taken_as_written() -> None:
     assert answer_texel_density({"look": "PBR at 256 px/m"}) == 256
+    assert answer_texture_size({"look": "PBR at 256 px/m"}) is None
     assert answer_texel_density({"look": "1 px outlines, flat colours"}) is None
-    assert answer_texel_density({"look": "32 px tiles"}) == 32
+    assert answer_texel_density({"look": "32 px tiles"}) is None
+    assert answer_texture_size({"look": "32 px tiles"}) == 32
+    assert answer_texel_density({"look": "32 px textures on 2 m tiles"}) == 16
+    assert answer_tile_metres({"look": "each texture spans 4 metres"}) == 4
+    assert answer_tile_metres({"look": "a 16 m tall tower, pixel textures"}) is None
 
 
 def test_no_numbers_keep_the_preset() -> None:
