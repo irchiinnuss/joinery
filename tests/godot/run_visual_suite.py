@@ -87,6 +87,11 @@ SIDEBAR_STATES = (
     "tidy-all",
     "tidy-sent",
     "tidy-clean",
+    "brief-status",
+    "cut",
+    "cut-cuts",
+    "cut-sent",
+    "review-keep-avoid",
     "variants-working",
     "variants",
     "variants-picked",
@@ -395,21 +400,26 @@ def startup(theme: str, capture: Path, logs: Path) -> Harness:
 
 def sidebar(capture: Path, logs: Path) -> Harness:
     harness = Harness("sidebar")
+    # `--states a,b` (JOINERY_VISUAL_STATES) captures only those sidebar states.
+    only = [s for s in os.environ.get("JOINERY_VISUAL_STATES", "").split(",") if s]
     harness.expected = (
         [
             f"sidebar-{state}-{theme}-{width}.png"
             for state in SIDEBAR_STATES
+            if not only or state in only
             for theme in THEMES
             for width in SIDEBAR_WIDTHS
         ]
         + [
             f"sidebar-{state}-{theme}-480.png"
             for state in SIDEBAR_NARROW
+            if not only or state in only
             for theme in THEMES
         ]
         + [
             f"sidebar-{state}-{theme}-1000.png"
             for state in SIDEBAR_WIDE
+            if not only or state in only
             for theme in THEMES
         ]
     )
@@ -422,6 +432,10 @@ def sidebar(capture: Path, logs: Path) -> Harness:
             'config_version=5\n[rendering]\nrenderer/rendering_method="gl_compatibility"\n'
         )
         env = isolated_environment(temporary, ROOT, capture)
+        if only:
+            env["JOINERY_VISUAL_STATES"] = ",".join(only)
+        if os.environ.get("JOINERY_BACKGROUND"):
+            env["JOINERY_BACKGROUND"] = "1"  # never take focus (ADR 0032)
         binary = isolated_editor(engine_binary(), temporary)
         base = [str(binary), "--path", str(project), "--audio-driver", "Dummy"]
         run_godot(harness, base + ["--headless", "--editor", "--import"], env, logs)
@@ -700,7 +714,14 @@ def main() -> int:
         help="Skip the older startup, assistant and scene-edit harnesses",
     )
     parser.add_argument("--themes", nargs="+", choices=THEMES, default=list(THEMES))
+    parser.add_argument(
+        "--states",
+        default="",
+        help="Capture only these sidebar states (comma-separated)",
+    )
     args = parser.parse_args()
+    if args.states:
+        os.environ["JOINERY_VISUAL_STATES"] = args.states
     if sys.prefix == sys.base_prefix:
         raise SystemExit("Run this suite with uv run python.")
     out: Path = args.out.resolve()

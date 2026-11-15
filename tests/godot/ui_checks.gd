@@ -666,7 +666,19 @@ static func _target(control: Control) -> String:
 
 ## Save `viewport` as <screen>.png in JOINERY_CAPTURE_DIR, then check `roots`.
 ## Prints "VISUAL-CAPTURE <file>" so the runner can confirm every screen exists.
+## Whether [param screen] ("sidebar-cut-dark-480") is one JOINERY_VISUAL_STATES asks for
+## ("cut,brief-status"); every screen when it is unset.
+static func wanted(screen: String) -> bool:
+	var only := OS.get_environment("JOINERY_VISUAL_STATES").split(",", false)
+	if only.is_empty() or not screen.begins_with("sidebar-"):
+		return true
+	var parts := screen.trim_prefix("sidebar-").rsplit("-", true, 2)
+	return parts.size() == 3 and only.has(parts[0])
+
+
 static func snapshot(screen: String, viewport: Viewport, roots: Array) -> bool:
+	if not wanted(screen):
+		return true
 	var frame: Image = null
 	var directory := OS.get_environment("JOINERY_CAPTURE_DIR")
 	if not directory.is_empty() and DisplayServer.get_name() != "headless":

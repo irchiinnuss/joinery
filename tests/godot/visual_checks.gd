@@ -3,6 +3,24 @@ extends RefCounted
 ## performance, and the sound pass. [param suite] is visual_sidebar_test.gd, whose `_shot` and
 ## `_check` these use.
 
+const FEATURE_BRIEF := """# Game brief — Lamplight
+
+## 1. Pitch
+A keeper fixes the harbour lights before the storm.
+
+## 18. Features
+- Lamps light up (test: res://tests/test_lamp.gd)
+- The keeper reaches the lighthouse (reach: lighthouse)
+- The harbour has a crane (reach: crane)
+- Fishing for fun
+
+## 19. Keep
+- Jump height 1.2 m
+
+## 20. Avoid
+- Guns (gun, rifle, pistol)
+"""
+
 
 ## Make it match: the scores and the top findings, then its fixes running as tasks.
 static func match_shots(suite: Variant, light: bool, width: int, chat: Control) -> void:
@@ -139,3 +157,89 @@ static func sound_pass(suite: Variant, light: bool, width: int, chat: Control) -
 	card.free()
 	tasks.set("sound_card", null)
 	tasks.call("sync_visible")
+
+
+## The brief's features marked from evidence on the /brief page; /cut's polish list, cuts and
+## ship estimate, and once written; and a change in review that crosses a Keep line.
+static func brief_and_cut(suite: Variant, light: bool, width: int, chat: Control) -> void:
+	var dialogs: Script = load("res://addons/joinery/art_review_dialog.gd")
+	dialogs.call("show_document", chat, "Game brief", FEATURE_BRIEF, "Change the game brief: ")
+	var page: Control = chat.get_meta("joinery_art_page")
+	var marks: GDScript = load(
+		(suite.get_script() as Script).resource_path.get_base_dir().path_join(
+			"brief_status_test.gd"
+		)
+	)
+	page.call("show_feature_status", marks.get_script_constant_map()["REPORT"])
+	await suite._shot("brief-status", light, width, chat)
+	page.call("set_open", false)
+
+	var tasks: Node = chat.get("_tasks")
+	var cards: GDScript = load(
+		(suite.get_script() as Script).resource_path.get_base_dir().path_join("cut_card_test.gd")
+	)
+	var cutter: Node = tasks.get_node("Cut")
+	cutter.set("runner", func(_args: PackedStringArray) -> Dictionary: return cards.call("report"))
+	cutter.call("open")
+	var card: Control = tasks.get("cut_card")
+	suite._check(card != null, "The cut card shows")
+	await suite._shot("cut", light, width, chat)
+	var scroll := card.get("_scroll") as ScrollContainer
+	scroll.scroll_vertical = int(scroll.get_v_scroll_bar().max_value)
+	await suite._shot("cut-cuts", light, width, chat)
+	card.call("set_sent", ["c1", "c2"])
+	await suite._shot("cut-sent", light, width, chat)
+	card.free()
+	tasks.set("cut_card", null)
+	tasks.call("sync_visible")
+
+	# A change that moves a pinned Keep value: the review names the line.
+	var host := Control.new()
+	host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	chat.get_parent().add_child(host)
+	var ground := ColorRect.new()
+	ground.color = Color("f7f6f3") if light else Color("202123")
+	ground.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	host.add_child(ground)
+	var panel: Control = load("res://addons/joinery/review_panel.gd").new()
+	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	host.add_child(panel)
+	(
+		panel
+		. call(
+			"show_file_review",
+			"Make the jump higher",
+			(
+				"--- player/player.gd\n+++ player/player.gd\n@@ -3 +3 @@\n"
+				+ "-@export var jump_height := 1.2\n+@export var jump_height := 1.8"
+			),
+			[],
+			[{"path": "player/player.gd", "change": "modified"}],
+		)
+	)
+	(
+		panel
+		. call(
+			"show_glance",
+			{
+				"facts": ["jump higher"],
+				"changes": [{"path": "player/player.gd", "change": "modified"}],
+				"checks": {"ran": ["Godot import", "tests"], "skipped": []},
+				"review_notes":
+				[
+					{
+						"severity": "warn",
+						"rule": "brief",
+						"file": "player/player.gd",
+						"text":
+						(
+							"Crosses the brief's Keep line “Jump height 1.2 m”: it moves "
+							+ "jump_height from 1.2 to 1.8 in player/player.gd."
+						),
+					},
+				],
+			}
+		)
+	)
+	await suite._shot("review-keep-avoid", light, width, host)
+	host.free()
