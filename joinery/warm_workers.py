@@ -65,7 +65,13 @@ async def _command(argv: list[str], timeout: int) -> Result:
         *argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
     )
     try:
-        output, error = await asyncio.wait_for(process.communicate(), timeout)
+        try:
+            output, error = await asyncio.wait_for(process.communicate(), timeout)
+        except TimeoutError:
+            from joinery.authoring import WorkerTimeout
+
+            # A bare TimeoutError reads as an empty error to the agent.
+            raise WorkerTimeout(timeout) from None
         return Result(
             process.returncode == 0,
             output.decode(errors="replace"),

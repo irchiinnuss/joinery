@@ -7,6 +7,7 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 import shutil
 import uuid
 from dataclasses import dataclass, field
@@ -59,6 +60,17 @@ def confined(project: Path, relative: str) -> Path:
     if not target.resolve().is_relative_to(project.resolve()):
         raise ValueError("The document is outside this project.")
     return target
+
+
+#: Warnings an app prints about its own bundled scripts on every start (Krita's
+#: scripter under Python 3.12): never the agent's code, and long enough to push
+#: the real traceback out of the error the agent reads.
+_NOISE = re.compile(r"^\S+\.py:\d+: SyntaxWarning: .*\n(?:[ \t]+.*\n?)?", re.MULTILINE)
+
+
+def _quiet(output: str) -> str:
+    """``output`` without the apps' own start-up warnings."""
+    return _NOISE.sub("", output)
 
 
 class WorkerTimeout(TimeoutError):
@@ -281,11 +293,22 @@ async def edit_document(
             result = await run_offline(argv, project, image=module.replay_image)
         else:
             result = await run_offline(argv, project)
+    except WorkerTimeout as late:
+        _restore(project, kept)
+        script.unlink(missing_ok=True)
+        raise RuntimeError(
+            f"{tool} did not finish the document operation in {late.seconds:g} s "
+            "and was stopped: the code may loop forever or wait for something "
+            f"that never comes. {_quiet(late.output)[-1500:]}".rstrip()
+        ) from None
     except BaseException:
         _restore(project, kept)
+        script.unlink(missing_ok=True)
         raise
     if not result.ok:
         _restore(project, kept)
+        # A failed operation is no recipe: leave no script behind in recipes/.
+        script.unlink(missing_ok=True)
     if tool == "blender" and result.ok:
         folder = confined(project, texture_dir(source))
         written = tuple(
@@ -294,7 +317,8 @@ async def edit_document(
         recipe = recipe.model_copy(update={"outputs": (*recipe.outputs, *written)})
     if not result.ok:
         raise RuntimeError(
-            f"{tool} did not complete the document operation: {result.output[-2000:]}"
+            f"{tool} did not complete the document operation: "
+            f"{_quiet(result.output)[-2000:]}"
         )
     if tool == "blender":
         # Godot imports portable GLB exports. Keep native .blend documents

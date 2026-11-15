@@ -143,6 +143,57 @@ def test_native_application_failure_never_records_success(
     record.assert_not_awaited()
 
 
+def test_a_failed_operation_leaves_no_script_and_shows_the_traceback(
+    stage: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    noise = (
+        "/usr/share/krita/pykrita/scripter/syntax.py:37: SyntaxWarning: "
+        "invalid escape sequence '\\|'\n  '\\^', '\\|',\n"
+    ) * 40
+    monkeypatch.setattr(
+        authoring,
+        "run_offline",
+        AsyncMock(
+            return_value=Result(False, noise + "RuntimeError: no document", "", 0.1)
+        ),
+    )
+    with pytest.raises(RuntimeError) as failed:
+        asyncio.run(
+            authoring.edit_document(
+                stage, "krita", "art/paint/icon.kra", "x = 1", ["art/textures/icon.png"]
+            )
+        )
+    assert "RuntimeError: no document" in str(failed.value)
+    assert "SyntaxWarning" not in str(failed.value)
+    assert list((stage / "recipes").glob("*.py")) == []
+
+
+def test_a_document_operation_past_its_time_says_so(
+    stage: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        authoring,
+        "run_offline",
+        AsyncMock(side_effect=authoring.WorkerTimeout(600, "painting...")),
+    )
+    with pytest.raises(
+        RuntimeError, match=r"did not finish .* in 600 s .*loop forever"
+    ):
+        asyncio.run(
+            authoring.edit_document(
+                stage, "krita", "art/paint/icon.kra", "x = 1", ["art/textures/icon.png"]
+            )
+        )
+    assert list((stage / "recipes").glob("*.py")) == []
+
+
+def test_a_warm_worker_past_its_time_names_the_limit() -> None:
+    from joinery.warm_workers import _command
+
+    with pytest.raises(authoring.WorkerTimeout, match="ran past 1 s"):
+        asyncio.run(_command(["sleep", "5"], 1))
+
+
 @pytest.mark.parametrize(
     "source,exports",
     [
