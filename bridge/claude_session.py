@@ -538,6 +538,12 @@ class ClaudeSession:
         if self.role:
             env[ROLE_ENV] = self.role
         env[STAGE_ENV] = self.stage or NO_STAGE
+        # The turn's text first: Claude Code gives up on stdin after 3 s, and a cold
+        # project map can take longer than that to build.
+        # A resumed session holds the map and rules from its last turn already.
+        stable = await asyncio.to_thread(stable_text, prompt)
+        known = stable if self.started and self._holds(stable) else ""
+        data = await asyncio.to_thread(user_input, prompt, known)
         self.process = await asyncio.create_subprocess_exec(
             *readonly_command(launch_argv(args[0], args[1:]), self.project),
             cwd=self.project,
@@ -549,10 +555,7 @@ class ClaudeSession:
             limit=16_000_000,
         )
         assert self.process.stdin and self.process.stdout and self.process.stderr
-        # A resumed session holds the map and rules from its last turn already.
-        stable = stable_text(prompt)
-        known = stable if self.started and self._holds(stable) else ""
-        self.process.stdin.write(user_input(prompt, known))
+        self.process.stdin.write(data)
         self._remember(stable)
         await self.process.stdin.drain()
         self.process.stdin.close()
