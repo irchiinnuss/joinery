@@ -21,9 +21,15 @@ extends VBoxContainer
 ##
 ## The same page shows the game brief (/brief, [method show_document]): read-only, each section
 ## its caption over its words, with "Ask Journeyman to change it" at its end. Edits to it are
-## reviewed changes like any other; the brief has nothing to approve.
+## reviewed changes like any other; the brief has nothing to approve. Its Features section shows
+## each feature marked built, broken, missing or not checked ([method show_feature_status],
+## from `joinery brief --status`), with the evidence and when it was found; "Check now" asks
+## for fresh evidence ([signal status_check_requested]). A mark is never made up here: until
+## the marks arrive the section shows its own words.
 
 signal closed
+## "Check now" on the brief's Features: play the game, run the tests and replays.
+signal status_check_requested(check: bool)
 
 const UI_THEME := preload("ui_theme.gd")
 const UI_MOTION := preload("ui_motion.gd")
@@ -46,6 +52,15 @@ const NARROW := 340
 ## From this column width (logical px) the swatches are SWATCH_H.lg tall.
 const WIDE := 600
 const META := "joinery_art_page"
+const FEATURES := "Features"
+const CHECK_NOW := "Check now"
+const CHECK_TIP := "Play the game and run the tests and replays the features name"
+const CHECKING := "Checking…"
+const CHECKING_LONG := "Playing the game and running the tests…"
+const READING := "Reading the marks…"
+const NO_FEATURES := "No features with marks yet"
+## A mark's glyph (ui_components.gd status icons); not checked is a hollow dot.
+const MARK_ICONS := {"built": "done", "broken": "failed", "missing": "warning"}
 
 var dock: Control
 ## The art review event on screen ({text, sha256, approved, version, palette, references,
@@ -68,6 +83,10 @@ var _match: Button
 var _ticket := 0
 ## The reference shown full width, or {} on the look.
 var _expanded: Dictionary = {}
+## The brief's Features section while the document is on screen, else null.
+var _features: VBoxContainer
+## The section's own words, shown until the marks arrive.
+var _features_text := ""
 
 
 ## Add the hidden page to [param sidebar]'s content column, opening on its
@@ -208,8 +227,12 @@ func show_document(title: String, text: String, ask := "") -> void:
 	var parts := DIALOG.sections(text)
 	if parts.is_empty():
 		column.add_child(_rich(DIALOG.to_bbcode(text)))
+	_features = null
 	for part: Array in parts:
 		var body := DIALOG.clean(str(part[1]))
+		if str(part[0]) == FEATURES:
+			column.add_child(_feature_section(body))
+			continue
 		if body.is_empty():
 			continue
 		var item := VBoxContainer.new()
@@ -226,6 +249,124 @@ func show_document(title: String, text: String, ask := "") -> void:
 		column.add_child(change)
 	_content.add_child(column)
 	UI_MOTION.stagger(column.get_children())
+
+
+## The brief's Features: its heading with "Check now", a line saying the marks are being read,
+## and the section's own words until [method show_feature_status] replaces them.
+func _feature_section(body: String) -> VBoxContainer:
+	_features_text = body
+	var item := VBoxContainer.new()
+	item.name = "Features"
+	item.theme_type_variation = "JoineryTight"
+	var head := LOOK.heading(FEATURES)
+	var check := UI.quiet_link(CHECK_NOW)
+	check.name = "CheckNow"
+	check.tooltip_text = CHECK_TIP
+	check.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	check.pressed.connect(_on_check_now)
+	head.add_child(check)
+	item.add_child(head)
+	var state := UI.status(READING, "working")
+	state.name = "State"
+	item.add_child(state)
+	var rows := VBoxContainer.new()
+	rows.name = "Rows"
+	rows.theme_type_variation = "JoineryStack"
+	item.add_child(rows)
+	if not body.is_empty():
+		rows.add_child(_rich(DIALOG.to_bbcode(body)))
+	_features = item
+	return item
+
+
+func _on_check_now() -> void:
+	if _features == null:
+		return
+	var check := _features.get_node("FeaturesHeading/CheckNow") as Button
+	check.disabled = true
+	check.text = CHECKING
+	UI.set_status(_features.get_node("State") as HBoxContainer, CHECKING_LONG, "working")
+	status_check_requested.emit(true)
+
+
+## Show [param report] (`joinery brief --status --json`: {headline, when, features: [{text,
+## status, word, evidence, when, kind, target}]} or {error}) in the brief's Features section.
+func show_feature_status(report: Dictionary) -> void:
+	if _features == null or not is_instance_valid(_features):
+		return
+	var check := _features.get_node("FeaturesHeading/CheckNow") as Button
+	check.disabled = false
+	check.text = CHECK_NOW
+	var state := _features.get_node("State") as HBoxContainer
+	var rows := _features.get_node("Rows") as VBoxContainer
+	if report.has("error"):
+		UI.set_status(state, str(report["error"]), "attention")
+		return
+	var marks: Array = report.get("features", [])
+	if marks.is_empty():
+		UI.set_status(state, NO_FEATURES, "off")
+		return
+	for child: Node in rows.get_children():
+		rows.remove_child(child)
+		child.queue_free()
+	var line := str(report.get("headline", ""))
+	var when := str(report.get("when", ""))
+	UI.set_status(
+		state,
+		line + (" · last checked " + when if not when.is_empty() else ""),
+		"attention" if int((report.get("counts", {}) as Dictionary).get("broken", 0)) else "ready"
+	)
+	for mark: Variant in marks:
+		if mark is Dictionary:
+			rows.add_child(feature_row(mark))
+	UI_MOTION.stagger(rows.get_children())
+
+
+## One feature: its mark as a glyph that reads without colour (✓ built, ✕ broken, ! missing,
+## a hollow dot for not checked), the feature's words, then the mark, what checks it and when,
+## and the evidence in one quiet line.
+static func feature_row(mark: Dictionary) -> HBoxContainer:
+	var status := str(mark.get("status", "not_checked"))
+	var row := HBoxContainer.new()
+	row.name = "Feature"
+	row.theme_type_variation = "JoineryRow"
+	row.set_meta("status", status)
+	var glyph: Control
+	if MARK_ICONS.has(status):
+		glyph = UI.status_icon(str(MARK_ICONS[status]))
+	else:
+		glyph = UI.status_dot("off")
+	glyph.name = "Mark"
+	glyph.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	row.add_child(glyph)
+	var words := VBoxContainer.new()
+	words.theme_type_variation = "JoineryTight"
+	words.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(words)
+	var title := UI.label(str(mark.get("text", "")), "", true)
+	title.name = "Text"
+	words.add_child(title)
+	var word := str(mark.get("word", status))
+	var meta := PackedStringArray([word.left(1).to_upper() + word.substr(1)])
+	var kind := str(mark.get("kind", ""))
+	if kind == "no_errors":
+		meta.append("no errors")
+	elif not kind.is_empty():
+		meta.append("%s: %s" % [kind, str(mark.get("target", ""))])
+	if not str(mark.get("when", "")).is_empty():
+		meta.append(str(mark["when"]))
+	var detail := UI.label(" · ".join(meta), "JoineryCaption", true)
+	detail.name = "Detail"
+	words.add_child(detail)
+	var evidence := str(mark.get("evidence", ""))
+	if not evidence.is_empty():
+		var why := UI.label(evidence, "JoineryCaption", true)
+		why.name = "Evidence"
+		why.tooltip_text = evidence
+		why.max_lines_visible = 3
+		why.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		words.add_child(why)
+	return row
 
 
 ## Show [param review] with [param on_approve] for Approve, and open the page.

@@ -182,6 +182,7 @@ func _ready() -> void:
 	_slash.readiness_changed.connect(_on_readiness)
 	_slash.revertible_changed.connect(_on_revertible)
 	_slash.bible_upgraded.connect(_on_bible_upgraded)
+	_slash.brief_status_ready.connect(_on_brief_status)
 	add_child(_slash)
 	_review = _make_review()
 	_suggestions = SUGGESTIONS.new(self)
@@ -548,6 +549,26 @@ func _open_brief() -> void:
 		return
 	var text := FileAccess.get_file_as_string(BRIEF_PATH)
 	ART_DIALOG.show_document(self, "Game brief", text, "Change the game brief: ")
+	var page := _brief_page()
+	if page != null:
+		if not page.is_connected("status_check_requested", _slash.brief_status):
+			page.connect("status_check_requested", _slash.brief_status)
+		# The marks come from what is already known; Check now gathers fresh evidence.
+		_slash.brief_status(false)
+
+
+## The sidebar's page when it shows the brief's features, else null.
+func _brief_page() -> Control:
+	var page: Variant = get_meta("joinery_art_page") if has_meta("joinery_art_page") else null
+	if page is Control and (page as Control).has_method("show_feature_status"):
+		return page
+	return null
+
+
+func _on_brief_status(report: Dictionary) -> void:
+	var page := _brief_page()
+	if page != null and page.visible:
+		page.call("show_feature_status", report)
 
 
 ## Bring a draft of the look in the first layout to the new one without asking (the art page

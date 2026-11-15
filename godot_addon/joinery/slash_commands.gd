@@ -30,6 +30,9 @@ signal readiness_changed(report: Dictionary)
 signal revertible_changed(states: Dictionary)
 ## "Update to the new layout" on a first-format art bible finished.
 signal bible_upgraded(ok: bool, message: String)
+## The brief's feature marks from `joinery brief --status --json` ({headline, features, …}
+## or {error}).
+signal brief_status_ready(report: Dictionary)
 ## "/playtest [focus]": the playtester plays the game; [param focus] is the words after it.
 signal playtest_requested(focus: String)
 ## "/match", or Make it match elsewhere: audit the project against the art bible.
@@ -296,6 +299,33 @@ func write_brief() -> void:
 		finished.emit("/brief", "Couldn't start Joinery.", "error")
 		return
 	started.emit("/brief")
+
+
+## The brief's features marked built, missing, broken or not checked
+## (`joinery brief --status`); with [param check] the game is played and the tests and replays
+## run first (`--check`). Comes back through [signal brief_status_ready].
+func brief_status(check := false) -> void:
+	if _jobs.has("brief_status"):
+		if not check:
+			return
+		var running: RefCounted = _jobs["brief_status"][0]
+		running.cancel()
+		_jobs.erase("brief_status")
+	var args := _base_args()
+	args.append_array(["brief", "--project", _project(), "--status", "--json"])
+	if check:
+		args.append("--check")
+	if not _start("brief_status", args, _on_brief_status):
+		brief_status_ready.emit({"error": "Couldn't start Joinery."})
+
+
+func _on_brief_status(result: Dictionary) -> void:
+	var output := str(result.get("output", ""))
+	var data := parse_json(output)
+	if data.is_empty():
+		print("[Joinery] brief --status\n", output, "\n", result.get("error", ""))
+		data = {"error": "Couldn't read the marks. Details are in Output."}
+	brief_status_ready.emit(data)
 
 
 ## Bring a first-format art bible to the new layout (`joinery bible --upgrade`). The change
