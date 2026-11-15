@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 
 from joinery import scene_tests, submission
-from joinery.authoring import WorkerTimeout, run_offline
+from joinery.authoring import WorkerStalled, WorkerTimeout, run_offline
 from joinery.runner import Result
 from joinery.transactions import FileTransaction
 from joinery.turn import error_text
@@ -81,7 +81,14 @@ def test_a_hung_new_test_fails_alone_and_the_rest_still_count(
     assert fake.runs.count(("stage", "tests/test_hangs.gd")) == 2
     assert fake.runs.count(("stage", "tests/test_door.gd")) == 1
     assert set(fake.timeouts) == {45}
-    # A time-out is not cached: the next check runs the test again.
+    # A time-out is cached by what the test loads: the next check of the same
+    # files (the submit after a precheck) does not wait it out again.
+    again = _run(tx, [])
+    assert [p.paths for p in again] == [["tests/test_hangs.gd"]]
+    assert again[0].items[0].rule == "tests.timed_out"
+    assert fake.runs.count(("stage", "tests/test_hangs.gd")) == 2
+    # A change to its files runs it again.
+    (tx.stage / "tests/test_hangs.gd").write_text(TEST_HANGS + "# edited\n")
     _run(tx, [])
     assert fake.runs.count(("stage", "tests/test_hangs.gd")) == 4
 
@@ -230,3 +237,142 @@ def test_the_worker_is_killed_at_the_limit_and_its_output_kept(
     assert "SCRIPT ERROR: boom" in stopped.value.output
     assert str(stopped.value)  # never a blank reason
     assert launched[0].returncode is not None  # the hung process was killed
+
+
+def test_a_hung_baseline_is_cached_so_the_submit_does_not_run_it_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # As in a live run: a test hangs before and after the change; the precheck
+    # and the submit both checked it, each waiting out both sides.
+    tx = _transaction(tmp_path)
+    (tx.stage / "game/lever.gd").write_text("extends Node\nvar pulled := true\n")
+    fake = Hangs(
+        {"stage": {"tests/test_lever.gd"}, "baseline": {"tests/test_lever.gd"}}
+    )
+    monkeypatch.setattr("joinery.submission.run_offline", fake)
+    info: list[str] = []
+    assert _run(tx, info) == []  # the precheck
+    assert fake.runs.count(("baseline", "tests/test_lever.gd")) == 2
+    assert fake.runs.count(("stage", "tests/test_lever.gd")) == 2
+    info = []
+    assert _run(tx, info) == []  # the submit, nothing changed since
+    assert info and "res://tests/test_lever.gd" in info[0]
+    assert fake.runs.count(("baseline", "tests/test_lever.gd")) == 2
+    assert fake.runs.count(("stage", "tests/test_lever.gd")) == 2
+    # The change moves on: only the change side runs again; the baseline is known.
+    (tx.stage / "game/lever.gd").write_text("extends Node\nvar pulled := false\n")
+    assert _run(tx, []) == []
+    assert fake.runs.count(("baseline", "tests/test_lever.gd")) == 2
+    assert fake.runs.count(("stage", "tests/test_lever.gd")) == 4
+
+
+def test_a_raised_limit_runs_a_cached_time_out_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tx = _transaction(tmp_path)
+    fake = Hangs({"stage": {"tests/test_door.gd"}})
+    monkeypatch.setattr("joinery.submission.run_offline", fake)
+    # Unchanged by the change, so it hung before it too: a note, not a hold.
+    _run(tx, [])
+    assert fake.runs.count(("stage", "tests/test_door.gd")) == 2
+    _run(tx, [])
+    assert fake.runs.count(("stage", "tests/test_door.gd")) == 2
+    (tmp_path / "joinery.toml").write_text("[checks]\nscene_test_seconds = 90\n")
+    _run(tx, [])
+    assert fake.runs.count(("stage", "tests/test_door.gd")) == 4
+    assert fake.timeouts[-1] == 90
+
+
+def _spawn_python(
+    monkeypatch: pytest.MonkeyPatch, code: str
+) -> list[asyncio.subprocess.Process]:
+    """Make run_offline start ``python -c code`` in place of the worker."""
+    launched: list[asyncio.subprocess.Process] = []
+    real = asyncio.create_subprocess_exec
+
+    async def launch(*argv: str, **options: Any) -> asyncio.subprocess.Process:
+        if argv[:2] == ("docker", "rm"):
+            return await real(sys.executable, "-c", "pass", **options)
+        process = await real(sys.executable, "-c", code, **options)
+        launched.append(process)
+        return process
+
+    monkeypatch.setattr("joinery.authoring.asyncio.create_subprocess_exec", launch)
+    return launched
+
+
+#: A test whose physics callback errors every frame after its _run stopped.
+REPEATS_ERROR = """
+import time
+print('Godot Engine v4.7', flush=True)
+for _ in range(400):
+    print('SCRIPT ERROR: Invalid call. Nonexistent function find_target in base Nil.')
+    print('   at: _update_sight (res://game/enemies/slag_drudge.gd:142)', flush=True)
+    time.sleep(0.05)
+"""
+
+
+def test_a_run_that_repeats_one_error_is_stopped_early(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    launched = _spawn_python(monkeypatch, REPEATS_ERROR)
+
+    async def go() -> float:
+        loop = asyncio.get_running_loop()
+        start = loop.time()
+        with pytest.raises(WorkerStalled) as stopped:
+            await run_offline(["godot"], tmp_path, 60, warm=False, stall=1.0)
+        assert "slag_drudge.gd:142" in stopped.value.output
+        assert "nothing new for 1 s" in str(stopped.value)
+        return loop.time() - start
+
+    assert asyncio.run(go()) < 10  # not the 60 s limit
+    assert launched[0].returncode is not None
+
+
+def test_a_run_that_keeps_making_progress_after_an_error_finishes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _spawn_python(
+        monkeypatch,
+        "import time\n"
+        "print('SCRIPT ERROR: one-off', flush=True)\n"
+        "for i in range(8):\n"
+        "    print(f'step {i}', flush=True)\n"
+        "    time.sleep(0.4)\n"
+        "print('FAIL: the door stayed shut', flush=True)\n",
+    )
+    got = asyncio.run(run_offline(["godot"], tmp_path, 60, warm=False, stall=1.0))
+    assert "FAIL: the door stayed shut" in got.output
+
+
+def test_a_stalled_test_is_stopped_once_and_says_why(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tx = _transaction(tmp_path)
+    (tx.stage / "tests/test_gun.gd").write_text(TEST_HANGS)
+    runs: list[tuple[str, float]] = []
+
+    async def offline(argv: list[str], root: Path, seconds: int, **k: Any) -> Result:
+        if "--import" in argv:
+            return Result(True, "", "", 0.0)
+        script = argv[argv.index("-s") + 1].removeprefix("res://")
+        runs.append((script, float(k.get("stall", 0))))
+        if script == "tests/test_gun.gd":
+            raise WorkerStalled(
+                k["stall"],
+                "SCRIPT ERROR: boom\n   at: _run (res://tests/test_gun.gd:9)\n",
+            )
+        return Result(True, "PASS", "", 0.0)
+
+    monkeypatch.setattr("joinery.submission.run_offline", offline)
+    (problem,) = _run(tx, [])
+    gun = [stall for script, stall in runs if script == "tests/test_gun.gd"]
+    assert len(gun) == 1 and gun[0] > 0  # stopped early, never tried again
+    assert "printed nothing new" in problem.message
+    assert "test_gun.gd:9" in problem.message
+    assert problem.items[0].rule == "tests.timed_out"
+    # Cached: the submit after the precheck reports it without a run.
+    (again,) = _run(tx, [])
+    assert "printed nothing new" in again.message
+    assert len([s for s, _ in runs if s == "tests/test_gun.gd"]) == 1

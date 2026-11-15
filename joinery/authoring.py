@@ -83,6 +83,49 @@ class WorkerTimeout(TimeoutError):
         self.output = output
 
 
+class WorkerStalled(WorkerTimeout):
+    """An offline run stopped early: it printed a script or parse error and then
+    nothing new for ``idle`` seconds (a SceneTree test whose ``_run`` stopped at
+    the error never reaches its quit()). Repeating the same error every frame is
+    not progress."""
+
+    def __init__(self, idle: float, output: str = "") -> None:
+        super().__init__(idle, output)
+        said = (
+            "the offline worker printed a script error and then nothing new for "
+            f"{idle:g} s, so it was stopped"
+        )
+        self.args = (said,)
+        self.idle = idle
+
+
+#: What Godot prints when a script stops at an error (or never compiles).
+STALL_SIGNS = ("SCRIPT ERROR:", "Parse Error:")
+
+
+class _Progress:
+    """Watches a run's output: whether it printed an error, and when it last
+    printed a line it had not printed before."""
+
+    def __init__(self) -> None:
+        self.seen: set[str] = set()
+        self.errored = False
+        self.last_new = 0.0
+        self._partial = b""
+
+    def feed(self, chunk: bytes, now: float) -> None:
+        lines = (self._partial + chunk).split(b"\n")
+        self._partial = lines.pop()
+        for raw in lines:
+            line = raw.decode(errors="replace").strip()
+            if not line or line in self.seen:
+                continue
+            self.seen.add(line)
+            self.last_new = now
+            if any(sign in line for sign in STALL_SIGNS):
+                self.errored = True
+
+
 async def run_offline(
     argv: list[str],
     project: Path,
@@ -91,11 +134,15 @@ async def run_offline(
     readonly: bool = False,
     image: str = IMAGE,
     warm: bool = True,
+    stall: float = 0.0,
 ) -> Result:
     """Run ``argv`` in the offline worker on ``project`` (mounted at /work).
 
     A supervised session reuses one warm worker per project, one command at a
-    time; ``warm=False`` starts a worker of its own, so several run at once."""
+    time; ``warm=False`` starts a worker of its own, so several run at once.
+    ``stall`` (seconds, a worker of its own only) stops the run early, raising
+    :class:`WorkerStalled`, once it printed a script or parse error and then no
+    new line for that long, instead of waiting out ``timeout``."""
     if warm and os.environ.get("JOINERY_WORKER_SCOPE"):
         from joinery.warm_workers import execute
 
@@ -130,22 +177,45 @@ async def run_offline(
         stderr=asyncio.subprocess.PIPE,
     )
     out, err = bytearray(), bytearray()
+    loop = asyncio.get_running_loop()
+    progress = _Progress()
 
     async def pump(stream: asyncio.StreamReader | None, into: bytearray) -> None:
         while stream is not None and (chunk := await stream.read(65536)):
             into.extend(chunk)
+            progress.feed(chunk, loop.time())
+
+    async def watch() -> None:
+        # Ends (so the run is stopped) once an error is followed by nothing new.
+        while True:
+            await asyncio.sleep(min(1.0, stall / 4))
+            if progress.errored and loop.time() - progress.last_new >= stall:
+                return
 
     try:
-        try:
-            await asyncio.wait_for(
-                asyncio.gather(
-                    pump(process.stdout, out), pump(process.stderr, err), process.wait()
-                ),
-                timeout,
+        finished = asyncio.ensure_future(
+            asyncio.gather(
+                pump(process.stdout, out), pump(process.stderr, err), process.wait()
             )
-        except TimeoutError:
-            # What it printed before the limit says why it never finished.
-            raise WorkerTimeout(timeout, (out + err).decode(errors="replace")) from None
+        )
+        watcher = asyncio.ensure_future(watch()) if stall > 0 else None
+        try:
+            waiting = {finished} | ({watcher} if watcher is not None else set())
+            done, _ = await asyncio.wait(
+                waiting, timeout=timeout, return_when=asyncio.FIRST_COMPLETED
+            )
+        finally:
+            pending = [t for t in (finished, watcher) if t is not None and not t.done()]
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+        if finished not in done:
+            # What it printed before it was stopped says why it never finished.
+            printed = (out + err).decode(errors="replace")
+            if watcher is not None and watcher in done:
+                raise WorkerStalled(stall, printed)
+            raise WorkerTimeout(timeout, printed)
+        finished.result()
         return Result(
             process.returncode == 0,
             out.decode(errors="replace"),

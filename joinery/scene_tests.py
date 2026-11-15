@@ -29,6 +29,7 @@ from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from joinery.authoring import WorkerStalled
 from joinery.runner import Result
 
 #: Results by key, per project; Joinery's own cache (gitignored with .joinery/).
@@ -245,9 +246,14 @@ class Tree:
 class Outcome:
     passed: bool
     output: str = ""
-    #: The test never finished in time, on two tries: a fail of this run only,
-    #: never cached (a busy machine is not the test's content).
+    #: The test never finished: stopped at its time limit (on two tries), or
+    #: early, after a script error with nothing new printed.
     timed_out: bool = False
+    #: A script error stopped it: the same files hang the same way again.
+    stalled: bool = False
+    #: The time limit it ran under, for a time-out: a cached time-out answers
+    #: only a run with the same or a shorter limit.
+    seconds: int = 0
 
 
 @dataclass
@@ -282,17 +288,34 @@ class Cache:
             except (OSError, ValueError):
                 self.entries = {}
 
-    def get(self, key: str) -> Outcome | None:
+    def get(self, key: str, seconds: int = 0) -> Outcome | None:
+        """The cached result for ``key``. A time-out at its limit answers only a
+        run with no longer a limit (a raised limit runs the test again); one a
+        script error stopped answers any."""
         entry = self.entries.get(key)
         if entry is None:
             return None
-        return Outcome(bool(entry.get("passed")), str(entry.get("output", "")))
+        found = Outcome(
+            bool(entry.get("passed")),
+            str(entry.get("output", "")),
+            timed_out=bool(entry.get("timed_out")),
+            stalled=bool(entry.get("stalled")),
+            seconds=int(str(entry.get("seconds", 0) or 0)),
+        )
+        if found.timed_out and not found.stalled and found.seconds < seconds:
+            return None
+        return found
 
     def put(self, key: str, outcome: Outcome) -> None:
-        if outcome.timed_out:
-            return
+        """Keep a result by key: passes, fails and time-outs alike, so a test that
+        hangs on the same files is not run (and waited out) again."""
         self.entries.pop(key, None)
-        self.entries[key] = {"passed": outcome.passed, "output": outcome.output}
+        entry: dict[str, object] = {"passed": outcome.passed, "output": outcome.output}
+        if outcome.timed_out:
+            entry.update(
+                timed_out=True, stalled=outcome.stalled, seconds=outcome.seconds
+            )
+        self.entries[key] = entry
         while len(self.entries) > CACHE_MAX:
             self.entries.pop(next(iter(self.entries)))
 
@@ -319,11 +342,20 @@ Importer = Callable[[Path], Awaitable[None]]
 SCRIPT_ERROR = "SCRIPT ERROR:"
 
 
-def timeout_text(seconds: int, output: str = "", tries: int = 2) -> str:
+def timeout_text(
+    seconds: int, output: str = "", tries: int = 2, stalled: float = 0
+) -> str:
     """What a test that never finished says, in place of its output; ``output`` is
-    what it printed before it was stopped."""
+    what it printed before it was stopped, ``stalled`` the seconds it printed
+    nothing new after a script error when that stopped it early."""
     times = "twice" if tries > 1 else "once"
-    if SCRIPT_ERROR in output:
+    if stalled:
+        said = (
+            "was stopped: a script error stopped it before it called quit(), and "
+            f"it printed nothing new for {stalled:g} s after. Fix the error (the "
+            "test's own code or the game's), and make the test quit on every path."
+        )
+    elif SCRIPT_ERROR in output:
         said = (
             f"timed out after {seconds} s: a script error stopped it before it "
             "called quit(). Fix the error (the test's own code or the game's), and "
@@ -354,6 +386,7 @@ async def _run_all(
     async def one(script: str) -> tuple[str, Outcome]:
         printed = ""
         tries = 0
+        stalled = 0.0
         while tries < 2:
             tries += 1
             try:
@@ -361,12 +394,20 @@ async def _run_all(
                     got = await run(root, script)
             except TimeoutError as stopped:
                 printed = str(getattr(stopped, "output", "") or "")
+                if isinstance(stopped, WorkerStalled):
+                    stalled = stopped.idle
                 if SCRIPT_ERROR in printed:
                     break
                 continue
             return script, Outcome(passed(got), got.output[-_FAIL_TAIL:].strip())
-        text = timeout_text(seconds, printed, tries)
-        return script, Outcome(False, text, timed_out=True)
+        text = timeout_text(seconds, printed, tries, stalled)
+        return script, Outcome(
+            False,
+            text,
+            timed_out=True,
+            stalled=SCRIPT_ERROR in printed,
+            seconds=seconds,
+        )
 
     tasks = [asyncio.ensure_future(one(s)) for s in scripts]
     try:
@@ -407,7 +448,7 @@ async def judge(
     keys = {s: now.key(s, args(stage, s)) for s in scripts}
     results: dict[str, Outcome] = {}
     for script, key in keys.items():
-        hit = cache.get(key)
+        hit = cache.get(key, seconds)
         if hit is not None:
             results[script] = hit
             verdict.cached.append(script)
@@ -428,7 +469,7 @@ async def judge(
             if not (original / script).is_file():
                 continue  # new with this change: no "before"
             key = then.key(script, args(original, script))
-            hit = results[script] if key == keys[script] else cache.get(key)
+            hit = results[script] if key == keys[script] else cache.get(key, seconds)
             if hit is not None:
                 before[script] = hit
             else:

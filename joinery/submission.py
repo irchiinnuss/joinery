@@ -116,6 +116,9 @@ SCENE_TESTS_MAX = 20
 SCENE_TEST_SECONDS = 120
 #: The worker is linux/amd64; on an arm64 host it runs emulated, several times slower.
 EMULATED_FACTOR = 2
+#: A SceneTree test that printed a script error and then nothing new for this long
+#: (natively; scaled like the limit) is stopped then, not at its limit.
+SCENE_TEST_STALL_SECONDS = 10
 _SCENE_TREE = re.compile(
     r'^[ \t]*(?:class_name[ \t]+\w+[ \t]+)?extends[ \t]+"?SceneTree"?[ \t]*(?:#.*)?$',
     re.MULTILINE,
@@ -705,8 +708,12 @@ def scene_test_seconds(project: Path) -> int:
     setting = checks.get("scene_test_seconds") if isinstance(checks, dict) else None
     if isinstance(setting, int) and not isinstance(setting, bool) and setting > 0:
         return setting
-    emulated = platform.machine().lower() in {"arm64", "aarch64"}
-    return SCENE_TEST_SECONDS * (EMULATED_FACTOR if emulated else 1)
+    return SCENE_TEST_SECONDS * (EMULATED_FACTOR if _emulated() else 1)
+
+
+def _emulated() -> bool:
+    """The linux/amd64 worker runs emulated on this (arm64) host."""
+    return platform.machine().lower() in {"arm64", "aarch64"}
 
 
 async def run_scene_tests(
@@ -728,6 +735,7 @@ async def run_scene_tests(
     """
 
     seconds = scene_test_seconds(tx.project if tx is not None else stage)
+    stall = SCENE_TEST_STALL_SECONDS * (EMULATED_FACTOR if _emulated() else 1)
 
     async def run(root: Path, script: str) -> Result:
         # A settings file of its own: no test sees another's. A run past the limit
@@ -738,6 +746,7 @@ async def run_scene_tests(
             root,
             seconds,
             warm=False,
+            stall=stall,
         )
         worker_ready(got)
         return got
