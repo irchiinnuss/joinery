@@ -1,4 +1,4 @@
-# 0087. Keep and Avoid lines, feature marks, and /cut
+# 0088. Keep and Avoid lines, feature marks, and /cut
 
 Status: accepted (2026-11-15)
 
