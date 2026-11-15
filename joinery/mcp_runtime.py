@@ -288,22 +288,55 @@ class _Request:
     timeout: float
 
 
+#: Seconds between asks while Docker doesn't answer (busy, starting, a hiccup):
+#: about 15 s in all before the image counts as unavailable.
+IMAGE_RETRY_DELAYS = (1.0, 2.0, 4.0, 8.0)
+#: What Docker says when it answered and the image really isn't there.
+_NO_IMAGE = ("No such image", "No such object")
+
+
 async def _image_present(image: str) -> int:
     """`docker image inspect`'s exit code for [image] (1 when it takes over 10 s)."""
+    return (await _image_state(image))[0]
+
+
+async def _image_state(image: str) -> tuple[int, bool]:
+    """`docker image inspect`'s exit code for [image], and whether Docker answered
+    that the image is missing (False: no answer, a timeout, a daemon error)."""
     check = await asyncio.create_subprocess_exec(
         "docker",
         "image",
         "inspect",
         image,
         stdout=asyncio.subprocess.DEVNULL,
-        stderr=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
     )
     try:
-        return await asyncio.wait_for(check.wait(), 10)
+        _out, err = await asyncio.wait_for(check.communicate(), 10)
+        code = check.returncode if check.returncode is not None else 1
     except TimeoutError:
         check.kill()
         await check.wait()
-        return 1
+        return 1, False
+    text = (err or b"").decode(errors="replace")
+    return int(code), bool(code) and any(sign in text for sign in _NO_IMAGE)
+
+
+async def image_ready(image: str) -> bool:
+    """Whether [image] is there, asking again with backoff while Docker is busy.
+
+    Docker saying the image is missing twice in a row is final; anything else (no
+    answer, a timeout, a daemon error) is asked again after 1, 2, 4 and 8 s."""
+    missing = 0
+    for delay in (*IMAGE_RETRY_DELAYS, None):
+        code, absent = await _image_state(image)
+        if code == 0:
+            return True
+        missing = missing + 1 if absent else 0
+        if missing >= 2 or delay is None:
+            return False
+        await asyncio.sleep(delay)
+    return False
 
 
 @dataclass
@@ -337,21 +370,19 @@ class MCPConnection:
             if verdict.severity is Severity.STOP:
                 raise PolicyStop(verdict.reason)
             raise PermissionError(verdict.reason)
-        if self.spec.worker_image:
-            # Asked twice: a busy Docker answering late is not a missing tool.
-            code = await _image_present(self.spec.worker_image)
-            if code:
-                await asyncio.sleep(1)
-                code = await _image_present(self.spec.worker_image)
-            if code:
-                self.readiness.state = "runtime-missing"
-                self.readiness.detail = (
-                    "This app's offline tools aren't available right now: Docker "
-                    "may not be running, or the tools need a refresh after an "
-                    "update. Ask the user to start Docker or press Refresh tools "
-                    "in the Joinery sidebar, then try again."
-                )
-                raise ValueError(self.readiness.detail)
+        # Asked again with backoff: a busy Docker answering late is not a
+        # missing tool, and one late answer must not end the turn.
+        if self.spec.worker_image and not await image_ready(self.spec.worker_image):
+            self.readiness.state = "runtime-missing"
+            self.readiness.detail = (
+                "This app's offline tools aren't available right now: Docker "
+                "may not be running, or the tools need a refresh after an "
+                "update. Joinery asked Docker for about 15 seconds. Carry on "
+                "with other parts of the request and call this tool again "
+                "later; if it still fails, ask the user to start Docker or "
+                "press Refresh tools in the Joinery sidebar, then try again."
+            )
+            raise ValueError(self.readiness.detail)
         self._ready = asyncio.get_running_loop().create_future()
         self._task = asyncio.create_task(self._serve())
         try:

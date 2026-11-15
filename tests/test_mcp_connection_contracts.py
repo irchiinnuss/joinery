@@ -272,7 +272,10 @@ def test_model_credentials_and_injected_libraries_are_not_inherited_by_tools(
 def test_missing_worker_image_reports_runtime_missing_without_launching_client(
     project: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    child = SimpleNamespace(wait=AsyncMock(return_value=1))
+    child = SimpleNamespace(
+        communicate=AsyncMock(return_value=(b"", b"Error: No such image: x")),
+        returncode=1,
+    )
     spawn = AsyncMock(return_value=child)
     peer = AsyncMock()
     monkeypatch.setattr(mcp_runtime.asyncio, "create_subprocess_exec", spawn)
@@ -287,7 +290,7 @@ def test_missing_worker_image_reports_runtime_missing_without_launching_client(
     # Plain words for the agent to pass on: no command line, no placeholder.
     with pytest.raises(ValueError, match="Refresh tools in the Joinery sidebar"):
         asyncio.run(conn.connect())
-    # Asked twice: a busy Docker answering late is not a missing tool.
+    # Docker said twice that the image is missing: final, no more waiting.
     assert spawn.await_count == 2
     assert conn.readiness.state == "runtime-missing"
     assert not conn.readiness.connected and conn._task is None
@@ -298,3 +301,31 @@ def test_missing_worker_image_reports_runtime_missing_without_launching_client(
         "inspect",
         "missing-fixture-worker",
     )
+
+
+def test_a_busy_docker_is_asked_again_with_backoff(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No answer, then a daemon error, then the image: ready, after waiting 1+2 s.
+    Never giving up on the first late answer keeps the turn going."""
+    answers = [(1, False), (1, False), (0, False)]
+    asked: list[str] = []
+
+    async def state(image: str) -> tuple[int, bool]:
+        asked.append(image)
+        return answers.pop(0)
+
+    slept: list[float] = []
+
+    async def sleep(seconds: float) -> None:
+        slept.append(seconds)
+
+    monkeypatch.setattr(mcp_runtime, "_image_state", state)
+    monkeypatch.setattr(mcp_runtime.asyncio, "sleep", sleep)
+    assert asyncio.run(mcp_runtime.image_ready("worker")) is True
+    assert slept == [1.0, 2.0] and len(asked) == 3
+    # Docker never answering: every delay is tried before it counts as missing.
+    answers[:] = [(1, False)] * 5
+    slept.clear()
+    assert asyncio.run(mcp_runtime.image_ready("worker")) is False
+    assert slept == list(mcp_runtime.IMAGE_RETRY_DELAYS)
