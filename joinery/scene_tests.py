@@ -377,13 +377,23 @@ async def _run_all(
     run: Runner,
     passed: Callable[[Result], bool],
     seconds: int,
+    done: Callable[[int, int], None] | None = None,
 ) -> dict[str, Outcome]:
     """Run each test; one that times out runs once more before it counts (unless a
     script error stopped it: that hangs again), and a time-out is that test's
     result alone: the others still count."""
     gate = asyncio.Semaphore(PARALLEL)
+    names = list(scripts)
+    finished = [0]
 
     async def one(script: str) -> tuple[str, Outcome]:
+        pair = await judged(script)
+        finished[0] += 1
+        if done is not None:
+            done(finished[0], len(names))
+        return pair
+
+    async def judged(script: str) -> tuple[str, Outcome]:
         printed = ""
         tries = 0
         stalled = 0.0
@@ -409,7 +419,7 @@ async def _run_all(
             seconds=seconds,
         )
 
-    tasks = [asyncio.ensure_future(one(s)) for s in scripts]
+    tasks = [asyncio.ensure_future(one(s)) for s in names]
     try:
         pairs = await asyncio.gather(*tasks)
     except BaseException:
@@ -433,6 +443,7 @@ async def judge(
     baseline: Callable[[], Awaitable[Path | None]] | None = None,
     prepare: Importer | None = None,
     seconds: int = 120,
+    done: Callable[[int, int], None] | None = None,
 ) -> Verdict:
     """Run ``scripts`` on ``stage`` and judge each failure against ``original``.
 
@@ -455,7 +466,7 @@ async def judge(
     fresh = [s for s in scripts if s not in results]
     if fresh:
         for script, outcome in (
-            await _run_all(stage, fresh, run, passed, seconds)
+            await _run_all(stage, fresh, run, passed, seconds, done)
         ).items():
             results[script] = outcome
             cache.put(keys[script], outcome)
@@ -480,7 +491,9 @@ async def judge(
                 try:
                     if prepare is not None:
                         await prepare(copy)
-                    ran = await _run_all(copy, list(unknown), run, passed, seconds)
+                    ran = await _run_all(
+                        copy, list(unknown), run, passed, seconds, done
+                    )
                     for script, outcome in ran.items():
                         before[script] = outcome
                         cache.put(unknown[script], outcome)

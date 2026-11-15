@@ -538,6 +538,7 @@ async def validate(
         info=found.info,
         failing=found.already_failing,
         current=not importing and godot,
+        note=gateway.progress_detail,
     )
     return found
 
@@ -557,6 +558,7 @@ async def checks(
     info: list[str] | None = None,
     failing: list[str] | None = None,
     current: bool = False,
+    note: Callable[[str], None] | None = None,
 ) -> list[Problem]:
     """The art bible's measured rules beside Godot's import check, the project's tests,
     its recorded replays and its kept saves.
@@ -625,7 +627,13 @@ async def checks(
             found += await run_tests(tx.stage, tests, timed)
         if scene_tests:
             found += await run_scene_tests(
-                tx.stage, scene_tests, timed, tx=tx, info=info, failing=failing
+                tx.stage,
+                scene_tests,
+                timed,
+                tx=tx,
+                info=info,
+                failing=failing,
+                note=note,
             )
         if replays_on:
             found += await run_replays(tx, imported=godot or testing, timed=timed)
@@ -785,6 +793,7 @@ async def run_scene_tests(
     tx: FileTransaction | None = None,
     info: list[str] | None = None,
     failing: list[str] | None = None,
+    note: Callable[[str], None] | None = None,
 ) -> list[Problem]:
     """Run each SceneTree test headless (``godot -s``), several at once; one that
     exits non-zero, prints a ``FAIL`` line or a script error, or never quits fails.
@@ -851,6 +860,7 @@ async def run_scene_tests(
             baseline=baseline,
             prepare=prepare,
             seconds=seconds,
+            done=(lambda ran, of: note(f"{ran} of {of}")) if note else None,
         )
     if verdict.already and info is not None:
         info.append(scene_cache.already_note(verdict.already))

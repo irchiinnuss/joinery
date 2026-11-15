@@ -418,3 +418,15 @@ def test_a_docker_hiccup_is_asked_again_and_never_cached_as_a_result(
     runs.clear()
     _run(tx, [])
     assert runs.count("tests/test_gun.gd") == 1  # run, not answered from a cache
+
+
+def test_the_scene_tests_say_how_many_are_done(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tx = _transaction(tmp_path)
+    monkeypatch.setattr("joinery.submission.run_offline", Hangs({}))
+    said: list[str] = []
+    scripts = submission.scene_tree_tests(tx.stage)
+    asyncio.run(submission.run_scene_tests(tx.stage, scripts, tx=tx, note=said.append))
+    assert said[-1] == f"{len(scripts)} of {len(scripts)}"
+    assert said[0] == f"1 of {len(scripts)}"

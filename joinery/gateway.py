@@ -7,8 +7,8 @@ import difflib
 import json
 import time
 import uuid
-from collections.abc import Awaitable, Callable
-from contextlib import AbstractContextManager, nullcontext
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -149,6 +149,22 @@ OP_APPS: dict[str, tuple[str, ...]] = {
 NATIVE_OPS = frozenset(OP_APPS)
 #: Key prefix of a read-only agent's connection on the stage, beside the staged ones.
 VIEW = "view:"
+#: Seconds between progress events while a long check runs, so `joinery run`'s idle
+#: limit and the sidebar both see the turn is still at work.
+PROGRESS_EVERY = 30.0
+#: The phases that take long enough to say so, in the user's words.
+TICKING = {
+    "precheck": "Checking the change",
+    "submit": "Checking the change",
+    "import": "Importing into Godot",
+    "review_rules": "Checking the look",
+    "review_import": "Importing into Godot",
+    "review_tests": "Running the tests",
+    "review_scene_tests": "Running scene tests",
+    "review_replays": "Replaying recorded play",
+    "review_saves": "Loading kept saves",
+    "review_media": "Rendering the review",
+}
 #: Script checks of finished stages, closing in the background.
 _CLOSING: set[asyncio.Task[None]] = set()
 
@@ -355,6 +371,9 @@ class ProjectGateway:
         self.runtime_root_script = False
         self._call_lock = asyncio.Lock()
         self.progress: Callable[[str], None] = lambda _text: None
+        #: Long phases running now: [label, started, detail], innermost last.
+        self._ticks: list[list[Any]] = []
+        self._ticker: asyncio.Task[None] | None = None
         self.timing: TurnTiming | None = None
         #: (transaction id, stage inventory) right after a clean Godot import.
         self._imported: tuple[str, dict[str, str]] | None = None
@@ -1459,10 +1478,56 @@ class ProjectGateway:
     def span(
         self, phase: str, name: str = "", attributes: dict[str, Any] | None = None
     ) -> AbstractContextManager[dict[str, Any]]:
-        """Time a phase of this turn (and record it as a span of the change)."""
-        if self.timing is None:
-            return nullcontext({})
-        return self.timing.span(phase, name, attributes)
+        """Time a phase of this turn (and record it as a span of the change). A
+        long phase (``TICKING``) also says it is still running every
+        ``PROGRESS_EVERY`` seconds."""
+        label = TICKING.get(phase)
+        timed: AbstractContextManager[dict[str, Any]] = (
+            nullcontext({}) if self.timing is None
+            else self.timing.span(phase, name, attributes)
+        )  # fmt: skip
+        return timed if label is None else self._ticking_span(label, timed)
+
+    @contextmanager
+    def _ticking_span(
+        self, label: str, timed: AbstractContextManager[dict[str, Any]]
+    ) -> Iterator[dict[str, Any]]:
+        with self.ticking(label), timed as attrs:
+            yield attrs
+
+    @contextmanager
+    def ticking(self, label: str) -> Iterator[None]:
+        """While the block runs, a progress event every ``PROGRESS_EVERY`` seconds
+        ("Running scene tests: 3 of 8, 2 min…"), for the innermost long phase."""
+        entry: list[Any] = [label, time.monotonic(), ""]
+        self._ticks.append(entry)
+        if self._ticker is None or self._ticker.done():
+            try:
+                self._ticker = asyncio.get_running_loop().create_task(self._tick())
+            except RuntimeError:
+                self._ticker = None  # no loop running: nothing to keep alive
+        try:
+            yield
+        finally:
+            self._ticks.remove(entry)
+            if not self._ticks and self._ticker is not None:
+                self._ticker.cancel()
+                self._ticker = None
+
+    def progress_detail(self, text: str) -> None:
+        """How far the innermost long phase is ("3 of 8"), said in its next tick."""
+        if self._ticks:
+            self._ticks[-1][2] = text
+
+    async def _tick(self) -> None:
+        while self._ticks:
+            await asyncio.sleep(PROGRESS_EVERY)
+            if not self._ticks:
+                return
+            label, started, detail = self._ticks[-1]
+            minutes = int((time.monotonic() - started) // 60)
+            took = f"{minutes} min" if minutes else "under a minute"
+            self.progress(f"{label}{': ' + detail if detail else ''}, {took}…")
 
     def search_root(self) -> Path:
         """Where ``search_project`` looks: this change's stage while one is open (so

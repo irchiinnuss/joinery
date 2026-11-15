@@ -249,3 +249,59 @@ def test_the_cli_prints_the_chat_id(
     out = capsys.readouterr().out
     assert "Chat c42" in out and "--chat c42" in out
     assert "waits for your review" in out
+
+
+#: A host whose check runs past the idle limit, saying how far it is as it goes
+#: (the gateway's progress, wired as bridge.stdio wires it), then opens its review.
+LONG_CHECK_HOST = """
+import asyncio, json, sys
+from pathlib import Path
+from joinery import gateway
+def say(event):
+    print(json.dumps(event), flush=True)
+def hear():
+    return json.loads(sys.stdin.readline())
+got = []
+say({"kind": "connection", "state": "connected"})
+got.append(hear())
+say({"kind": "turn_state", "state": "working"})
+gateway.PROGRESS_EVERY = 0.5
+gw = gateway.ProjectGateway(Path(sys.argv[1]).parent)
+gw.progress = lambda text: say({"kind": "progress", "text": text})
+async def check():
+    with gw.span("submit"):
+        with gw.span("review_scene_tests"):
+            gw.progress_detail("3 of 8")
+            await asyncio.sleep(5.0)
+asyncio.run(check())
+say({"kind": "file_preview", "transaction_id": "tx1", "summary": "A door"})
+say({"kind": "timing", "outcome": "done"})
+got.append(hear())
+say({"kind": "quiet"})
+with open(sys.argv[1], "w") as out:
+    json.dump(got, out)
+sys.stdin.readline()
+"""
+
+
+def test_a_long_check_keeps_the_run_alive_past_the_idle_limit(tmp_path: Path) -> None:
+    (tmp_path / "project.godot").write_text("config_version=5\n")
+    (tmp_path / "joinery.toml").write_text('[tools]\nenabled=["godot"]\n')
+    command, _seen = fake(tmp_path, LONG_CHECK_HOST)
+    events: list[dict[str, Any]] = []
+    outcome = asyncio.run(
+        headless.run_request(
+            tmp_path,
+            "Make a door",
+            headless.Pin("claude"),
+            on_event=events.append,
+            timeout=2.0,
+            command=command,
+        )
+    )
+    assert not outcome.error, (outcome.note, events)
+    assert outcome.state == "review" and outcome.transaction_id == "tx1"
+    said = [e["text"] for e in events if e["kind"] == "progress"]
+    assert len(said) >= 4, said
+    # The innermost long phase, how far it is and for how long.
+    assert said[0] == "Running scene tests: 3 of 8, under a minute…"

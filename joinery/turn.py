@@ -1758,11 +1758,13 @@ async def _verify(controller: TurnController) -> list[done_when.Result]:
     assert todo is not None
     tx = controller.gateway.transaction
     staged = tx is not None and tx.state == "staging" and bool(tx.diff())
-    return await done_when.verify(
-        todo,
-        project=controller.gateway.project,
-        stage=tx.stage if staged and tx is not None else None,
-        ran=list(controller._passed.get("ran", [])),
-        skipped=list(controller._passed.get("skipped", [])),
-        failing=list(controller._passed.get("already_failing", [])),
-    )
+    # A seeded playtest can take minutes: say it is still running.
+    with controller.gateway.ticking("Checking the done-when items"):
+        return await done_when.verify(
+            todo,
+            project=controller.gateway.project,
+            stage=tx.stage if staged and tx is not None else None,
+            ran=list(controller._passed.get("ran", [])),
+            skipped=list(controller._passed.get("skipped", [])),
+            failing=list(controller._passed.get("already_failing", [])),
+        )
