@@ -127,10 +127,11 @@ func _start() -> void:
 
 
 func _match_refresh_rate() -> void:
-	var openxr: OpenXRInterface = interface as OpenXRInterface
-	if openxr == null:
+	# No OpenXRInterface type here: web builds have no OpenXR module, and the
+	# type name alone stops this script, and the VR autoload, from loading.
+	if interface == null or not interface.has_method(&"get_display_refresh_rate"):
 		return
-	var rate: float = openxr.get_display_refresh_rate()
+	var rate: float = float(interface.call(&"get_display_refresh_rate"))
 	if rate >= 60.0:
 		Engine.physics_ticks_per_second = roundi(rate)
 
