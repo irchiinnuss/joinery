@@ -800,6 +800,28 @@ again.
   starts them at once and `/idle clear` drops them (see When you're away below).
 - `/brief` opens `design/brief.md` read-only on the same sidebar page as `/art`,
   each section in one card, with **Ask Journeyman to change it**. With no brief, **Write the brief** drafts one from the starting point.
+  Its **Features** section marks each feature **built**, **broken**, **missing** or
+  **not checked**, with what checked it, when, and the evidence. A line is marked only
+  from evidence: end it with what checks it, `(reach: Lighthouse)`, `(no errors: 60 s)`,
+  `(test: res://tests/test_lamp.gd)` or `(replay: first_storm)`; the milestones' "Done
+  when" cells take the same. **Check now** plays the game and runs those tests and
+  replays; otherwise the marks come from the last check and newer playtests.
+- The brief's **Keep** lines say what must stay true ("Jump height 1.2 m"; a number pins
+  a value, and `(res://player/player.gd:jump_height)` or a project setting names where
+  it lives) and its **Avoid** lines what the game must not have ("Guns (gun, rifle)").
+  Journeyman asks before crossing one. A change that moves a pinned value or adds an
+  Avoid word is flagged: the review leads with the line it crosses, and the change
+  never goes through **Accept changes automatically**. Editing Keep or Avoid is a brief
+  change of direction, so it waits for you too.
+- `/cut` gathers the design check, the newest playtest, the last accessibility and
+  performance reports, the open console errors, what tidy finds and the brief's marks
+  into one polish list, highest priority first, each row saying where it came from. It
+  proposes cuts with a reason (built but broken, promised but not built, or not built
+  yet and the worst findings point at it) and never a feature a Keep line covers. For a
+  game made to sell (`goal = "sell"` in the brief's facts) it adds a ship estimate: a
+  content freeze at 70% of the time to `target_date`. **Write polish list** makes one
+  change in Review: `design/polish.md`, and the ticked cuts moved to the brief's Out of
+  scope. Nothing in the game is deleted; removing built content is its own request.
 - `/tools` gives each app's state and its one action (for example Start Docker
   or Rebuild), the same report as the app rail and project setup. When an app
   needs something, the sidebar header says so in one line.
@@ -1238,6 +1260,9 @@ translate.
 ```sh
 uv run joinery brief --project /path/to/game        # write design/brief.md (setup answers, else the starting point)
 uv run joinery brief --project /path/to/game --json # the brief's summary and suggestions
+uv run joinery brief --project /path/to/game --status [--check]  # each feature built, broken, missing or not checked
+uv run joinery cut --project /path/to/game          # one polish list, proposed cuts, ship estimate
+uv run joinery cut --project /path/to/game --write [--cut ID] [--no-cuts]  # stage design/polish.md and the cuts for review
 uv run joinery bible --project /path/to/game --upgrade   # bring an older bible up to date
 uv run joinery check bible --project /path/to/game  # gaps, reference board and suggestions
 uv run joinery match --project /path/to/game        # how far the project is from the bible, per area
