@@ -233,7 +233,7 @@ def test_draft_without_a_starting_point_records_everything_as_open() -> None:
         assert heading in parsed.gaps
     assert "# Game brief — Untitled game" in text
     # Nothing is made up: no starting-point credit, no default verbs.
-    assert "starting point" not in text.split("## 1.")[1].split("## 19.")[0].replace(
+    assert "starting point" not in text.split("## 1.")[1].split("## 22.")[0].replace(
         "the starting point you picked", ""
     )
 

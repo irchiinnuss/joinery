@@ -65,10 +65,25 @@ Who the player gets to be, and what they get to feel.
 ## 17. Scope and milestones
 {{scope}}
 
-## 18. Open questions
+## 18. Features
+One feature per line. End a line with what checks it, and Joinery marks it built, missing or broken from that evidence: `(reach: Lighthouse)`, `(no errors: 60 s)`, `(test: res://tests/test_lamp.gd)`, `(replay: first_storm)`. A line with nothing to check stays "not checked".
+
+{{features}}
+
+## 19. Keep
+What must stay true as the game changes. Journeyman asks before changing one. A number pins a value: `- Jump height 1.2 m`, `- Player speed 11 m/s`. Name what holds it when the name alone doesn't find it: `- Jump height 1.2 m (res://player/player.gd:jump_height)`.
+
+{{keep}}
+
+## 20. Avoid
+What the game must not have. Journeyman asks before adding one. Words in brackets are what to look for: `- Guns (gun, rifle, pistol)`.
+
+{{avoid}}
+
+## 21. Open questions
 {{open_questions}}
 
-## 19. Facts (checked)
+## 22. Facts (checked)
 The same decisions in a form Journeyman can compare with the game's setup.
 Keep them in step with the sections above.
 

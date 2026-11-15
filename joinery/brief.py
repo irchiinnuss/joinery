@@ -31,10 +31,12 @@ brief works the same with or without the starting-point catalogue.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import tomllib
 from collections.abc import Iterable, Mapping, Sequence
+from datetime import date
 from pathlib import Path
 from typing import Any, Literal
 
@@ -56,6 +58,8 @@ ANSWERS_FILE = ".joinery-brief-answers.json"
 #: The answers file's object of question-round answers (``genre_questions``).
 QUESTIONS_KEY = "questions"
 UNSET = "_Not decided yet._"
+#: An empty list section (Keep, Avoid, Open questions): decided, with nothing in it.
+NONE_YET = "None yet."
 EDIT_HINT = "Changing the brief is a reviewed edit of design/brief.md."
 FACTS_SCHEMA = 1
 
@@ -105,6 +109,9 @@ SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Accessibility goals", ("accessibility_goals",)),
     ("Monetisation", ("monetisation",)),
     ("Scope and milestones", ("scope",)),
+    ("Features", ("features",)),
+    ("Keep", ("keep",)),
+    ("Avoid", ("avoid",)),
     ("Open questions", ("open_questions",)),
     ("Facts (checked)", ("facts",)),
 )
@@ -218,6 +225,20 @@ class BriefFacts(_Strict):
     #: "" = not decided.
     monetisation: str = ""
     rating_target: str = ""
+    #: Why the game is made: only "sell" gets dates (a freeze and a ship estimate).
+    goal: Literal["", "jam", "learn", "hobby", "sell"] = ""
+    #: The day it should ship, YYYY-MM-DD ("" = none).
+    target_date: str = ""
+
+    @field_validator("target_date")
+    @classmethod
+    def _iso_date(cls, value: str) -> str:
+        if value:
+            try:
+                date.fromisoformat(value)
+            except ValueError as exc:
+                raise ValueError("target_date is a day such as 2027-03-01") from exc
+        return value
 
     @field_validator("genre", "platforms", "stores", "input", "languages")
     @classmethod
@@ -256,6 +277,56 @@ class BriefFacts(_Strict):
         return data
 
 
+class Pin(_Strict):
+    """The value a Keep line holds: "1.2 m" in "Jump height 1.2 m"."""
+
+    value: float
+    #: As written ("1.2 m", "11 m/s").
+    text: str
+    unit: str = ""
+    #: The words before the number ("jump height").
+    name: str
+    #: What holds it, when the line names it: ``res://path:property`` or a project
+    #: setting (``physics/2d/default_gravity``). "" lets the check look by name.
+    target: str = ""
+
+
+class KeepLine(_Strict):
+    """One line of the brief's Keep section: something that must stay true."""
+
+    text: str
+    #: 1-based line in design/brief.md.
+    line: int
+    pin: Pin | None = None
+
+
+class AvoidLine(_Strict):
+    """One line of the brief's Avoid section: something the game must not have."""
+
+    text: str
+    line: int
+    #: What to look for in a change, lowercase.
+    words: list[str]
+    #: True: any one word is enough (words the user listed in brackets); False:
+    #: every word must appear (taken from the line itself).
+    any_word: bool = False
+
+
+class FeatureLine(_Strict):
+    """A feature of the brief, or a milestone's "done when", with what checks it."""
+
+    #: Stable while the line's words stay the same.
+    id: str
+    text: str
+    line: int
+    where: Literal["features", "milestone"] = "features"
+    #: What checks it: a done-when kind (``reach``, ``no_errors``, ``test``) or a
+    #: replay; "" when the line names nothing to check.
+    kind: Literal["", "reach", "no_errors", "test", "replay"] = ""
+    target: str = ""
+    seconds: float = 60.0
+
+
 class Brief(_Strict):
     text: str
     facts: BriefFacts | None
@@ -265,6 +336,9 @@ class Brief(_Strict):
     open_questions: list[str] = []
     #: Things that make the brief unreadable by machine (the facts block).
     problems: list[str] = []
+    keep: list[KeepLine] = []
+    avoid: list[AvoidLine] = []
+    features: list[FeatureLine] = []
 
 
 # --------------------------------------------------------------------------
@@ -354,6 +428,16 @@ def facts_toml(facts: BriefFacts) -> str:
         ("save", json.dumps(facts.save), "none | checkpoints | slots | both"),
         ("monetisation", json.dumps(facts.monetisation), '"" = not decided'),
         ("rating_target", json.dumps(facts.rating_target), '"" = not decided'),
+        (
+            "goal",
+            json.dumps(facts.goal),
+            'jam | learn | hobby | sell ("" = not decided)',
+        ),
+        (
+            "target_date",
+            json.dumps(facts.target_date),
+            'YYYY-MM-DD, for "sell" ("" = none)',
+        ),
     ]
     body = []
     for key, value, comment in lines:
@@ -941,10 +1025,10 @@ def draft(
     values["languages"] = _languages_text(chosen)
     values["accessibility_goals"] = _accessibility_text(blueprint, chosen)
     values["scope"] = _scope_text()
+    values["keep"] = NONE_YET
+    values["avoid"] = NONE_YET
     asked = _open_questions(facts, chosen)
-    values["open_questions"] = (
-        "\n".join(f"- {q}" for q in asked) if asked else "None yet."
-    )
+    values["open_questions"] = "\n".join(f"- {q}" for q in asked) if asked else NONE_YET
     values["facts"] = facts_toml(facts)
     values = genre_questions.into(values, list(questions))
 
@@ -1109,11 +1193,258 @@ def parse_facts(text: str) -> tuple[BriefFacts | None, list[str]]:
         ]
 
 
+def _starts(text: str) -> dict[str, int]:
+    """The 1-based line each section's body starts on, by heading."""
+    return {
+        match.group(1): text.count("\n", 0, match.end()) + 1
+        for match in _SECTION.finditer(text)
+    }
+
+
+def _items(body: str, first: int) -> list[tuple[int, str]]:
+    """``(line, words)`` for each top-level bullet of a section body; a ticked or
+    unticked box (``- [ ]``, ``- [x]``) is part of the bullet, not its words."""
+    found: list[tuple[int, str]] = []
+    for offset, raw in enumerate(body.split("\n")):
+        match = _TOP_BULLET.match(raw)
+        if match is None:
+            continue
+        words = _BOX.sub("", match.group(1)).strip()
+        if words and words not in (UNSET, NONE_YET) and not words.startswith("_"):
+            found.append((first + offset, words))
+    return found
+
+
+_TOP_BULLET = re.compile(r"^[-*]\s+(.+?)\s*$")
+_BOX = re.compile(r"^\[[ xX]\]\s*")
+#: A pinned value: a number and its unit, at the end of a Keep line (before any
+#: brackets naming what holds it).
+_PIN = re.compile(
+    r"^(?P<name>.*?[A-Za-z].*?)\s*(?:[:=]|\bis\b|\bat\b)?\s*"
+    r"(?P<value>-?\d+(?:\.\d+)?)\s*(?P<unit>[A-Za-z°%][A-Za-z°%/²³]*)?\s*$"
+)
+_BRACKETS = re.compile(r"\s*\(([^()]*)\)\s*$")
+_SETTING = re.compile(r"^[a-z_][a-z0-9_]*(/[A-Za-z0-9_.]+)+$")
+_CHECKED_BY = re.compile(
+    r"\s*\(\s*(reach|no[ _-]?errors|test|replay)\s*:\s*([^()]*?)\s*\)\s*$",
+    re.IGNORECASE,
+)
+_WORD = re.compile(r"[a-z][a-z0-9']*")
+#: Words an Avoid line's own wording never needs to match.
+_STOP = frozenset(
+    [
+        "a",
+        "an",
+        "and",
+        "any",
+        "are",
+        "as",
+        "at",
+        "be",
+        "by",
+        "for",
+        "from",
+        "in",
+        "into",
+        "is",
+        "it",
+        "its",
+        "no",
+        "not",
+        "of",
+        "on",
+        "or",
+        "our",
+        "over",
+        "than",
+        "that",
+        "the",
+        "their",
+        "them",
+        "then",
+        "there",
+        "these",
+        "this",
+        "those",
+        "to",
+        "too",
+        "under",
+        "up",
+        "very",
+        "was",
+        "we",
+        "were",
+        "what",
+        "when",
+        "where",
+        "which",
+        "while",
+        "who",
+        "will",
+        "with",
+        "without",
+        "you",
+        "your",
+        "all",
+        "more",
+        "most",
+        "much",
+        "many",
+        "some",
+        "such",
+        "only",
+        "just",
+        "can",
+        "should",
+        "must",
+        "never",
+        "game",
+        "games",
+        "player",
+        "players",
+    ]
+)
+
+
+def words_of(text: str) -> list[str]:
+    """The content words of ``text``, lowercase, singular, in order."""
+    found = []
+    for word in _WORD.findall(text.lower()):
+        word = word.strip("'")
+        if word in _STOP or len(word) < 3:
+            continue
+        found.append(singular(word))
+    return list(dict.fromkeys(found))
+
+
+def singular(word: str) -> str:
+    if len(word) > 4 and word.endswith("ies"):
+        return word[:-3] + "y"
+    if len(word) > 3 and word.endswith("s") and not word.endswith("ss"):
+        return word[:-1]
+    return word
+
+
+def _keep(line: int, words: str) -> KeepLine:
+    target = ""
+    rest = words
+    bracket = _BRACKETS.search(rest)
+    if bracket is not None:
+        inside = bracket.group(1).strip().strip("`")
+        if inside.startswith("res://") or _SETTING.match(inside):
+            target = inside
+            rest = rest[: bracket.start()]
+    match = _PIN.match(rest.strip().rstrip("."))
+    if match is None:
+        return KeepLine(text=words, line=line)
+    unit = match.group("unit") or ""
+    number = match.group("value")
+    name = match.group("name").strip().rstrip(":=").strip()
+    return KeepLine(
+        text=words,
+        line=line,
+        pin=Pin(
+            value=float(number),
+            text=f"{number} {unit}".strip(),
+            unit=unit,
+            name=name,
+            target=target,
+        ),
+    )
+
+
+def _avoid(line: int, words: str) -> AvoidLine | None:
+    bracket = _BRACKETS.search(words)
+    if bracket is not None:
+        listed = [
+            singular(w.strip().lower())
+            for w in re.split(r"[,;/]| or ", bracket.group(1))
+            if w.strip()
+        ]
+        if listed:
+            return AvoidLine(text=words, line=line, words=listed, any_word=True)
+    found = words_of(words)[:4]
+    if not found:
+        return None
+    return AvoidLine(text=words, line=line, words=found)
+
+
+def feature_id(text: str) -> str:
+    """A feature line's id: the same while its words (and check) stay the same."""
+    squashed = " ".join(text.lower().split())
+    return hashlib.sha1(squashed.encode()).hexdigest()[:10]
+
+
+def _feature(line: int, words: str, where: str = "features") -> FeatureLine:
+    kind = ""
+    target = ""
+    seconds = 60.0
+    text = words
+    match = _CHECKED_BY.search(words)
+    if match is not None:
+        named = match.group(1).lower().replace(" ", "").replace("-", "")
+        kind = {"noerrors": "no_errors", "no_errors": "no_errors"}.get(named, named)
+        target = match.group(2).strip().strip("`")
+        text = words[: match.start()].strip()
+        if kind == "no_errors":
+            number = re.search(r"\d+(?:\.\d+)?", target)
+            seconds = min(max(float(number.group()) if number else 60.0, 10.0), 300.0)
+            target = ""
+    return FeatureLine.model_validate(
+        {
+            "id": feature_id(words),
+            "text": text or words,
+            "line": line,
+            "where": where,
+            "kind": kind,
+            "target": target,
+            "seconds": seconds,
+        }
+    )
+
+
+def _milestones(body: str, first: int) -> list[FeatureLine]:
+    """The scope table's milestones whose "done when" is written."""
+    found: list[FeatureLine] = []
+    for offset, raw in enumerate(body.split("\n")):
+        cells = [c.strip() for c in raw.strip().strip("|").split("|")]
+        if not raw.lstrip().startswith("|") or len(cells) < 2:
+            continue
+        name, done = cells[0], cells[1]
+        if (
+            not done
+            or done in (UNSET, "Done when")
+            or set(done) <= set("-: ")
+            or done.startswith("_")
+        ):
+            continue
+        feature = _feature(first + offset, f"{name}: {done}", "milestone")
+        found.append(feature)
+    return found
+
+
 def parse(text: str) -> Brief:
     facts, problems = parse_facts(text)
     gaps: list[str] = []
     asked: list[str] = []
+    keep: list[KeepLine] = []
+    avoid: list[AvoidLine] = []
+    features: list[FeatureLine] = []
+    starts = _starts(text)
     for heading, body in sections(text):
+        first = starts.get(heading, 1)
+        if heading == "Keep":
+            keep = [_keep(line, words) for line, words in _items(body, first)]
+        elif heading == "Avoid":
+            avoid = [
+                found
+                for line, words in _items(body, first)
+                if (found := _avoid(line, words)) is not None
+            ]
+        elif heading == "Features":
+            features += [_feature(line, words) for line, words in _items(body, first)]
+        elif heading == "Scope and milestones":
+            features = _milestones(body, first) + features
         if heading.lower().startswith("facts"):
             continue
         if UNSET in body:
@@ -1125,7 +1456,14 @@ def parse(text: str) -> Brief:
                 if bullet != UNSET and not bullet.startswith("_")
             ]
     return Brief(
-        text=text, facts=facts, gaps=gaps, open_questions=asked, problems=problems
+        text=text,
+        facts=facts,
+        gaps=gaps,
+        open_questions=asked,
+        problems=problems,
+        keep=keep,
+        avoid=avoid,
+        features=features,
     )
 
 
@@ -1140,6 +1478,9 @@ DIRECTION_SECTIONS = (
     "Core loop",
     "Monetisation",
     "Scope and milestones",
+    "Features",
+    "Keep",
+    "Avoid",
 )
 #: The facts that say the same: genre, players, scope of the game.
 DIRECTION_FACTS = (
@@ -1149,6 +1490,8 @@ DIRECTION_FACTS = (
     "max_players",
     "monetisation",
     "rating_target",
+    "goal",
+    "target_date",
 )
 
 
@@ -1343,5 +1686,9 @@ def summary(project: Path, game: Mapping[str, Any] | None) -> dict[str, Any]:
         "gaps": list(brief.gaps),
         "open_questions": list(brief.open_questions),
         "problems": list(brief.problems),
+        # The user's own lines: Journeyman asks before crossing one (keep_avoid).
+        "keep": [line.text for line in brief.keep],
+        "avoid": [line.text for line in brief.avoid],
+        "features": [line.text for line in brief.features],
         "suggestions": suggestions,
     }
