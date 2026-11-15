@@ -33,6 +33,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict
 
 from joinery import brief as brief_mod
+from joinery import genre_questions
 
 Severity = Literal["high", "medium", "low"]
 SEVERITY_ORDER: dict[str, int] = {"high": 0, "medium": 1, "low": 2}
@@ -289,12 +290,23 @@ def sections(source: Text, level: int | None = None) -> list[Section]:
 
 def brief_section(project: Project, name: str) -> Section | None:
     """The brief's section called ``name`` (numbers ignored). Parts still marked
-    "_Not decided yet._" are the caller's to skip: nothing undecided is a promise."""
+    "_Not decided yet._" are the caller's to skip: nothing undecided is a promise.
+    A suggested default the user hasn't confirmed, or a question they skipped, is
+    no promise either: those lines are left out here, so no check holds the game
+    to them (``genre_questions``, ADR 0053)."""
     if project.brief is None:
         return None
     for section in sections(project.brief, 2):
         if section.heading.lower().startswith(name.lower()):
-            return section
+            return Section(
+                section.heading,
+                section.line,
+                [
+                    (index, text)
+                    for index, text in section.body
+                    if not genre_questions.unconfirmed(text)
+                ],
+            )
     return None
 
 
@@ -409,6 +421,20 @@ def _squash(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip().lower()
 
 
+def _unconfirmed_line(root: Path, place: Evidence) -> bool:
+    """Whether ``place`` is a brief line the user never confirmed (a suggested
+    default left standing, or a skipped question)."""
+    if not place.line:
+        return False
+    try:
+        lines = (root / place.path).read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError):
+        return False
+    return 0 < place.line <= len(lines) and genre_questions.unconfirmed(
+        lines[place.line - 1]
+    )
+
+
 def _evidence(root: Path, raw: Any) -> tuple[Evidence | None, str]:
     """One cited place, checked against the file; (None, why) when it doesn't hold."""
     if not isinstance(raw, dict):
@@ -506,6 +532,14 @@ def agent_findings(
         ):
             dropped.append(
                 f"{label} ({title}): rests on the {basis} but cites no line of it"
+            )
+            continue
+        if basis == "brief" and all(
+            _unconfirmed_line(root, p) for p in places if p.path.startswith("design/")
+        ):
+            dropped.append(
+                f"{label} ({title}): rests on a suggested default the user hasn't "
+                "confirmed, which is no promise"
             )
             continue
         fix = " ".join(str(item.get("fix", "")).split())[:600]
