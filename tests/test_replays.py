@@ -364,3 +364,91 @@ def test_playtest_seeds_the_game_and_can_record(tmp_path: Path) -> None:
     assert f"--joinery-record={tmp_path / 'play.replay'}" in args
     # The screenshot replay never records over it.
     assert not any(a.startswith("--joinery-record") for a in playtest._bot_args(options, tmp_path, shots=[5]))
+
+
+def _state(players: int, drudge_x: float) -> dict[str, Any]:
+    return {
+        "scene": "res://level.tscn",
+        "paused": False,
+        "level_time": 1.0,
+        "player": [{"at": [float(i), 0.0, 0.0], "health": 100.0} for i in range(players)],
+        "saveable": {"drudge1": {"position": [drudge_x, 0.0, 4.0], "yaw": -1.5}},
+    }
+
+
+def _rerun(checks: list[tuple[int, dict[str, Any]]], build: str = "linux") -> dict[str, Any]:
+    return {
+        "ok": True,
+        "checks": len(checks),
+        "build": build,
+        "recorded_build": HEADER["build"],
+        "recaptured": [
+            {"f": f, "check": {"hash": json.dumps(s, sort_keys=True), "state": s}}
+            for f, s in checks
+        ],
+    }
+
+
+def test_staged_check_compares_whole_runs_on_the_worker_build(tmp_path: Path) -> None:
+    """Another build drifts from the recording at frame 60 by itself; the check still
+    sees what the change does after that, by comparing the whole run on the worker
+    with the same input's run there before the change (a sound beside the player
+    counted as a second player hid behind the drift before)."""
+    project = _project(tmp_path)
+    _write(project / "tests/replays/walk.replay")
+    _write(project / "tests/replays/jump.replay")
+    stage = tmp_path / "stage"
+    stage.mkdir()
+    (stage / "project.godot").write_text((project / "project.godot").read_text())
+    _write(stage / "tests/replays/walk.replay")
+    _write(stage / "tests/replays/jump.replay")
+    before = _rerun([(60, _state(1, 20.0)), (120, _state(1, 21.0))])
+    runner, _calls = _fake_runner(
+        {
+            "before": {"walk": before, "jump": before},
+            "after": {
+                "walk": before,
+                "jump": _rerun([(60, _state(1, 20.0)), (120, _state(2, 21.5))]),
+            },
+        }
+    )
+    by_name = {o.name: o for o in asyncio.run(replays.check_stage(project, stage, runner))}
+    assert by_name["walk"].ok and "Plays exactly as it did" in by_name["walk"].note
+    jump = by_name["jump"]
+    assert jump.status == "diverged" and jump.frame == 120, jump
+    assert jump.differs == ["players: 1 -> 2", "saved drudge1: changed"]
+    assert "the change did it" in jump.detail
+
+
+def test_on_the_recording_build_the_whole_run_is_held_to_the_recording(
+    tmp_path: Path,
+) -> None:
+    project = _project(tmp_path)
+    stage = tmp_path / "stage"
+    stage.mkdir()
+    path = _write(stage / "tests/replays/walk.replay")
+    lines = path.read_text().splitlines()
+    recorded = {60: _state(1, 20.0), 120: _state(1, 21.0)}
+    out = []
+    for raw in lines:
+        line = json.loads(raw)
+        if "check" in line:
+            state = recorded[line["f"]]
+            line["check"] = {"hash": json.dumps(state, sort_keys=True), "state": state}
+        out.append(json.dumps(line))
+    path.write_text("\n".join(out) + "\n")
+    same = _rerun([(60, _state(1, 20.0)), (120, _state(1, 21.0))], build=HEADER["build"])
+    off = _rerun([(60, _state(1, 20.0)), (120, _state(2, 21.0))], build=HEADER["build"])
+    runner, _ = _fake_runner({"before": {"walk": same}, "after": {"walk": same}})
+    (good,) = asyncio.run(replays.check_stage(project, stage, runner))
+    assert good.ok, good
+    runner, _ = _fake_runner({"before": {"walk": off}, "after": {"walk": off}})
+    (bad,) = asyncio.run(replays.check_stage(project, stage, runner))
+    # Off its own recording on the very build that made it: the CLI says the same.
+    assert bad.status == "diverged" and bad.differs == ["players: 1 -> 2"], bad
+
+
+def test_worker_runs_rerecord_to_keep_the_whole_run(tmp_path: Path) -> None:
+    replay = replays.read(_write(tmp_path / "tests/replays/walk.replay"))
+    assert replays.RERECORD_ARG in replays._script([replay], "after", rerecord=True)
+    assert replays.RERECORD_ARG not in replays._script([replay], "after")

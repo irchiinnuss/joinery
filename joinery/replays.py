@@ -55,7 +55,9 @@ STARTUP_SECONDS = 60.0
 #: Where staged-change checks keep what each replay did before the change.
 BASELINES = Path(".joinery") / "replays"
 #: Godot console lines that mean the game broke.
-_ERROR = re.compile(r"^(SCRIPT ERROR|USER SCRIPT ERROR|ERROR:|USER ERROR)", re.MULTILINE)
+_ERROR = re.compile(
+    r"^(SCRIPT ERROR|USER SCRIPT ERROR|ERROR:|USER ERROR)", re.MULTILINE
+)
 _NAME = re.compile(r"[^A-Za-z0-9._-]+")
 
 
@@ -224,7 +226,9 @@ def add(project: Path, source: Path, name: str = "") -> Path:
     target = folder(project) / (base.removesuffix(SUFFIX) + SUFFIX)
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists() and target.resolve() != source.resolve():
-        raise ValueError(f"tests/replays/{target.name} already exists; pick another --name.")
+        raise ValueError(
+            f"tests/replays/{target.name} already exists; pick another --name."
+        )
     if target.resolve() != source.resolve():
         shutil.copyfile(source, target)
     return target
@@ -328,7 +332,11 @@ def outcome(name: str, console: str, code: int | None, replay: Replay) -> Outcom
         result.detail = str(divergence.get("error", "")) or (
             "The game's state no longer matches the recording."
         )
-        if result.build and result.recorded_build and result.build != result.recorded_build:
+        if (
+            result.build
+            and result.recorded_build
+            and result.build != result.recorded_build
+        ):
             result.note = (
                 f"Recorded on {result.recorded_build}, replayed on {result.build}: "
                 "another build can differ by itself."
@@ -364,7 +372,9 @@ def run(project: Path, path: Path, *, godot: Path | None = None) -> Outcome:
     except ValueError as exc:
         return Outcome(path.stem, "failed", str(exc))
     if replay.header.get("partial"):
-        return Outcome(replay.name, "failed", "It starts mid-session, so it can't replay.")
+        return Outcome(
+            replay.name, "failed", "It starts mid-session, so it can't replay."
+        )
     binary = godot or godot_binary()
     with tempfile.TemporaryDirectory(prefix="joinery-replay-") as temp:
         work = Path(temp)
@@ -380,7 +390,12 @@ def run(project: Path, path: Path, *, godot: Path | None = None) -> Outcome:
         limit = STARTUP_SECONDS + replay.seconds * SECONDS_PER_GAME_SECOND
         try:
             done = subprocess.run(
-                argv, env=env, capture_output=True, text=True, timeout=limit, check=False
+                argv,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=limit,
+                check=False,
             )
         except subprocess.TimeoutExpired as exc:
             out = exc.stdout if isinstance(exc.stdout, str) else ""
@@ -397,7 +412,10 @@ def run_all(project: Path, names: Iterable[str] = ()) -> list[Outcome]:
     wanted = {n.removesuffix(SUFFIX) for n in names}
     paths = [p for p in project_replays(project) if not wanted or p.stem in wanted]
     missing = wanted - {p.stem for p in paths}
-    found = [Outcome(n, "failed", f"There is no tests/replays/{n}{SUFFIX}.") for n in sorted(missing)]
+    found = [
+        Outcome(n, "failed", f"There is no tests/replays/{n}{SUFFIX}.")
+        for n in sorted(missing)
+    ]
     return found + [run(project, p) for p in paths]
 
 
@@ -413,7 +431,11 @@ def rewrite(text: str, recaptured: list[dict[str, Any]], build: str, when: str) 
     header naming the build and time it was re-recorded."""
     out: list[str] = []
     checks = sorted(
-        (c for c in recaptured if isinstance(c, dict) and isinstance(c.get("check"), dict)),
+        (
+            c
+            for c in recaptured
+            if isinstance(c, dict) and isinstance(c.get("check"), dict)
+        ),
         key=lambda c: int(c.get("f", 0)),
     )
     header_done = False
@@ -436,7 +458,10 @@ def rewrite(text: str, recaptured: list[dict[str, Any]], build: str, when: str) 
             out.append(raw)
     # Inputs and checkpoints in frame order, a frame's inputs before its checkpoint.
     events = [(int(json.loads(r).get("f", 0)), 0, r) for r in out[1:]]
-    events += [(int(c["f"]), 1, json.dumps({"f": int(c["f"]), "check": c["check"]})) for c in checks]
+    events += [
+        (int(c["f"]), 1, json.dumps({"f": int(c["f"]), "check": c["check"]}))
+        for c in checks
+    ]
     events.sort(key=lambda item: (item[0], item[1]))
     lines = [out[0], *(r for _, _, r in events)]
     if end is not None:
@@ -454,7 +479,9 @@ def rerecord(root: Path, path: Path, *, godot: Path | None = None) -> Replay:
     root = root.resolve()
     replay = read(path)
     if replay.header.get("partial"):
-        raise ValueError(f"{replay.name} starts mid-session, so it can't be re-recorded.")
+        raise ValueError(
+            f"{replay.name} starts mid-session, so it can't be re-recorded."
+        )
     binary = godot or godot_binary()
     with tempfile.TemporaryDirectory(prefix="joinery-rerecord-") as temp:
         work = Path(temp)
@@ -464,12 +491,19 @@ def rerecord(root: Path, path: Path, *, godot: Path | None = None) -> Replay:
         from joinery import import_cache
 
         import_cache.ensure(binary, root, env)
-        argv = command(replay, str(root), str(path.resolve()), godot=str(binary), work=str(work))
+        argv = command(
+            replay, str(root), str(path.resolve()), godot=str(binary), work=str(work)
+        )
         argv.append(RERECORD_ARG)
         limit = STARTUP_SECONDS + replay.seconds * SECONDS_PER_GAME_SECOND
         try:
             done = subprocess.run(
-                argv, env=env, capture_output=True, text=True, timeout=limit, check=False
+                argv,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=limit,
+                check=False,
             )
         except subprocess.TimeoutExpired:
             raise ValueError(
@@ -498,7 +532,9 @@ def rerecord(root: Path, path: Path, *, godot: Path | None = None) -> Replay:
             + "; ".join(judged.errors[:3])
         )
     if isinstance(data.get("divergence"), dict) and data["divergence"].get("error"):
-        raise ValueError(f"{replay.name} couldn't be re-recorded: {data['divergence']['error']}")
+        raise ValueError(
+            f"{replay.name} couldn't be re-recorded: {data['divergence']['error']}"
+        )
     from datetime import UTC, datetime
 
     text = rewrite(
@@ -517,7 +553,10 @@ def stage_add(project: Path, source: Path, name: str = "") -> tuple[Any, Path]:
 
     label = name or source.stem
     tx, target = stage_change(
-        project, f"Keep replay {label}", "joinery replay", lambda stage: add(stage, source, name)
+        project,
+        f"Keep replay {label}",
+        "joinery replay",
+        lambda stage: add(stage, source, name),
     )
     return tx, project / target.relative_to(tx.stage)
 
@@ -581,7 +620,8 @@ async def rerecord_tool(gateway: Any, params: dict[str, Any]) -> dict[str, Any]:
     return {
         "status": "staged",
         "rerecorded": [
-            {"name": r.name, "seconds": r.seconds, "checkpoints": r.checks} for r in again
+            {"name": r.name, "seconds": r.seconds, "checkpoints": r.checks}
+            for r in again
         ],
         "next": NEXT_RERECORDED,
     }
@@ -596,8 +636,10 @@ def _quote(text: str) -> str:
     return "'" + text.replace("'", "'\\''") + "'"
 
 
-def _script(replays: list[Replay], tag: str) -> str:
-    """One shell script that replays each file in the worker, each result marked."""
+def _script(replays: list[Replay], tag: str, *, rerecord: bool = False) -> str:
+    """One shell script that replays each file in the worker, each result marked.
+    With ``rerecord`` each run also hands back its checkpoints (``recaptured``) for the
+    whole run, compared afterwards by :func:`compare_runs`."""
     parts = []
     for replay in replays:
         work = f"/tmp/{tag}-{replay.name}"
@@ -608,6 +650,8 @@ def _script(replays: list[Replay], tag: str) -> str:
             godot="godot",
             work=work,
         )
+        if rerecord:
+            argv.append(RERECORD_ARG)
         settings = str(replay.header.get("settings", ""))
         parts.append(
             f"mkdir -p {_quote(work + '/saves')}; "
@@ -640,9 +684,22 @@ def fingerprint(root: Path) -> str:
     digest = hashlib.sha256()
     for path in sorted(root.rglob("*")):
         rel = path.relative_to(root)
-        if not path.is_file() or rel.parts[0] in {".godot", ".joinery", ".git", "tests"}:
+        if not path.is_file() or rel.parts[0] in {
+            ".godot",
+            ".joinery",
+            ".git",
+            "tests",
+        }:
             continue
-        if path.suffix in {".gd", ".tscn", ".tres", ".gdshader", ".godot", ".cfg", ".json"}:
+        if path.suffix in {
+            ".gd",
+            ".tscn",
+            ".tres",
+            ".gdshader",
+            ".godot",
+            ".cfg",
+            ".json",
+        }:
             digest.update(rel.as_posix().encode() + b"\0" + path.read_bytes())
     return digest.hexdigest()[:16]
 
@@ -677,7 +734,7 @@ async def check_stage(
             outcomes.append(Outcome(path.stem, "failed", str(exc)))
     if not replays:
         return outcomes
-    script = ("" if imported else IMPORT) + _script(replays, "after")
+    script = ("" if imported else IMPORT) + _script(replays, "after", rerecord=True)
     got = await runner(["sh", "-c", script], stage, timeout)
     after = split_runs(got.output)
     baseline = await _baseline(project, replays, runner, timeout)
@@ -685,15 +742,202 @@ async def check_stage(
         console = after.get(replay.name)
         if console is None:
             outcomes.append(
-                Outcome(replay.name, "failed", "The replay didn't run: " + got.output[-600:])
+                Outcome(
+                    replay.name, "failed", "The replay didn't run: " + got.output[-600:]
+                )
             )
             continue
         result = outcome(replay.name, console, None, replay)
         before = baseline.get(replay.name)
-        if result.status == "diverged" and before is not None:
+        run = recaptured(console)
+        if run is not None and result.status == "passed":
+            # The whole run's checkpoints: held to the recording when the worker made
+            # it, else to what the same input did on the worker before the change, so
+            # a change after the first frame another build drifts at is still seen.
+            same_build = bool(result.build) and result.build == replay.build
+            reference = (
+                recorded_checks(replay.path)
+                if same_build
+                else (before or {}).get("recaptured")
+            )
+            if isinstance(reference, list):
+                result = _against_run(result, replay, reference, run, same_build)
+            else:
+                result.note = (
+                    "Not compared: it didn't run on this build before the change."
+                )
+        elif result.status == "diverged" and before is not None:
+            # A game core from before re-recording compares only to its recording.
             result = _against_baseline(result, before)
         outcomes.append(result)
     return outcomes
+
+
+def recaptured(console: str) -> list[dict[str, Any]] | None:
+    """The checkpoints a re-recording run handed back (``recaptured``), or None when the
+    game's core doesn't re-record."""
+    found: list[dict[str, Any]] | None = None
+    for line in console.splitlines():
+        if not line.startswith(RESULT_PREFIX):
+            continue
+        try:
+            data = json.loads(line[len(RESULT_PREFIX) :])
+        except ValueError:
+            continue
+        if isinstance(data, dict) and isinstance(data.get("recaptured"), list):
+            found = [
+                c
+                for c in data["recaptured"]
+                if isinstance(c, dict) and isinstance(c.get("check"), dict)
+            ]
+    return found
+
+
+def recorded_checks(path: Path) -> list[dict[str, Any]]:
+    """The checkpoints in a replay file, as ``{"f", "check"}``."""
+    found: list[dict[str, Any]] = []
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        try:
+            line = json.loads(raw) if raw.strip() else None
+        except ValueError:
+            continue
+        if isinstance(line, dict) and isinstance(line.get("check"), dict):
+            found.append({"f": int(line.get("f", 0)), "check": line["check"]})
+    return found
+
+
+#: Tolerances of ``core/replays/replay_state.gd``, for the same build.
+_POSITION_3D = 0.25
+_POSITION_2D = 4.0
+_TIME = 0.1
+_NUMBER = 0.001
+_MAX_SAVED = 12
+
+
+def _close(a: Any, b: Any) -> bool:
+    if isinstance(a, int | float) and isinstance(b, int | float):
+        x, y = float(a), float(b)
+        return abs(x - y) <= _NUMBER * max(1.0, abs(x), abs(y))
+    if isinstance(a, list) and isinstance(b, list):
+        return len(a) == len(b) and all(_close(p, q) for p, q in zip(a, b, strict=True))
+    if isinstance(a, dict) and isinstance(b, dict):
+        return a.keys() == b.keys() and all(_close(a[k], b[k]) for k in a)
+    return str(a) == str(b)
+
+
+def _places(state: dict[str, Any]) -> list[list[float]]:
+    people = state.get("player") or []
+    if people:
+        return [
+            [float(v) for v in one.get("at", [])] if isinstance(one, dict) else []
+            for one in people
+        ]
+    places = []
+    for text in state.get("players") or []:
+        parts = str(text).strip("()").split(",")
+        places.append([float(p) for p in parts if p.strip()])
+    return places
+
+
+def state_differences(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
+    """What differs between two checkpoint states of the same build, the way the game
+    words it (``ReplayState.differences``): "players: 1 -> 2", "saved drudge1: changed"."""
+    found: list[str] = []
+    for key in ("scene", "paused"):
+        if (key in before or key in after) and str(before.get(key)) != str(
+            after.get(key)
+        ):
+            found.append(f"{key}: {before.get(key)} -> {after.get(key)}")
+    if "level_time" in before and "level_time" in after:
+        then, now = float(before["level_time"]), float(after["level_time"])
+        if abs(then - now) > _TIME:
+            found.append(f"level_time: {then} -> {now}")
+    places_before, places_after = _places(before), _places(after)
+    if len(places_before) != len(places_after):
+        found.append(f"players: {len(places_before)} -> {len(places_after)}")
+    else:
+        for a, b in zip(places_before, places_after, strict=True):
+            limit = _POSITION_2D if len(a) == 2 else _POSITION_3D
+            far = sum((p - q) ** 2 for p, q in zip(a, b, strict=False)) ** 0.5
+            if len(a) != len(b) or far > limit:
+                text_a = ", ".join(f"{v:.2f}" for v in a)
+                text_b = ", ".join(f"{v:.2f}" for v in b)
+                found.append(f"players: ({text_a}) -> ({text_b})")
+        for one, other in zip(
+            before.get("player") or [], after.get("player") or [], strict=False
+        ):
+            if (
+                isinstance(one, dict)
+                and isinstance(other, dict)
+                and "health" in one
+                and not _close(one.get("health"), other.get("health"))
+            ):
+                found.append(f"health: {one.get('health')} -> {other.get('health')}")
+    saved_before, saved_after = before.get("saveable"), after.get("saveable")
+    if isinstance(saved_before, dict) and isinstance(saved_after, dict):
+        for key, value in saved_before.items():
+            if len(found) >= _MAX_SAVED:
+                break
+            if key not in saved_after:
+                found.append(f"saved {key}: gone")
+            elif not _close(value, saved_after[key]):
+                found.append(f"saved {key}: changed")
+    return found
+
+
+def compare_runs(
+    reference: list[dict[str, Any]], run: list[dict[str, Any]]
+) -> tuple[int, list[str]] | None:
+    """The first checkpoint where ``run`` differs from ``reference`` (same input, same
+    build), as (frame, what differs), or None when it plays the same throughout."""
+    by_frame = {int(c.get("f", 0)): c["check"] for c in reference}
+    seen: set[int] = set()
+    for check in sorted(run, key=lambda c: int(c.get("f", 0))):
+        frame = int(check.get("f", 0))
+        then = by_frame.get(frame)
+        seen.add(frame)
+        if then is None or then.get("hash") == check["check"].get("hash"):
+            continue
+        differs = state_differences(
+            then.get("state") or {}, check["check"].get("state") or {}
+        )
+        if differs:
+            return frame, differs
+    missing = sorted(set(by_frame) - seen)
+    if missing:
+        return missing[0], [f"the run stopped before frame {missing[0]}"]
+    return None
+
+
+def _against_run(
+    result: Outcome,
+    replay: Replay,
+    reference: list[dict[str, Any]],
+    run: list[dict[str, Any]],
+    same_build: bool,
+) -> Outcome:
+    """Judge a re-recorded run against its recording (same build) or against the same
+    input's run on this build before the change."""
+    result.checks = len(run)
+    differs = compare_runs(reference, run)
+    if differs is None:
+        if not same_build:
+            result.note = (
+                f"Plays exactly as it did on {result.build or 'this build'} before the "
+                f"change (recorded on {replay.build})."
+            )
+        return result
+    frame, what = differs
+    result.status = "diverged"
+    result.frame = frame
+    result.seconds = round(frame / max(replay.ticks, 1), 2)
+    result.differs = what
+    result.detail = (
+        "The game's state no longer matches the recording."
+        if same_build
+        else "It played differently on this build before this change: the change did it."
+    )
+    return result
 
 
 def _against_baseline(after: Outcome, before: dict[str, Any]) -> Outcome:
@@ -710,7 +954,9 @@ def _against_baseline(after: Outcome, before: dict[str, Any]) -> Outcome:
             f"(frame {after.frame})."
         )
     elif before.get("status") == "passed" and after.status == "diverged":
-        after.detail = "It played like the recording before this change and doesn't now."
+        after.detail = (
+            "It played like the recording before this change and doesn't now."
+        )
     return after
 
 
@@ -724,8 +970,14 @@ async def _baseline(
     except (OSError, ValueError):
         stored = {}
     stored = stored if isinstance(stored, dict) else {}
-    keys = {r.name: hashlib.sha256(r.path.read_bytes()).hexdigest()[:16] for r in replays}
-    missing = [r for r in replays if (stored.get(r.name) or {}).get("key") != keys[r.name]]
+    # Keyed by the file and the way it is run (re-recording, its whole run kept).
+    keys = {
+        r.name: "rr-" + hashlib.sha256(r.path.read_bytes()).hexdigest()[:16]
+        for r in replays
+    }
+    missing = [
+        r for r in replays if (stored.get(r.name) or {}).get("key") != keys[r.name]
+    ]
     if missing:
         from joinery.transactions import clone_tree
 
@@ -739,11 +991,15 @@ async def _baseline(
             for replay in missing:
                 shutil.copyfile(replay.path, target / replay.path.name)
             prepared = [
-                Replay(target / r.path.name, r.header, r.frames, r.events, r.checks, r.end)
+                Replay(
+                    target / r.path.name, r.header, r.frames, r.events, r.checks, r.end
+                )
                 for r in missing
             ]
             got = await runner(
-                ["sh", "-c", IMPORT + _script(prepared, "before")], copy, timeout
+                ["sh", "-c", IMPORT + _script(prepared, "before", rerecord=True)],
+                copy,
+                timeout,
             )
         finally:
             shutil.rmtree(scratch, ignore_errors=True)
@@ -755,6 +1011,7 @@ async def _baseline(
             stored[replay.name] = {
                 "key": keys[replay.name],
                 **outcome(replay.name, console, None, replay).as_dict(),
+                "recaptured": recaptured(console),
             }
         cache.parent.mkdir(parents=True, exist_ok=True)
         for old in cache.parent.glob("baseline-*.json"):
@@ -816,10 +1073,16 @@ def _staged(args: argparse.Namespace, project: Path) -> int:
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     actions = parser.add_subparsers(dest="action", required=True)
-    add_cmd = actions.add_parser("add", help="keep a recorded play as a test in tests/replays/")
-    add_cmd.add_argument("file", type=Path, help="a .replay file, or a bug report folder")
+    add_cmd = actions.add_parser(
+        "add", help="keep a recorded play as a test in tests/replays/"
+    )
+    add_cmd.add_argument(
+        "file", type=Path, help="a .replay file, or a bug report folder"
+    )
     add_cmd.add_argument("--project", type=Path, required=True)
-    add_cmd.add_argument("--name", default="", help="the replay's name in tests/replays/")
+    add_cmd.add_argument(
+        "--name", default="", help="the replay's name in tests/replays/"
+    )
     add_cmd.add_argument("--yes", action="store_true", help="accept the change at once")
     add_cmd.add_argument("--json", action="store_true")
     again = actions.add_parser(
@@ -827,14 +1090,22 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="play a replay's input on the game as it is and keep its new checkpoints "
         "(for a change meant to alter the level), as a change for review",
     )
-    again.add_argument("names", nargs="*", help="replays in tests/replays/ (default: all)")
+    again.add_argument(
+        "names", nargs="*", help="replays in tests/replays/ (default: all)"
+    )
     again.add_argument("--project", type=Path, required=True)
     again.add_argument("--yes", action="store_true", help="accept the change at once")
     again.add_argument("--json", action="store_true")
-    run_cmd = actions.add_parser("run", help="replay headless and report where it diverges")
-    run_cmd.add_argument("names", nargs="*", help="replays in tests/replays/ (default: all)")
+    run_cmd = actions.add_parser(
+        "run", help="replay headless and report where it diverges"
+    )
+    run_cmd.add_argument(
+        "names", nargs="*", help="replays in tests/replays/ (default: all)"
+    )
     run_cmd.add_argument("--project", type=Path, required=True)
-    run_cmd.add_argument("--all", action="store_true", help="every replay (the default)")
+    run_cmd.add_argument(
+        "--all", action="store_true", help="every replay (the default)"
+    )
     run_cmd.add_argument("--file", type=Path, help="replay this file instead")
     run_cmd.add_argument("--json", action="store_true")
     list_cmd = actions.add_parser("list", help="list the project's replays")
