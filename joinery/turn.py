@@ -18,7 +18,15 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from joinery import auto_accept, brief, done_when, look_preview, metrics, reasons
+from joinery import (
+    auto_accept,
+    brief,
+    done_when,
+    keep_avoid,
+    look_preview,
+    metrics,
+    reasons,
+)
 from joinery.claims import LEAD_BUSY, MAIN, live_refusal
 from joinery.peer_review import PeerReview, Reviewer, ReviewPlan, request_for
 from joinery.reasons import Reason
@@ -360,6 +368,8 @@ class TurnController:
         self._passed: dict[str, list[str]] = {}
         #: The agent's plain words on what visibly changed, for the review.
         self._facts: list[str] = []
+        #: The brief's Keep/Avoid lines the submitted change crosses (keep_avoid).
+        self._crossed: list[keep_avoid.Flag] = []
         #: Each part of the request and what was done about it, for the card's list.
         self._done_items: list[str] = []
         #: The agent's own one line naming its change, from its last submit.
@@ -459,6 +469,7 @@ class TurnController:
         self.last_result = None
         self._checked = None
         self._facts = []
+        self._crossed = []
         self._done_items = []
         self._named = ""
         self.review_rounds = 0
@@ -959,6 +970,9 @@ class TurnController:
                 placed, notes = self._placement(found)
                 problems = problems + placed
                 notes = notes + self._owned_notes(found)
+                self._crossed = self._keep_avoid(found, summary)
+                if self._crossed:
+                    notes = notes + [keep_avoid.agent_note(self._crossed)]
             self._passed = {"ran": checked.ran, "skipped": checked.skipped}
             if checked.info:
                 self._passed["info"] = list(checked.info)
@@ -1009,7 +1023,9 @@ class TurnController:
             )
             self._record_findings("checks", problems, final)
             if final and found and held(problems):
-                return await self._hold(summary, found, origin, changes, problems, notes)
+                return await self._hold(
+                    summary, found, origin, changes, problems, notes
+                )
             if final:
                 await self._drop("failed")
                 return self._result(
@@ -1164,6 +1180,7 @@ class TurnController:
             unsaved=auto_accept.unsaved_scenes(self.gateway.editor_context),
             hold_on=hold_on,
             brief_direction=direction,
+            crossed=[flag.reason() for flag in self._crossed],
             owned=auto_accept.owned_changes(
                 project, [str(c.get("path", "")) for c in changes]
             ),
@@ -1187,6 +1204,19 @@ class TurnController:
             return []
         owned = auto_accept.owned_changes(project, [c["path"] for c in found])
         return [auto_accept.owned_note(owned)] if owned else []
+
+    def _keep_avoid(
+        self, found: list[dict[str, str]], summary: str
+    ) -> list[keep_avoid.Flag]:
+        """The brief's Keep and Avoid lines the staged change crosses (shared core)."""
+        tx = self.gateway.transaction
+        if tx is None or tx.state != "staging" or not found:
+            return []
+        said = " ".join([summary, *self._facts, *self._done_items])
+        try:
+            return keep_avoid.check(tx.original, tx.stage, found, said=said)
+        except (OSError, ValueError):
+            return []
 
     def _brief_edit(
         self, changes: list[dict[str, Any]]
@@ -1506,7 +1536,12 @@ class TurnController:
                 await self.gateway.cancel()  # an empty stage beside a live edit
             return None
         notes = [note.as_dict() for note in peer.notes] if peer is not None else []
-        notes = [*failed_notes(failing or []), *notes]
+        crossed = [
+            {"severity": "warn", "rule": "brief", "text": flag.text()}
+            | ({"file": flag.path} if flag.path else {})
+            for flag in self._crossed
+        ]
+        notes = [*failed_notes(failing or []), *crossed, *notes]
         reviewer = (
             peer.status_dict(self.review_rounds)
             if peer is not None
@@ -1528,6 +1563,9 @@ class TurnController:
         preview["checks"] = self._passed
         if failing:
             preview["failed_checks"] = [problem.as_dict() for problem in failing]
+        if self._crossed:
+            # Which Keep/Avoid line of the brief the change touched, for the review.
+            preview["keep_avoid"] = [flag.as_dict() for flag in self._crossed]
         if self.todo is not None and self._done:
             preview["done_when"] = [r.as_dict() for r in self._done]
             preview["done_when_summary"] = done_when.counts_line(self._done)

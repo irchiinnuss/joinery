@@ -13,7 +13,9 @@ for that, and always when it says the game breaks or work is lost (rule
 shown with the kept change. A note (``info``) never holds it and is shown with
 it. A routine edit of ``design/brief.md`` (controls, verbs, a renamed action)
 is kept with a note; one that changes its direction (pitch, genre, audience,
-fantasy, core loop, scope, monetisation, or those facts) waits. A change to a
+fantasy, core loop, scope, features, Keep, Avoid, monetisation, or those facts)
+waits. A change that crosses one of the brief's Keep or Avoid lines (moves a pinned
+value, adds something to avoid; ``joinery.keep_avoid``) waits too. A change to a
 file Joinery owns in the game (the shared core and test harness,
 ``joinery.core_update.owned``) always waits, with a note.
 
@@ -152,6 +154,7 @@ def held(
     hold_on: str = DEFAULT_HOLD,
     brief_direction: Sequence[str] | None = None,
     owned: Sequence[str] = (),
+    crossed: Sequence[str] = (),
 ) -> list[str]:
     """Why a change that reached review waits for the user; empty when it may be
     kept without asking. Each reason is a short plain line, for logs and metrics.
@@ -170,6 +173,8 @@ def held(
     the brief's direction the change alters (``brief.direction_changes``), None
     when nobody looked, which holds a change to the brief. ``owned`` are the
     Joinery-owned files it changes (``owned_changes``): always a hold.
+    ``crossed`` the brief's Keep/Avoid lines it crosses (``keep_avoid.check``, as
+    ``Flag.reason``): always a hold, naming the lines.
     """
     reasons: list[str] = []
     paths = [str(c.get("path", "")) for c in changes]
@@ -186,6 +191,12 @@ def held(
                 + ", ".join(brief_direction)
                 + ")"
             )
+    if crossed:
+        reasons.append(
+            "it crosses the game brief's Keep/Avoid lines ("
+            + "; ".join(crossed[:3])
+            + ")"
+        )
     if owned:
         reasons.append(OWNED_REASON + " (" + ", ".join(owned[:3]) + ")")
     if notes:
