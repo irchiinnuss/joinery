@@ -121,6 +121,10 @@ class Outcome:
     kept: bool = False
     #: Why auto-accept left the change for the user ("it has notes for the user", …).
     auto_accept_held: list[str] = field(default_factory=list)
+    #: The change was kept without asking (``joinery.auto_accept``); state "accepted".
+    auto_accepted: bool = False
+    #: What an auto-accepted change says to the user (the card's notes).
+    notes: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return {"kind": "run_result", **asdict(self)}
@@ -223,7 +227,7 @@ async def drive(
             with contextlib.suppress(ProcessLookupError):
                 process.terminate()
             await process.wait()
-    if outcome.state != "review" and project is not None:
+    if outcome.state not in {"review", "accepted"} and project is not None:
         kept = keep_leftovers(project, started, why)
         if kept:
             outcome.transaction_id, outcome.state = kept[0], "review"
@@ -232,9 +236,11 @@ async def drive(
         why=why,
         kept="what it had applied waits for your review"
         if outcome.state == "review"
+        else "its change was accepted"
+        if outcome.state == "accepted"
         else "it had applied nothing that could be kept",
     )
-    if outcome.state != "review":
+    if outcome.state not in {"review", "accepted"}:
         outcome.state = "failed"
     return outcome
 
@@ -295,6 +301,26 @@ async def _stopped(
                     if isinstance(event, dict) and event.get("kind") in EVENTS:
                         on_event(event)
                         _note_kept(outcome, event)
+                        _note_auto_accepted(outcome, event)
+
+
+def _note_auto_accepted(outcome: Outcome, event: dict[str, Any]) -> bool:
+    """A ``file_decision`` the host made itself (auto-accept): the run's change is
+    that accepted transaction. False for any other event."""
+    if (
+        event.get("kind") != "file_decision"
+        or event.get("task_id")
+        or not event.get("auto_accepted")
+        or not event.get("accepted")
+    ):
+        return False
+    outcome.transaction_id = str(event.get("transaction_id", ""))
+    outcome.summary = str(event.get("summary", "")) or outcome.summary
+    outcome.notes = [str(note) for note in event.get("notes") or []]
+    outcome.state = "accepted"
+    outcome.auto_accepted = True
+    outcome.kept = False
+    return True
 
 
 def _note_kept(outcome: Outcome, event: dict[str, Any]) -> None:
@@ -349,6 +375,10 @@ async def _follow(
             outcome.chat_id = str(event["chat_id"])
         elif kind == "kept":
             _note_kept(outcome, event)
+        elif _note_auto_accepted(outcome, event):
+            if accept:
+                return outcome  # decided already: nothing left to accept
+            continue
         elif kind == "auto_accept_held" and not event.get("task_id"):
             for why in event.get("reasons") or []:
                 if str(why) not in outcome.auto_accept_held:
@@ -393,6 +423,8 @@ async def _follow(
                     continue
                 outcome.todo_waiting = todo_id
                 waiting = None
+            if accept and outcome.auto_accepted:
+                return outcome
             if accept and outcome.transaction_id:
                 await send(
                     {
@@ -660,7 +692,15 @@ def finish(outcome: Outcome, project: Path, as_json: bool) -> int:
                 "Waiting for your review in the Review tab, or: joinery transactions "
                 f"accept --project {project} --id {identifier}"
             )
-        if not waiting and outcome.state != "failed":
+        if outcome.state == "accepted":
+            print(
+                f"Accepted automatically: {outcome.summary or outcome.transaction_id}. "
+                f"Undo it with: joinery transactions revert --project {project} "
+                f"--id {outcome.transaction_id}"
+            )
+            for note in outcome.notes:
+                print("Note: " + note)
+        elif not waiting and outcome.state != "failed":
             print("Nothing changed.")
         if outcome.auto_accept_held and outcome.state == "review":
             print("Not accepted automatically: " + "; ".join(outcome.auto_accept_held) + ".")

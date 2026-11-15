@@ -103,7 +103,9 @@ the viewport) with "no editor is open", so the agent stages saved files. With
 `--json` every host event that matters is one line (connection, turn states,
 steps, tool calls, checks, token use, notices, the change for review, timing),
 then a `run_result` line with the transaction id, the reply, any parallel
-tasks' changes and the change's cost from `joinery.metrics`.
+tasks' changes and the change's cost from `joinery.metrics`. A change the
+project's auto-accept kept is reported as that transaction with `state:
+accepted`, `auto_accepted: true` and its notes.
 
 It **never accepts.** When the turn ends it sends `when_quiet`; the host answers
 `quiet` once nothing is at work (seen twice 250 ms apart). The runner then

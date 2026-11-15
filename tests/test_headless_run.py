@@ -230,3 +230,65 @@ def test_the_host_says_when_it_is_quiet(
     assert gateways[0].keep_reviews is True  # type: ignore[attr-defined]
     kinds = [e.get("kind") for e in events]
     assert kinds.index("timing") < kinds.index("quiet")
+
+
+#: A host whose change is accepted automatically, as ``Turn._auto_accept`` does it:
+#: a ``file_decision`` with ``auto_accepted`` and no ``file_preview`` first.
+AUTO_HOST = """
+import json, sys
+def say(event):
+    print(json.dumps(event), flush=True)
+say({"kind": "connection", "state": "connected"})
+sys.stdin.readline()
+say({"kind": "file_decision", "transaction_id": "tx9", "accepted": True,
+     "changes": [], "auto_accepted": True, "summary": "Ammo on the HUD",
+     "message": "Accepted automatically", "notes": ["The HUD font is the stock one."]})
+say({"kind": "timing", "outcome": "done"})
+got = json.loads(sys.stdin.readline())
+with open(sys.argv[1], "w") as out:
+    json.dump(got, out)
+say({"kind": "quiet"})
+sys.stdin.readline()
+"""
+
+
+def test_an_auto_accepted_change_is_the_runs_result(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / "project.godot").write_text("config_version=5\n")
+    command, seen = fake(tmp_path, AUTO_HOST)
+    monkeypatch.setattr(headless, "chat_command", command)
+    args = ["run", "--project", str(tmp_path), "--request", "Ammo", "--agent", "claude"]
+    assert cli_main([*args, "--json"]) == 0
+    result = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert result["kind"] == "run_result"
+    assert result["state"] == "accepted" and result["auto_accepted"] is True
+    assert result["transaction_id"] == "tx9" and result["kept"] is False
+    assert result["summary"] == "Ammo on the HUD"
+    assert result["notes"] == ["The HUD font is the stock one."]
+    # Nothing to decide: the run asks when the host is quiet, as for any turn.
+    assert json.loads(seen.read_text()) == {"kind": "when_quiet"}
+    # The text form says it was kept and how to undo it, not "Nothing changed".
+    assert cli_main(args) == 0
+    out = capsys.readouterr().out
+    assert "Accepted automatically: Ammo on the HUD" in out
+    assert "revert" in out and "tx9" in out and "Nothing changed" not in out
+    assert "Note: The HUD font is the stock one." in out
+
+
+def test_an_accepting_run_does_not_decide_an_auto_accepted_change_again(
+    tmp_path: Path,
+) -> None:
+    command, seen = fake(tmp_path, AUTO_HOST)
+    outcome = asyncio.run(
+        headless.drive(
+            command(tmp_path, headless.Pin("claude")),
+            [{"kind": "prompt", "text": "Ammo"}],
+            accept=True,
+            timeout=30,
+        )
+    )
+    assert outcome.state == "accepted" and outcome.transaction_id == "tx9"
+    assert not seen.exists()  # no decision was sent
