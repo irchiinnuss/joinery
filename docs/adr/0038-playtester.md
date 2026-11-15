@@ -115,6 +115,27 @@ code. Custom games made from the blank blueprint have no play tests at all.
    its origin, and when. The done-when checks use it (ADR 0060). All of it is seeded: the
    same seed gives the same grid and the same route.
 
+8. **Fighting through** (2026-11-15). A bot that never shoots back can't show a combat game
+   is finishable: it dies before the exit. `bot_fight.gd` is on by default once the game
+   shows enemies (group `enemies` or `enemy`, something with `take_damage` or `health` that
+   isn't `dead`) and has an attack action (`--fight` forces it, `--no-fight` turns it off;
+   3D only). It turns the view with the look actions toward the nearest enemy with a clear
+   line from the eyes, holds attack when on target, keeps a fighting distance, switches guns
+   with `weapon_next` when the one in hand is empty, backs off below 35 % health, and picks
+   up health and ammo pickups (by name) when short. Otherwise it follows the blockout's
+   markers: a key the grid joins first, then its door, then the exit (or the `--reach`
+   places), pressing interact at an exit that needs using. The coverage grid now knows walls:
+   a horizontal ray between neighbouring cells (bodies that move about don't count), a route
+   climbs at most 1.1 m a cell, and a door that opens (or an enemy that falls in a doorway)
+   has its cells probed again and the grid joined on beyond it. Moves that would walk off a
+   ledge are dropped unless the way goes down, and a player fallen below the exit with no way
+   on heads for a hazard to be sent back to the checkpoint. Everything is pressed through the
+   input map and drawn from its own generator seeded from the run's seed, so the same seed
+   plays the same fight. The report's `fight` has keys, doors, kills of enemies seen,
+   deaths and where, the goals in order, a trail every 5 s, whether it reached the exit and
+   finished, and else the obstacle: which door needs which unreachable key, or the goal it
+   was after, how close it got, and whether the map had no way there or it was stuck.
+
 ## Consequences
 
 - Every blueprint gets a real playtest in CI: a 20 s seeded run each in stock Godot must find
