@@ -57,14 +57,40 @@ from joinery.wiring import _command_str
 DYNAMIC_SECTIONS_FLAG = "--exclude-dynamic-system-prompt-sections"
 
 
+#: Claude Code's built-in tools a writing role is offered: the ones that can run in a
+#: session with no permission prompts (PERMITTED_NATIVE, Bash for a judged read-only
+#: search, WebFetch for the hook to judge). Write, Edit, NotebookEdit and the rest
+#: would only ever be refused here, and their schemas cost about 7k tokens on every
+#: model call of the turn; files change through the registry's call_tool.
+CLAUDE_SESSION_TOOLS: tuple[str, ...] = (
+    "Read",
+    "Grep",
+    "Glob",
+    "Bash",
+    "ToolSearch",
+    "Agent",
+    "TodoWrite",
+    "WebFetch",
+)
+
+#: Environment for every Joinery-run Claude session. Claude's own auto memory keeps
+#: notes outside the project, unreviewed, and adds its instructions to every call;
+#: the project's memory is JOURNEYMAN.md, already in the prompt (ADR 0077).
+SESSION_ENV: dict[str, str] = {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
+
+
 def cache_flags(role: str, stable_system_prompt: bool, tools_flag: bool) -> list[str]:
     """The flags that keep a session's prefix stable and small, where this CLI has
     them: the per-machine system-prompt sections move to the first user message, and
-    a read-only role is offered only Claude's read tools (the hook still judges every
+    each role is offered only the built-in tools it can use: a read-only role Claude's
+    read tools, every other role CLAUDE_SESSION_TOOLS (the hook still judges every
     call)."""
     flags = [DYNAMIC_SECTIONS_FLAG] if stable_system_prompt else []
-    if tools_flag and role and spec(role).read_only:
-        flags += ["--tools", ",".join(CLAUDE_READ_TOOLS)]
+    if tools_flag:
+        offered = (
+            CLAUDE_READ_TOOLS if role and spec(role).read_only else CLAUDE_SESSION_TOOLS
+        )
+        flags += ["--tools", ",".join(offered)]
     return flags
 
 
@@ -490,7 +516,12 @@ class ClaudeSession:
             # The project's settings (its joinery hook) and Joinery's own; the user's
             # only for signing in and the model (user_settings_kept).
             args += [SETTING_SOURCES_FLAG, "project,local"]
-        env = dict(os.environ, DISABLE_TELEMETRY="1", DISABLE_ERROR_REPORTING="1")
+        env = dict(
+            os.environ,
+            DISABLE_TELEMETRY="1",
+            DISABLE_ERROR_REPORTING="1",
+            **SESSION_ENV,
+        )
         if prompt.model:
             args += ["--model", prompt.model]
         if prompt.effort:

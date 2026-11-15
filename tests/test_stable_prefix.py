@@ -14,7 +14,14 @@ from pathlib import Path
 import pytest
 
 from bridge.acp_session import ACPSession
-from bridge.claude_session import DYNAMIC_SECTIONS_FLAG, cache_flags, user_input
+from bridge.claude_session import (
+    CLAUDE_SESSION_TOOLS,
+    DYNAMIC_SECTIONS_FLAG,
+    PERMITTED_NATIVE,
+    SESSION_ENV,
+    cache_flags,
+    user_input,
+)
 from bridge.codex_session import registry_config
 from bridge.instructions import (
     CHECK_PROMPT,
@@ -279,8 +286,13 @@ def test_codex_approves_only_the_tools_a_role_is_offered() -> None:
 
 
 def test_claude_flags_where_the_cli_has_them() -> None:
-    assert cache_flags("", True, True) == [DYNAMIC_SECTIONS_FLAG]
-    assert cache_flags("worker", True, True) == [DYNAMIC_SECTIONS_FLAG]
+    session_tools = ",".join(CLAUDE_SESSION_TOOLS)
+    assert cache_flags("", True, True) == [
+        DYNAMIC_SECTIONS_FLAG,
+        "--tools",
+        session_tools,
+    ]
+    assert cache_flags("worker", True, False) == [DYNAMIC_SECTIONS_FLAG]
     assert cache_flags("reviewer", True, True) == [
         DYNAMIC_SECTIONS_FLAG,
         "--tools",
@@ -288,6 +300,17 @@ def test_claude_flags_where_the_cli_has_them() -> None:
     ]
     # An older CLI without them runs as before.
     assert cache_flags("reviewer", False, False) == []
+
+
+def test_a_writing_claude_session_is_offered_only_tools_that_can_run() -> None:
+    # Each call re-sends every offered schema: tools a session without permission
+    # prompts would always refuse (Write, Edit, NotebookEdit) are left out.
+    offered = set(CLAUDE_SESSION_TOOLS)
+    assert {"Write", "Edit", "MultiEdit", "NotebookEdit"}.isdisjoint(offered)
+    assert offered <= PERMITTED_NATIVE | {"Bash", "WebFetch"}
+    assert {"Read", "Grep", "Bash", "ToolSearch"} <= offered
+    # Claude's own memory stays off: the project's is JOURNEYMAN.md, in the prompt.
+    assert SESSION_ENV["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] == "1"
 
 
 # --- ACP: the instructions once per session -------------------------------------------
