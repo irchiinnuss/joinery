@@ -11,6 +11,7 @@ when its own sign-in is already in place (``joinery.connection.status``).
 
 from __future__ import annotations
 
+import datetime
 import re
 import tomllib
 from collections.abc import Callable
@@ -40,6 +41,65 @@ anything, finish the request, then submit the change for review as usual."""
 def is_quota(text: str) -> bool:
     """True when a provider's error words say a usage, quota or rate limit stopped it."""
     return bool(QUOTA.search(text or ""))
+
+
+#: Words for a short-term rate limit (requests per minute), not a used-up allowance.
+_RATE = re.compile(r"rate[ _-]?limit|too many requests|\b429\b", re.IGNORECASE)
+#: Words for a used-up allowance: a plan's usage window, quota or credits.
+_USAGE = re.compile(
+    r"usage limit|hit your limit|limit reached|quota|credit balance|out of credits|"
+    r"insufficient[ _]funds|resource[ _]exhausted",
+    re.IGNORECASE,
+)
+#: When the limit lifts, as the providers say it: "resets 3pm (Europe/Berlin)",
+#: "try again at 4:12 PM", "try again in 2 days 3 hours", "retry in 41.3s".
+_RESET = re.compile(
+    r"\b(?:resets?|try again|retry|available again)\b"
+    r"(?:\s+(?P<how>at|in|after|on))?\s*"
+    r"(?P<when>(?:in\s+)?[0-9](?:[^.;,\n()|]|\.(?=\d))*?(?:\s*\([^)\n]*\))?)"
+    r"\s*(?:[;,\n|]|\.(?!\d)|$)",
+    re.IGNORECASE,
+)
+#: Claude Code's older form: "Claude AI usage limit reached|1760000000".
+_EPOCH = re.compile(r"\|\s*(\d{10})\b")
+
+
+def reset_time(text: str) -> str:
+    """When a usage or rate limit lifts, in the provider's words ("" when unsaid)."""
+    epoch = _EPOCH.search(text or "")
+    if epoch:
+        moment = datetime.datetime.fromtimestamp(int(epoch.group(1)), tz=datetime.UTC)
+        return moment.strftime("%Y-%m-%d %H:%M UTC")
+    found = _RESET.search(text or "")
+    if not found:
+        return ""
+    when = found.group("when").strip()
+    how = (found.group("how") or "").lower()
+    if how in {"in", "after"} and not when.lower().startswith("in "):
+        when = "in " + when
+    return when
+
+
+def provider_error(text: str) -> tuple[str, str, str]:
+    """(kind, reset time, one plain line) for a provider's error words.
+
+    kind is "usage_limit" (a plan's usage window, quota or credits used up),
+    "rate_limit" (too many requests for now) or "provider" (any other error). The
+    line leads with the kind and the reset time when the provider gave one, then
+    the provider's own words: "Usage limit reached (resets 3pm): You've hit…".
+    """
+    words = " ".join((text or "").split())[:400]
+    if _USAGE.search(words):
+        kind, label = "usage_limit", "Usage limit reached"
+    elif _RATE.search(words):
+        kind, label = "rate_limit", "Rate limit reached"
+    else:
+        return "provider", "", f"Provider error: {words}" if words else "Provider error"
+    reset = reset_time(text)
+    if reset:
+        verb = "try again" if reset.startswith("in ") else "resets"
+        label += f" ({verb} {reset})"
+    return kind, reset, f"{label}: {words}"
 
 
 def setting(project: Path) -> str:

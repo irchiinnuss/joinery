@@ -81,6 +81,9 @@ NO_EDITOR = "No editor is open in this run; stage saved files."
 #: A notice's ``about`` when Joinery submitted the change the agent left
 #: (``bridge.turn_runner.left_notice``): the run's reply ends with it.
 LEFT_CHANGE = "left_change"
+#: A notice's ``about`` when a usage or rate limit ended the turn
+#: (``bridge.turn_runner.limit_notice``): it becomes the run's error.
+PROVIDER_ERROR = "provider_error"
 #: Seconds a run may go without any event from the host before it is stopped.
 TIMEOUT = 900.0
 #: Seconds the host gets, once a run stops, to keep what it applied and close.
@@ -111,7 +114,13 @@ class Outcome:
     reply: str = ""
     #: The turn's outcome as the host timed it ("done", "failed", "stopped", …).
     outcome: str = ""
+    #: Why the run failed: a usage or rate limit (with when it lifts), the provider's
+    #: own error, or the stop; "" when it didn't.
     error: str = ""
+    #: "usage_limit", "rate_limit" or "provider" when the agent's side failed.
+    error_kind: str = ""
+    #: When a usage or rate limit lifts, in the provider's words ("" when unsaid).
+    resets: str = ""
     #: Changes parallel tasks left for review: [{task_id, title, transaction_id}].
     tasks: list[dict[str, str]] = field(default_factory=list)
     #: The chat the request went to: ``joinery run --chat <id>`` continues it.
@@ -363,6 +372,8 @@ async def _follow(
     reply: list[str] = []
     #: Joinery's own lines that belong at the end of the reply (``_with_notices``).
     joinery_says: list[str] = []
+    #: The last warning and who gave it ("warn", "refuse", "joinery"), for the error.
+    warned = ("", "")
     tasks: dict[str, dict[str, str]] = {}
     waiting: dict[str, Any] | None = None
     while True:
@@ -413,6 +424,19 @@ async def _follow(
             reply.append(str(event.get("text", "")))
         elif kind == "message" and not event.get("task_id"):
             outcome.reply = str(event.get("text", "")).strip() or outcome.reply
+            if event.get("level") in {"warn", "refuse"} and event.get("text"):
+                # "warn": the agent's side failed (a provider error); "refuse":
+                # the agent or a policy said no.
+                warned = (str(event["text"]).strip(), str(event["level"]))
+        elif (
+            kind == "notice"
+            and event.get("about") == PROVIDER_ERROR
+            and not event.get("task_id")
+        ):
+            # A usage or rate limit ended the turn: Joinery's own words for it.
+            outcome.error = str(event.get("text", "")).strip()
+            outcome.error_kind = str(event.get("error_kind", "")) or "provider"
+            outcome.resets = str(event.get("resets", ""))
         elif (
             kind == "notice"
             and event.get("about") == LEFT_CHANGE
@@ -421,6 +445,14 @@ async def _follow(
             # Joinery submitted the change the agent left: the reply says so, even
             # when the agent said there was nothing to review.
             joinery_says.append(str(event.get("text", "")).strip())
+        elif (
+            kind == "notice"
+            and event.get("level") == "warn"
+            and event.get("text")
+            and not event.get("task_id")
+        ):
+            # Joinery's own line for a change that didn't make it.
+            warned = (str(event["text"]).strip(), "joinery")
         elif kind == "file_preview" and not event.get("task_id"):
             outcome.transaction_id = str(event.get("transaction_id", ""))
             outcome.summary = str(event.get("summary", ""))
@@ -438,6 +470,8 @@ async def _follow(
             )
             if outcome.outcome not in {"done", ""} and outcome.state == "none":
                 outcome.state = "failed"
+            if outcome.outcome not in {"done", ""} and not outcome.error:
+                _note_failure(outcome, warned)
             if waiting is not None and outcome.outcome == "done":
                 todo_id = str(waiting.get("todo_id", ""))
                 if _says_go(go, waiting):
@@ -474,6 +508,21 @@ async def _follow(
     if outcome.kept:
         return outcome  # a crash after the host kept the change: nothing is lost
     raise HostClosed("The chat host closed before the request finished.")
+
+
+def _note_failure(outcome: Outcome, warned: tuple[str, str]) -> None:
+    """A turn that failed with no limit notice: its error is the last warning given.
+    A provider's ("warn") is classified, so a limit in its own words still reads as
+    one; a refusal or Joinery's own line stands as it is."""
+    from joinery.fallback import provider_error
+
+    text, source = warned
+    if not text:
+        outcome.error = f"The turn ended ({outcome.outcome}) without saying why."
+    elif source == "warn":
+        outcome.error_kind, outcome.resets, outcome.error = provider_error(text)
+    else:
+        outcome.error = text
 
 
 def _with_notices(reply: str, notices: list[str]) -> str:

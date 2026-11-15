@@ -656,4 +656,10 @@ def test_without_another_signed_in_agent_the_user_is_told(
     assert host.agents == ["codex"]
     told = [e for e in host.events if e.get("kind") == "notice"]
     assert any("no other agent is signed in" in e["text"] for e in told)
+    # Joinery says which limit stopped the turn and when it lifts, for the sidebar
+    # and joinery run's error.
+    limit = next(e for e in told if e.get("about") == "provider_error")
+    assert limit["level"] == "warn" and limit["error_kind"] == "usage_limit"
+    assert limit["resets"] == "4:12 PM"
+    assert limit["text"] == "Usage limit reached (resets 4:12 PM): " + QUOTA_WORDS
     assert "provider_switch" not in host.kinds()

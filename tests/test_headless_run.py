@@ -327,3 +327,71 @@ def test_the_reply_says_when_joinery_put_the_agents_change_up(tmp_path: Path) ->
         "Nothing was saved, so there is nothing to review.\n\nJoinery: A change is "
         "waiting for your review · It holds art/rust.png (created)."
     )
+
+
+def limited_host(*events: dict[str, Any]) -> str:
+    """A host whose turn fails after ``events``."""
+    lines = "\n".join(f"say({e!r})" for e in events)
+    return f"""
+import json, sys
+def say(event):
+    print(json.dumps(event), flush=True)
+say({{"kind": "connection", "state": "connected"}})
+sys.stdin.readline()
+{lines}
+say({{"kind": "timing", "outcome": "failed"}})
+sys.stdin.readline()
+say({{"kind": "quiet"}})
+sys.stdin.readline()
+"""
+
+
+def run_host(tmp_path: Path, source: str) -> headless.Outcome:
+    command, _seen = fake(tmp_path, source)
+    return asyncio.run(
+        headless.drive(
+            command(tmp_path, headless.Pin("claude")),
+            [{"kind": "prompt", "text": "Barrel"}],
+            timeout=30,
+        )
+    )
+
+
+def test_a_usage_limit_is_the_runs_error_with_its_reset_time(tmp_path: Path) -> None:
+    words = "You've hit your usage limit. Try again at 4:12 PM."
+    outcome = run_host(
+        tmp_path,
+        limited_host(
+            {"kind": "message", "level": "warn", "text": words},
+            {
+                "kind": "notice",
+                "level": "warn",
+                "about": "provider_error",
+                "error_kind": "usage_limit",
+                "resets": "4:12 PM",
+                "text": "Usage limit reached (resets 4:12 PM): " + words,
+            },
+        ),
+    )
+    assert outcome.state == "failed"
+    assert outcome.error == "Usage limit reached (resets 4:12 PM): " + words
+    assert (outcome.error_kind, outcome.resets) == ("usage_limit", "4:12 PM")
+    assert outcome.as_dict()["error"] == outcome.error
+
+
+def test_any_agents_error_words_become_the_runs_error(tmp_path: Path) -> None:
+    # No limit notice (an agent that only said it): the words are classified.
+    words = "429 Too Many Requests: Please retry in 41.3s"
+    outcome = run_host(
+        tmp_path, limited_host({"kind": "message", "level": "warn", "text": words})
+    )
+    assert outcome.error == "Rate limit reached (try again in 41.3s): " + words
+    assert outcome.error_kind == "rate_limit"
+    other = run_host(
+        tmp_path,
+        limited_host({"kind": "message", "level": "warn", "text": "API Error: 500"}),
+    )
+    assert other.error == "Provider error: API Error: 500"
+    assert other.error_kind == "provider"
+    silent = run_host(tmp_path, limited_host())
+    assert silent.error == "The turn ended (failed) without saying why."

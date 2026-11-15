@@ -30,8 +30,8 @@ from bridge.protocol import (
     Usage,
 )
 from joinery import done_when, metrics
-from joinery.fallback import is_quota
-from joinery.headless import LEFT_CHANGE
+from joinery.fallback import is_quota, provider_error
+from joinery.headless import LEFT_CHANGE, PROVIDER_ERROR
 from joinery.timing import TurnTiming
 from joinery.turn import MAX_CONTINUATIONS, Problem, SubmitResult, TurnController
 
@@ -171,6 +171,21 @@ def left_notice(result: SubmitResult) -> dict[str, Any] | None:
         )
     level = "warn" if result.problems else "info"
     return {"kind": "notice", "level": level, "text": text, "about": LEFT_CHANGE}
+
+
+def limit_notice(words: str) -> dict[str, Any]:
+    """Joinery's own line when a usage or rate limit ended the turn: which limit,
+    when it lifts if the provider said, and the provider's words. ``joinery run``
+    takes it as the run's error (``about`` = PROVIDER_ERROR)."""
+    kind, reset, line = provider_error(words)
+    return {
+        "kind": "notice",
+        "level": "warn",
+        "text": line,
+        "about": PROVIDER_ERROR,
+        "error_kind": kind,
+        "resets": reset,
+    }
 
 
 def continuation(prompt: Prompt, result: SubmitResult) -> Prompt:
@@ -503,11 +518,13 @@ async def _carry_on(
     """The provider stopped on a usage or quota limit: offer another agent and, if
     the user takes it (or the project names one), let it carry the turn on with the
     change staged so far. Returns its ``Done.ok`` and the bridge the turn now uses;
-    without a fallback the turn ends as it would have."""
+    without a fallback the turn ends as it would have, saying why (``limit_notice``)."""
+    reason = ""
     while controller.quota and fallback is not None:
         reason, controller.quota = controller.quota, ""
         offered = await fallback(reason)
         if offered is None:
+            emit(limit_notice(reason))
             return False, bridge
         bridge, text = offered
         # Token totals are per provider session; the new one starts from zero.
@@ -518,7 +535,9 @@ async def _carry_on(
         ok = await stream(controller, bridge, carried, emit, timing)
         if ok or not controller.quota:
             return ok, bridge
-    controller.quota = ""
+    reason, controller.quota = controller.quota or reason, ""
+    if reason:
+        emit(limit_notice(reason))
     return False, bridge
 
 

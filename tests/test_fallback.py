@@ -6,7 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from joinery.fallback import candidates, continue_text, is_quota, setting, staged_lines
+from joinery.fallback import (
+    candidates,
+    continue_text,
+    is_quota,
+    provider_error,
+    setting,
+    staged_lines,
+)
 
 
 @pytest.mark.parametrize(
@@ -28,6 +35,50 @@ def test_quota_words_are_recognised(text: str) -> None:
 )
 def test_other_errors_are_not_quota(text: str) -> None:
     assert not is_quota(text)
+
+
+@pytest.mark.parametrize(
+    ("text", "kind", "reset"),
+    [
+        (
+            "You've hit your usage limit. Try again at 4:12 PM.",
+            "usage_limit",
+            "4:12 PM",
+        ),
+        (
+            "5-hour limit reached ∙ resets 3pm (Europe/Berlin)",
+            "usage_limit",
+            "3pm (Europe/Berlin)",
+        ),
+        (
+            "Claude AI usage limit reached|1760000000",
+            "usage_limit",
+            "2025-10-09 08:53 UTC",
+        ),
+        (
+            "You've hit your usage limit. Upgrade to Pro, or try again in 2 days 3 hours.",
+            "usage_limit",
+            "in 2 days 3 hours",
+        ),
+        ("429 Too Many Requests: Please retry in 41.3s", "rate_limit", "in 41.3s"),
+        ("RESOURCE_EXHAUSTED: Quota exceeded for quota metric", "usage_limit", ""),
+        ("API Error: 500 Internal server error", "provider", ""),
+    ],
+)
+def test_provider_errors_say_which_limit_and_when_it_lifts(
+    text: str, kind: str, reset: str
+) -> None:
+    got_kind, got_reset, line = provider_error(text)
+    assert (got_kind, got_reset) == (kind, reset)
+    lead = {
+        "usage_limit": "Usage limit reached",
+        "rate_limit": "Rate limit reached",
+        "provider": "Provider error",
+    }[kind]
+    assert line.startswith(lead) and line.endswith(text)
+    if reset:
+        # Before the provider's words: "Usage limit reached (resets 4:12 PM): …".
+        assert line.index(reset + ")") < line.index(text)
 
 
 def test_the_setting_names_a_known_agent_only(tmp_path: Path) -> None:
