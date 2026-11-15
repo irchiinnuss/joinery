@@ -38,7 +38,8 @@ extends VBoxContainer
 ## which the transcript moves into the card's status line ([method adopt_timing]); opening it
 ## shows the steps again with the timing details.
 ##
-## Under the done list: what was guessed and what isn't as asked (sidebar_departures.gd).
+## Under the done list: what was guessed and what isn't as asked (sidebar_departures.gd); under
+## an accepted change's decision line, "Not played since this change" (sidebar_unplayed.gd).
 ##
 ## States: sending, failed (not sent), working, gated, ready, applying, accepted, rejected,
 ## reverted, stopped, done.
@@ -68,6 +69,7 @@ const ATTACHMENT_ROW := preload("sidebar_attachments.gd")
 const REVIEW_ROW := preload("sidebar_review_row.gd")
 const ART_GATE := preload("sidebar_art_gate.gd")
 const DEPARTURES := preload("sidebar_departures.gd")
+const UNPLAYED := preload("sidebar_unplayed.gd")
 ## Apps recognised in step text; the card shows each one it sees once.
 const APPS := ["Blender", "Krita", "GIMP", "Material Maker", "Surge XT", "SuperCollider", "Godot"]
 ## Shown instead of Revert once the change's restore data is gone.
@@ -142,6 +144,9 @@ var _steps: VBoxContainer
 ## Each part of the request and what was done about it, ticked (set_done).
 var _done_list: VBoxContainer
 var _departures: DEPARTURES
+## "Not played since this change", under the decision line, and the ids it last heard.
+var _unplayed := UNPLAYED.new()
+var _unplayed_ids: Array = []
 ## The ready change: picture, one line, Discard / Accept or Review.
 var _ready_row: REVIEW_ROW
 var _outcome: HBoxContainer
@@ -284,6 +289,7 @@ func _init(text := "", context: Array = []) -> void:
 	_departures = DEPARTURES.new()
 	_departures.visibility_changed.connect(_sync_activity)
 	_column.add_child(_departures)
+	add_to_group(&"joinery_unplayed")
 	_ready_row = REVIEW_ROW.new()
 	_ready_row.other_ways_pressed.connect(_try_other_ways)
 	_column.add_child(_ready_row)
@@ -334,6 +340,8 @@ func _notification(what: int) -> void:
 			_outcome.free()
 		if is_instance_valid(_ready_row) and _ready_row.get_parent() == null:
 			_ready_row.free()
+		if is_instance_valid(_unplayed) and _unplayed.get_parent() == null:
+			_unplayed.free()
 
 
 ## Controls whose text follows the transcript text size, as [control, TYPE step] pairs.
@@ -579,6 +587,22 @@ func set_departures(guessed: Array, not_as_asked: Array) -> void:
 	_departures.set_lines(guessed, not_as_asked)
 
 
+## The changes nobody has played since ({ids}, played_watch.gd), to mark this one if accepted.
+func show_unplayed(data: Dictionary) -> void:
+	_unplayed_ids = (data.get("ids") as Array).duplicate() if data.get("ids") is Array else []
+	_sync_unplayed()
+
+
+func unplayed_shown() -> bool:
+	return _unplayed.visible
+
+
+func _sync_unplayed() -> void:
+	var waiting := state == "accepted" and transaction_id in _unplayed_ids
+	if _unplayed.sync(waiting, _outcome, _column):
+		_sync_activity()
+
+
 ## "Try other ways": a few more versions of this request beside this change (sidebar_variants.gd).
 func _try_other_ways() -> void:
 	if is_inside_tree() and not transaction_id.is_empty():
@@ -624,6 +648,7 @@ func set_outcome(kind: String, text: String, optimistic := false) -> void:
 		UI_MOTION.pulse(_outcome)
 	else:
 		UI_MOTION.fade_in(_outcome)
+	_sync_unplayed()
 
 
 ## Undo an optimistic outcome after the action failed, and say why under the card.
@@ -685,6 +710,7 @@ func revert_finished(ok: bool, message := "") -> void:
 	_reverting.hide()
 	if ok:
 		state = "reverted"
+		_sync_unplayed()
 		_outcome_text.text = "Reverted"
 		STYLE.set_glyph(_outcome_icon, "reload", "text_muted")
 		_outcome_icon.show()

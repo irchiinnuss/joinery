@@ -24,6 +24,7 @@ extends Node
 ## Reasons a turn ends without its change ("idle" with one of these): the preview goes.
 const DROPPED := ["failed", "cancelled", "stopped", "needs_user"]
 const AUTO_ACCEPTED := "Accepted automatically"
+const PLAYED_WATCH := preload("played_watch.gd")
 
 ## The undo history of a scene (UndoRedo for [param root]), for tests; empty asks the editor.
 var history_for := Callable()
@@ -56,6 +57,9 @@ func setup(plugin: Object, chat: Node) -> void:
 	for signal_name: String in links:
 		if chat.has_signal(signal_name):
 			chat.connect(signal_name, links[signal_name])
+	# Not yet played by you: the editor hears a person's run and each decision says the state.
+	if plugin is EditorPlugin and chat.has_signal("file_decision"):
+		chat.connect("file_decision", PLAYED_WATCH.install(plugin as EditorPlugin).on_decision)
 	var panel := _panel()
 	if panel != null and panel.has_signal("revise_requested"):
 		panel.connect("revise_requested", _on_revise)

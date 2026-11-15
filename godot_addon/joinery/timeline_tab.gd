@@ -38,6 +38,9 @@ const OFFER_TITLE := "Keep a timeline"
 const OFFER_TEXT := "Every change you accept, kept with git in this project."
 const SWITCHED_OFF := "Accepted changes aren't added. Turn it on in Settings."
 const PENDING_CAPTION := "Not saved yet"
+## An entry nobody has played since (joinery/played.py): the row's word, and its full line.
+const NOT_PLAYED := "Not played"
+const NOT_PLAYED_SINCE := "Not played since this change"
 const MONTHS := ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 const WEEKDAYS := ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
 ## The remote is asked again when the tab is shown this long after the last time, in seconds.
@@ -86,6 +89,19 @@ var _sync_review: Button
 var _fetched_at := -1.0e9
 
 
+## Accepted changes nobody has played since, from played_watch.gd: their entries say so.
+func show_unplayed(state: Dictionary) -> void:
+	var commits: Array = state.get("commits", []) if state.get("commits") is Array else []
+	var changed := false
+	for entry: Dictionary in _entries:
+		var waiting := str(entry.get("commit", "")) in commits
+		if bool(entry.get("unplayed", false)) != waiting:
+			entry["unplayed"] = waiting
+			changed = true
+	if changed:
+		_render()
+
+
 ## Add the Timeline tab to [param plugin]'s bottom panel, after Review. It removes itself when
 ## the plugin leaves the tree, so plugin.gd needs only this one call.
 static func install(plugin: EditorPlugin) -> Control:
@@ -121,6 +137,7 @@ func _init() -> void:
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	size_flags_vertical = Control.SIZE_EXPAND_FILL
 	accessibility_name = "Timeline: how this project changed, newest first"
+	add_to_group(&"joinery_unplayed")
 	_build_list()
 	_entry = ENTRY.new()
 	_entry.hide()
@@ -612,6 +629,15 @@ func _row(entry: Dictionary, now: float, named: bool) -> HBoxContainer:
 		dot.tooltip_text = "New from your last pull"
 		line.add_child(dot)
 		open.accessibility_name = subject + ", new from your last pull, show its files"
+	if bool(entry.get("unplayed", false)):
+		# Accepted here, changes the game, and nobody has run it since (joinery/played.py).
+		var unplayed := UI.label(NOT_PLAYED, "JoineryCaption")
+		unplayed.name = "Unplayed"
+		unplayed.tooltip_text = NOT_PLAYED_SINCE
+		unplayed.mouse_filter = Control.MOUSE_FILTER_PASS
+		unplayed.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		line.add_child(unplayed)
+		open.accessibility_name = subject + ", " + NOT_PLAYED_SINCE.to_lower() + ", show its files"
 	var author := str(entry.get("author", ""))
 	if named and not author.is_empty():
 		var who := UI.label(author, "JoineryCaption")

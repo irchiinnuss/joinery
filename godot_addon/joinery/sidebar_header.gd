@@ -22,9 +22,16 @@ extends VBoxContainer
 ##
 ## Beside the menu, a small ring shows how full the conversation's context is, with token use
 ## on hover ([member usage]); it appears only once the provider reports usage.
+##
+## When accepted changes to the game wait to be played by a person, a quiet link under the title
+## row says how many
+## ("3 changes not played yet", joinery/played.py) and runs the game from the editor: playing it
+## is what clears them ([method show_unplayed], played_watch.gd keeps it current).
 
 signal reconnect_pressed
 signal connect_pressed
+## The "not played yet" link: run the game.
+signal play_pressed
 
 const UI_THEME := preload("ui_theme.gd")
 const UI_MOTION := preload("ui_motion.gd")
@@ -45,6 +52,10 @@ var row: HBoxContainer
 var title: Label
 ## The context ring beside the menu (usage_meter.gd), shown once the provider reports usage.
 var usage: USAGE_SCRIPT
+## "3 changes not played yet": runs the game ([method show_unplayed]).
+var unplayed: Button
+## Off in tests: the link only emits [signal play_pressed].
+var play_on_press := true
 ## What Joinery or the project's apps need, below the banner (setup_notice.gd).
 var notice: NOTICE_SCRIPT
 var _dot: Control
@@ -96,8 +107,20 @@ func _init() -> void:
 	_name = UI.label("", "JoineryCaption")
 	_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(_name)
+	unplayed = UI.quiet_link("")
+	unplayed.name = "Unplayed"
+	UI.bind_icon(unplayed, "play")
+	UI.bind_height(unplayed, "xs")
+	unplayed.tooltip_text = "Play the game: changes you haven't played since they were accepted"
+	unplayed.pressed.connect(_on_play)
+	UI_MOTION.press_feedback(unplayed)
+	unplayed.hide()
+	# Its own line under the title row, so a narrow sidebar never pushes the menu off the edge.
+	unplayed.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	stack.add_child(unplayed)
 	usage = USAGE_SCRIPT.new()
 	row.add_child(usage)
+	add_to_group(&"joinery_unplayed")
 	# The gap around the banner comes and goes with it, so the idle header stays tight.
 	_banner_gap = MarginContainer.new()
 	_banner_gap.hide()
@@ -280,6 +303,38 @@ func _show_count() -> void:
 	_name.set_meta("_joinery_value", _agents)
 	if several:
 		UI_MOTION.fade_in(_name)
+
+
+## Accepted changes to the game nobody has played since ({count, text} from
+## `joinery played status`): the link shows while there are any.
+func show_unplayed(state: Dictionary) -> void:
+	var count := int(state.get("count", 0))
+	var text := str(state.get("text", ""))
+	if count <= 0 or text.is_empty():
+		if unplayed.visible:
+			UI_MOTION.exit(unplayed)
+		return
+	# Fewer than before: a play cleared some; the line confirms it with a pulse.
+	var fewer := unplayed.visible and count < int(unplayed.get_meta("count", count))
+	unplayed.set_meta("count", count)
+	unplayed.text = text
+	unplayed.accessibility_name = text + ". Play the game"
+	if not unplayed.visible:
+		unplayed.show()
+		UI_MOTION.fade_in(unplayed)
+	elif fewer:
+		UI_MOTION.pulse(unplayed)
+
+
+## The "not played yet" line ("" when hidden), for tests.
+func unplayed_text() -> String:
+	return unplayed.text if unplayed.visible else ""
+
+
+func _on_play() -> void:
+	play_pressed.emit()
+	if play_on_press and Engine.is_editor_hint():
+		EditorInterface.play_main_scene()
 
 
 func _show_banner(kind: String, text: String, action: String) -> void:

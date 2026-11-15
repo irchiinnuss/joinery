@@ -406,6 +406,9 @@ func show_states(report: Dictionary) -> void:
 			_apply(id, state, revertible)
 		elif state == "accepted" and is_instance_valid(_changes[id][0]):
 			_changes[id][0].call("set_revertible", revertible)
+		if bool(entry.get("unplayed", false)) and is_instance_valid(_changes[id][0]):
+			# Accepted and nobody has played since: the card says so under its line.
+			_changes[id][0].call("show_unplayed", {"ids": [id]})
 
 
 # --- Helpers -----------------------------------------------------------------------------------

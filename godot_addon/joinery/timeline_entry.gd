@@ -42,6 +42,8 @@ const BINARY_NOUNS := {
 var entry: Dictionary = {}
 var _title: Label
 var _meta: Label
+## "Not played since this change", for an entry nobody has played since (joinery/played.py).
+var _unplayed: Label
 var _files: VBoxContainer
 var _loading: VBoxContainer
 var _rows: Dictionary = {}
@@ -80,6 +82,10 @@ func _init() -> void:
 	_meta = UI.label("", "JoineryNumeric")
 	_meta.name = "Meta"
 	words.add_child(_meta)
+	_unplayed = UI.label("Not played since this change", "JoineryCaption")
+	_unplayed.name = "Unplayed"
+	_unplayed.hide()
+	words.add_child(_unplayed)
 	_loading = BLOCKS.skeleton(3)
 	_loading.name = "Loading"
 	_loading.hide()
@@ -95,6 +101,7 @@ func set_loading(summary: Dictionary) -> void:
 	entry = summary.duplicate()
 	_title.text = str(summary.get("subject", ""))
 	_meta.text = meta_text(summary)
+	_unplayed.visible = bool(summary.get("unplayed", false))
 	_clear()
 	_loading.show()
 
