@@ -962,6 +962,7 @@ class TurnController:
             self._passed = {"ran": checked.ran, "skipped": checked.skipped}
             if checked.info:
                 self._passed["info"] = list(checked.info)
+                self._passed["already_failing"] = list(checked.already_failing)
             skipped = checked.skipped
         elif isinstance(error, (OSError, RuntimeError, ValueError, TimeoutError)):
             tx = self.gateway.transaction
@@ -1673,4 +1674,5 @@ async def _verify(controller: TurnController) -> list[done_when.Result]:
         stage=tx.stage if staged and tx is not None else None,
         ran=list(controller._passed.get("ran", [])),
         skipped=list(controller._passed.get("skipped", [])),
+        failing=list(controller._passed.get("already_failing", [])),
     )

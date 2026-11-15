@@ -310,6 +310,18 @@ def test_a_scene_tree_test_counts_without_gut(tmp_path: Path) -> None:
         assert other.status == "inconclusive"
         assert "extends SceneTree and quits with 0" in other.evidence
     assert verify("res://tests/test_door.gd", []).status == "inconclusive"
+    # A test that failed before the change too doesn't hold it, but isn't done.
+    (failed,) = run(
+        lambda: done_when.verify(
+            _test_item("res://tests/test_door.gd"),
+            project=tmp_path,
+            stage=stage,
+            ran=["Godot import", "tests"],
+            skipped=[],
+            failing=["tests/test_door.gd"],
+        )
+    )
+    assert failed.status == "fail" and "failed before this change" in failed.evidence
 
 
 def test_a_place_not_reached_or_an_error_fails_and_a_missing_name_is_inconclusive(

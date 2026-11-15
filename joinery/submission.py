@@ -285,6 +285,8 @@ class Validation:
     #: Worth knowing but not the change's fault, so never a hold: tests that
     #: already failed before the change.
     info: list[str] = field(default_factory=list)
+    #: The tests ``info`` says already failed, by project path.
+    already_failing: list[str] = field(default_factory=list)
 
 
 def keep_refusal(
@@ -510,6 +512,7 @@ async def validate(
         replays_on=replaying,
         saves_on=saving,
         info=found.info,
+        failing=found.already_failing,
     )
     return found
 
@@ -527,6 +530,7 @@ async def checks(
     saves_on: bool = False,
     scene_tests: list[str] | None = None,
     info: list[str] | None = None,
+    failing: list[str] | None = None,
 ) -> list[Problem]:
     """The art bible's measured rules beside Godot's import check, the project's tests,
     its recorded replays and its kept saves.
@@ -590,7 +594,7 @@ async def checks(
             found += await run_tests(tx.stage, tests, timed)
         if scene_tests:
             found += await run_scene_tests(
-                tx.stage, scene_tests, timed, tx=tx, info=info
+                tx.stage, scene_tests, timed, tx=tx, info=info, failing=failing
             )
         if replays_on:
             found += await run_replays(tx, imported=godot or testing, timed=timed)
@@ -679,6 +683,7 @@ async def run_scene_tests(
     *,
     tx: FileTransaction | None = None,
     info: list[str] | None = None,
+    failing: list[str] | None = None,
 ) -> list[Problem]:
     """Run each SceneTree test headless (``godot -s``), several at once; one that
     exits non-zero, prints a ``FAIL`` line or a script error, or never quits fails.
@@ -736,6 +741,8 @@ async def run_scene_tests(
         )
     if verdict.already and info is not None:
         info.append(scene_cache.already_note(verdict.already))
+    if failing is not None:
+        failing.extend(verdict.already)
     return [
         Problem(
             "tests",

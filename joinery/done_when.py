@@ -447,11 +447,13 @@ async def verify(
     ran: list[str],
     skipped: list[str],
     play: Player | None = None,
+    failing: list[str] | None = None,
 ) -> list[Result]:
     """Check every "done when" item of ``todo`` against the change.
 
     ``stage`` is the change as files (None for a live edit alone, which the playtest can't
-    see until it is accepted); ``ran`` and ``skipped`` are the submit checks' lists. Every
+    see until it is accepted); ``ran`` and ``skipped`` are the submit checks' lists,
+    ``failing`` the tests they found already failing before the change. Every
     item that plays shares one seeded run of the stage, as long as the longest asks.
     """
     play = play or _play
@@ -481,7 +483,7 @@ async def verify(
         if criterion.kind in {"reach", "no_errors"}:
             results.append(_played(criterion, report, stage, failure))
         elif criterion.kind == "test":
-            results.append(_test(criterion, stage, ran, skipped))
+            results.append(_test(criterion, stage, ran, skipped, failing or []))
         elif criterion.kind == "check":
             results.append(_check(criterion, ran, skipped))
         else:
@@ -581,7 +583,11 @@ def _played(
 
 
 def _test(
-    criterion: Criterion, stage: Path | None, ran: list[str], skipped: list[str]
+    criterion: Criterion,
+    stage: Path | None,
+    ran: list[str],
+    skipped: list[str],
+    failing: list[str] | None = None,
 ) -> Result:
     def result(status: Status, evidence: str) -> Result:
         return Result(criterion.id, criterion.text, status, evidence)
@@ -609,6 +615,12 @@ def _test(
             else "Joinery didn't run the tests for this change"
         )
         return result("inconclusive", f"{criterion.target} didn't run: {why}.")
+    if path in (failing or []):
+        return result(
+            "fail",
+            f"{criterion.target} fails; it failed before this change too, so it "
+            "doesn't hold the change, but the item isn't done.",
+        )
     return result(
         "pass", f"{criterion.target} ran with the project's tests and passed."
     )
