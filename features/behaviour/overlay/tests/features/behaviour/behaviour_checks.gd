@@ -35,6 +35,7 @@ func run() -> void:
 	await _check_flee()
 	await _check_wander()
 	await _check_patrol()
+	await _check_freed_target()
 
 
 func _check_parse() -> void:
@@ -175,6 +176,36 @@ func _check_patrol() -> void:
 	h.expect(absf(moved.x) > agent.arrive_distance, "patrol walks along its beat")
 	h.expect(absf(moved.x) <= agent.patrol_radius * 1.1, "within the patrol radius")
 	agent.get_parent().queue_free()
+
+
+## The agent's target is killed (freed), then the level restarts under an agent that
+## outlives it: the agent and the playtester's look at it carry on without a script error.
+func _check_freed_target() -> void:
+	var prey: Node = Node3D.new() if is_3d else Node2D.new()
+	prey.name = "Prey"
+	prey.add_to_group(&"behaviour_test_prey")
+	Game.current_level().add_child(prey)
+	var agent: BehaviourAgent = _spawn(_away(4.0), "guard")
+	agent.target_group = &"behaviour_test_prey"
+	await h.physics_frames(5)
+	h.expect(agent.target() == prey, "the agent targets its prey")
+	prey.free()
+	h.expect(agent.target() == null, "a killed target is no target")
+	var state: Dictionary = agent.playtest_state()
+	h.expect(not (state["blackboard"] as Dictionary).has("target"), "nor on the blackboard")
+	await h.physics_frames(5)
+	# An agent outside the level (kept across levels) whose target goes with the level.
+	var keeper: BehaviourAgent = _spawn(_away(4.0), "guard")
+	var body: Node = keeper.get_parent()
+	body.reparent(tree.root)
+	keeper.blackboard["target"] = Game.local_player() if Game.local_player() != null else player
+	Game.restart_level()
+	await h.physics_frames(30)
+	state = keeper.playtest_state()
+	h.expect(state["kind"] == "behaviour", "after a restart the agent still reports itself")
+	h.expect(keeper.target() == null or is_instance_valid(keeper.target()), "with no freed target")
+	body.queue_free()
+	await h.physics_frames(2)
 
 
 ## A point `metres` from the player (pixels: x 40), off to one side.

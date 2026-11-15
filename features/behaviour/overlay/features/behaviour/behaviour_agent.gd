@@ -103,6 +103,8 @@ func _ready() -> void:
 	_is_3d = body is Node3D
 	add_to_group(GROUP)
 	add_to_group(STATE_GROUP)
+	# A level change or restart frees the target with the level: let go of it.
+	tree_exiting.connect(forget_freed.bind(true))
 	for key: String in DEFAULTS:
 		if float(get(key)) <= 0.0:
 			set(key, float(DEFAULTS[key][1 if _is_3d else 0]))
@@ -131,6 +133,7 @@ func _physics_process(delta: float) -> void:
 		return
 	_clock += delta
 	desired = Vector3.ZERO
+	forget_freed()
 	var target: Node = find_target()
 	blackboard["target"] = target
 	root.tick(self)
@@ -206,10 +209,25 @@ func stop_action(action: String, _node: Nodes.BTNode) -> void:
 		_wander_to = Vector3.INF
 
 
+## Drops blackboard values that point at freed objects (a killed target, a level
+## restart). [param all_nodes]: drop every node too (the agent is leaving the tree).
+func forget_freed(all_nodes: bool = false) -> void:
+	for key: Variant in blackboard.keys():
+		var value: Variant = blackboard[key]
+		if typeof(value) != TYPE_OBJECT:
+			continue
+		if not is_instance_valid(value) or all_nodes and value is Node:
+			blackboard.erase(key)
+
+
 ## The current target: the nearest living one in target_group (or the players).
 func target() -> Node:
 	var found: Variant = blackboard.get("target")
-	return found if found is Node and is_instance_valid(found) else null
+	if typeof(found) != TYPE_OBJECT or not is_instance_valid(found):
+		return null
+	# A target leaving with its level (a restart) is still valid, but has no place.
+	var node: Node = found as Node
+	return node if node != null and node.is_inside_tree() else null
 
 
 func find_target() -> Node:
@@ -221,7 +239,7 @@ func find_target() -> Node:
 	var best: Node = null
 	var best_distance: float = INF
 	for node: Node in candidates:
-		if not (node is Node2D or node is Node3D) or node == body:
+		if not (node is Node2D or node is Node3D) or node == body or not node.is_inside_tree():
 			continue
 		if node.has_method(&"is_alive") and not bool(node.call(&"is_alive")):
 			continue
@@ -255,12 +273,17 @@ func describe() -> String:
 ## For the playtester: the tree, the running branch, statuses and the blackboard.
 func playtest_state() -> Dictionary:
 	var board: Dictionary = {}
+	forget_freed()
 	for key: Variant in blackboard:
 		var value: Variant = blackboard[key]
-		board[str(key)] = str(value.get_path()) if value is Node else var_to_str(value)
+		if value is Node:
+			var node: Node = value
+			board[str(key)] = str(node.get_path()) if node.is_inside_tree() else str(node.name)
+		else:
+			board[str(key)] = var_to_str(value)
 	return {
 		"kind": "behaviour",
-		"body": str(body.get_path()) if body != null else "",
+		"body": str(body.get_path()) if body != null and body.is_inside_tree() else "",
 		"tree": tree.resource_path if tree != null else "(tree_text)",
 		"running": running,
 		"statuses": describe(),
