@@ -35,9 +35,28 @@ def approved(project: Path) -> bool:
     return _bible_approved(project)
 
 
+def _owner(project: Path) -> Path:
+    """The project a change's stage belongs to, or ``project`` itself.
+
+    A stage (``<project>/.joinery/transactions/<id>/stage``) copies the project
+    without ``.joinery``, so the approval record lives only in its owner. The
+    registry reads a turn's change through its stage once the change has begun.
+    """
+    parts = project.parts
+    if (
+        len(parts) >= 4
+        and parts[-1] == "stage"
+        and parts[-3] == "transactions"
+        and parts[-4] == ".joinery"
+    ):
+        return project.parents[3]
+    return project
+
+
 def _bible_approved(project: Path) -> bool:
     try:
-        data = json.loads((project / ".joinery/art-approval.json").read_text())
+        record = _owner(project) / ".joinery/art-approval.json"
+        data = json.loads(record.read_text())
         return data.get("bible_sha256") == fingerprint(project) and bool(
             data.get("approved_by")
         )

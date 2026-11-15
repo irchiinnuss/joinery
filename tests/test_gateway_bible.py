@@ -198,3 +198,20 @@ def test_ui_is_not_checked_without_an_approved_bible(
     (tx.stage / "ui").mkdir()
     (tx.stage / "ui/theme.tres").write_text(LOW_CONTRAST)
     assert finish(gateway, tx) is not None
+
+
+def test_a_change_stage_reads_the_projects_approval(tmp_path: Path) -> None:
+    from joinery.art_approval import approved
+
+    (tmp_path / "project.godot").write_text("config_version=5\n")
+    (tmp_path / "art").mkdir()
+    (tmp_path / "art/bible.md").write_text(BIBLE)
+    approve(tmp_path, "Milan", allow_open=True)
+    tx = FileTransaction(tmp_path)
+    tx.begin("Rust the crate")
+    # The stage has the bible but not .joinery; the registry reads it there.
+    assert (tx.stage / "art/bible.md").is_file()
+    assert approved(tmp_path) and approved(tx.stage)
+    # A bible changed in the change is not the approved one.
+    (tx.stage / "art/bible.md").write_text(BIBLE + "\nMore.\n")
+    assert not approved(tx.stage)
