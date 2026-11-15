@@ -19,6 +19,7 @@ from typing import Any, BinaryIO, Protocol
 from bridge import (
     compaction,
     connect_errors,
+    cut,
     mixer_save,
     remember,
     scene_variant,
@@ -1221,6 +1222,10 @@ async def _serve(
                     # /tidy's Remove: one reviewed change that takes out what the
                     # game never uses, with its sources (bridge/tidy.py).
                     await tidy.start(crew, project, data, task_prompt())
+                elif data.get("kind") == "cut_write":
+                    # /cut's Write: design/polish.md and the cuts the user kept, as
+                    # one reviewed change; nothing in the game is deleted (bridge/cut.py).
+                    await cut.start(crew, project, data, task_prompt())
                 elif data.get("kind") == "remember":
                     # /remember and Remember this: one line added to JOURNEYMAN.md
                     # as a reviewed change (bridge/remember.py, ADR 0077).

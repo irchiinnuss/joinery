@@ -26,6 +26,7 @@ from joinery import (
     complex_models,
     connection,
     console_errors,
+    cut,
     design_cli,
     done_when,
     game_setup,
@@ -1254,6 +1255,11 @@ def _parser() -> argparse.ArgumentParser:
         "tidy", help="find what the game never uses; remove it as one reviewed change"
     )
     tidy_cli.add_arguments(tidy_cmd)
+    cut_cmd = commands.add_parser(
+        "cut",
+        help="one polish list from every check, with proposed cuts; written as one reviewed change",
+    )
+    cut.add_arguments(cut_cmd)
     steam_cmd = commands.add_parser(
         "steam", help="show or set the Steam app ID (it can be added any time)"
     )
@@ -1830,6 +1836,8 @@ def main(argv: list[str] | None = None) -> int:
         return design_cli.main(args)
     if args.command == "tidy":
         return tidy_cli.main(args)
+    if args.command == "cut":
+        return cut.main(args)
     if args.command == "update-core":
         from joinery import core_update
 
