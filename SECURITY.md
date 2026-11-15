@@ -4,7 +4,7 @@
 
 Please do not open a public issue for a security problem. Report it privately
 through [GitHub's private vulnerability reporting](https://github.com/irchiinnuss/joinery/security/advisories/new)
-or by email to SECURITY_CONTACT_EMAIL.
+or by email to milan.vrankic@irchiinnuss.com.
 
 Include what you found, how to reproduce it, the Joinery version
 (`joinery --version`) and your platform. You should get a reply within a week.

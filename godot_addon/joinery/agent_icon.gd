@@ -9,11 +9,11 @@ const UI_THEME := preload("ui_theme.gd")
 ## colour so they read in both themes; the others keep their own colours.
 const FILES := {
 	"claude": "claude.svg",
-	"codex": "codex.png",
-	"gemini": "gemini.png",
+	"codex": "codex.svg",
+	"gemini": "gemini.svg",
 	"opencode": "opencode.svg",
 }
-const MONOCHROME := ["opencode"]
+const MONOCHROME := ["codex", "gemini", "opencode"]
 ## Logical size of the mark inside its tile (the tile adds its own padding, 5 × unit a side).
 const MARK := 18
 

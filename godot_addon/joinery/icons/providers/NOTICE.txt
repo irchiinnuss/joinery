@@ -1,8 +1,4 @@
 Provider marks identify their respective products; trademarks belong to their owners.
-Claude, Codex and Gemini marks were imported unchanged from locally installed
-applications/extensions at the user's request.
-Claude SVG: Material Icon Theme 5.40.0 (MIT; license included).
-Gemini PNG: Continue 2.0.0 provider logos (Google Gemini mark).
-Codex PNG: installed ChatGPT app resources (OpenAI Codex app mark).
-opencode SVG: a plain monochrome "oc" monogram drawn in-house for Joinery.
-No marks were generated or downloaded. See sources.json for hashes.
+Claude SVG: Material Icon Theme 5.40.0 (MIT; license included), imported unchanged at the user's request.
+Codex, Gemini and opencode SVGs: plain monochrome monograms ('cx', 'gm', 'oc') drawn in-house for Joinery;
+no external artwork. No marks were generated or downloaded. See sources.json for hashes.

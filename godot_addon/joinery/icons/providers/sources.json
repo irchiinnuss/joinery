@@ -6,16 +6,16 @@
     "origin": "user-requested local import"
   },
   {
-    "file": "codex.png",
-    "source": "/Applications/ChatGPT.app/Contents/Resources/icon-codex-dark-color.png",
-    "sha256": "69fb4384e161be8a20dcb94a9ac34aea4fbfaeb67514110a71e7b0732eccb0fc",
-    "origin": "user-requested local import"
+    "file": "codex.svg",
+    "source": "drawn in-house for Joinery: a 'cx' monogram, no external artwork",
+    "sha256": "297a212faae4517ac3091ba84bfe9f3b0af29a274348e742ef03cacbbc18a83f",
+    "origin": "in-house"
   },
   {
-    "file": "gemini.png",
-    "source": "~/.vscode/extensions/continue.continue-2.0.0-darwin-arm64/gui/logos/gemini.png",
-    "sha256": "64e675e574ca10afc1cd86b250aadaf714ee6b4b9af96214649a95ba49a5e824",
-    "origin": "user-requested local import"
+    "file": "gemini.svg",
+    "source": "drawn in-house for Joinery: a 'gm' monogram, no external artwork",
+    "sha256": "e1bba73e84557eb0a5d394b36d161aa4e088e857abb2a81616a5bc2194bc9830",
+    "origin": "in-house"
   },
   {
     "file": "opencode.svg",
