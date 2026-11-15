@@ -3,7 +3,8 @@ extends PanelContainer
 ## The art gate's card in a request's card (sidebar_change_card.gd): asset work waits until the
 ## look is approved. A miniature of the look leads it (the palette as a 24 px strip and up to
 ## three reference thumbnails, five dashed swatches when nothing is chosen yet), then "Agree the
-## look first", then "Review the look" (the card's one accent) and the quiet "Describe my own".
+## look first" with, when the look is blank or unfinished, one caption saying what it lacks, then
+## "Review the look" (the card's one accent) and the quiet "Describe my own".
 ## The step above it reads "Waiting for the look"; once the look is approved the card leaves.
 
 signal review_requested
@@ -21,6 +22,7 @@ const THUMBS := 3
 
 var _preview: HBoxContainer
 var _heading: Label
+var _note: Label
 
 
 func _init() -> void:
@@ -39,6 +41,10 @@ func _init() -> void:
 	_heading = STYLE.card_title(HEADING, true)
 	_heading.name = "Heading"
 	column.add_child(_heading)
+	_note = UI.label("", "JoineryCaption", true)
+	_note.name = "Note"
+	_note.hide()
+	column.add_child(_note)
 	var actions := HFlowContainer.new()
 	actions.name = "Actions"
 	STYLE.on_theme_overrides(
@@ -69,8 +75,11 @@ func _init() -> void:
 	show_look({})
 
 
-## Show the miniature of [param look] ({palette, references}, as the bridge sends them).
+## Show the miniature of [param look] ({palette, references, note}, as the bridge sends them);
+## the note says when the look is blank or what it still lacks.
 func show_look(look: Dictionary) -> void:
+	_note.text = str(look.get("note", ""))
+	_note.visible = not _note.text.is_empty()
 	for child: Node in _preview.get_children():
 		_preview.remove_child(child)
 		child.queue_free()
@@ -94,6 +103,11 @@ func show_look(look: Dictionary) -> void:
 ## The heading on show.
 func heading() -> String:
 	return _heading.text
+
+
+## The caption under the heading ("" when the look lacks nothing).
+func note() -> String:
+	return _note.text if _note.visible else ""
 
 
 func _thumb(texture: Texture2D, title: String) -> Control:

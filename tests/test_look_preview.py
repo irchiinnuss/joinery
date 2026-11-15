@@ -59,4 +59,9 @@ def test_gate_preview_keeps_three_pictures(tmp_path: Path) -> None:
 
 
 def test_no_bible_has_nothing_to_show(tmp_path: Path) -> None:
-    assert look_preview.gate_preview(tmp_path) == {"palette": [], "references": []}
+    assert look_preview.gate_preview(tmp_path) == {
+        "palette": [],
+        "references": [],
+        "state": "missing",
+        "note": "",
+    }

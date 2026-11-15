@@ -126,4 +126,10 @@ def gate_preview(project: Path) -> dict[str, Any]:
     """The art gate's miniature: the palette, and the first pictures on the board."""
     found = look(project)
     pictures = [ref for ref in found["references"] if ref["file"]]
-    return {"palette": found["palette"], "references": pictures[:GATE_REFERENCES]}
+    state = bible_lint.completeness(project)
+    return {
+        "palette": found["palette"],
+        "references": pictures[:GATE_REFERENCES],
+        "state": state["state"],
+        "note": bible_lint.gate_note(state),
+    }

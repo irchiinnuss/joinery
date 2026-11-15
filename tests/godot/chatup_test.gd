@@ -236,6 +236,12 @@ func _run_revert_and_gate() -> void:
 	_check(
 		held._gate.find_child("Palette", true, false) != null, "The gate shows the look in small"
 	)
+	_check(held._gate.note() == "", "A look that lacks nothing adds no note")
+	held._gate.show_look({"note": "The look is blank. Review the look to start it."})
+	_check(
+		held._gate.note() == "The look is blank. Review the look to start it.",
+		"A blank look is said plainly on the gate"
+	)
 	var review: Button = held._gate.find_children("*", "Button", true, false)[0]
 	_check(review.text == "Review the look", "Review the look is the primary action")
 	review.pressed.emit()

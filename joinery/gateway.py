@@ -1182,9 +1182,19 @@ class ProjectGateway:
             "kind": "art_gate",
             "needs_art_approval": True,
             "resume": self.request_summary,
-            "message": team.gate_message(self.project) or ART_GATE_MESSAGE,
+            "message": team.gate_message(self.project) or self._art_gate_message(),
         }
         return self.art_gate
+
+    def _art_gate_message(self) -> str:
+        """Why asset work waits, plainly: a blank or unfinished look says what it
+        lacks and how the user fills it."""
+        from joinery.bible_lint import completeness
+
+        look = completeness(self.project)
+        if look["state"] in {"blank", "unfinished"}:
+            return str(look["message"])
+        return ART_GATE_MESSAGE
 
     def _team_check(self, named: set[str]) -> None:
         """Teammates' work on the files a call names (ADR 0071): a teammate's
