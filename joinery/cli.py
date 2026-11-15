@@ -1638,8 +1638,28 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _parse(argv: list[str] | None) -> argparse.Namespace:
+    """Parse ``argv``; plain words after an option land in the command's word list.
+
+    A command whose free text may follow its options (``joinery rules add --path
+    G Every screen ...``) names that list with ``set_defaults(interleaved=...)``.
+    Python 3.12 before 3.12.7 fills a ``nargs="*"`` positional only once, from
+    the words before the first option, and reports the rest as unrecognized;
+    later versions collect them all. Adding the leftovers back gives the same
+    result on every version; anything else unrecognized is still an error.
+    """
+    parser = _parser()
+    args, extra = parser.parse_known_args(argv)
+    target = getattr(args, "interleaved", None)
+    if extra and target and not any(word.startswith("-") for word in extra):
+        setattr(args, target, [*getattr(args, target), *extra])
+    elif extra:
+        parser.error(f"unrecognized arguments: {' '.join(extra)}")
+    return args
+
+
 def main(argv: list[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
+    args = _parse(argv)
 
     if args.command == "history":
         return history.run(args)

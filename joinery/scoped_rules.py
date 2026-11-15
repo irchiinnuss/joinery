@@ -440,6 +440,8 @@ def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) ->
         help="add: the files the rule is for, such as game/ai/** (repeatable)",
     )
     parser.add_argument("--json", action="store_true", help="print JSON")
+    # The rule's words may follow --path; cli._parse collects them on every Python.
+    parser.set_defaults(interleaved="words")
 
 
 def _rule_json(rule: Rule) -> dict[str, object]:
