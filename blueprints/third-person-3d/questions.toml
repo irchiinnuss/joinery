@@ -1,0 +1,64 @@
+# The new-project wizard's optional "How it plays" round (joinery/genre_questions.py).
+# Each answer becomes one line in the brief, marked as the user's answer, a
+# suggested default or skipped. Defaults are suggestions, never rules.
+intro = "A few choices about how your third-person game plays."
+
+[[question]]
+key = "focus"
+ask = "What fills most of the time?"
+label = "Most of the time"
+section = "core_loop"
+default = "platforming"
+choices = [
+  { id = "platforming", label = "Running and jumping", brief = "Running, jumping and lining up the next landing." },
+  { id = "exploring", label = "Exploring", brief = "Looking for hidden ways up and things to collect." },
+  { id = "fighting", label = "Fighting", brief = "Fighting enemies that block the way." },
+]
+
+[[question]]
+key = "challenge"
+ask = "What makes it hard?"
+label = "What makes it hard"
+section = "progression"
+default = "jumps"
+choices = [
+  { id = "jumps", label = "Tricky jumps", brief = "Tricky jumps; a fall returns the player to the last checkpoint." },
+  { id = "enemies", label = "Enemies", brief = "Enemies that take health; at zero the player restarts the area." },
+  { id = "finding", label = "Finding the way", brief = "Finding the way; nothing can hurt the player." },
+]
+
+[[question]]
+key = "feel"
+ask = "How should moving feel?"
+label = "Feel"
+section = "fantasy"
+default = "nimble"
+choices = [
+  { id = "nimble", label = "Light and nimble", brief = "Light and nimble: quick turns and a floaty jump." },
+  { id = "weighty", label = "Heavy and grounded", brief = "Heavy and grounded: momentum and a short, firm jump." },
+  { id = "relaxed", label = "Relaxed", brief = "Relaxed: forgiving landings and no rush." },
+]
+
+[[question]]
+key = "session"
+ask = "How long is one sitting?"
+label = "One sitting"
+section = "session"
+default = "short"
+choices = [
+  { id = "short", label = "About 15 minutes", brief = "About 15 minutes: one area per sitting." },
+  { id = "medium", label = "30 to 60 minutes", brief = "30 to 60 minutes: a few areas per sitting." },
+  { id = "long", label = "Longer evenings", brief = "Longer evenings in a world the player returns to." },
+]
+
+[[question]]
+key = "camera"
+ask = "Who controls the camera?"
+label = "Camera control"
+section = "camera"
+default = "player"
+choices = [
+  { id = "player", label = "The player", brief = "The player orbits the camera freely." },
+  { id = "guided", label = "Guided", brief = "The camera follows set angles per area; the player can nudge it." },
+  { id = "fixed", label = "Fixed angles", brief = "Fixed angles per room, chosen by the level." },
+]

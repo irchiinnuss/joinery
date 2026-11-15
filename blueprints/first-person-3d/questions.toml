@@ -1,0 +1,64 @@
+# The new-project wizard's optional "How it plays" round (joinery/genre_questions.py).
+# Each answer becomes one line in the brief, marked as the user's answer, a
+# suggested default or skipped. Defaults are suggestions, never rules.
+intro = "A few choices about how your first-person game plays."
+
+[[question]]
+key = "focus"
+ask = "What fills most of the time?"
+label = "Most of the time"
+section = "core_loop"
+default = "puzzles"
+choices = [
+  { id = "explore", label = "Exploring", brief = "Looking around and finding the way on." },
+  { id = "puzzles", label = "Solving puzzles", brief = "Working out switches, doors and how the rooms connect." },
+  { id = "story", label = "Uncovering a story", brief = "Finding notes and places that tell what happened here." },
+]
+
+[[question]]
+key = "challenge"
+ask = "What makes it hard?"
+label = "What makes it hard"
+section = "progression"
+default = "thinking"
+choices = [
+  { id = "thinking", label = "Only thinking", brief = "Nothing can hurt the player; the challenge is working things out." },
+  { id = "clock", label = "A clock", brief = "A timer: reach the exit before it runs out." },
+  { id = "hazards", label = "Hazards", brief = "Drops and traps send the player back to the last checkpoint." },
+]
+
+[[question]]
+key = "feel"
+ask = "How should it feel?"
+label = "Feel"
+section = "fantasy"
+default = "calm"
+choices = [
+  { id = "calm", label = "Calm and curious", brief = "Quiet rooms and time to look at everything." },
+  { id = "tense", label = "Tense", brief = "Something is wrong here and the player wants to get out." },
+  { id = "playful", label = "Playful", brief = "Things react when the player pokes at them." },
+]
+
+[[question]]
+key = "session"
+ask = "How long is one sitting?"
+label = "One sitting"
+section = "session"
+default = "short"
+choices = [
+  { id = "short", label = "About 10 minutes", brief = "About 10 minutes: one area per sitting." },
+  { id = "medium", label = "20 to 40 minutes", brief = "20 to 40 minutes: a few areas per sitting." },
+  { id = "long", label = "An hour or more", brief = "An hour or more in one large, connected place." },
+]
+
+[[question]]
+key = "reward"
+ask = "What does finishing an area give?"
+label = "Finishing an area"
+section = "progression"
+default = "next"
+choices = [
+  { id = "next", label = "The next area", brief = "The next area opens." },
+  { id = "collectible", label = "A collectible", brief = "A collectible, counted on the main menu." },
+  { id = "ability", label = "A new ability", brief = "A new ability that opens doors in places already visited." },
+]

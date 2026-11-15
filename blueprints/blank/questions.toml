@@ -1,0 +1,65 @@
+# The new-project wizard's optional "How it plays" round (joinery/genre_questions.py).
+# Each answer becomes one line in the brief, marked as the user's answer, a
+# suggested default or skipped. Defaults are suggestions, never rules.
+intro = "A few choices to start the brief of an empty project."
+
+[[question]]
+key = "kind"
+ask = "What kind of game is it?"
+label = "Genre"
+section = "genre"
+default = "action"
+choices = [
+  { id = "action", label = "Action", brief = "Action: the player's reactions and skill matter most." },
+  { id = "puzzle", label = "Puzzle", brief = "Puzzle: working things out matters most." },
+  { id = "story", label = "Story", brief = "Story: what happens and to whom matters most." },
+  { id = "toy", label = "Toy or sandbox", brief = "Toy or sandbox: playing around matters most; no set goal." },
+]
+
+[[question]]
+key = "focus"
+ask = "What does the player do over and over?"
+label = "Most of the time"
+section = "core_loop"
+default = "move"
+choices = [
+  { id = "move", label = "Move and dodge", brief = "Moving around and getting out of the way of danger." },
+  { id = "choose", label = "Make choices", brief = "Choosing between options and seeing what follows." },
+  { id = "arrange", label = "Arrange things", brief = "Placing, sorting and arranging things." },
+]
+
+[[question]]
+key = "challenge"
+ask = "What makes it hard?"
+label = "What makes it hard"
+section = "progression"
+default = "skill"
+choices = [
+  { id = "skill", label = "Skill", brief = "Timing and control." },
+  { id = "thinking", label = "Thinking", brief = "Working out the right answer." },
+  { id = "none", label = "Nothing", brief = "Nothing: it is about the experience, not winning." },
+]
+
+[[question]]
+key = "feel"
+ask = "How should it feel?"
+label = "Feel"
+section = "fantasy"
+default = "relaxed"
+choices = [
+  { id = "relaxed", label = "Relaxed", brief = "Relaxed and unhurried." },
+  { id = "exciting", label = "Exciting", brief = "Exciting, with moments of pressure." },
+  { id = "thoughtful", label = "Thoughtful", brief = "Thoughtful, with time to consider each step." },
+]
+
+[[question]]
+key = "session"
+ask = "How long is one sitting?"
+label = "One sitting"
+section = "session"
+default = "short"
+choices = [
+  { id = "short", label = "A few minutes", brief = "A few minutes at a time." },
+  { id = "medium", label = "About half an hour", brief = "About half an hour." },
+  { id = "long", label = "A long evening", brief = "A long evening." },
+]

@@ -1,0 +1,64 @@
+# The new-project wizard's optional "How it plays" round (joinery/genre_questions.py).
+# Each answer becomes one line in the brief, marked as the user's answer, a
+# suggested default or skipped. Defaults are suggestions, never rules.
+intro = "A few choices about how your card game plays."
+
+[[question]]
+key = "focus"
+ask = "What is the player doing most?"
+label = "Most of the time"
+section = "core_loop"
+default = "memory"
+choices = [
+  { id = "memory", label = "Remembering cards", brief = "Remembering where cards are and matching them." },
+  { id = "planning", label = "Planning moves", brief = "Planning a few moves ahead with the cards in hand." },
+  { id = "speed", label = "Quick reactions", brief = "Spotting matches quickly before the time runs out." },
+]
+
+[[question]]
+key = "challenge"
+ask = "What limits the player?"
+label = "The limit"
+section = "progression"
+default = "moves"
+choices = [
+  { id = "moves", label = "A move limit", brief = "A limited number of moves per board." },
+  { id = "time", label = "A timer", brief = "A timer per board." },
+  { id = "none", label = "Nothing", brief = "No limit; stars reward fewer moves." },
+]
+
+[[question]]
+key = "feel"
+ask = "How should it feel?"
+label = "Feel"
+section = "fantasy"
+default = "relaxed"
+choices = [
+  { id = "relaxed", label = "Relaxed", brief = "Relaxed: a quiet table and no pressure." },
+  { id = "clever", label = "Clever", brief = "Clever: the player feels sharp when a plan works." },
+  { id = "lively", label = "Lively", brief = "Lively: quick rounds and cheerful reactions to every match." },
+]
+
+[[question]]
+key = "session"
+ask = "How long is one sitting?"
+label = "One sitting"
+section = "session"
+default = "short"
+choices = [
+  { id = "short", label = "A board or two", brief = "A board or two: about 5 minutes." },
+  { id = "medium", label = "About 20 minutes", brief = "About 20 minutes of boards in a row." },
+  { id = "long", label = "A long run", brief = "A long run of boards that get harder." },
+]
+
+[[question]]
+key = "players"
+ask = "Who plays?"
+label = "Players"
+section = "progression"
+default = "solo"
+choices = [
+  { id = "solo", label = "One player", brief = "One player against the board." },
+  { id = "hotseat", label = "Two on one screen", brief = "Two players take turns on one screen." },
+  { id = "both", label = "Both", brief = "One player alone, or two taking turns on one screen." },
+]

@@ -1,0 +1,64 @@
+# The new-project wizard's optional "How it plays" round (joinery/genre_questions.py).
+# Each answer becomes one line in the brief, marked as the user's answer, a
+# suggested default or skipped. Defaults are suggestions, never rules.
+intro = "A few choices about how your top-down game plays."
+
+[[question]]
+key = "focus"
+ask = "What fills most of the time?"
+label = "Most of the time"
+section = "core_loop"
+default = "fighting"
+choices = [
+  { id = "fighting", label = "Fighting waves", brief = "Fighting waves of enemies in one arena." },
+  { id = "exploring", label = "Exploring rooms", brief = "Moving through rooms and clearing each one." },
+  { id = "surviving", label = "Surviving", brief = "Staying alive as long as possible while the arena fills up." },
+]
+
+[[question]]
+key = "challenge"
+ask = "What makes it hard?"
+label = "What makes it hard"
+section = "progression"
+default = "numbers"
+choices = [
+  { id = "numbers", label = "Many enemies", brief = "More enemies at once in each wave." },
+  { id = "patterns", label = "Enemy patterns", brief = "Fewer enemies with attacks to learn and dodge." },
+  { id = "resources", label = "Scarce health", brief = "Health and pickups are scarce, so every hit counts." },
+]
+
+[[question]]
+key = "feel"
+ask = "How should a fight feel?"
+label = "Feel"
+section = "fantasy"
+default = "frantic"
+choices = [
+  { id = "frantic", label = "Fast and frantic", brief = "Fast and frantic: always moving, dashing out of trouble." },
+  { id = "deliberate", label = "Careful", brief = "Careful: read the enemy, then strike." },
+  { id = "powerful", label = "Powerful", brief = "Powerful: the player cuts through crowds." },
+]
+
+[[question]]
+key = "session"
+ask = "How long is one run?"
+label = "One run"
+section = "session"
+default = "short"
+choices = [
+  { id = "short", label = "5 to 10 minutes", brief = "A run lasts 5 to 10 minutes." },
+  { id = "medium", label = "About 20 minutes", brief = "A run lasts about 20 minutes." },
+  { id = "endless", label = "Until you fall", brief = "A run lasts until the player's health runs out." },
+]
+
+[[question]]
+key = "between"
+ask = "What carries over between runs?"
+label = "Between runs"
+section = "progression"
+default = "score"
+choices = [
+  { id = "score", label = "Only the high score", brief = "Only the high score carries over." },
+  { id = "unlocks", label = "Unlocks", brief = "New weapons or characters unlock for later runs." },
+  { id = "upgrades", label = "Upgrades", brief = "Coins buy lasting upgrades between runs." },
+]

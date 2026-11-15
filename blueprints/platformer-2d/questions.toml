@@ -1,0 +1,64 @@
+# The new-project wizard's optional "How it plays" round (joinery/genre_questions.py).
+# Each answer becomes one line in the brief, marked as the user's answer, a
+# suggested default or skipped. Defaults are suggestions, never rules.
+intro = "A few choices about how your platformer plays."
+
+[[question]]
+key = "focus"
+ask = "What fills most of the time?"
+label = "Most of the time"
+section = "core_loop"
+default = "precision"
+choices = [
+  { id = "precision", label = "Precise jumps", brief = "Making precise jumps over pits and spikes." },
+  { id = "exploring", label = "Exploring", brief = "Exploring levels for hidden coins and side paths." },
+  { id = "speed", label = "Going fast", brief = "Keeping speed up and finding the quickest line." },
+]
+
+[[question]]
+key = "challenge"
+ask = "What happens after a fall?"
+label = "A fall"
+section = "progression"
+default = "checkpoint"
+choices = [
+  { id = "checkpoint", label = "Back to a checkpoint", brief = "The player goes back to the last checkpoint." },
+  { id = "restart", label = "Restart the level", brief = "The level starts over." },
+  { id = "lives", label = "Lose a life", brief = "The player loses a life; with none left the level starts over." },
+]
+
+[[question]]
+key = "feel"
+ask = "How should the jump feel?"
+label = "Jump feel"
+section = "fantasy"
+default = "snappy"
+choices = [
+  { id = "snappy", label = "Snappy", brief = "Snappy: quick to start, quick to stop, a little forgiving at ledges." },
+  { id = "floaty", label = "Floaty", brief = "Floaty: long hang time and lots of air control." },
+  { id = "heavy", label = "Heavy", brief = "Heavy: momentum matters and every jump is a commitment." },
+]
+
+[[question]]
+key = "session"
+ask = "How long is one level?"
+label = "One level"
+section = "session"
+default = "short"
+choices = [
+  { id = "short", label = "1 to 3 minutes", brief = "A level takes 1 to 3 minutes." },
+  { id = "medium", label = "5 to 10 minutes", brief = "A level takes 5 to 10 minutes." },
+  { id = "world", label = "One big world", brief = "One connected world, played in sittings of about 30 minutes." },
+]
+
+[[question]]
+key = "goal"
+ask = "What is the goal of a level?"
+label = "Level goal"
+section = "progression"
+default = "flag"
+choices = [
+  { id = "flag", label = "Reach the end", brief = "Reach the flag at the end." },
+  { id = "collect", label = "Collect everything", brief = "Collect every coin to open the exit." },
+  { id = "time", label = "Beat the clock", brief = "Reach the end before the timer runs out." },
+]

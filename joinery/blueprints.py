@@ -44,7 +44,7 @@ from pydantic import (
     field_validator,
 )
 
-from joinery import __version__
+from joinery import __version__, genre_questions
 from joinery.catalog import ROOT
 from joinery.godot_config import (
     KEYS,
@@ -583,6 +583,8 @@ def _describe(catalogue: _Catalogue, blueprint: Blueprint) -> dict[str, Any]:
     data["features_supported"] = sorted(
         f.id for f in catalogue.features.values() if f.supports(blueprint.id)
     )
+    # The wizard's optional "How it plays" round for this starting point.
+    data["questions"] = genre_questions.as_json(blueprint.id)
     return data
 
 
@@ -1942,6 +1944,7 @@ def validate_catalogue() -> list[str]:
     """Every check the catalogue must pass, as readable problems (empty = fine)."""
     errors: list[str] = []
     catalogue = _load(errors)
+    errors += genre_questions.problems()
     if catalogue.core is None and catalogue.blueprints and not any(
         d.name == CORE_DIR_NAME for d in _unit_dirs(BLUEPRINTS_DIR)
     ):

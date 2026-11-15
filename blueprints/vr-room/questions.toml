@@ -1,0 +1,64 @@
+# The new-project wizard's optional "How it plays" round (joinery/genre_questions.py).
+# Each answer becomes one line in the brief, marked as the user's answer, a
+# suggested default or skipped. Defaults are suggestions, never rules.
+intro = "A few choices about how your VR room plays."
+
+[[question]]
+key = "focus"
+ask = "What do hands do most?"
+label = "Most of the time"
+section = "core_loop"
+default = "puzzles"
+choices = [
+  { id = "puzzles", label = "Solve puzzles", brief = "Picking things up and fitting them together to open the way." },
+  { id = "build", label = "Build things", brief = "Stacking and building with the objects in the room." },
+  { id = "play", label = "Play with objects", brief = "Throwing, catching and playing with objects for fun." },
+]
+
+[[question]]
+key = "challenge"
+ask = "What makes it hard?"
+label = "What makes it hard"
+section = "progression"
+default = "thinking"
+choices = [
+  { id = "thinking", label = "Only thinking", brief = "Working out what goes where; there is no fail state." },
+  { id = "dexterity", label = "Steady hands", brief = "Careful placing and aiming." },
+  { id = "clock", label = "A clock", brief = "Finishing before the timer runs out." },
+]
+
+[[question]]
+key = "feel"
+ask = "How should the room feel?"
+label = "Feel"
+section = "fantasy"
+default = "cosy"
+choices = [
+  { id = "cosy", label = "Cosy", brief = "Cosy: a warm room to tinker in." },
+  { id = "mysterious", label = "Mysterious", brief = "Mysterious: the room hides how it works." },
+  { id = "silly", label = "Silly", brief = "Silly: objects react in surprising ways." },
+]
+
+[[question]]
+key = "session"
+ask = "How long is one sitting?"
+label = "One sitting"
+section = "session"
+default = "short"
+choices = [
+  { id = "short", label = "5 to 10 minutes", brief = "5 to 10 minutes, so the headset stays comfortable." },
+  { id = "medium", label = "About 20 minutes", brief = "About 20 minutes, with a natural break halfway." },
+  { id = "rooms", label = "One room each time", brief = "One room per sitting, however long it takes." },
+]
+
+[[question]]
+key = "moving"
+ask = "How does the player get around?"
+label = "Moving"
+section = "camera"
+default = "both"
+choices = [
+  { id = "both", label = "Walk or teleport", brief = "Walk with the stick or teleport, picked in comfort settings." },
+  { id = "teleport", label = "Teleport only", brief = "Teleport only, for the most comfort." },
+  { id = "roomscale", label = "Their own feet", brief = "Room-scale only: everything is within reach of the play space." },
+]
