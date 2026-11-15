@@ -182,6 +182,9 @@ class SubmitResult:
     next: str = ""
     #: What the agent should say in its reply; never a reason the change fails.
     notes: list[str] = field(default_factory=list)
+    #: Found by the checks but not caused by the change (tests already failing
+    #: before it): never a hold, never a send-back.
+    info: list[str] = field(default_factory=list)
 
     def as_tool_result(self) -> dict[str, Any]:
         result: dict[str, Any] = {
@@ -197,6 +200,8 @@ class SubmitResult:
         }
         if self.notes:
             result["notes"] = self.notes
+        if self.info:
+            result["info"] = self.info
         if self.status == "accepted":
             result["auto_accepted"] = True
         return result
@@ -450,6 +455,7 @@ class TurnController:
         self._done, self._done_print = [], None
         self.turn_id = uuid.uuid4().hex
         self.attempts = 0
+        self._passed = {}
         self.last_result = None
         self._checked = None
         self._facts = []
@@ -782,6 +788,7 @@ class TurnController:
         return tx is not None and tx.state == "staging" and bool(tx.diff())
 
     def _result(self, status: Any, final: bool, **extra: Any) -> SubmitResult:
+        extra.setdefault("info", list(self._passed.get("info", [])))
         return SubmitResult(
             status=status,
             attempt=self.attempts,
@@ -952,6 +959,8 @@ class TurnController:
                 placed, notes = self._placement(found)
                 problems = problems + placed
             self._passed = {"ran": checked.ran, "skipped": checked.skipped}
+            if checked.info:
+                self._passed["info"] = list(checked.info)
             skipped = checked.skipped
         elif isinstance(error, (OSError, RuntimeError, ValueError, TimeoutError)):
             tx = self.gateway.transaction
@@ -1160,7 +1169,10 @@ class TurnController:
         tx = self.gateway.transaction
         if tx is not None:
             # Shown with the kept change: what didn't hold it but is worth knowing.
-            tx.auto_notes = auto_accept.shown_notes(peer, hold_on, sections)
+            tx.auto_notes = [
+                *auto_accept.shown_notes(peer, hold_on, sections),
+                *self._passed.get("info", []),
+            ]
         return "editor" if self.live_edits else "core"
 
     def _brief_edit(
@@ -1288,6 +1300,7 @@ class TurnController:
             "ran": checked.ran,
             "skipped": checked.skipped,
             "notes": notes,
+            "info": checked.info,
             "attempts_left": max(MAX_SUBMITS - self.attempts, 0),
             "next": after,
         }

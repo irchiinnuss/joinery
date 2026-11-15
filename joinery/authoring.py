@@ -68,8 +68,13 @@ async def run_offline(
     *,
     readonly: bool = False,
     image: str = IMAGE,
+    warm: bool = True,
 ) -> Result:
-    if os.environ.get("JOINERY_WORKER_SCOPE"):
+    """Run ``argv`` in the offline worker on ``project`` (mounted at /work).
+
+    A supervised session reuses one warm worker per project, one command at a
+    time; ``warm=False`` starts a worker of its own, so several run at once."""
+    if warm and os.environ.get("JOINERY_WORKER_SCOPE"):
         from joinery.warm_workers import execute
 
         return await execute(argv, project, timeout, readonly, image)

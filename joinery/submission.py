@@ -11,13 +11,24 @@ from __future__ import annotations
 import asyncio
 import re
 import secrets
+import shutil
 from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
-from joinery import complex_models, reasons, references, replays, saves, scene_variants
+from joinery import (
+    complex_models,
+    reasons,
+    references,
+    replays,
+    saves,
+    scene_variants,
+)
+from joinery import (
+    scene_tests as scene_cache,
+)
 from joinery.art_approval import approved
 from joinery.art_approval import fingerprint as bible_fingerprint
 from joinery.authoring import run_offline
@@ -29,7 +40,7 @@ from joinery.lockfile import check_assets
 from joinery.policy import load_denylist
 from joinery.puzzle import check as puzzle_check
 from joinery.runner import Result
-from joinery.transactions import DIRECTORY, FileTransaction
+from joinery.transactions import DIRECTORY, FileTransaction, clone_tree
 from joinery.turn import Problem, scene_route
 
 if TYPE_CHECKING:
@@ -271,6 +282,9 @@ class Validation:
     skipped: list[str] = field(default_factory=list)
     #: The checks that ran, in plain words ("art bible", "tests"), for the review.
     ran: list[str] = field(default_factory=list)
+    #: Worth knowing but not the change's fault, so never a hold: tests that
+    #: already failed before the change.
+    info: list[str] = field(default_factory=list)
 
 
 def keep_refusal(
@@ -495,6 +509,7 @@ async def validate(
         imported=lambda: gateway.mark_imported(tx),
         replays_on=replaying,
         saves_on=saving,
+        info=found.info,
     )
     return found
 
@@ -511,6 +526,7 @@ async def checks(
     replays_on: bool = False,
     saves_on: bool = False,
     scene_tests: list[str] | None = None,
+    info: list[str] | None = None,
 ) -> list[Problem]:
     """The art bible's measured rules beside Godot's import check, the project's tests,
     its recorded replays and its kept saves.
@@ -531,7 +547,7 @@ async def checks(
             found = await check_rules(
                 tx.stage,
                 [change["path"] for change in changes],
-                lambda argv, root: run_offline(
+                lambda argv, root: worker_run(
                     argv, root, OFFLINE_SECONDS, readonly=True
                 ),
             )
@@ -552,7 +568,7 @@ async def checks(
         testing = bool(tests) or bool(scene_tests)
         if godot or testing:
             with timed("review_import"):
-                got = await run_offline(
+                got = await worker_run(
                     ["godot", "--headless", "--path", "/work", "--editor", "--import"],
                     tx.stage,
                     OFFLINE_SECONDS,
@@ -573,7 +589,9 @@ async def checks(
         if tests:
             found += await run_tests(tx.stage, tests, timed)
         if scene_tests:
-            found += await run_scene_tests(tx.stage, scene_tests, timed)
+            found += await run_scene_tests(
+                tx.stage, scene_tests, timed, tx=tx, info=info
+            )
         if replays_on:
             found += await run_replays(tx, imported=godot or testing, timed=timed)
         if saves_on:
@@ -600,6 +618,24 @@ WORKER_DOWN = (
 )
 
 
+#: Seconds between tries when the offline worker didn't start (a busy Docker).
+WORKER_RETRY_DELAYS = (2.0, 4.0, 8.0)
+
+
+async def worker_run(
+    argv: list[str], root: Path, seconds: int, **options: Any
+) -> Result:
+    """``run_offline``, tried again with backoff while the worker itself can't
+    start: one Docker hiccup must not end a check, or the turn with it."""
+    got = await run_offline(argv, root, seconds, **options)
+    for delay in WORKER_RETRY_DELAYS:
+        if got.ok or not any(sign in got.stderr for sign in WORKER_DOWN):
+            break
+        await asyncio.sleep(delay)
+        got = await run_offline(argv, root, seconds, **options)
+    return got
+
+
 def worker_ready(got: Result) -> None:
     """Raise when the offline worker never ran: no change can fix that."""
     if not got.ok and any(sign in got.stderr for sign in WORKER_DOWN):
@@ -622,7 +658,7 @@ async def run_tests(
         "-gexit",
     ]
     with timed("review_tests") if timed is not None else nullcontext():
-        got = await run_offline(argv, stage, OFFLINE_SECONDS)
+        got = await worker_run(argv, stage, OFFLINE_SECONDS)
     worker_ready(got)
     if got.ok and "SCRIPT ERROR:" not in got.output:
         return []
@@ -637,37 +673,82 @@ async def run_tests(
 
 
 async def run_scene_tests(
-    stage: Path, scripts: list[str], timed: Any = None
+    stage: Path,
+    scripts: list[str],
+    timed: Any = None,
+    *,
+    tx: FileTransaction | None = None,
+    info: list[str] | None = None,
 ) -> list[Problem]:
-    """Run each SceneTree test headless (``godot -s``); one that exits non-zero, prints
-    a ``FAIL`` line or a script error, or never quits is a problem naming it."""
-    problems: list[Problem] = []
+    """Run each SceneTree test headless (``godot -s``), several at once; one that
+    exits non-zero, prints a ``FAIL`` line or a script error, or never quits fails.
+
+    Only a test that passed before the change (or that the change adds) and fails
+    now is a problem. One that failed before too goes in ``info`` as already
+    failing. Results are cached by the content of the files each test can load
+    (``joinery.scene_tests``), so a test the change can't affect never runs again.
+    """
+
+    async def run(root: Path, script: str) -> Result:
+        # A settings file of its own: no test sees another's.
+        settings = f"/tmp/joinery-test-{secrets.token_hex(6)}.cfg"
+        got = await worker_run(
+            scene_test_argv(root, script, settings),
+            root,
+            SCENE_TEST_SECONDS,
+            warm=False,
+        )
+        worker_ready(got)
+        return got
+
+    async def baseline() -> Path | None:
+        # The project as it was, while the change is still staged.
+        if tx is None or tx.original != tx.project:
+            return None
+        copy = tx.directory / f"baseline-{secrets.token_hex(4)}"
+        try:
+            await asyncio.to_thread(clone_tree, tx.project, copy)
+        except OSError:
+            shutil.rmtree(copy, ignore_errors=True)
+            return None
+        return copy
+
+    async def prepare(root: Path) -> None:
+        got = await worker_run(
+            ["godot", "--headless", "--path", "/work", "--editor", "--import"],
+            root,
+            OFFLINE_SECONDS,
+            warm=False,
+        )
+        worker_ready(got)
+
     with timed("review_scene_tests") if timed is not None else nullcontext():
-        for script in scripts:
-            # A settings file of its own: no test sees another's (a warm worker
-            # keeps its /tmp between runs).
-            settings = f"/tmp/joinery-test-{secrets.token_hex(6)}.cfg"
-            got = await run_offline(
-                scene_test_argv(stage, script, settings),
-                stage,
-                SCENE_TEST_SECONDS,
-            )
-            worker_ready(got)
-            if scene_test_passed(got):
-                continue
-            problems.append(
-                Problem(
-                    "tests",
-                    f"The test res://{script} failed: "
-                    + (
-                        got.output[-2000:].strip()
-                        or "it exited with an error or didn't quit (end it with quit())."
-                    ),
-                    [script],
-                    items=reasons.tests(got.output),
-                )
-            )
-    return problems
+        verdict = await scene_cache.judge(
+            project=tx.project if tx is not None else None,
+            stage=stage,
+            original=tx.original if tx is not None else None,
+            scripts=scripts,
+            args=lambda root, script: scene_test_args(root, script) or [],
+            run=run,
+            passed=scene_test_passed,
+            baseline=baseline,
+            prepare=prepare,
+        )
+    if verdict.already and info is not None:
+        info.append(scene_cache.already_note(verdict.already))
+    return [
+        Problem(
+            "tests",
+            f"The test res://{script} failed: "
+            + (
+                output
+                or "it exited with an error or didn't quit (end it with quit())."
+            ),
+            [script],
+            items=reasons.tests(output),
+        )
+        for script, output in verdict.broken.items()
+    ]
 
 
 def scene_test_passed(got: Result) -> bool:
@@ -686,7 +767,7 @@ async def run_replays(
     problem naming the frame and what differed (ADR 0059)."""
 
     async def offline(argv: list[str], root: Path, seconds: int) -> Result:
-        got = await run_offline(argv, root, seconds)
+        got = await worker_run(argv, root, seconds)
         worker_ready(got)
         return got
 
@@ -713,7 +794,7 @@ async def run_saves(
     data it loaded with before the change, is a problem naming it (ADR 0066)."""
 
     async def offline(argv: list[str], root: Path, seconds: int) -> Result:
-        got = await run_offline(argv, root, seconds)
+        got = await worker_run(argv, root, seconds)
         worker_ready(got)
         return got
 
