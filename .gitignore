@@ -18,3 +18,19 @@ godot_patches/godot-src/
 
 # Helper agents' scratch copies of the repo
 .claude/worktrees/
+
+# OS and editor junk
+.DS_Store
+._*
+Thumbs.db
+desktop.ini
+*.swp
+*~
+.idea/
+.vscode/
+*.log
+
+# Python tool caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
