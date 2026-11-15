@@ -42,12 +42,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
+import stat
 import struct
 import tempfile
 import tomllib
 import zipfile
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from xml.etree import ElementTree
@@ -463,24 +466,100 @@ def run_recipe(
 
 def _runner_for(recipe: Recipe, runner: Runner) -> Runner:
     """The runner in the tool's own worker image, for tools that have one."""
-    from joinery.runner import SandboxRunner
+    from joinery.runner import SandboxRunner, SessionRunner
 
     try:
         image = tools.get(recipe.tool).replay_image
     except ValueError:
         return runner
-    if image and isinstance(runner, SandboxRunner):
+    if image and isinstance(runner, SandboxRunner | SessionRunner):
         return replace(runner, image=image)
     return runner
 
 
+#: What a recipe's scratch copy leaves out: version control, Godot's import cache
+#: and Joinery's own state (its kept transactions) are no recipe's input.
+_SCRATCH_IGNORE = (
+    ".git",
+    ".godot",
+    ".joinery",
+    ".venv",
+    "__pycache__",
+    ".pytest_cache",
+)
+
+
+def _scratch_copy(project: Path, scratch: Path) -> None:
+    """Make ``scratch`` the project as a recipe sees it: files cloned (copy-on-write
+    where the disk can), links kept as links. Into a folder that already holds a
+    copy (a worker slot the last recipe used) only what differs is cloned again
+    and what the project doesn't have is removed, so a large game is copied once
+    per slot, not once per recipe, and the folders a worker mounts stay put."""
+    from joinery.transactions import copy_file
+
+    def same(source: os.stat_result, target: os.stat_result) -> bool:
+        return (
+            stat.S_IFMT(source.st_mode) == stat.S_IFMT(target.st_mode)
+            and source.st_size == target.st_size
+            and source.st_mtime_ns == target.st_mtime_ns
+        )
+
+    wanted: set[str] = set()
+    for directory, folders, files in os.walk(project):
+        folders[:] = [f for f in folders if f not in _SCRATCH_IGNORE]
+        here = Path(directory)
+        there = scratch / here.relative_to(project)
+        for name in [*folders, *files]:
+            source, target = here / name, there / name
+            wanted.add(target.relative_to(scratch).as_posix())
+            info = source.lstat()
+            try:
+                held: os.stat_result | None = target.lstat()
+            except FileNotFoundError:
+                held = None
+            if stat.S_ISLNK(info.st_mode):
+                if (
+                    held is None
+                    or not target.is_symlink()
+                    or (os.readlink(target) != os.readlink(source))
+                ):
+                    _remove(target)
+                    target.symlink_to(os.readlink(source))
+            elif stat.S_ISDIR(info.st_mode):
+                if held is not None and not stat.S_ISDIR(held.st_mode):
+                    _remove(target)
+                target.mkdir(parents=True, exist_ok=True)
+            elif held is None or not same(info, held):
+                _remove(target)
+                copy_file(source, target)
+    for directory, folders, files in os.walk(scratch, topdown=False):
+        here = Path(directory)
+        for name in [*files, *folders]:
+            path = here / name
+            if path.relative_to(scratch).as_posix() not in wanted:
+                _remove(path)
+
+
+def _remove(path: Path) -> None:
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+    elif path.exists() or path.is_symlink():
+        path.unlink()
+
+
 def rebuild_one(
-    path: Path, project: Path, runner: Runner, timeout: int = DEFAULT_TIMEOUT
+    path: Path,
+    project: Path,
+    runner: Runner,
+    timeout: int = DEFAULT_TIMEOUT,
+    *,
+    scratch: Path | None = None,
 ) -> Rebuilt:
     """Replay one recipe and check every output still fingerprints the same.
 
-    Outputs are removed only in a disposable copy. Keeping the old outputs
-    around would let a no-op recipe pass without recreating anything.
+    Outputs are removed only in a disposable copy (in ``scratch``, an empty
+    folder, when given). Keeping the old outputs around would let a no-op
+    recipe pass without recreating anything.
     """
     name = path.name
     try:
@@ -504,46 +583,45 @@ def rebuild_one(
             raise ValueError(
                 "Recipe outputs cannot overwrite their script or source inputs"
             )
+        if scratch is not None:
+            _scratch_copy(project, scratch)
+            return _rebuild_in(name, recipe, scratch, runner, timeout)
         with tempfile.TemporaryDirectory(prefix="joinery-recipe-") as directory:
-            scratch = Path(directory) / "project"
-            shutil.copytree(
-                project,
-                scratch,
-                symlinks=True,
-                ignore=shutil.ignore_patterns(
-                    ".git", ".joinery", ".venv", "__pycache__"
-                ),
-            )
-            # An absolute symlink that pointed inside the original project can
-            # point back out of this copy. Recheck here before removing anything.
-            scratch_root = scratch.resolve()
-            for relative in (*inputs, *recipe.outputs):
-                if not (scratch / relative).resolve().is_relative_to(scratch_root):
-                    raise ValueError(
-                        f"{relative}: replay paths cannot link outside the scratch copy"
-                    )
-            input_paths = {(scratch / relative).resolve() for relative in inputs}
-            if any(
-                (scratch / relative).resolve() in input_paths
-                for relative in recipe.outputs
-            ):
-                raise ValueError(
-                    "Recipe outputs cannot alias their script or source inputs"
-                )
-            for relative in recipe.outputs:
-                output = scratch / relative
-                if output.is_symlink() or (output.exists() and not output.is_file()):
-                    raise ValueError(
-                        f"{relative}: recipe outputs must be regular files"
-                    )
-            # Read old expectations against the outputs as they were, in the
-            # copy, before the replay removes them.
-            upgraded = _upgraded(recipe, scratch, runner)
-            for relative in recipe.outputs:
-                (scratch / relative).unlink(missing_ok=True)
-            return _verify_rebuilt(name, upgraded, scratch, runner, timeout)
+            copy = Path(directory) / "project"
+            _scratch_copy(project, copy)
+            return _rebuild_in(name, recipe, copy, runner, timeout)
     except (OSError, ValueError) as exc:
         return Rebuilt(name, False, 0.0, (str(exc),))
+
+
+def _rebuild_in(
+    name: str, recipe: Recipe, scratch: Path, runner: Runner, timeout: int
+) -> Rebuilt:
+    """Replay ``recipe`` in ``scratch``, a fresh copy of the project."""
+    inputs = {recipe.script, *recipe.sources}
+    # An absolute symlink that pointed inside the original project can
+    # point back out of this copy. Recheck here before removing anything.
+    scratch_root = scratch.resolve()
+    for relative in (*inputs, *recipe.outputs):
+        if not (scratch / relative).resolve().is_relative_to(scratch_root):
+            raise ValueError(
+                f"{relative}: replay paths cannot link outside the scratch copy"
+            )
+    input_paths = {(scratch / relative).resolve() for relative in inputs}
+    if any(
+        (scratch / relative).resolve() in input_paths for relative in recipe.outputs
+    ):
+        raise ValueError("Recipe outputs cannot alias their script or source inputs")
+    for relative in recipe.outputs:
+        output = scratch / relative
+        if output.is_symlink() or (output.exists() and not output.is_file()):
+            raise ValueError(f"{relative}: recipe outputs must be regular files")
+    # Read old expectations against the outputs as they were, in the
+    # copy, before the replay removes them.
+    upgraded = _upgraded(recipe, scratch, runner)
+    for relative in recipe.outputs:
+        (scratch / relative).unlink(missing_ok=True)
+    return _verify_rebuilt(name, upgraded, scratch, runner, timeout)
 
 
 def _legacy_model(rel: str, wanted: str, project: Path) -> str | None:
@@ -684,10 +762,56 @@ def recipe_paths(project: Path) -> list[Path]:
     return sorted((project / RECIPE_DIR).glob("*.toml"))
 
 
+def default_jobs() -> int:
+    """Recipes rebuilt at once: each runs in its own scratch copy, so they are
+    independent; a few at a time keeps the tools' memory in bounds."""
+    return max(1, min(4, (os.cpu_count() or 2) // 2))
+
+
 def rebuild_all(
-    project: Path, runner: Runner, timeout: int = DEFAULT_TIMEOUT
+    project: Path,
+    runner: Runner,
+    timeout: int = DEFAULT_TIMEOUT,
+    *,
+    jobs: int = 1,
+    on_result: Callable[[Rebuilt], None] | None = None,
 ) -> list[Rebuilt]:
-    return [rebuild_one(p, project, runner, timeout) for p in recipe_paths(project)]
+    """Replay every recipe, ``jobs`` at a time, each in its own scratch copy of
+    ``project`` (which is never written). In the sandbox each of the ``jobs`` slots
+    keeps one worker per tool image up for the whole run instead of starting a
+    container per step. Results come back in recipe order; ``on_result`` hears
+    each as it finishes."""
+    from joinery.runner import SandboxRunner, SessionRunner, WorkerPool
+
+    paths = recipe_paths(project)
+    jobs = max(1, min(jobs, len(paths)))
+    with tempfile.TemporaryDirectory(prefix="joinery-rebuild-") as directory:
+        pool: WorkerPool | None = None
+        worker: Runner = runner
+        if isinstance(runner, SandboxRunner):
+            pool = WorkerPool(Path(directory), slots=jobs)
+            worker = SessionRunner(pool, name=runner.name, image=runner.image)
+        try:
+
+            def one(path: Path) -> Rebuilt:
+                if pool is None:
+                    result = rebuild_one(path, project, worker, timeout)
+                else:
+                    with pool.slot() as slot:
+                        result = rebuild_one(
+                            path, project, worker, timeout, scratch=slot
+                        )
+                if on_result is not None:
+                    on_result(result)
+                return result
+
+            if jobs <= 1 or len(paths) <= 1:
+                return [one(p) for p in paths]
+            with ThreadPoolExecutor(max_workers=jobs) as executor:
+                return list(executor.map(one, paths))
+        finally:
+            if pool is not None:
+                pool.close()
 
 
 def record(path: Path, project: Path, runner: Runner) -> Recipe:

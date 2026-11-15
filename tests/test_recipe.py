@@ -348,3 +348,106 @@ def test_recipe_text_keeps_the_seed() -> None:
     )
     assert "\nseed = 7\n" in recipe_text(recipe)
     assert "seed" not in recipe_text(recipe.model_copy(update={"seed": None}))
+
+
+def test_a_reused_slot_is_brought_back_to_the_project(tmp_path: Path) -> None:
+    """A worker slot keeps its folders between recipes: only what differs from the
+    project is cloned again, and what a recipe left behind is removed."""
+    from joinery.recipe import _scratch_copy
+
+    project = tmp_path / "game"
+    put(project, "art/a.png", b"a")
+    put(project, "art/sub/b.png", b"b")
+    put(project, ".git/HEAD", b"ref")
+    put(project, ".joinery/transactions/x/stage/big.bin", b"x" * 100)
+    slot = tmp_path / "slot"
+    slot.mkdir()
+    _scratch_copy(project, slot)
+    assert (slot / "art/a.png").read_bytes() == b"a"
+    assert not (slot / ".git").exists() and not (slot / ".joinery").exists()
+    # The last recipe rewrote one output, deleted another and left a stray file.
+    (slot / "art/a.png").write_bytes(b"rebuilt")
+    (slot / "art/sub/b.png").unlink()
+    put(slot, "art/stray/extra.png", b"stray")
+    (slot / "art/sub/b.png").write_bytes(b"b")
+    unchanged = (slot / "art/sub").stat().st_ino
+    _scratch_copy(project, slot)
+    assert (slot / "art/a.png").read_bytes() == b"a"
+    assert not (slot / "art/stray").exists()
+    # The folders a worker mounts stay the same folders.
+    assert (slot / "art/sub").stat().st_ino == unchanged
+
+
+def test_rebuild_all_runs_jobs_at_once_and_reports_each(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+    import time
+
+    from joinery import recipe as recipe_module
+    from joinery.recipe import Rebuilt, rebuild_all
+
+    for name in ("a", "b", "c", "d"):
+        write_recipe(tmp_path, name, "")
+    running: list[int] = []
+    most = [0]
+    lock = threading.Lock()
+
+    def fake(
+        path: Path, project: Path, runner: object, timeout: int, **_: object
+    ) -> Rebuilt:
+        with lock:
+            running.append(1)
+            most[0] = max(most[0], len(running))
+        time.sleep(0.2)
+        with lock:
+            running.pop()
+        return Rebuilt(path.name, True, 0.2)
+
+    monkeypatch.setattr(recipe_module, "rebuild_one", fake)
+    heard: list[str] = []
+    results = rebuild_all(
+        tmp_path, FakeRunner(), jobs=4, on_result=lambda r: heard.append(r.recipe)
+    )
+    assert [r.recipe for r in results] == ["a.toml", "b.toml", "c.toml", "d.toml"]
+    assert sorted(heard) == ["a.toml", "b.toml", "c.toml", "d.toml"]
+    assert most[0] > 1
+
+
+def test_sandbox_steps_run_in_a_kept_worker_per_slot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One container per slot and image, each step a `docker exec` at /work."""
+    from joinery import runner as runner_module
+    from joinery.runner import SessionRunner, WorkerPool
+
+    pool = WorkerPool(tmp_path / "pool", slots=2)
+    started: list[tuple[str, str]] = []
+
+    def container(slot: Path, image: str) -> str:
+        started.append((slot.name, image))
+        return f"cid-{slot.name}"
+
+    monkeypatch.setattr(pool, "container", container)
+    ran: list[list[str]] = []
+    monkeypatch.setattr(
+        runner_module,
+        "_timed",
+        lambda cmd, timeout, cwd=None: ran.append(cmd) or Result(True, "", "", 0.0),
+    )
+    worker = SessionRunner(pool, image="joinery-creative-worker")
+    with pool.slot() as slot:
+        assert worker.run(["krita", "x"], slot).ok
+    exec_cmd = ran[-1]
+    assert exec_cmd[:2] == ["docker", "exec"] and exec_cmd[-3:] == [
+        "cid-slot-0",
+        "krita",
+        "x",
+    ]
+    assert exec_cmd[exec_cmd.index("-w") + 1] == "/work"
+    # A project that isn't a slot starts its own container, as before.
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+    worker.run(["true"], other)
+    assert ran[-1][:3] == ["docker", "run", "--rm"]
+    assert started == [("slot-0", "joinery-creative-worker")]

@@ -6,9 +6,9 @@ import argparse
 import importlib
 import json
 import shlex
-import shutil
 import sys
-import tempfile
+import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -86,7 +86,7 @@ from joinery.locking import write_lock
 from joinery.policy import load_denylist, normalise
 from joinery.project import create_project, mark_tour_pending, read_answers
 from joinery.puzzle import command as puzzle_command
-from joinery.recipe import rebuild_all, recipe_paths, record
+from joinery.recipe import Rebuilt, default_jobs, rebuild_all, recipe_paths, record
 from joinery.runner import pick
 from joinery.transactions import (
     DIRECTORY,
@@ -951,7 +951,9 @@ def _auth(agent_id: str | None) -> int:
     return 0
 
 
-def _rebuild(project: Path, prefer: str, record_mode: bool, timeout: int) -> int:
+def _rebuild(
+    project: Path, prefer: str, record_mode: bool, timeout: int, jobs: int = 0
+) -> int:
     """Replay every recipe and report whether each asset came back identical."""
     runner = pick(prefer)
     if not runner.available():
@@ -978,28 +980,39 @@ def _rebuild(project: Path, prefer: str, record_mode: bool, timeout: int) -> int
     # Replay in a copy, never in place. A rebuild rewrites its outputs, and a
     # .blend is not byte-reproducible, so rebuilding the working tree would
     # leave every asset's joinery.lock hash stale even when the recipe is
-    # perfectly correct. Verification must not dirty the thing it verifies.
-    failed = 0
-    with tempfile.TemporaryDirectory(prefix="joinery-rebuild-") as tmp:
-        scratch = Path(tmp) / project.name
-        shutil.copytree(project, scratch, symlinks=True)
-        print(
-            f"rebuilding {len(paths)} recipe(s) via the {runner.name} runner, "
-            "in a scratch copy"
-        )
-        for result in rebuild_all(scratch, runner, timeout):
+    # perfectly correct. Verification must not dirty the thing it verifies:
+    # each recipe runs in its own copy-on-write clone (rebuild_all).
+    jobs = jobs if jobs > 0 else default_jobs()
+    started = time.monotonic()
+    print(
+        f"rebuilding {len(paths)} recipe(s) via the {runner.name} runner, "
+        f"{jobs} at a time, each in a scratch copy",
+        flush=True,
+    )
+    lock = threading.Lock()
+
+    def report(result: Rebuilt) -> None:
+        # As each one finishes, flushed, so a redirected log shows progress; its
+        # problems straight under it, naming the recipe and (first) the asset.
+        with lock:
             mark = "ok " if result.ok else "FAIL"
-            print(f"  [{mark}] {result.recipe:<28} {result.seconds:6.1f}s")
-            # On stdout, in order: each problem under its recipe, naming the
-            # recipe and (first) the asset, so a piped log reads as one story.
-            for problem in result.problems:
-                print(f"         {result.recipe}: {problem}")
-            failed += not result.ok
+            lines = [f"  [{mark}] {result.recipe:<28} {result.seconds:6.1f}s"]
+            lines += [f"         {result.recipe}: {p}" for p in result.problems]
+            print("\n".join(lines), flush=True)
+
+    results = rebuild_all(project, runner, timeout, jobs=jobs, on_result=report)
+    failed = sum(not r.ok for r in results)
     total = len(paths)
+    timing = (
+        f"{time.monotonic() - started:.0f} s in all, "
+        f"{sum(r.seconds for r in results):.0f} s in the tools"
+    )
     if failed:
-        print(f"rebuild: FAILED ({total - failed} of {total} recipes rebuilt)")
+        print(
+            f"rebuild: FAILED ({total - failed} of {total} recipes rebuilt; {timing})"
+        )
     else:
-        print(f"rebuild: ok ({total} of {total} recipes rebuilt)")
+        print(f"rebuild: ok ({total} of {total} recipes rebuilt; {timing})")
     return 1 if failed else 0
 
 
@@ -1401,6 +1414,12 @@ def _parser() -> argparse.ArgumentParser:
         help="measure the current outputs and write their fingerprints",
     )
     rebuild.add_argument("--timeout", type=int, default=900)
+    rebuild.add_argument(
+        "--jobs",
+        type=int,
+        default=0,
+        help="recipes rebuilt at once (default: a few, by the machine's cores)",
+    )
     lock = commands.add_parser(
         "lock", help="write joinery.lock from what the recipes produced"
     )
@@ -1830,7 +1849,7 @@ def main(argv: list[str] | None = None) -> int:
         print(text)
         return code
     if args.command == "rebuild":
-        return _rebuild(args.project, args.runner, args.record, args.timeout)
+        return _rebuild(args.project, args.runner, args.record, args.timeout, args.jobs)
     if args.command == "bible":
         if args.questions:
             print(json.dumps({"pages": grouped()}, indent=2))
