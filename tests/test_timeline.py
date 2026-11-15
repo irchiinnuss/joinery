@@ -91,9 +91,11 @@ def test_start_makes_one_entry_and_keeps_restore_data_out(tmp_path: Path) -> Non
     (project / ".joinery/transactions/x").mkdir(parents=True)
     (project / ".joinery/transactions/x/journal.json").write_text("{}")
     (project / ".joinery/game-manifest.json").write_text("{}")
+    (project / ".joinery/core-files.json").write_text("{}")
     status = git(project, "status", "--porcelain", "--untracked-files=all")
     assert ".joinery/transactions" not in status
     assert ".joinery/game-manifest.json" in status
+    assert ".joinery/core-files.json" in status
     with pytest.raises(timeline.TimelineError, match="already"):
         timeline.start(project)
 
@@ -271,8 +273,12 @@ def test_a_failed_commit_is_owed_to_the_next_accept(tmp_path: Path) -> None:
 
 
 def ignoring_core_files(project: Path) -> None:
-    """Ignore rules that leave out core-files.json, which changes carry."""
-    assert "!.joinery/core-files.json" not in (project / ".gitignore").read_text()
+    """The ignore rules of a project started before core-files.json was kept."""
+    rules = (project / ".gitignore").read_text()
+    (project / ".gitignore").write_text(
+        rules.replace("!.joinery/core-files.json\n", "")
+    )
+    git(project, "commit", "-q", "-am", "Older ignore rules")
 
 
 def test_an_ignored_file_the_change_touched_stays_out_of_the_commit(

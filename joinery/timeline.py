@@ -65,12 +65,15 @@ GENERATED_SUFFIXES = (".uid", ".import")
 COMMIT_TRIES = 3
 COMMIT_WAIT = 0.2
 #: The ignore rules a Joinery project needs: the editor's cache and Joinery's
-#: restore data stay out; the game record and the art approval are kept.
+#: restore data stay out; the game records (the manifest and the installed core
+#: files, which accepted changes carry into the project) and the art approval
+#: are kept.
 IGNORE_MARKER = "# Joinery: restore data and caches stay out of git"
 IGNORE_RULES = (
     ".godot/",
     ".joinery/*",
     "!.joinery/game-manifest.json",
+    "!.joinery/core-files.json",
     "!.joinery/art-approval.json",
     "!.joinery/commands/",
 )
