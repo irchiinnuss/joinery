@@ -94,11 +94,18 @@ def test_new_project_has_design_and_reference_folders(tmp_path: Path) -> None:
     assert (project / "design").is_dir()
     # Reference boards stay out of Godot's import and every export.
     assert (project / "art/reference/.gdignore").is_file()
+    # So do recipes and native sources; the folders for game assets don't.
+    for folder in ("recipes", "art/sources", "audio/sources"):
+        assert (project / folder / ".gdignore").is_file(), folder
+    assert not (project / "art/.gdignore").exists()
+    assert not (project / "audio/.gdignore").exists()
     assert "[game]" not in (project / "joinery.toml").read_text()
     assert check_assets(project, load_catalog()) == []
 
 
-def test_new_project_from_blueprint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_new_project_from_blueprint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from joinery import blueprints
     from tests.blueprints.conftest import build_catalogue
 
@@ -107,21 +114,42 @@ def test_new_project_from_blueprint(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(blueprints, "FEATURES_DIR", catalogue.features)
     project = tmp_path / "game"
     create_project(
-        project, "G", Selection(["godot"], []), load_catalog(),
-        blueprint="alpha", features=["controller"],
+        project,
+        "G",
+        Selection(["godot"], []),
+        load_catalog(),
+        blueprint="alpha",
+        features=["controller"],
     )
     assert (project / "game/level.tscn").is_file()
-    assert 'run/main_scene="res://core/main.tscn"' in (project / "project.godot").read_text()
+    assert (
+        'run/main_scene="res://core/main.tscn"'
+        in (project / "project.godot").read_text()
+    )
     assert blueprints.read_record(project) == blueprints.GameRecord(
-        blueprint="alpha", blueprint_version=1,
-        features=["controller"], feature_versions={"controller": 1},
+        blueprint="alpha",
+        blueprint_version=1,
+        features=["controller"],
+        feature_versions={"controller": 1},
     )
     assert check_assets(project, load_catalog()) == []
     with pytest.raises(ValueError, match="Unknown blueprint: nope"):
-        create_project(tmp_path / "other", "G", Selection(["godot"], []), load_catalog(), blueprint="nope")
+        create_project(
+            tmp_path / "other",
+            "G",
+            Selection(["godot"], []),
+            load_catalog(),
+            blueprint="nope",
+        )
     assert not (tmp_path / "other").exists()
     with pytest.raises(ValueError, match="need a blueprint"):
-        create_project(tmp_path / "third", "G", Selection(["godot"], []), load_catalog(), features=["net"])
+        create_project(
+            tmp_path / "third",
+            "G",
+            Selection(["godot"], []),
+            load_catalog(),
+            features=["net"],
+        )
 
 
 def _cli_new(tmp_path: Path, name: str, *args: str) -> tuple[int, Path]:
@@ -132,7 +160,9 @@ def _cli_new(tmp_path: Path, name: str, *args: str) -> tuple[int, Path]:
 
 
 def test_new_blank_blueprint_is_the_wizard_project(tmp_path: Path) -> None:
-    code, project = _cli_new(tmp_path, "blank", "--blueprint", "blank", "--features", "")
+    code, project = _cli_new(
+        tmp_path, "blank", "--blueprint", "blank", "--features", ""
+    )
     assert code == 0
     # The addon ships inside the game, so its MIT licence goes with it.
     licence = (project / "addons/joinery/LICENSE").read_text()
@@ -171,7 +201,10 @@ def test_new_first_person_with_features(tmp_path: Path) -> None:
     assert "| Pause (`pause`) | Esc / P | Start | — |" in brief
     # The blueprint's bible preset filled the technical sections as suggestions.
     bible = (project / "art/bible.md").read_text()
-    assert "_Suggested by the Stylised PBR 3D preset for this starting point; change freely._" in bible
+    assert (
+        "_Suggested by the Stylised PBR 3D preset for this starting point; change freely._"
+        in bible
+    )
     assert "{{" not in bible
     assert check_assets(project, load_catalog()) == []
 
@@ -192,7 +225,9 @@ def test_new_without_features_flag_uses_the_blueprint_defaults(tmp_path: Path) -
 def test_bad_feature_mix_leaves_no_folder(
     tmp_path: Path, features: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    code, project = _cli_new(tmp_path, "bad", "--blueprint", "blank", "--features", features)
+    code, project = _cli_new(
+        tmp_path, "bad", "--blueprint", "blank", "--features", features
+    )
     assert code == 1
     assert "Unknown feature" in capsys.readouterr().err
     assert not project.exists()
@@ -209,7 +244,11 @@ def test_failed_apply_removes_the_half_made_project(
     monkeypatch.setattr(blueprints, "apply", refuse)
     with pytest.raises(ValueError, match="already exists"):
         create_project(
-            tmp_path / "half", "G", Selection(["godot"], []), load_catalog(), blueprint="blank"
+            tmp_path / "half",
+            "G",
+            Selection(["godot"], []),
+            load_catalog(),
+            blueprint="blank",
         )
     assert not (tmp_path / "half").exists()
 
@@ -230,7 +269,14 @@ def test_new_writes_the_history_choice(tmp_path: Path) -> None:
     assert code == 0
     assert load_policy(project) == HistoryPolicy(keep=10, max_mb=1024)
     code, project = _cli_new(
-        tmp_path, "own", "--history", "custom", "--history-keep", "3", "--history-max-mb", "300"
+        tmp_path,
+        "own",
+        "--history",
+        "custom",
+        "--history-keep",
+        "3",
+        "--history-max-mb",
+        "300",
     )
     assert code == 0
     assert load_policy(project) == HistoryPolicy(keep=3, max_mb=300)

@@ -38,6 +38,19 @@ def test_lock_records_measured_hash(tmp_path: Path) -> None:
     assert entry["recipe"] == "recipes/make.toml"
 
 
+def test_a_tools_first_source_folder_gets_a_gdignore(tmp_path: Path) -> None:
+    project = project_with(
+        tmp_path, asset="art/sources/maps/door/rust.kra", claimed=True
+    )
+    (project / "art/models").mkdir(parents=True)
+    assert write_lock(project) == []
+    # Recipes and native sources stay out of Godot; the game's own folders don't.
+    assert (project / "recipes/.gdignore").is_file()
+    assert (project / "art/sources/.gdignore").is_file()
+    assert not (project / "art/models/.gdignore").exists()
+    assert not (project / "art/.gdignore").exists()
+
+
 def test_locked_project_passes_the_gate(tmp_path: Path) -> None:
     project = project_with(tmp_path, asset="art/door.blend", claimed=True)
     write_lock(project)

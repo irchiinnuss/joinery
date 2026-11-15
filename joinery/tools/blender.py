@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from joinery.source_folders import source_folder
 from joinery.tools.base import (
     BLENDER_WORKER,
     CREATIVE_WORKER,
@@ -959,8 +960,10 @@ class Blender(ToolModule):
     )
 
     def check_destinations(self, source: str, exports: list[str]) -> None:
+        # Godot never imports art/sources/ (.gdignore), so no export can live there.
         if not source.startswith("art/sources/") or any(
-            Path(path).is_relative_to(Path(source).parent) for path in exports
+            Path(path).is_relative_to(Path(source).parent) or source_folder(path)
+            for path in exports
         ):
             raise ValueError(
                 "Keep native Blender sources under art/sources/ and exports outside that source directory."

@@ -119,6 +119,30 @@ def test_a_deleted_file_stays_deleted_and_a_new_one_is_added(game: Path) -> None
     assert REPLAYS in found.deleted and gone in found.create
 
 
+def test_source_folders_get_their_gdignore_unless_the_game_loads_from_them(
+    game: Path,
+) -> None:
+    for folder in ("recipes", "art/sources/maps", "audio/sources"):
+        (game / folder).mkdir(parents=True)
+    (game / "audio/sources/hit.wav").write_bytes(b"RIFF")
+    (game / "hit.gd").write_text('const HIT = preload("res://audio/sources/hit.wav")\n')
+    found = core_update.plan(game)
+    assert "recipes/.gdignore" in found.create
+    assert "art/sources/.gdignore" in found.create
+    assert "audio/sources/.gdignore" not in found.files
+    assert found.unmarked == {"audio/sources": ["audio/sources/hit.wav"]}
+    assert any(
+        line.startswith("Leaves audio/sources/ without a .gdignore: the game loads ")
+        for line in core_update._words(found, False)
+    )
+    tx = core_update.stage(game, found=found)
+    assert tx is not None
+    tx.accept()
+    assert (game / "art/sources/.gdignore").read_bytes() == b""
+    again = core_update.plan(game)
+    assert "art/sources/.gdignore" not in again.create
+
+
 def test_the_command_lists_and_stages(
     game: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -162,7 +186,9 @@ def test_the_blockout_records_the_script_it_writes(tmp_path: Path) -> None:
     assert data["files"] == {"other.gd": _sha(b"x"), SCRIPT: _sha(b"script")}
 
 
-def test_feature_overlay_files_update_too_and_edited_ones_are_kept(tmp_path: Path) -> None:
+def test_feature_overlay_files_update_too_and_edited_ones_are_kept(
+    tmp_path: Path,
+) -> None:
     project = tmp_path / "fps"
     project.mkdir()
     (project / "project.godot").write_text("config_version=5\n")

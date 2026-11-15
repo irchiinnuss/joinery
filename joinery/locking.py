@@ -22,7 +22,7 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-from joinery import gltf_signature
+from joinery import gltf_signature, source_folders
 from joinery.lockfile import GLTF_SUFFIXES, LOCK_NAME, asset_files
 from joinery.recipe import load_recipe, migrate_model_expectations, recipe_paths
 
@@ -157,6 +157,8 @@ def write_model_imports(project: Path) -> list[str]:
 
 
 def write_lock(project: Path) -> list[str]:
+    # A tool's first write into a source folder keeps it out of Godot's imports.
+    source_folders.mark(project)
     write_model_imports(project)
     migrate_model_expectations(project)
     text, problems = record_lock(project)

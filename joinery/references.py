@@ -13,6 +13,8 @@ import re
 from collections.abc import Iterable
 from pathlib import Path, PurePosixPath
 
+from joinery import source_folders
+
 #: Saved Godot documents whose external resources are checked.
 SCENE_SUFFIXES = frozenset({".tscn", ".tres"})
 _EXT_RESOURCE = re.compile(r"^\[ext_resource\b[^\n]*\]", re.MULTILINE)
@@ -100,6 +102,9 @@ def missing(root: Path, documents: Iterable[str]) -> dict[str, list[str]]:
         lost: list[str] = []
         for relative, uid in references(path.read_text(errors="replace")):
             if (root / relative).exists():
+                # A file in a folder Godot ignores (.gdignore) is missing to it.
+                if source_folders.ignored_folder(root, relative):
+                    lost.append(relative)
                 continue
             if uid:
                 if uids is None:
@@ -145,9 +150,28 @@ def refusal(gaps: dict[str, list[str]]) -> str:
         + " in the project or in this change"
         for scene, paths in sorted(gaps.items())
     ]
+    hidden = sorted(
+        {
+            source_folders.source_folder(p)
+            for paths in gaps.values()
+            for p in paths
+            if source_folders.source_folder(p)
+        }
+    )
+    why = (
+        " ("
+        + ", ".join(f"{f}/" for f in hidden)
+        + " "
+        + ("holds" if len(hidden) == 1 else "hold")
+        + " native sources, which Godot doesn't import: export the file the game "
+        "uses outside it)"
+        if hidden
+        else ""
+    )
     return (
         "Not submitted: "
         + "; ".join(lines)
+        + why
         + ". Make the model or texture and the scene that uses it "
         "in the same change, or point the scene at a file the project has."
     )

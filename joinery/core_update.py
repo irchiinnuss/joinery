@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from joinery import blueprints
+from joinery import blueprints, source_folders
 from joinery.blockout import build as blockout_build
 from joinery.transactions import FileTransaction
 
@@ -66,6 +66,8 @@ class CorePlan:
     same: list[str] = field(default_factory=list)
     #: path -> the current version's bytes, for every file Joinery owns here.
     files: dict[str, bytes] = field(default_factory=dict)
+    #: Source folders left without a .gdignore: {folder: game files loaded from it}.
+    unmarked: dict[str, list[str]] = field(default_factory=dict)
 
     def writes(self, force: bool = False) -> list[str]:
         return [*self.update, *self.create, *(self.edited if force else [])]
@@ -77,6 +79,7 @@ class CorePlan:
             "edited": self.edited,
             "deleted": self.deleted,
             "same": len(self.same),
+            "unmarked": self.unmarked,
         }
 
 
@@ -110,10 +113,12 @@ def _sources(project: Path) -> dict[str, Path]:
 
 
 def owned(project: Path) -> dict[str, bytes]:
-    """The current version of every Joinery-owned file this project has."""
+    """The current version of every Joinery-owned file this project has, with the
+    empty ``.gdignore`` of each source folder that lacks one (source_folders)."""
     files = {rel: path.read_bytes() for rel, path in _sources(project).items()}
     if (project / BLOCKOUT_SCRIPT).is_file():
         files[BLOCKOUT_SCRIPT] = blockout_build.SCRIPT_SOURCE.read_bytes()
+    files.update(dict.fromkeys(source_folders.missing(project), b""))
     return files
 
 
@@ -198,6 +203,13 @@ def installed(project: Path) -> dict[str, str]:
 def plan(project: Path) -> CorePlan:
     """What ``stage`` would change. Reads the project, writes nothing."""
     result = CorePlan(files=owned(project))
+    for folder in source_folders.SOURCE_ONLY:
+        if (project / folder).is_dir() and not (
+            project / folder / source_folders.MARKER
+        ).exists():
+            used = source_folders.game_uses(project, folder)
+            if used:
+                result.unmarked[folder] = used
     known = installed(project)
     for rel, data in sorted(result.files.items()):
         path = project / rel
@@ -311,6 +323,14 @@ def _words(found: CorePlan, force: bool) -> list[str]:
         )
     if found.deleted:
         lines.append("Leaves out deleted file(s): " + ", ".join(found.deleted))
+    for folder, used in sorted(found.unmarked.items()):
+        lines.append(
+            f"Leaves {folder}/ without a .gdignore: the game loads "
+            + ", ".join(used[:3])
+            + (f" and {len(used) - 3} more" if len(used) > 3 else "")
+            + " from it. Move those files out of the source folder, then run "
+            "update-core again."
+        )
     return lines
 
 

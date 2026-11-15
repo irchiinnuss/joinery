@@ -8,7 +8,15 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from joinery import bible, brief, game_setup, genre_questions, memory, setup_imports
+from joinery import (
+    bible,
+    brief,
+    game_setup,
+    genre_questions,
+    memory,
+    setup_imports,
+    source_folders,
+)
 from joinery.catalog import ROOT, Catalog
 from joinery.installer import Selection, write_mcp_config, write_selection
 from joinery.wiring import write_agent_wiring, write_memory_stubs
@@ -191,11 +199,11 @@ def _scaffold(path: Path, name: str, selection: Selection) -> None:
     for directory in ASSET_DIRS:
         (path / directory).mkdir()
         (path / directory / ".gitkeep").touch()
-    # The game brief lives in design/; reference boards stay out of Godot imports.
+    # The game brief lives in design/. Native sources, recipes and reference
+    # boards stay out of Godot's imports (source_folders).
     (path / "design").mkdir()
     (path / "design" / ".gitkeep").touch()
-    (path / "art" / "reference").mkdir()
-    (path / "art" / "reference" / ".gdignore").write_text("")
+    source_folders.mark(path, create=True)
     text = (TEMPLATE / "project.godot").read_text().replace("{{name}}", name)
     (path / "project.godot").write_text(text)
     (path / "joinery.lock").write_text("version = 1\n")

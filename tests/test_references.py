@@ -70,6 +70,22 @@ def test_references_read_paths_and_uids() -> None:
     assert references.references('[ext_resource path="res://../x.glb" id="1"]') == []
 
 
+def test_a_file_in_a_folder_godot_ignores_is_missing(tmp_path: Path) -> None:
+    (tmp_path / "art/sources").mkdir(parents=True)
+    (tmp_path / "art/sources/.gdignore").write_text("")
+    (tmp_path / "art/sources/ashtray.glb").write_text("glTF")
+    (tmp_path / "scene.tscn").write_text(
+        SCENE.replace("art/models/ashtray.glb", "art/sources/ashtray.glb")
+    )
+    gaps = references.missing(tmp_path, ["scene.tscn"])
+    assert gaps == {"scene.tscn": ["art/sources/ashtray.glb"]}
+    message = references.refusal(gaps)
+    assert "art/sources/ holds native sources, which Godot doesn't import" in message
+    # Without the marker, the same file loads.
+    (tmp_path / "art/sources/.gdignore").unlink()
+    assert references.missing(tmp_path, ["scene.tscn"]) == {}
+
+
 def test_a_scene_without_its_model_is_refused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
