@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import time
 from pathlib import Path, PureWindowsPath
 
 import pytest
@@ -343,6 +344,39 @@ def test_an_entry_is_named_by_the_change_and_keeps_the_request(
     assert change_title(many) == "Change a.png, b.png and 3 more files"
     uid = {"path": "a.gd.uid", "change": "created", "before": "", "after": "b"}
     assert change_title([many[0], uid]) == "Change a.png"
+
+
+def test_a_resumed_chat_digest_lists_new_timeline_entries(tmp_path: Path) -> None:
+    from joinery import chats
+
+    project = started(tmp_path / "game")
+    time.sleep(1.1)  # Git times are whole seconds.
+    before = time.time()
+    time.sleep(1.0)
+    accept(project, "Add a crate", {"crate.gd": "extends Node3D\n"})
+    (project / "door.gd").write_text("extends Node\n")
+    git(project, "add", "door.gd")
+    git(
+        project,
+        "-c",
+        "user.name=Grace Hopper",
+        "-c",
+        "user.email=grace@example.com",
+        "commit",
+        "-q",
+        "-m",
+        "Add a door",
+    )
+    assert [e["subject"] for e in timeline.since(project, before)] == [
+        "Add a door",
+        "Add a crate",
+    ]
+    digest = chats.since_digest(project, before)
+    assert "(Add a crate): accepted by the user." in digest
+    assert '- "Add a door" by Grace Hopper, 1 files.' in digest
+    # The accepted change isn't listed again as an entry, nor its files as edits.
+    assert '"Add a crate"' not in digest and "Files changed" not in digest
+    assert chats.since_digest(project, time.time() + 5) == ""
 
 
 def test_messages_keep_a_short_subject() -> None:

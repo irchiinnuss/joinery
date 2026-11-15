@@ -791,6 +791,19 @@ def _log(project: Path, *args: str) -> Iterator[dict[str, Any]]:
         }
 
 
+def since(project: Path, when: float, limit: int = PAGE) -> list[dict[str, Any]]:
+    """Entries made after ``when`` (seconds since the epoch), newest first, each
+    with its ``paths``. [] for a project without a timeline. Never raises."""
+    project = project.resolve()
+    try:
+        if state(project)["state"] != "ready":
+            return []
+        found = _log(project, f"--since=@{int(when)}", f"--max-count={limit}")
+        return [entry for entry in found if entry["time"] > int(when)]
+    except (OSError, TimelineError):
+        return []
+
+
 def entries(
     project: Path, skip: int = 0, limit: int = PAGE, text: str = ""
 ) -> dict[str, Any]:

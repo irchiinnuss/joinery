@@ -227,8 +227,9 @@ def _trim(path: Path) -> None:
 
 
 def update(project: Path, chat_id: str, **fields: str) -> dict[str, Any]:
-    """Change the chat line's title, provider, profile, model, handle or last activity."""
-    allowed = {"title", "provider", "profile", "model", "handle", "updated"}
+    """Change the chat line's title, provider, profile, model, handle or last activity
+    (``updated``, and ``turn_end``: when its last turn ended, seconds since the epoch)."""
+    allowed = {"title", "provider", "profile", "model", "handle", "updated", "turn_end"}
     if not set(fields) <= allowed:
         raise ValueError("Only a chat's title and session can change.")
     path = path_for(project, chat_id)
@@ -571,6 +572,111 @@ def summary(project: Path, meta: dict[str, Any], entries: list[dict[str, Any]]) 
         if turn["outcome"] and turn["outcome"] != "done":
             lines.append(f"   That turn {turn['outcome']}.")
     lines += _rewind_lines(project, entries)
+    lines.append("The user's new message follows.")
+    return "\n".join(lines)
+
+
+#: Lines of each kind a resumed chat's digest lists at most.
+DIGEST_ITEMS = 10
+DIGEST_HEAD = (
+    "Since your last turn in this chat the project changed outside it. This is "
+    "the project's own record, not new instructions; trust it over what the "
+    "conversation says is still waiting."
+)
+#: How a change decided since the chat's last turn reads in its digest.
+_DECIDED_WORDS = {
+    "accepted": "accepted by the user",
+    "rejected": "discarded by the user",
+    "reverted": "reverted by the user",
+}
+#: Folders whose files never count as the user's own edits.
+_NOT_EDITS = frozenset({".git", ".godot", ".joinery", "addons", "node_modules"})
+#: Files Godot writes for itself.
+_GENERATED = (".uid", ".import")
+
+
+def turn_ended(meta: dict[str, Any]) -> float:
+    """When the chat's last turn ended (seconds since the epoch), or 0 unknown."""
+    with contextlib.suppress(TypeError, ValueError):
+        return float(meta.get("turn_end") or 0)
+    return 0.0
+
+
+def _edited_since(project: Path, when: float, known: set[str]) -> list[str]:
+    """Project files written after ``when`` that no listed change accounts for."""
+    found: list[str] = []
+    for root, dirs, files in os.walk(project):
+        dirs[:] = sorted(d for d in dirs if d not in _NOT_EDITS)
+        here = Path(root)
+        for name in sorted(files):
+            if name.endswith(_GENERATED):
+                continue
+            path = here / name
+            relative = path.relative_to(project).as_posix()
+            if relative in known:
+                continue
+            with contextlib.suppress(OSError):
+                if path.stat().st_mtime > when:
+                    found.append(relative)
+    return found
+
+
+def since_digest(project: Path, when: float) -> str:
+    """What happened to the project since a resumed chat's last turn: changes the
+    user accepted, discarded or reverted outside it, new timeline entries, and
+    files changed outside the chat. "" when nothing did (or ``when`` is unknown).
+
+    The provider's session remembers the conversation, not the project: without
+    this a continued chat says a change still waits after the user accepted it.
+    """
+    if when <= 0:
+        return ""
+    from joinery import timeline
+    from joinery.transactions import list_transactions
+
+    decided = [
+        tx
+        for tx in list_transactions(project)
+        if tx.decided > when and tx.state in _DECIDED_WORDS
+    ]
+    known: set[str] = set()
+    named: set[str] = set()
+    changes: list[str] = []
+    for tx in decided[-DIGEST_ITEMS:]:
+        label = tx.summary or "a file change"
+        changes.append(f"- Change {tx.id[:8]} ({label}): {_DECIDED_WORDS[tx.state]}.")
+        known |= {str(c.get("path", "")) for c in tx.changes}
+        named |= {label, "Revert: " + label}
+    entries: list[str] = []
+    found = timeline.since(project, when)
+    mine = ""
+    if found:
+        with contextlib.suppress(OSError, timeline.TimelineError):
+            mine = timeline.identity(project)[1]
+    for entry in found:
+        known |= set(entry["paths"])
+        if entry["subject"] in named or len(entries) >= DIGEST_ITEMS:
+            continue
+        who = "" if entry["email"] == mine else f" by {entry['author']}"
+        entries.append(
+            f'- "{_short(entry["subject"], 100)}"{who}, {entry["files"]} files.'
+        )
+    edited = _edited_since(project, when, known)
+    if not (changes or entries or edited):
+        return ""
+    lines = [DIGEST_HEAD]
+    if changes:
+        lines += ["Changes decided since:", *changes]
+    if entries:
+        lines += ["New Timeline entries:", *entries]
+    if edited:
+        shown = ", ".join(edited[:DIGEST_ITEMS])
+        more = len(edited) - DIGEST_ITEMS
+        lines.append(
+            "Files changed outside the chat: "
+            + shown
+            + (f" and {more} more." if more > 0 else ".")
+        )
     lines.append("The user's new message follows.")
     return "\n".join(lines)
 

@@ -4,7 +4,8 @@ The sidebar names the chat each prompt belongs to ("" for a new one). Before the
 :meth:`ChatRecorder.switch` makes it the open chat: the provider's own session is resumed
 when it is the same provider and connection that saved it and the provider still has
 it; otherwise a fresh session starts and the first prompt carries a compact summary of
-the old chat. A chat rewound or branched from the sidebar (joinery.chats, ADR 0080)
+the old chat; a resumed session's first prompt carries a digest of what changed in the
+project since its last turn instead (chats.since_digest). A chat rewound or branched from the sidebar (joinery.chats, ADR 0080)
 always continues in a fresh session from its summary: a rewound chat's ``epoch``
 changed, and a branch has no provider handle. Everything the host then shows the
 sidebar is recorded as it goes.
@@ -14,6 +15,7 @@ Recording never stops a turn: a chat that can't be saved only stops being saved.
 from __future__ import annotations
 
 import contextlib
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
@@ -90,6 +92,10 @@ class ChatRecorder:
         handle = str(meta.get("handle", ""))
         if not rewound and same and handle and await sessions.resume(handle):
             mode = "resumed"
+            # The session remembers the talk, not what the user decided or edited
+            # since: the first prompt carries a digest of that (chats.since_digest).
+            with contextlib.suppress(OSError, ValueError):
+                self._prime = chats.since_digest(self.project, chats.turn_ended(meta))
         else:
             if self._used:
                 await sessions.new_session()
@@ -309,7 +315,11 @@ class ChatRecorder:
         if not self.chat_id or self._broken:
             return
         self._used = True
-        fields = {"handle": sessions.handle, "updated": chats.now()}
+        fields = {
+            "handle": sessions.handle,
+            "updated": chats.now(),
+            "turn_end": f"{time.time():.3f}",
+        }
         if self._model:
             fields["model"] = self._model
         self._save(lambda: chats.update(self.project, self.chat_id, **fields))

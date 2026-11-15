@@ -349,6 +349,47 @@ def test_a_saved_chat_resumes_in_the_providers_session(
     ).items()
 
 
+def test_a_resumed_chat_hears_what_changed_outside_it(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from joinery.transactions import FileTransaction
+
+    def held(summary: str, path: str) -> FileTransaction:
+        tx = FileTransaction(project)
+        tx.begin(summary)
+        (tx.stage / path).write_text("extends Node\n")
+        tx.review()
+        return tx
+
+    waiting = held("Spark Wisp enemy", "wisp.gd")
+    dropped = held("Louder footsteps", "steps.gd")
+    first = host(project, monkeypatch, [{"text": "Wisp", "chat_id": ""}])
+    chat_id = chat_events(first)[0]["chat_id"]
+    # Between turns the user decides from the CLI and edits a file by hand.
+    waiting.accept()
+    dropped.reject()
+    (project / "notes.txt").write_text("mine\n")
+    host(
+        project,
+        monkeypatch,
+        [{"text": "Music", "chat_id": chat_id}, {"text": "More", "chat_id": chat_id}],
+    )
+    bridge = FakeBridge.instances[-1]
+    digest, _, typed = bridge.prompts[0].rpartition("\n\n")
+    assert typed == "Music"
+    assert digest.startswith("Since your last turn in this chat")
+    assert (
+        f"Change {waiting.id[:8]} (Spark Wisp enemy): accepted by the user." in digest
+    )
+    assert (
+        f"Change {dropped.id[:8]} (Louder footsteps): discarded by the user." in digest
+    )
+    assert "Files changed outside the chat: notes.txt." in digest
+    assert "wisp.gd" not in digest.partition("Files changed")[2]
+    # Once: the next prompt goes as typed.
+    assert bridge.prompts[1] == "More"
+
+
 def test_without_the_providers_session_a_chat_continues_from_a_summary(
     project: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
