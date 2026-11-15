@@ -35,6 +35,7 @@ const CARD := preload("sidebar_task_card.gd")
 const DEBUG := preload("sidebar_debug.gd")
 const DESIGN := preload("sidebar_design.gd")
 const TIDY := preload("sidebar_tidy.gd")
+const CUT := preload("sidebar_cut.gd")
 const TODO := preload("sidebar_todo.gd")
 const MATCH := preload("sidebar_match.gd")
 const SOUND_PASS := preload("sidebar_sound_pass.gd")
@@ -87,6 +88,8 @@ var perf_card: Control
 var design_card: Control
 ## The tidy card (tidy_card.gd): what the game never uses, while there is one.
 var tidy_card: Control
+## The cut card (cut_card.gd): the polish list and proposed cuts, while there is one.
+var cut_card: Control
 ## A project command's form (command_card.gd), while there is one.
 var command_card: Control
 ## Requests tried several ways (sidebar_variants.gd): their ways' events go there.
@@ -149,6 +152,8 @@ static func attach(sidebar: Control, content: Control, before: Control) -> VBoxC
 	DESIGN.attach(sidebar, tasks)
 	# "/tidy": what the game never uses, removed as one reviewed change.
 	TIDY.attach(sidebar, tasks)
+	# "/cut": one polish list from every check, written as one reviewed change.
+	CUT.attach(sidebar, tasks)
 	tasks.variants = VARIANTS.attach(sidebar, tasks)
 	# A bare "/variant": an inherited scene of the scene open in the editor.
 	SCENE_VARIANT.attach(sidebar, tasks)
@@ -482,6 +487,7 @@ func sync_visible() -> void:
 		or is_instance_valid(perf_card)
 		or is_instance_valid(design_card)
 		or is_instance_valid(tidy_card)
+		or is_instance_valid(cut_card)
 		or is_instance_valid(command_card)
 		or is_instance_valid(sound_card)
 		or is_instance_valid(todo_card)

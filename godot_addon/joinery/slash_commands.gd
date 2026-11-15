@@ -45,6 +45,8 @@ signal perf_requested(target: String)
 signal design_requested
 ## "/tidy": what the game never uses, removed as one reviewed change (sidebar_tidy.gd).
 signal tidy_requested
+## "/cut": one polish list from every check, with proposed cuts (sidebar_cut.gd).
+signal cut_requested
 ## "/variants [N] <request>": make the request a few ways side by side (sidebar_variants.gd).
 signal variants_requested(words: String)
 ## "/sound-pass [focus]": make the sounds the level lacks; [param focus] is the words after it.
@@ -82,6 +84,7 @@ const COMMANDS := {
 	"/design": ["Check the game design", "ui"],
 	"/perf": ["Measure how the game runs", "ui"],
 	"/tidy": ["Find what the game never uses", "ui"],
+	"/cut": ["Polish list and proposed cuts", "ui"],
 	"/variants": ["Try a few ways side by side", "ui"],
 	"/sound-pass": ["Add the sounds the level lacks", "ui"],
 	"/mix": ["Buses, ducking and music layers", "ui"],
@@ -205,6 +208,8 @@ func run(entry: String) -> bool:
 			design_requested.emit()
 		elif command == "/tidy":
 			tidy_requested.emit()
+		elif command == "/cut":
+			cut_requested.emit()
 		elif command == "/variants":
 			variants_requested.emit(" ".join(arguments(entry)))
 		elif command == "/variant":

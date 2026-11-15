@@ -69,6 +69,7 @@ RESERVED = frozenset(
         "blockout",
         "brief",
         "check",
+        "cut",
         "debug",
         "design",
         "doctor",

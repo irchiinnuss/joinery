@@ -435,6 +435,16 @@ func send_mixer(line: Dictionary) -> bool:
 	return true
 
 
+## "/cut"'s Write ({kind: "cut_write", cuts}): the host writes design/polish.md and moves
+## [param cuts] (proposed cut ids) to the brief's Out of scope, as one change in Review.
+## False when not connected.
+func send_cut(cuts: Array) -> bool:
+	if not is_ready():
+		return false
+	_job.send_line(JSON.stringify({"kind": "cut_write", "cuts": cuts}))
+	return true
+
+
 ## "/tidy"'s Remove ({kind: "tidy_remove", ids}): the host makes the removal one change in
 ## Review (bridge/tidy.py); an empty [param ids] takes every sure finding. False when not
 ## connected.

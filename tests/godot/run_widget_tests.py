@@ -67,6 +67,7 @@ CASES = {
     "design_card_test.gd": "design card: ok",
     "tidy_card_test.gd": "tidy card: ok",
     "brief_status_test.gd": "brief status: ok",
+    "cut_card_test.gd": "cut card: ok",
     "project_commands_test.gd": "project commands: ok",
     "variants_test.gd": "variants: ok",
     "complex_models_setting_test.gd": "complex models setting: ok",
