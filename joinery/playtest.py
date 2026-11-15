@@ -42,6 +42,8 @@ from joinery.catalog import ROOT
 BOT = Path(__file__).resolve().parent / "playtest_bot" / "bot.gd"
 STOCK_GODOT = ROOT / ".tools/Godot.app/Contents/MacOS/Godot"
 FOLDER = Path(".joinery") / "playtests"
+#: Bot and store-media runs pass this: game notices meant for players stay quiet.
+QUIET_NOTICES = "--joinery-quiet-notices"
 #: Runs kept per project; older ones are removed.
 KEEP = 10
 DEFAULT_SECONDS = 120.0
@@ -198,6 +200,9 @@ def _bot_args(
         f"--saves-dir={out / 'saves'}",
         # The game core seeds the game's own random numbers from it (ADR 0059).
         f"--joinery-seed={options.seed}",
+        # Notices for players (the VR feature's "no headset") stay off the bot's
+        # frames and the store pictures.
+        QUIET_NOTICES,
     ]
     if options.record and not shots:
         args.append(f"--joinery-record={out / REPLAY_NAME}")

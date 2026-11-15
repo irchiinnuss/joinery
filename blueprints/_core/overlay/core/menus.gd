@@ -194,14 +194,35 @@ func current_menu() -> StringName:
 
 
 ## A short message at the bottom of the screen. `text` is an English msgid.
-func toast(text: String, seconds: float = 2.5) -> void:
+## `corner` puts it small in the top-right corner instead, clear of a HUD's
+## counters, bars and messages (a notice about the game itself, not the play).
+func toast(text: String, seconds: float = 2.5, corner: bool = false) -> void:
 	var holder: PanelContainer = PanelContainer.new()
 	holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var label: Label = Label.new()
 	label.text = text
 	holder.add_child(label)
-	_toasts.add_child(holder)
+	if corner:
+		_corner_box().add_child(holder)
+	else:
+		_toasts.add_child(holder)
 	get_tree().create_timer(seconds, true, false, true).timeout.connect(holder.queue_free)
+
+
+## The top-right box for corner toasts, made the first time one is shown.
+func _corner_box() -> VBoxContainer:
+	var box: VBoxContainer = _root.get_node_or_null(^"CornerToasts") as VBoxContainer
+	if box != null:
+		return box
+	box = VBoxContainer.new()
+	box.name = "CornerToasts"
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	box.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	box.offset_right = -UiStyle.px(16)
+	box.offset_top = UiStyle.px(16)
+	_root.add_child(box)
+	return box
 
 
 func _add_core_entries() -> void:

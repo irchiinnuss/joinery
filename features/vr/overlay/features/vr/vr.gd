@@ -40,6 +40,10 @@ const SIMULATED := &"simulated"
 const DESKTOP := &"desktop"
 const SIMULATE_ARG := "--vr-simulate"
 const NOTICE := "No VR headset found: playing on the desktop."
+## How long the notice shows, in the top-right corner clear of the HUD.
+const NOTICE_SECONDS := 3.0
+## The playtest bot and store-media runs pass this: no notice over their frames.
+const QUIET_ARG := "--joinery-quiet-notices"
 const RIG_SCENE := "res://features/vr/xr_rig.tscn"
 const SAVE_EXTRA := "vr"
 const ComfortPage := preload("res://features/vr/comfort_page.gd")
@@ -135,7 +139,13 @@ func _notice() -> void:
 	if _noticed or is_active():
 		return
 	_noticed = true
-	Menus.toast(NOTICE, 6.0)
+	if QUIET_ARG in OS.get_cmdline_user_args():
+		return
+	# A core from before corner toasts takes two arguments.
+	if Menus.get_method_argument_count(&"toast") >= 3:
+		Menus.call(&"toast", NOTICE, NOTICE_SECONDS, true)
+	else:
+		Menus.call(&"toast", NOTICE, NOTICE_SECONDS)
 
 
 func _on_menu_opened(_menu: Control) -> void:

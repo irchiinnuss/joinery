@@ -310,13 +310,31 @@ func _check_desktop_fallback() -> void:
 		h.expect(player.get_node_or_null(^"XRRig") == null, "the player keeps its own camera")
 		var camera: Camera3D = tree.root.get_camera_3d()
 		h.expect(camera != null and player.is_ancestor_of(camera), "the player's camera is in use")
-	var toasts: Node = Menus.get_node(^"Root/Toasts")
-	var shown: bool = false
-	for holder: Node in toasts.get_children():
-		for label: Node in holder.get_children():
-			if label is Label and (label as Label).text == VR.NOTICE:
-				shown = true
-	h.expect(shown, "a notice says the game is on the desktop")
+	var quiet: bool = VR.QUIET_ARG in OS.get_cmdline_user_args()
+	var shown: Label = null
+	for box_path: NodePath in [^"Root/Toasts", ^"Root/CornerToasts"]:
+		var toasts: Node = Menus.get_node_or_null(box_path)
+		if toasts == null:
+			continue
+		for holder: Node in toasts.get_children():
+			for label: Node in holder.get_children():
+				if label is Label and (label as Label).text == VR.NOTICE:
+					shown = label as Label
+	if quiet:
+		h.expect(shown == null, "a playtest or store-media run shows no desktop notice")
+	else:
+		h.expect(shown != null, "a notice says the game is on the desktop")
+	if shown != null:
+		# Top right: clear of the HUD's counters, bars and messages (headless runs
+		# have a tiny window, so measured against the corner, not a share of it).
+		var rect: Rect2 = shown.get_global_rect()
+		var screen: Vector2 = shown.get_viewport_rect().size
+		var margin: float = UiStyle.px(48)
+		h.expect(
+			rect.end.x > screen.x - margin and rect.end.x <= screen.x and rect.position.y < margin,
+			"the desktop notice sits in the top-right corner (%s on %s)" % [rect, screen]
+		)
+		h.expect(VR.NOTICE_SECONDS <= 3.0, "the desktop notice is short")
 	if player != null:
 		var start: Vector3 = player.global_position
 		await h.hold(&"move_forward", 30)

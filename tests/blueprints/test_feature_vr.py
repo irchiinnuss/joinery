@@ -194,6 +194,21 @@ def test_desktop_fallback(tmp_path: Path, blueprint: str) -> None:
 
 
 @needs_godot
+def test_playtest_and_media_runs_show_no_desktop_notice(tmp_path: Path) -> None:
+    """The bot's and the store pictures' runs pass the quiet flag: no notice over the
+    HUD in their frames. Players still get it (above), short and in the corner."""
+    from joinery import playtest
+
+    args = playtest._bot_args(playtest.Options(project=tmp_path), tmp_path / "out")
+    assert playtest.QUIET_NOTICES in args
+    project = make_project(tmp_path, "first-person-3d", [FEATURE])
+    run_godot(
+        project, TEST, ("--autostart", _settings(tmp_path), playtest.QUIET_NOTICES),
+        timeout=240, marker="vr",
+    )
+
+
+@needs_godot
 @pytest.mark.parametrize("blueprint", THREE_D)
 def test_simulated_rig(tmp_path: Path, blueprint: str) -> None:
     """The rig on the player: walk, snap, teleport, point, grab, menu, save."""
