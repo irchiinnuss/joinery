@@ -57,6 +57,11 @@ def readiness_report(
         data = _fill(project, data, host)
     tools = [t for t in data["tools"] if not t.get("custom")]
     data["problems"] = sum(1 for t in tools if t.get("state") in PROBLEMS)
+    if (project / "project.godot").is_file():
+        from joinery.bible_lint import completeness
+
+        # Not a tool problem, but the first thing art work waits on.
+        data["look"] = completeness(project)
     return data
 
 

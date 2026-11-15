@@ -319,6 +319,11 @@ def _new(
         print(started)
     mark_tour_pending(path)
     print(f"Created {path} with: {', '.join(selection.tools)}")
+    from joinery.bible_lint import completeness
+
+    look = completeness(path)
+    if look["state"] in {"blank", "unfinished"}:
+        print(look["message"])
     print("Open it with: " + shlex.join(["joinery", "launch", "--project", str(path)]))
     return 0
 
@@ -820,7 +825,35 @@ def _brief(
     return 0
 
 
-def _bible(project: Path) -> int:
+def _bible_answers(project: Path, source: Path) -> None:
+    """``joinery bible --answers FILE``: the look's answers (the object setup asks
+    for, or ``{"bible": {...}}`` as ``joinery new --answers`` takes) dropped where
+    the wizard drops them."""
+    from joinery.bible import ANSWERS_FILE
+
+    try:
+        raw = json.loads(source.expanduser().read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{source}: not valid JSON: {exc}") from exc
+    if isinstance(raw, dict) and isinstance(raw.get("bible"), dict):
+        raw = raw["bible"]
+    if not isinstance(raw, dict):
+        raise ValueError(f"{source}: answers must be a JSON object")  # noqa: TRY004
+    (project / ANSWERS_FILE).write_text(json.dumps(raw), encoding="utf-8")
+
+
+def _bible(project: Path, answers: Path | None = None, as_json: bool = False) -> int:
+    from joinery.bible_lint import completeness
+
+    def say(text: str, **fields: Any) -> None:
+        if as_json:
+            print(json.dumps({**fields, **completeness(project)}))
+        else:
+            print(text)
+            look = completeness(project)
+            if look["message"]:
+                print(f"bible: {look['message']}")
+
     try:
         record = blueprints.read_record(project)
         preset = (
@@ -830,19 +863,29 @@ def _bible(project: Path) -> int:
         )
         from joinery.bible import answered as _answered
 
+        if answers is not None:
+            _bible_answers(project, answers)
         answered = _answered(project)
-        written = write_from_answers_file(project, preset or None)
+        # Answers given here may fill a look that is still blank, never one with
+        # the user's words in it (that is a reviewed edit in /art).
+        written = write_from_answers_file(
+            project, preset or None, replace_blank=answers is not None
+        )
         # The wizard's reference images go on the board before the approval.
         imports = setup_imports.plan_from_args(
             project, answers=(setup_imports.REFERENCES_FILE,)
         )
         for step in setup_imports.apply(project, imports):
-            _print_step(step)
-    except (ValueError, FileExistsError) as exc:
-        print(f"bible: {exc}", file=sys.stderr)
+            if not as_json:
+                _print_step(step)
+    except (OSError, ValueError, FileExistsError) as exc:
+        if as_json:
+            print(json.dumps({"error": str(exc)}))
+        else:
+            print(f"bible: {exc}", file=sys.stderr)
         return 1
     if written is None:
-        print("bible: no answers file to read; nothing written")
+        say("bible: no answers file to read; nothing written", written="")
         return 0
     from joinery.agents import running_agent
     from joinery.art_approval import (
@@ -854,11 +897,14 @@ def _bible(project: Path) -> int:
 
     # Drafted from the user's own answers: approved at creation, if complete.
     if approve_at_creation(project):
-        print(f"bible: {APPROVED_AT_CREATION if answered else APPROVED_FROM_PRESET}")
+        say(
+            f"bible: {APPROVED_AT_CREATION if answered else APPROVED_FROM_PRESET}",
+            written=str(written),
+            approved=True,
+        )
         return 0
-    print(f"bible: wrote {written}")
-    if running_agent():
-        print(f"bible: {DRAFTED_BY_AGENT}")
+    drafted = f"\nbible: {DRAFTED_BY_AGENT}" if running_agent() else ""
+    say(f"bible: wrote {written}{drafted}", written=str(written), approved=False)
     return 0
 
 
@@ -1480,6 +1526,15 @@ def _parser() -> argparse.ArgumentParser:
         help="print the interview questions as JSON, for a UI front end",
     )
     bible.add_argument(
+        "--answers",
+        type=Path,
+        metavar="FILE",
+        help=(
+            "your answers to the look's questions as JSON (keys from --questions); "
+            "fills a look that is still blank"
+        ),
+    )
+    bible.add_argument(
         "--upgrade",
         action="store_true",
         help="bring a first-format bible up to date, as a reviewed change",
@@ -1918,7 +1973,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.upgrade:
             return _bible_upgrade(args.project, args.yes, args.json)
-        code = _bible(args.project)
+        code = _bible(args.project, args.answers, args.json)
         # The wizard writes the bible right after setup: it joins the first entry.
         _timeline_begin(args.project, fresh=False)
         return code

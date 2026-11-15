@@ -267,6 +267,106 @@ def lint(project: Path) -> BibleReport:
     return lint_text(path.read_text(errors="replace"), project)
 
 
+def fill_hint(project: Path | None = None) -> str:
+    """How the user fills in the look: the interview in the editor, or answers
+    from a file."""
+    where = str(project) if project is not None else "<project>"
+    return (
+        "Fill it in the editor: open /art and start with Journeyman, who asks you "
+        "about the look and drafts it for your approval. Or write your answers as "
+        "JSON and run: joinery bible --project "
+        f"{where} --answers FILE (the keys are in joinery bible --questions)."
+    )
+
+
+def gate_note(state: dict[str, Any]) -> str:
+    """The art gate card's line under its heading, from ``completeness``: what the
+    look lacks, said with the card's own buttons ("" when nothing is missing)."""
+    if state["state"] == "blank":
+        return (
+            "The look is blank. Review the look to start it with Journeyman, or "
+            "Describe my own."
+        )
+    if state["state"] == "unfinished" and state["missing"]:
+        return "Still to decide: " + ", ".join(state["missing"]) + "."
+    return ""
+
+
+def completeness(project: Path) -> dict[str, Any]:
+    """Whether the look can be approved as it is, and what it still lacks.
+
+    ``state`` is "missing" (no art/bible.md), "blank" (none of the sections
+    approval needs is filled: the template as written), "unfinished" (some are)
+    or "complete". ``missing`` names the sections approval still needs and
+    ``open`` those that may wait. ``message`` says it plainly with how to fill
+    it ("" when complete).
+    """
+    path = project / BIBLE
+    if not path.is_file():
+        return {
+            "state": "missing",
+            "complete": False,
+            "approved": False,
+            "missing": [],
+            "open": [],
+            "message": "The project has no look yet (art/bible.md). "
+            + fill_hint(project),
+        }
+    text = path.read_text(errors="replace")
+    gaps = _gaps(text)
+    # Only a section still holding its unset marker counts, as approval sees it: a
+    # hand-written bible without the template's headings is not blank.
+    needed = [g for g in gaps if g.required and not g.missing]
+    sections = [g for g in needed if g.section != bible_schema.TITLE_TOKEN]
+    required = [s for s in bible_schema.SECTIONS if s.required]
+    missing = [g.heading for g in needed]
+    open_ = [g.heading for g in gaps if not g.required]
+    # The same test approval applies (art_approval.approve).
+    unset = bible_schema.REQUIRED_MARKER in text or "{{" in text
+    from joinery.art_approval import approved  # Late: approval reads the team.
+
+    # Approved as drafted at creation, it gates nothing, but there's no look yet.
+    kept = approved(project)
+    if not needed and not unset:
+        return {
+            "state": "complete",
+            "complete": True,
+            "approved": kept,
+            "missing": [],
+            "open": open_,
+            "message": "",
+        }
+    if len(sections) == len(required):
+        state = "blank"
+        said = (
+            "The look (art/bible.md) is blank: none of its sections are filled in yet, "
+            + (
+                "so Journeyman has no look to follow."
+                if kept
+                else "so it can't be approved, and no art or audio can be made until it is."
+            )
+        )
+    else:
+        state = "unfinished"
+        said = (
+            "The look (art/bible.md) isn't finished: "
+            + (", ".join(missing) or "a section that says Not set yet")
+            + (
+                " still to fill."
+                if kept
+                else " still to fill before it can be approved."
+            )
+        )
+    return {
+        "state": state,
+        "complete": False,
+        "approved": kept,
+        "missing": missing,
+        "open": open_,
+        "message": f"{said} {fill_hint(project)}",
+    }
+
+
 def project_dimension(project: Path) -> str | None:
     """`2d`, `3d` or `ui` from the project's blueprint, when it has one."""
     try:

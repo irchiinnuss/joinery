@@ -118,7 +118,16 @@ def approve(
         )
     text = content.decode()
     if not allow_open and ("Not set yet" in text or "{{" in text):
-        raise ValueError("Finish the art direction before approving it.")
+        from joinery.bible_lint import completeness, fill_hint
+
+        look = completeness(project)
+        missing = ", ".join(look["missing"])
+        raise ValueError(
+            "Finish the art direction before approving it"
+            + (f" (still to fill: {missing})" if missing else "")
+            + ". "
+            + fill_hint(project)
+        )
     atomic_json(
         project / ".joinery/art-approval.json",
         {

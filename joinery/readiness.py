@@ -1418,6 +1418,9 @@ def lines(report: Mapping[str, Any]) -> list[str]:
         if desktop.get("label") and not desktop.get("available"):
             out.append(f"         {'':<16}   {desktop['label']}")
     out += [f"  {notice}" for notice in report.get("removed", [])]
+    look = report.get("look") or {}
+    if look.get("message"):
+        out.append(f"  {look['message']}")
     return out
 
 
@@ -1469,6 +1472,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             _release_refresh_lock()
     if args.agents:
         report["agents"] = agents()
+    if project is not None and (project / "project.godot").is_file():
+        from joinery.bible_lint import completeness
+
+        # A blank or unfinished look, said where the user checks the project.
+        report["look"] = completeness(project)
     if args.quiet:
         return 0
     if args.text:

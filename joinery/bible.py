@@ -125,11 +125,20 @@ def render(
 
 
 def write_bible(
-    project: Path, answers: dict[str, str], preset: str | None = None
+    project: Path,
+    answers: dict[str, str],
+    preset: str | None = None,
+    *,
+    replace_blank: bool = False,
 ) -> Path:
-    """Write `<project>/art/bible.md`. Refuses to overwrite an existing bible."""
+    """Write `<project>/art/bible.md`. Refuses to overwrite an existing bible,
+    except, with ``replace_blank``, one still blank (nothing in it is the user's)."""
+    from joinery.bible_lint import completeness  # Late: the lint reads the rules.
+
     destination = project / BIBLE_PATH
-    if destination.exists():
+    if destination.exists() and not (
+        replace_blank and completeness(project)["state"] == "blank"
+    ):
         raise FileExistsError(
             f"{destination} already exists; changing the look is a reviewed edit, "
             "not something project setup should overwrite"
@@ -163,7 +172,9 @@ def answered(project: Path) -> bool:
     )
 
 
-def write_from_answers_file(project: Path, preset: str | None = None) -> Path | None:
+def write_from_answers_file(
+    project: Path, preset: str | None = None, *, replace_blank: bool = False
+) -> Path | None:
     """Read the answers a front end dropped in the project, then remove them.
 
     The Project Manager cannot pass multi-line text as command arguments
@@ -193,4 +204,4 @@ def write_from_answers_file(project: Path, preset: str | None = None) -> Path | 
         if isinstance(v, str | int | float) and not isinstance(v, bool)
     }
     chosen = answers.pop(PRESET_KEY, "") or preset or None
-    return write_bible(project, answers, chosen)
+    return write_bible(project, answers, chosen, replace_blank=replace_blank)
