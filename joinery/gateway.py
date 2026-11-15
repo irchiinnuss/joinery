@@ -20,6 +20,7 @@ from joinery import (
     live_game,
     metrics,
     references,
+    scene_guard,
     scene_variants,
     script_scope,
     sound_kit,
@@ -862,6 +863,7 @@ class ProjectGateway:
         if apps:
             names = [self.slots.app_name(app) for app in apps]
             self.progress("Working in " + " and ".join(names) + "…")
+        guarded = self._scene_before(server, scene, readonly)
         async with self.slots.hold(
             apps,
             lambda app: self.progress(f"Waiting for {app}: another task is using it…"),
@@ -873,6 +875,10 @@ class ProjectGateway:
                 if server == "blender" or server.startswith("joinery-")
                 else 60,
             )
+        if guarded is not None:
+            refused = self._scene_after(scene, *guarded)
+            if refused is not None:
+                return refused
         if self.transaction is not None and any(
             connection is self.staged.get(key) for key in (server, VIEW + server)
         ):
@@ -920,6 +926,38 @@ class ProjectGateway:
         elif server == "godot" and tool == "stop_project" and not result.is_error:
             self.runtime_owned = False
         return result
+
+    def _scene_before(
+        self, server: str, scene: str, readonly: bool
+    ) -> tuple[Path, str] | None:
+        """The staged scene a Godot MCP call is about to load and save, with its
+        text, so :meth:`_scene_after` can see what the save dropped."""
+        tx = self.transaction
+        if server != "godot" or readonly or not scene or tx is None:
+            return None
+        if not scene.endswith(".tscn"):
+            return None
+        path = tx.stage / scene.removeprefix("res://")
+        try:
+            return path, path.read_text(encoding="utf-8")
+        except OSError:
+            return None
+
+    def _scene_after(self, scene: str, path: Path, before: str) -> CallToolResult | None:
+        """Put the scene back, and refuse the call, when saving it dropped a script
+        or an instance the headless Godot could not load (scene_guard)."""
+        try:
+            after = path.read_text(encoding="utf-8")
+        except OSError:
+            return None
+        lost = scene_guard.dropped(before, after)
+        if not lost:
+            return None
+        path.write_text(before, encoding="utf-8")
+        return CallToolResult(
+            content=[TextContent(type="text", text=scene_guard.message(scene, lost))],
+            is_error=True,
+        )
 
     def staging(self) -> FileTransaction:
         """This turn's staged change, begun on its first write and brought up to date
