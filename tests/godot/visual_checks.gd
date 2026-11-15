@@ -243,3 +243,27 @@ static func brief_and_cut(suite: Variant, light: bool, width: int, chat: Control
 	)
 	await suite._shot("review-keep-avoid", light, width, host)
 	host.free()
+
+
+## The kept change; then what the agent guessed and where it didn't do as asked, opened; then
+## "Not played since this change" under its line and the header's count, which runs the game.
+static func accepted_shots(suite: Variant, light: bool, width: int, chat: Control) -> void:
+	await suite._shot("accepted", light, width, chat)
+	var card: Control = chat.get("_transcript").call("current_card")
+	card.call(
+		"set_departures",
+		["Made it oak; the request named no wood"],
+		["1.2 m wide, not 3 m: the wall is only 2.5 m high"]
+	)
+	(card.get("_departures") as Object).call("set_open", true)
+	await suite._shot("departures", light, width, chat)
+	card.call("set_departures", [], [])
+	var id := "0123456789abcdef0123456789abcdef"
+	card.set("transaction_id", id)
+	var tree: SceneTree = chat.get_tree()
+	var waiting := {"count": 3, "text": "3 changes not played yet", "ids": [id]}
+	tree.call_group(&"joinery_unplayed", &"show_unplayed", waiting)
+	suite._check(card.call("unplayed_shown"), "The kept change says it wasn't played since")
+	await suite._shot("unplayed", light, width, chat)
+	tree.call_group(&"joinery_unplayed", &"show_unplayed", {"count": 0, "text": "", "ids": []})
+	card.set("transaction_id", "")

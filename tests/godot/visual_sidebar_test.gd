@@ -307,7 +307,7 @@ func _states(light: bool, width: int) -> void:
 	chat.call("_on_accept")
 	chat.hide_edit_review("Change accepted", "success")
 	chat.show_timing({"outcome": "done", "total_ms": 72000, "first_response_ms": 250})
-	await _shot("accepted", light, width, chat)
+	await _cards.accepted_shots(self, light, width, chat)
 
 	chat.show_agent_message("The **Door** is 20% wider and the `Wood` material is darker.")
 	await _shot("conversation", light, width, chat)

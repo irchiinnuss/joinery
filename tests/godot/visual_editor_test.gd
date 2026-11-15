@@ -576,6 +576,7 @@ func _timeline() -> void:
 					"author": people[index],
 					"time": now - [180, 4000, 5000, 90000, 400000][index],
 					"files": [2, 1, 1, 3, 48][index],
+					"unplayed": index == 0,
 				}
 			)
 		)
