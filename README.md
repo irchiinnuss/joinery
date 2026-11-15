@@ -18,7 +18,8 @@ in a real tool, kept as an editable source file, and has a recipe that rebuilds
 it. Games made with Joinery are plain Godot projects and open in stock Godot.
 
 What changed in this version, and what is still missing:
-[0.6.0 release notes](docs/releases/0.6.0.md).
+[0.6.0 release notes](docs/releases/0.6.0.md), with later fixes in
+[0.6.1](docs/releases/0.6.1.md) and [0.6.2](docs/releases/0.6.2.md).
 
 ## How a change works
 
@@ -136,6 +137,8 @@ The [editor guide](docs/editor-guide.md) has every option.
 - [Architecture decisions](docs/adr/)
 - [Art bible template](templates/art_bible.md)
 - [Rules every AI agent follows in this repo](CLAUDE.md)
+- [Contributing](CONTRIBUTING.md), [security](SECURITY.md) and the
+  [code of conduct](CODE_OF_CONDUCT.md)
 
 ## Licence
 
@@ -143,6 +146,7 @@ Joinery is released under the [GNU AGPL-3.0-or-later](LICENSE). The parts that
 are copied into your game (the editor add-on, blueprints, features, templates
 and kits) and the Godot engine changes are MIT, so your games stay yours to sell
 or keep closed. See [LICENSING.md](LICENSING.md) for the full split. Godot and
-other bundled components keep their own licences; see [licenses/](licenses/).
+other bundled components keep their own licences; see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [licenses/](licenses/).
 The creative tools are separate programs under their own licences and are not
 part of Joinery's code.
