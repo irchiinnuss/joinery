@@ -208,12 +208,15 @@ def _git(
     stdin: bytes | None = None,
     identity: tuple[str, str] | None = None,
 ) -> subprocess.CompletedProcess[bytes]:
+    """Run git in ``project``. Pathspecs are literal (a file named ``a*.png`` is
+    just that file), except for the commands that refuse pathspec magic."""
     program = git_executable()
     if program is None:
         raise TimelineError(NO_GIT)
+    literal = ["--literal-pathspecs"] if args[:1] != ("check-ignore",) else []
     argv = [
         program,
-        "--literal-pathspecs",
+        *literal,
         "-c",
         "core.quotepath=off",
         "-c",
@@ -493,13 +496,12 @@ def commit_paths(project: Path, paths: Sequence[str], message: str) -> str:
         return ""
     listed = "\0".join(wanted).encode() + b"\0"
     tracked = set(_split_z(_git(project, "ls-files", "-z", "--", *wanted).stdout))
-    ignored = set(
-        _split_z(
-            _git(
-                project, "check-ignore", "-z", "--stdin", stdin=listed, check=False
-            ).stdout
-        )
-    )
+    # Exit 1 means none is ignored; anything above is git failing, and adding an
+    # ignored file would make it refuse the whole commit.
+    checked = _git(project, "check-ignore", "-z", "--stdin", stdin=listed, check=False)
+    if checked.returncode > 1:
+        raise TimelineError(_reason(checked))
+    ignored = set(_split_z(checked.stdout))
     chosen = [
         path
         for path in wanted

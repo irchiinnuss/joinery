@@ -270,6 +270,52 @@ def test_a_failed_commit_is_owed_to_the_next_accept(tmp_path: Path) -> None:
     assert not (project / timeline.OWED).exists()
 
 
+def ignoring_core_files(project: Path) -> None:
+    """Ignore rules that leave out core-files.json, which changes carry."""
+    assert "!.joinery/core-files.json" not in (project / ".gitignore").read_text()
+
+
+def test_an_ignored_file_the_change_touched_stays_out_of_the_commit(
+    tmp_path: Path,
+) -> None:
+    project = started(tmp_path / "game")
+    ignoring_core_files(project)
+    tx = accept(
+        project,
+        "Add a blockout",
+        {"level.gd": "extends Node3D\n", ".joinery/core-files.json": "{}\n"},
+    )
+    # The record is carried into the project, but git ignores it there.
+    assert (project / ".joinery/core-files.json").read_text() == "{}\n"
+    assert ".joinery/core-files.json" in tx._timeline_paths(tx.changes)
+    assert tx.timeline["state"] == "committed"
+    assert files_of(project) == {"level.gd"}
+    assert git(project, "ls-files", ".joinery/core-files.json") == ""
+    assert not (project / timeline.OWED).exists()
+
+
+def test_owed_paths_with_an_ignored_file_clear_on_the_next_accept(
+    tmp_path: Path,
+) -> None:
+    project = started(tmp_path / "game")
+    ignoring_core_files(project)
+    # Left by an accept that git refused for the ignored record beside it.
+    (project / "level.gd").write_text("extends Node3D\n")
+    (project / ".joinery").mkdir(exist_ok=True)
+    (project / ".joinery/core-files.json").write_text("{}\n")
+    owed = [{"paths": ["level.gd", ".joinery/core-files.json"], "message": "Blockout"}]
+    (project / timeline.OWED).write_text(json.dumps(owed))
+    tx = accept(project, "Add a crate", {"crate.gd": "extends Node3D\n"})
+    assert tx.timeline["state"] == "committed"
+    assert git(project, "log", "--format=%s").splitlines()[:2] == [
+        "Add a crate",
+        "Blockout",
+    ]
+    assert files_of(project, "HEAD~1") == {"level.gd"}
+    assert timeline.uncommitted(project, ["level.gd", "crate.gd"]) == []
+    assert not (project / timeline.OWED).exists()
+
+
 def test_godot_files_beside_a_change_are_committed_with_it(tmp_path: Path) -> None:
     project = started(tmp_path / "game")
     # Godot wrote an id for a script already in the timeline (an open editor).
