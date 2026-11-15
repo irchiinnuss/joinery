@@ -108,7 +108,7 @@ func follow(player: Node) -> void:
 		style = "ui"
 	else:
 		style = "generic"
-	if player != null:
+	if player != null and player.is_inside_tree():
 		_last_at = _where(player)
 	interactive = player != null or not _others.is_empty()
 	# Mapped a little later, once the level around the new player has loaded.
@@ -134,7 +134,9 @@ func step(frame: int) -> void:
 		_check_reach(frame)
 		_check_stuck(frame)
 		_check_target(frame)
-	if frame >= _segment_end:
+	var away := _player != null and not (is_instance_valid(_player) and _player.is_inside_tree())
+	if frame >= _segment_end and not away:
+		# (Not while the player is between levels: a restart frees it before the next one.)
 		_new_segment(frame)
 	elif style in ["ui", "generic"] and frame % 24 == 0:
 		_click_something()
