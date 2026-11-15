@@ -416,6 +416,12 @@ func _music_bar_changes() -> void:
 	await _seconds(0.2)
 	play.expect(_layer_db("pads") <= -79.0, "solo on bass silences pads")
 	music.call(&"set_layer_solo", "bass", false)
+	# An intensity change landing mid-fade, with the pads' level the same, keeps
+	# the fader's quick fade instead of stretching it over the intensity fade.
+	music.set(&"pending_intensity", &"calm")
+	music.call(&"_apply_intensity")
+	await play.process_frames(4)
+	play.expect_near(_layer_db("pads"), 0.0, 0.01, "a fader's fade keeps its pace")
 	# Calm held for seconds; once released, the drivers bring back explore.
 	play.expect(music.get(&"intensity") == &"calm", "a held state stays")
 	music.call(&"release")
@@ -424,6 +430,13 @@ func _music_bar_changes() -> void:
 
 func _music_events() -> void:
 	var events: Node = play.events
+	# The duck is read off the pads' level, so the pads must be at full first:
+	# the mixer checks just before leave them fading back from solo.
+	for _i: int in 60:
+		if _layer_db("pads") >= -0.01:
+			break
+		await process_frame
+	play.expect_near(_layer_db("pads"), 0.0, 0.01, "pads at full before the stinger")
 	await _wait_into_bar(0.1, 0.2)
 	var beat: float = 60.0 / BPM
 	var stinger_player: AudioStreamPlayer = music.get_node(^"Stinger")

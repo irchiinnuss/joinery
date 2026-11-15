@@ -320,8 +320,13 @@ func _apply_intensity(overshoot: float = 0.0) -> void:
 	intensity_changed.emit(intensity)
 
 
+## A layer whose target stays the same keeps the fade it is in: a fader's quick
+## fade is not slowed by an intensity change on the same level, and moving one
+## layer's fader does not rush the others' intensity fades.
 func _retarget(layer: String, fade: float) -> void:
 	var target: float = _layer_target(layer, intensity)
+	if _rates.has(layer) and is_equal_approx(float(_targets.get(layer, -1.0)), target):
+		return
 	_targets[layer] = target
 	_rates[layer] = absf(target - float(_gains.get(layer, 0.0))) / maxf(fade, 0.001)
 	if not _gains.has(layer):
