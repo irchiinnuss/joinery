@@ -553,3 +553,23 @@ def test_metrics_record_an_automatic_accept(tmp_path: Path) -> None:
     metrics.record_decision(tmp_path, "tx1", True, auto=True)
     (span,) = metrics.read(target)
     assert span["attributes"][metrics.AUTO_ACCEPTED] is True
+
+
+def test_a_change_to_joinerys_own_harness_always_waits(tmp_path: Path) -> None:
+    from bridge.instructions import REVIEW_GUIDE
+    from tests.blueprints.godot_run import make_project
+
+    game = make_project(tmp_path, "blank")
+    paths = ["tests/support/play.gd", "game/level.gd", "res://notes.md"]
+    owned = auto_accept.owned_changes(game, paths)
+    assert owned == ["tests/support/play.gd"]
+    reasons = auto_accept.held(
+        changes=[{"path": "tests/support/play.gd"}], owned=owned
+    )
+    assert reasons == ["a Joinery-owned harness file changed (tests/support/play.gd)"]
+    assert "tests/support/play.gd" in auto_accept.owned_note(owned)
+    # The game's own files keep the usual rule.
+    assert auto_accept.owned_changes(game, ["game/level.gd"]) == []
+    assert auto_accept.held(changes=[{"path": "game/level.gd"}]) == []
+    # Journeyman is told to fix the game or its own test, never the harness.
+    assert "never edit Joinery's shared core or test harness" in REVIEW_GUIDE

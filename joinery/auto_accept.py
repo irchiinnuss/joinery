@@ -13,7 +13,9 @@ for that, and always when it says the game breaks or work is lost (rule
 shown with the kept change. A note (``info``) never holds it and is shown with
 it. A routine edit of ``design/brief.md`` (controls, verbs, a renamed action)
 is kept with a note; one that changes its direction (pitch, genre, audience,
-fantasy, core loop, scope, monetisation, or those facts) waits.
+fantasy, core loop, scope, monetisation, or those facts) waits. A change to a
+file Joinery owns in the game (the shared core and test harness,
+``joinery.core_update.owned``) always waits, with a note.
 
 The rule lives here and is applied by the turn (``joinery.turn``), so every agent
 (Claude Code, Codex, Gemini CLI, opencode) and every parallel task is judged the
@@ -149,6 +151,7 @@ def held(
     unsaved: Iterable[str] = (),
     hold_on: str = DEFAULT_HOLD,
     brief_direction: Sequence[str] | None = None,
+    owned: Sequence[str] = (),
 ) -> list[str]:
     """Why a change that reached review waits for the user; empty when it may be
     kept without asking. Each reason is a short plain line, for logs and metrics.
@@ -165,7 +168,8 @@ def held(
     work, which an accept must never write over or save. ``hold_on`` is the
     reviewer level that holds (``hold_level``); ``brief_direction`` the parts of
     the brief's direction the change alters (``brief.direction_changes``), None
-    when nobody looked, which holds a change to the brief.
+    when nobody looked, which holds a change to the brief. ``owned`` are the
+    Joinery-owned files it changes (``owned_changes``): always a hold.
     """
     reasons: list[str] = []
     paths = [str(c.get("path", "")) for c in changes]
@@ -182,6 +186,8 @@ def held(
                 + ", ".join(brief_direction)
                 + ")"
             )
+    if owned:
+        reasons.append(OWNED_REASON + " (" + ", ".join(owned[:3]) + ")")
     if notes:
         reasons.append("it has notes for the user")
     found = peer.notes if peer is not None else []
@@ -209,6 +215,32 @@ def held(
     if "" in live:
         reasons.append("a scene it changes isn't saved yet")
     return reasons
+
+
+#: Why a change to Joinery's own game files waits, in the held reasons.
+OWNED_REASON = "a Joinery-owned harness file changed"
+#: What the agent and the user are told about it.
+OWNED_NOTE = (
+    "This change edits files Joinery owns in the game ({paths}): the shared core "
+    "and test harness every test relies on. It waits for you, and Joinery's "
+    "updates stop reaching an edited file. Usually the game or its own test "
+    "should change instead."
+)
+
+
+def owned_changes(project: Path, paths: Iterable[str]) -> list[str]:
+    """The Joinery-owned game files (core, test harness) among ``paths``."""
+    from joinery import core_update
+
+    try:
+        owned = core_update.owned(project)
+    except (OSError, ValueError):
+        return []
+    return sorted({p.removeprefix("res://") for p in paths}.intersection(owned))
+
+
+def owned_note(paths: Sequence[str]) -> str:
+    return OWNED_NOTE.format(paths=", ".join(paths[:3]))
 
 
 def unsaved_scenes(editor_context: Mapping[str, str]) -> list[str]:

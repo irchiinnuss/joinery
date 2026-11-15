@@ -958,6 +958,7 @@ class TurnController:
             if gate is None:
                 placed, notes = self._placement(found)
                 problems = problems + placed
+                notes = notes + self._owned_notes(found)
             self._passed = {"ran": checked.ran, "skipped": checked.skipped}
             if checked.info:
                 self._passed["info"] = list(checked.info)
@@ -1162,6 +1163,9 @@ class TurnController:
             unsaved=auto_accept.unsaved_scenes(self.gateway.editor_context),
             hold_on=hold_on,
             brief_direction=direction,
+            owned=auto_accept.owned_changes(
+                project, [str(c.get("path", "")) for c in changes]
+            ),
         )
         if held:
             self.emit({"kind": "auto_accept_held", "reasons": held})
@@ -1174,6 +1178,14 @@ class TurnController:
                 *self._passed.get("info", []),
             ]
         return "editor" if self.live_edits else "core"
+
+    def _owned_notes(self, found: list[dict[str, str]]) -> list[str]:
+        """The note for a change to Joinery's own game files (core, harness)."""
+        project = getattr(self.gateway, "project", None)
+        if project is None:
+            return []
+        owned = auto_accept.owned_changes(project, [c["path"] for c in found])
+        return [auto_accept.owned_note(owned)] if owned else []
 
     def _brief_edit(
         self, changes: list[dict[str, Any]]
