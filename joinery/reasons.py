@@ -361,6 +361,22 @@ def tests(output: str) -> list[Reason]:
     ]
 
 
+def test_timeout(script: str, seconds: int) -> list[Reason]:
+    """A SceneTree test that never finished, on two tries."""
+    return [
+        Reason(
+            "tests.timed_out",
+            file=script,
+            measured=f"still running after {seconds} s, twice",
+            expected="the test ends with quit() in time",
+            fix=(
+                "Make the test call quit() on every path (a script error stops it "
+                "before quit), or raise [checks] scene_test_seconds if it is just slow."
+            ),
+        )
+    ]
+
+
 # --- everything else -------------------------------------------------------------
 
 #: For a problem that names only files: the rule and fix hint, by check.

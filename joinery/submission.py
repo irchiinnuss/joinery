@@ -9,9 +9,11 @@ decides what happens next: that is the turn controller's job.
 from __future__ import annotations
 
 import asyncio
+import platform
 import re
 import secrets
 import shutil
+import tomllib
 from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
@@ -108,9 +110,12 @@ GODOT_SUFFIXES = frozenset({".gd", ".tscn", ".tres", ".gdshader", ".glb"})
 GUT_RUNNER = "addons/gut/gut_cmdln.gd"
 TEST_DIRS = ("test", "tests")
 OFFLINE_SECONDS = 180
-#: SceneTree tests (``extends SceneTree`` under tests/): how many run, and how long each.
+#: SceneTree tests (``extends SceneTree`` under tests/): how many run, and how long each
+#: may take on a worker that runs natively. ``[checks] scene_test_seconds`` sets it.
 SCENE_TESTS_MAX = 20
 SCENE_TEST_SECONDS = 120
+#: The worker is linux/amd64; on an arm64 host it runs emulated, several times slower.
+EMULATED_FACTOR = 3
 _SCENE_TREE = re.compile(
     r'^[ \t]*(?:class_name[ \t]+\w+[ \t]+)?extends[ \t]+"?SceneTree"?[ \t]*(?:#.*)?$',
     re.MULTILINE,
@@ -676,6 +681,22 @@ async def run_tests(
     ]
 
 
+def scene_test_seconds(project: Path) -> int:
+    """Each SceneTree test's time limit: ``[checks] scene_test_seconds`` when the
+    project sets it, otherwise the native limit, scaled up when the worker runs
+    emulated (an arm64 host running the amd64 worker)."""
+    try:
+        raw = tomllib.loads((project / "joinery.toml").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raw = {}
+    checks = raw.get("checks", {})
+    setting = checks.get("scene_test_seconds") if isinstance(checks, dict) else None
+    if isinstance(setting, int) and not isinstance(setting, bool) and setting > 0:
+        return setting
+    emulated = platform.machine().lower() in {"arm64", "aarch64"}
+    return SCENE_TEST_SECONDS * (EMULATED_FACTOR if emulated else 1)
+
+
 async def run_scene_tests(
     stage: Path,
     scripts: list[str],
@@ -694,13 +715,16 @@ async def run_scene_tests(
     (``joinery.scene_tests``), so a test the change can't affect never runs again.
     """
 
+    seconds = scene_test_seconds(tx.project if tx is not None else stage)
+
     async def run(root: Path, script: str) -> Result:
-        # A settings file of its own: no test sees another's.
+        # A settings file of its own: no test sees another's. A run past the limit
+        # raises TimeoutError (the worker is killed); the judge tries it once more.
         settings = f"/tmp/joinery-test-{secrets.token_hex(6)}.cfg"
         got = await worker_run(
             scene_test_argv(root, script, settings),
             root,
-            SCENE_TEST_SECONDS,
+            seconds,
             warm=False,
         )
         worker_ready(got)
@@ -738,6 +762,7 @@ async def run_scene_tests(
             passed=scene_test_passed,
             baseline=baseline,
             prepare=prepare,
+            seconds=seconds,
         )
     if verdict.already and info is not None:
         info.append(scene_cache.already_note(verdict.already))
@@ -746,13 +771,22 @@ async def run_scene_tests(
     return [
         Problem(
             "tests",
-            f"The test res://{script} failed: "
+            f"The test res://{script} "
             + (
                 output
-                or "it exited with an error or didn't quit (end it with quit())."
+                if script in verdict.timed_out
+                else "failed: "
+                + (
+                    output
+                    or "it exited with an error or didn't quit (end it with quit())."
+                )
             ),
             [script],
-            items=reasons.tests(output),
+            items=(
+                reasons.test_timeout(script, seconds)
+                if script in verdict.timed_out
+                else reasons.tests(output)
+            ),
         )
         for script, output in verdict.broken.items()
     ]

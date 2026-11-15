@@ -245,6 +245,9 @@ class Tree:
 class Outcome:
     passed: bool
     output: str = ""
+    #: The test never finished in time, on two tries: a fail of this run only,
+    #: never cached (a busy machine is not the test's content).
+    timed_out: bool = False
 
 
 @dataclass
@@ -259,6 +262,8 @@ class Verdict:
     cached: list[str] = field(default_factory=list)
     #: Tests that ran.
     ran: list[str] = field(default_factory=list)
+    #: Tests whose run now timed out (twice), broken or already failing.
+    timed_out: list[str] = field(default_factory=list)
 
 
 class Cache:
@@ -284,6 +289,8 @@ class Cache:
         return Outcome(bool(entry.get("passed")), str(entry.get("output", "")))
 
     def put(self, key: str, outcome: Outcome) -> None:
+        if outcome.timed_out:
+            return
         self.entries.pop(key, None)
         self.entries[key] = {"passed": outcome.passed, "output": outcome.output}
         while len(self.entries) > CACHE_MAX:
@@ -307,20 +314,45 @@ Runner = Callable[[Path, str], Awaitable[Result]]
 Importer = Callable[[Path], Awaitable[None]]
 
 
+def timeout_text(seconds: int) -> str:
+    """What a test that never finished says, in place of its output."""
+    return (
+        f"timed out after {seconds} s, twice: it never called quit(), or it needs "
+        "longer than that here. End it with quit(), or raise "
+        "[checks] scene_test_seconds in joinery.toml."
+    )
+
+
 async def _run_all(
     root: Path,
     scripts: Iterable[str],
     run: Runner,
     passed: Callable[[Result], bool],
+    seconds: int,
 ) -> dict[str, Outcome]:
+    """Run each test; one that times out runs once more before it counts, and a
+    second time-out is that test's result alone: the others still count."""
     gate = asyncio.Semaphore(PARALLEL)
 
     async def one(script: str) -> tuple[str, Outcome]:
-        async with gate:
-            got = await run(root, script)
-        return script, Outcome(passed(got), got.output[-_FAIL_TAIL:].strip())
+        for _try in range(2):
+            try:
+                async with gate:
+                    got = await run(root, script)
+            except TimeoutError:
+                continue
+            return script, Outcome(passed(got), got.output[-_FAIL_TAIL:].strip())
+        return script, Outcome(False, timeout_text(seconds), timed_out=True)
 
-    pairs = await asyncio.gather(*(one(s) for s in scripts))
+    tasks = [asyncio.ensure_future(one(s)) for s in scripts]
+    try:
+        pairs = await asyncio.gather(*tasks)
+    except BaseException:
+        # One test's error ends the rest: none keeps a worker running unwatched.
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
     return dict(pairs)
 
 
@@ -335,13 +367,15 @@ async def judge(
     passed: Callable[[Result], bool],
     baseline: Callable[[], Awaitable[Path | None]] | None = None,
     prepare: Importer | None = None,
+    seconds: int = 120,
 ) -> Verdict:
     """Run ``scripts`` on ``stage`` and judge each failure against ``original``.
 
     ``args`` gives a test's arguments in a tree (part of its key); ``run`` runs one
     test; ``passed`` reads its result. ``baseline`` makes a runnable copy of the
     project as it was (None when it can't) and ``prepare`` imports it, only when
-    a failing test has no cached result from before the change.
+    a failing test has no cached result from before the change. ``seconds`` is
+    each run's time limit, said in a time-out's result.
     """
     cache = Cache(project)
     verdict = Verdict()
@@ -355,7 +389,9 @@ async def judge(
             verdict.cached.append(script)
     fresh = [s for s in scripts if s not in results]
     if fresh:
-        for script, outcome in (await _run_all(stage, fresh, run, passed)).items():
+        for script, outcome in (
+            await _run_all(stage, fresh, run, passed, seconds)
+        ).items():
             results[script] = outcome
             cache.put(keys[script], outcome)
             verdict.ran.append(script)
@@ -379,7 +415,7 @@ async def judge(
                 try:
                     if prepare is not None:
                         await prepare(copy)
-                    ran = await _run_all(copy, list(unknown), run, passed)
+                    ran = await _run_all(copy, list(unknown), run, passed, seconds)
                     for script, outcome in ran.items():
                         before[script] = outcome
                         cache.put(unknown[script], outcome)
@@ -387,6 +423,8 @@ async def judge(
                     shutil.rmtree(copy, ignore_errors=True)
     cache.save()
     for script in failing:
+        if results[script].timed_out:
+            verdict.timed_out.append(script)
         if script in before and not before[script].passed:
             verdict.already.append(script)
         else:
