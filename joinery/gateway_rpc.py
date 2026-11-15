@@ -96,6 +96,8 @@ def search_tools(data: dict[str, Any], query: str) -> dict[str, Any]:
         if not words or score:
             candidates.append((score, tool))
     candidates.sort(key=lambda entry: -entry[0])
+    listed = candidates[:DISCOVER_DETAILED]
+    rest = candidates[DISCOVER_DETAILED:DISCOVER_LISTED]
     return {
         "servers": [
             {
@@ -108,13 +110,65 @@ def search_tools(data: dict[str, Any], query: str) -> dict[str, Any]:
             {
                 "server": tool["server"],
                 "name": tool["name"],
-                "description": tool.get("description", "")[:500],
+                "description": tool.get("description", "")[:DISCOVER_DESCRIPTION],
+                "args": tool_arguments(tool.get("inputSchema")),
             }
-            for _, tool in candidates[:24]
+            for _, tool in listed
         ],
+        **(
+            {"more": [f"{tool['server']}/{tool['name']}" for _, tool in rest]}
+            if rest
+            else {}
+        ),
         "total_matches": len(candidates),
-        "hint": "Search by application or operation to narrow results; read tool_schema before calling. Native document operations save, export, import and record provenance automatically. Call submit_for_review when the change is complete; Joinery checks it then and opens the review.",
+        "hint": "args: name: type, * required. Call call_tool with them; tool_schema gives the full schema when they are unclear. Search by application or operation to narrow results. Native document operations save, export, import and record provenance automatically. Call submit_for_review when the change is complete; Joinery checks it then and opens the review.",
     }
+
+
+#: discover_tools: tools listed with their description and arguments, then by name.
+DISCOVER_DETAILED = 12
+DISCOVER_LISTED = 30
+DISCOVER_DESCRIPTION = 300
+#: Characters of one tool's argument line.
+ARGUMENTS_KEEP = 400
+
+
+def _argument_type(schema: Any) -> str:
+    if not isinstance(schema, dict):
+        return "any"
+    if isinstance(schema.get("enum"), list):
+        return "|".join(json.dumps(v) for v in schema["enum"][:6])
+    kind = schema.get("type")
+    if kind == "array":
+        return _argument_type(schema.get("items")) + "[]"
+    if isinstance(kind, list):
+        return "|".join(str(k) for k in kind)
+    if kind:
+        return str(kind)
+    for union in ("anyOf", "oneOf"):
+        if isinstance(schema.get(union), list):
+            return "|".join(
+                _argument_type(s) for s in schema[union] if s != {"type": "null"}
+            )
+    return "object" if "properties" in schema or "$ref" in schema else "any"
+
+
+def tool_arguments(schema: Any) -> str:
+    """A tool's input schema as one short line, ``path*: string, size: integer``
+    (``*`` required), so most calls need no separate tool_schema round trip."""
+    if not isinstance(schema, dict):
+        return ""
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        return ""
+    required = set(schema.get("required") or [])
+    line = ", ".join(
+        f"{name}{'*' if name in required else ''}: {_argument_type(value)}"
+        for name, value in properties.items()
+    )
+    if len(line) > ARGUMENTS_KEEP:
+        line = line[: ARGUMENTS_KEEP - 1].rsplit(",", 1)[0] + ", … (tool_schema)"
+    return line
 
 
 #: A task asked to change the scene on screen.
@@ -361,12 +415,20 @@ class GatewayRPC:
                     }
                 )
             elif method == "details":
-                data = compact.details(
-                    self.gateway.project,
-                    str(params.get("ref", "")),
-                    str(params.get("path", "") or ""),
-                    int(params.get("offset", 0) or 0),
-                )
+                paths = params.get("paths")
+                if isinstance(paths, list) and paths:
+                    data = compact.details_many(
+                        self.gateway.project,
+                        str(params.get("ref", "")),
+                        [str(p) for p in paths],
+                    )
+                else:
+                    data = compact.details(
+                        self.gateway.project,
+                        str(params.get("ref", "")),
+                        str(params.get("path", "") or ""),
+                        int(params.get("offset", 0) or 0),
+                    )
             elif method == "search":
                 data = project_search.search(
                     self.gateway.search_root(),

@@ -93,12 +93,12 @@ class VariantOverrideArgument(BaseModel):
 
 #: The server's instructions: the same bytes for every agent of a role.
 WRITER_INSTRUCTIONS = (
-    "Use discover_tools to check real connected capabilities, then tool_schema before calling a tool. "
+    "discover_tools finds connected tools with their arguments; tool_schema gives a full schema when those are unclear. "
     "Mutations are staged; call submit_for_review when the change is complete. "
     "Never claim staged changes are accepted or saved."
 )
 READER_INSTRUCTIONS = (
-    "Use discover_tools to check real connected capabilities, then tool_schema before calling a tool. "
+    "discover_tools finds connected tools with their arguments; tool_schema gives a full schema when those are unclear. "
     "This agent only reads: call_tool reaches read-only project tools."
 )
 
@@ -115,13 +115,13 @@ def make_server(socket: Path, role: str | None = None) -> MCPServer[Any]:
     @server.tool(annotations=ToolAnnotations(read_only_hint=True))
     @tool_errors
     async def discover_tools(query: str = "") -> dict[str, Any]:
-        """Find installed and connected project tools by purpose, with readiness and missing-tool reasons."""
+        """Find installed and connected project tools by purpose, with each tool's arguments (name: type, * required), readiness and missing-tool reasons."""
         return await rpc(socket, "inventory", {"query": query})
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True))
     @tool_errors
     async def tool_schema(server: str, tool: str) -> dict[str, Any]:
-        """Read the actual MCP input schema for a project tool before invoking it."""
+        """The full MCP input schema of a project tool, when the arguments discover_tools lists are not enough."""
         return await rpc(socket, "schema", {"server": server, "tool": tool})
 
     @server.tool()
@@ -144,11 +144,16 @@ def make_server(socket: Path, role: str | None = None) -> MCPServer[Any]:
         ref: Annotated[str, Field(max_length=20)],
         path: Annotated[str, Field(max_length=300)] = "",
         offset: Annotated[int, Field(ge=0)] = 0,
+        paths: Annotated[
+            list[Annotated[str, Field(max_length=300)]], Field(max_length=8)
+        ]
+        | None = None,
     ) -> dict[str, Any]:
-        """Read more of a long tool result that came back as a summary (it has details.ref). path: one part of it, keys and list indexes joined by '/' ('content/0/text', 'problems/12'). offset: the line to start from (next_offset of the last page). Ask only for what you need."""
-        return await rpc(
-            socket, "details", {"ref": ref, "path": path, "offset": offset}
-        )
+        """Read more of a long tool result that came back as a summary (it has details.ref). path: one part of it, keys and list indexes joined by '/' ('content/0/text', 'problems/12'). paths: up to 8 parts at once in one call ('problems/0/message', 'problems/1/message'). offset: the line to start from (next_offset of the last page). Ask only for what you need."""
+        params: dict[str, Any] = {"ref": ref, "path": path, "offset": offset}
+        if paths:
+            params["paths"] = paths
+        return await rpc(socket, "details", params)
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True))
     @tool_errors

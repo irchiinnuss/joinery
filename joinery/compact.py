@@ -323,3 +323,35 @@ def details(
         "total_lines": len(lines),
         "next_offset": end if end < len(lines) else None,
     }
+
+
+#: Parts one ``details`` call may read together.
+MAX_PATHS = 8
+
+
+def details_many(project: Path, ref: str, paths: list[str]) -> dict[str, Any]:
+    """Several parts of one kept result in one call ('problems/0/message',
+    'problems/1/message'), sharing one page's characters, so reading three failures
+    is one round trip, not three. A part that doesn't fit says how to page it."""
+    if not paths:
+        return details(project, ref)
+    if len(paths) > MAX_PATHS:
+        raise ValueError(f"Ask for at most {MAX_PATHS} paths at once.")
+    share = max(PAGE_CHARS // len(paths), 1000)
+    parts: list[dict[str, Any]] = []
+    tool = ""
+    for path in paths:
+        try:
+            page = details(project, ref, path)
+        except ValueError as exc:
+            if not _REF.match(ref) or "no longer kept" in str(exc):
+                raise
+            parts.append({"path": path, "error": str(exc)})
+            continue
+        tool = str(page["tool"])
+        text = str(page["lines"])
+        part: dict[str, Any] = {"path": path, "lines": text[:share]}
+        if len(text) > share or page["next_offset"] is not None:
+            part["more"] = f"details(ref='{ref}', path='{path}') pages the rest."
+        parts.append(part)
+    return {"ref": ref, "tool": tool, "parts": parts}
