@@ -46,6 +46,7 @@ from joinery import (
     references,
     replays,
     saves,
+    scoped_rules,
     setup_imports,
     share,
     skills,
@@ -1518,6 +1519,7 @@ def _parser() -> argparse.ArgumentParser:
     idle_runs.register(commands)
     project_map.register(commands)
     memory.register(commands)
+    scoped_rules.register(commands)
     project_commands.register(commands)
     headless.register(commands)
     skills.register(commands)
@@ -1548,6 +1550,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "memory":
         return memory.run(args)
+
+    if args.command == "rules":
+        return scoped_rules.run(args)
 
     if args.command == "command":
         return project_commands.run(args)

@@ -7,7 +7,9 @@ the user owns. Every agent reads it:
 * Joinery puts it in the stable prompt prefix of every turn, for every provider and
   role, after the role's rules and before the project map
   (``bridge.provider_process.turn_text``, ADR 0056). Comments and empty sections are
-  left out, and a file that is still only the template adds nothing.
+  left out, and a file that is still only the template adds nothing. Sections for
+  some files only ("## When working on game/ai/**") are left out too: the agent gets
+  them when it works on those files (``joinery.scoped_rules``, ADR 0088).
 * ``joinery.wiring.write_memory_stubs`` writes small ``CLAUDE.md`` / ``AGENTS.md`` /
   ``GEMINI.md`` files pointing at it (only where the project has none), so a coding
   agent run by hand in the project follows the same rules.
@@ -26,6 +28,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from joinery import scoped_rules
 from joinery.catalog import ROOT
 from joinery.transactions import FileTransaction
 
@@ -101,7 +104,9 @@ def read(project: Path) -> str:
 def block(project: Path) -> str:
     """The prompt block for ``project``: "" when the file is missing, empty or still
     the template; cut at ``LIMIT`` characters on a line, with a note."""
-    text = read(project)
+    # Rules for some files only are not in the prefix: the gateway gives them when
+    # the agent works on those files (joinery.scoped_rules, ADR 0088).
+    text = scoped_rules.strip(read(project))
     if not text or _template_only(text):
         return ""
     body = cleaned(text)
@@ -132,7 +137,8 @@ def entries(text: str) -> list[str]:
 
 def status(project: Path) -> dict[str, Any]:
     text = read(project)
-    size = len(cleaned(text)) if text and not _template_only(text) else 0
+    general = scoped_rules.strip(text)
+    size = len(cleaned(general)) if general and not _template_only(general) else 0
     return {
         "path": FILE,
         "exists": path(project).is_file(),
@@ -140,6 +146,7 @@ def status(project: Path) -> dict[str, Any]:
         "limit": LIMIT,
         "over": size > LIMIT,
         "remembered": entries(text),
+        "scoped_rules": len(scoped_rules.load(project)),
     }
 
 
@@ -179,7 +186,7 @@ def remembered(text: str, line: str) -> str:
         )
         lines.insert(at, f"- {item}")
         result = "\n".join(lines) + "\n"
-    grown = len(cleaned(result))
+    grown = len(cleaned(scoped_rules.strip(result)))
     if grown > LIMIT:
         raise ValueError(
             f"JOURNEYMAN.md would be longer than the {LIMIT} characters Journeyman "
