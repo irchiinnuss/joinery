@@ -89,6 +89,8 @@ var _joinery_layout := false
 
 
 func _enter_tree() -> void:
+	if OS.get_cmdline_user_args().has("--joinery-import-only"):  # an import run: no sidebar
+		return
 	_edits = EDITS_SCRIPT.new()
 	_shell = SHELL_SCRIPT.new()
 	scene_changed.connect(_on_edit_scene_changed)

@@ -115,8 +115,13 @@ GODOT_SUFFIXES = frozenset({".gd", ".tscn", ".tres", ".gdshader", ".glb"})
 GUT_RUNNER = "addons/gut/gut_cmdln.gd"
 TEST_DIRS = ("test", "tests")
 OFFLINE_SECONDS = 180
-#: Godot's import of a stage in the offline worker: the whole command.
-IMPORT_ARGV = ("godot", "--headless", "--path", "/work", "--editor", "--import")
+#: Godot's import of a stage in the offline worker: the whole command. The user
+#: argument tells Joinery's editor plugin to stay unbuilt (it only imports), which
+#: takes about a third off each import.
+IMPORT_ARGV = (
+    "godot", "--headless", "--path", "/work", "--editor", "--import",
+    "--", "--joinery-import-only",
+)  # fmt: skip
 #: SceneTree tests (``extends SceneTree`` under tests/): how many run, and how long each
 #: may take on a worker that runs natively. ``[checks] scene_test_seconds`` sets it.
 SCENE_TESTS_MAX = 20

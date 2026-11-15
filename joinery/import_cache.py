@@ -134,7 +134,9 @@ def loadable_marks(project: Path) -> dict[str, tuple[int, int]]:
 
 def run_import(godot: Path, project: Path, env: Mapping[str, str] | None = None) -> None:
     subprocess.run(
-        [str(godot), "--headless", "--path", str(project), "--import"],
+        # The user argument keeps Joinery's editor plugin unbuilt: it only imports.
+        [str(godot), "--headless", "--path", str(project), "--import"]
+        + ["--", "--joinery-import-only"],
         env=dict(env) if env is not None else None,
         capture_output=True,
         timeout=TIMEOUT,
