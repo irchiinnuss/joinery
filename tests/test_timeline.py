@@ -312,6 +312,39 @@ def test_godot_files_after_a_newer_entry_get_their_own(tmp_path: Path) -> None:
     assert files_of(project) == {"crate.gd.uid"}
 
 
+def test_an_entry_is_named_by_the_change_and_keeps_the_request(
+    tmp_path: Path,
+) -> None:
+    from joinery.transactions import change_title
+
+    project = started(tmp_path / "game")
+    tx = FileTransaction(project)
+    tx.request = "The tools are ready now. Go ahead and make the casting hall blockout"
+    tx.begin(tx.request[:160])
+    (tx.stage / "hall.toml").write_text("[rooms]\n")
+    (tx.stage / "hall.tscn").write_text("[gd_scene format=3]\n")
+    tx.summary = change_title(tx.diff())
+    tx.review()
+    assert FileTransaction.load(project, tx.id).request == tx.request
+    tx.accept()
+    message = git(project, "log", "-1", "--format=%B").strip()
+    assert message == (
+        "Add hall.toml and hall.tscn\n\nRequest: The tools are ready now. Go ahead "
+        "and make the casting hall blockout\n\nAccepted in Joinery"
+    )
+    # A request the summary already says isn't repeated.
+    assert timeline.message_for("Add a crate", request="Add a crate") == (
+        "Add a crate\n\nAccepted in Joinery"
+    )
+    many = [
+        {"path": f"art/{n}.png", "change": "modified", "before": "a", "after": "b"}
+        for n in "abcde"
+    ]
+    assert change_title(many) == "Change a.png, b.png and 3 more files"
+    uid = {"path": "a.gd.uid", "change": "created", "before": "", "after": "b"}
+    assert change_title([many[0], uid]) == "Change a.png"
+
+
 def test_messages_keep_a_short_subject() -> None:
     long = "Make " + "the lamp brighter " * 10
     message = timeline.message_for(long)

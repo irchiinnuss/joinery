@@ -460,8 +460,9 @@ def _drop_marker(project: Path) -> None:
 # --- Recording a change -----------------------------------------------------------
 
 
-def message_for(summary: str, reverted: bool = False) -> str:
-    """The commit message: the request summary, then where it was decided."""
+def message_for(summary: str, reverted: bool = False, request: str = "") -> str:
+    """The commit message: the change's summary, then the request it answered
+    (when that says more than the summary), then where it was decided."""
     lines = [line.strip() for line in summary.strip().splitlines() if line.strip()]
     subject = lines[0] if lines else "Project changes"
     body = lines[1:]
@@ -470,6 +471,9 @@ def message_for(summary: str, reverted: bool = False) -> str:
         subject = subject[:99].rstrip() + "…"
     if reverted:
         subject = "Revert: " + subject
+    asked = " ".join(request.split())
+    if asked and asked not in {" ".join(line.split()) for line in lines}:
+        body.append("Request: " + asked)
     parts = [subject]
     if body:
         parts.append("\n".join(body))
@@ -616,7 +620,11 @@ def _commit_retrying(project: Path, paths: Sequence[str], message: str) -> str:
 
 
 def record(
-    project: Path, paths: Sequence[str], summary: str, reverted: bool = False
+    project: Path,
+    paths: Sequence[str],
+    summary: str,
+    reverted: bool = False,
+    request: str = "",
 ) -> dict[str, str]:
     """Add one decided change to the timeline, if this project keeps one.
 
@@ -644,7 +652,7 @@ def record(
             "state": "failed",
             "message": f"Couldn't add this to the Timeline. {exc}",
         }
-    message = message_for(summary, reverted)
+    message = message_for(summary, reverted, request)
     queue = [*_owed(project), {"paths": sorted(set(mine)), "message": message}]
     commit, reason = "", ""
     still: list[dict[str, Any]] = []

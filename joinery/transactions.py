@@ -275,7 +275,10 @@ class FileTransaction:
         self.changes: list[dict[str, str]] = []
         #: CARRIED files this transaction replaced, with before and after hashes.
         self.carried: list[dict[str, str]] = []
+        #: The change's name: the agent's one line, or a title from its files.
         self.summary = ""
+        #: The user's request the change answers, kept as the timeline entry's detail.
+        self.request = ""
         self.include_dirs = True
         self.revertible = True
         self.created = 0.0
@@ -337,6 +340,7 @@ class FileTransaction:
             "state": self.state,
             "summary": self.summary,
             "include_dirs": self.include_dirs,
+            **({"request": self.request} if self.request else {}),
             "created": self.created,
         }
         if self.tools:
@@ -531,7 +535,11 @@ class FileTransaction:
         from joinery import timeline  # Late: timeline stages restores through here.
 
         self.timeline = timeline.record(
-            self.project, self._timeline_paths(changes), self.summary, reverted
+            self.project,
+            self._timeline_paths(changes),
+            self.summary,
+            reverted,
+            request=self.request,
         )
 
     def _timeline_paths(self, changes: list[dict[str, str]]) -> list[str]:
@@ -556,7 +564,7 @@ class FileTransaction:
             self.project,
             self._timeline_paths(self.changes),
             self.timeline.get("commit", ""),
-            timeline.message_for(self.summary),
+            timeline.message_for(self.summary, request=self.request),
         )
         if outcome.get("state") == "committed":
             self.timeline = outcome
@@ -756,6 +764,7 @@ class FileTransaction:
         ]
         transaction.state = raw["state"]
         transaction.summary = raw["summary"]
+        transaction.request = str(raw.get("request") or "")
         transaction.include_dirs = raw.get("include_dirs", False)
         transaction.revertible = raw.get("revertible", True) is not False
         transaction.created = float(raw.get("created", 0.0))
@@ -885,6 +894,38 @@ class FileTransaction:
             apply_retention(self.project)
         except (OSError, ValueError):
             pass
+
+
+#: Generated files left out of a change's title.
+_GENERATED = (".uid", ".import")
+
+
+def change_title(changes: list[dict[str, str]]) -> str:
+    """A short name for a change from the files it touches ("Add hall.toml and
+    hall.tscn", "Change door.gd, hinge.gd and 3 more files"), for a change whose
+    maker gave it none. Never the request's words."""
+    files = [
+        change
+        for change in changes
+        if DIRECTORY not in {change.get("before"), change.get("after")}
+    ]
+    named = [c for c in files if not c["path"].endswith(_GENERATED)] or files
+    if not named:
+        return "Project changes"
+    kinds = {c.get("change", "modified") for c in named}
+    verb = (
+        "Add"
+        if kinds == {"created"}
+        else "Remove"
+        if kinds == {"deleted"}
+        else "Change"
+    )
+    names = list(dict.fromkeys(Path(c["path"]).name for c in named))
+    if len(names) == 1:
+        return f"{verb} {names[0]}"
+    if len(names) <= 3:
+        return f"{verb} {', '.join(names[:-1])} and {names[-1]}"
+    return f"{verb} {', '.join(names[:2])} and {len(names) - 2} more files"
 
 
 def stage_change[T](

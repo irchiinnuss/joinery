@@ -357,6 +357,8 @@ class TurnController:
         self._facts: list[str] = []
         #: Each part of the request and what was done about it, for the card's list.
         self._done_items: list[str] = []
+        #: The agent's own one line naming its change, from its last submit.
+        self._named = ""
         #: The reviewer agent that reads each submitted change (None: no reviewer).
         self.reviewer: Reviewer | None = None
         #: Times the reviewer may send a change back this turn.
@@ -452,6 +454,7 @@ class TurnController:
         self._checked = None
         self._facts = []
         self._done_items = []
+        self._named = ""
         self.review_rounds = 0
         self._peer = self._peer_print = None
         self._sent_back = None
@@ -806,6 +809,8 @@ class TurnController:
         kitchen.tscn"); the request's card lists them when the change opens.
         """
         turn = self.turn_id
+        if origin == "agent" and summary.strip():
+            self._named = " ".join(summary.split())[:160]
         if facts is not None or origin == "agent":
             self._facts = [f.strip()[:40] for f in facts or [] if f.strip()][:3]
         if done is not None or origin == "agent":
@@ -1485,7 +1490,7 @@ class TurnController:
         if tx is not None:
             # Recorded with the change, so `joinery transactions list` shows them.
             tx.review_notes, tx.reviewer = notes, reviewer
-        preview = self.gateway.open_review(summary.strip() or self.request)
+        preview = self.gateway.open_review(summary.strip() or self._named)
         # The review panel's notes line reads review_notes and reviewer_status.
         preview["review_notes"] = notes
         preview["reviewer"] = reviewer
@@ -1546,7 +1551,9 @@ class TurnController:
                 unchanged = None
             self._last_chance = last
             try:
-                result = unchanged or await self.submit(self.request[:160], "joinery")
+                # Named by the agent's own summary when it gave one, else by its
+                # files (gateway.open_review); never by the request's words.
+                result = unchanged or await self.submit(self._named, "joinery")
             finally:
                 self._last_chance = False
             if (

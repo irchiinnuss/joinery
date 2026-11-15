@@ -223,7 +223,24 @@ def test_joinery_submits_a_change_the_agent_left(host: Host) -> None:
     positions = order(kinds, "message", "submitting", "file_preview", "done")
     assert positions == sorted(positions)
     preview = host.events[kinds.index("file_preview")]
-    assert preview["origin"] == "joinery" and preview["summary"] == "Make an ashtray"
+    # Named by what changed, never by the user's words.
+    assert preview["origin"] == "joinery" and preview["summary"] == "Add a.gd"
+
+
+def test_a_change_the_agent_left_keeps_its_own_name(host: Host) -> None:
+    async def agent(bridge: Any) -> AsyncIterator[Any]:
+        tx = host.stage({"scenes/ashtray.tscn": SCENE})
+        assert host.gateway is not None and host.gateway.turn is not None
+        # A submit that fails its checks still names the change.
+        result = await host.gateway.turn.submit("A brass ashtray", "agent")
+        assert result.status == "failed"
+        (tx.stage / "art/models").mkdir(parents=True)
+        (tx.stage / "art/models/ashtray.glb").write_text("glTF")
+        yield Done(ok=True)
+
+    host.run(agent)
+    preview = host.events[host.kinds().index("file_preview")]
+    assert preview["origin"] == "joinery" and preview["summary"] == "A brass ashtray"
 
 
 def test_a_failed_auto_submit_asks_once_then_holds_it_with_the_failure(

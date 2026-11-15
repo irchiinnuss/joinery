@@ -72,6 +72,7 @@ from joinery.transactions import (
     FileTransaction,
     ProjectLease,
     _sha256,
+    change_title,
     copy_file,
     inventory,
 )
@@ -925,6 +926,9 @@ class ProjectGateway:
         with changes accepted since; refused while a change waits for the user."""
         if self.transaction is None:
             self.transaction = FileTransaction(self.project)
+            # The request is the timeline entry's detail; the change is named when
+            # it opens for review (open_review).
+            self.transaction.request = self.request_summary
             self.transaction.begin(self.request_summary[:160] or "Project changes")
             self._synced = self.claims.generation
         elif self._synced < self.claims.generation:
@@ -1278,15 +1282,20 @@ class ProjectGateway:
     def open_review(self, summary: str) -> dict[str, Any]:
         """Put the checked stage in review and return its ``file_preview``.
 
-        ``summary`` is the agent's one line naming the change. The before/after
+        ``summary`` is the agent's one line naming the change; without one the change
+        is named by its files (transactions.change_title), never by the request's
+        words, which stay its detail (``tx.request``). The before/after
         renders are planned here and run afterwards (:meth:`start_media`); the
         preview already names the files they write, with ``media_pending``.
         """
         tx = self.transaction
         if tx is None:
             raise ValueError("Nothing is staged for review.")
-        if summary.strip():
-            tx.summary = summary.strip()[:160]
+        tx.summary = (
+            " ".join(summary.split())[:160]
+            if summary.strip()
+            else change_title(tx.diff())
+        )
         text_diffs = self.text_diff()
         reviewed = tx.review()
         media, jobs = plan(
