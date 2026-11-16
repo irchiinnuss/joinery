@@ -61,6 +61,7 @@ SIDEBAR_STATES = (
     "sending",
     "working",
     "trail",
+    "trail-tests",
     "trail-done",
     "trail-open",
     "submitting",

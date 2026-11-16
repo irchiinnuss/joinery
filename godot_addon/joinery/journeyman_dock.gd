@@ -756,11 +756,12 @@ func set_chat_state(state: String, detail: String) -> void:
 	_show_connection(detail if state == "error" else "")
 
 
-## A line of the work trail (chat_bridge.gd's trail_event) joins the request's card.
+## A line of the work trail (chat_bridge.gd's trail_event), or a test run as it goes (its
+## tests_event), joins the request's card.
 func add_trail(event: Dictionary) -> void:
 	var card := _card()
 	if card != null and _busy:
-		card.add_trail(event)
+		card.call("add_tests" if event.get("kind") == "tests" else "add_trail", event)
 		if event.get("state") == "running" and event.get("note") != "thought":
 			_progress = str(event.get("text", ""))
 		_sync()

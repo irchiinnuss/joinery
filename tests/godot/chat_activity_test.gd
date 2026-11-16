@@ -56,6 +56,7 @@ func _run() -> void:
 	await _trail(dock, backend)
 	await _review_opens(dock)
 	await _task_reviews(dock, backend)
+	await _follows(dock)
 	backend.queue_free()
 	dock.queue_free()
 	await process_frame
@@ -63,8 +64,8 @@ func _run() -> void:
 	quit(1 if _failed else 0)
 
 
-## The trail while it works, newest first; interim replies become steps; the steps fold when
-## done.
+## The trail while it works is one live line that replaces itself; interim replies become
+## steps; the steps fold when done and open to the whole record.
 func _activity(dock: Control) -> void:
 	var transcript: Object = dock.get("_transcript")
 	dock.call("_on_submit", "Make the door wider")
@@ -74,12 +75,11 @@ func _activity(dock: Control) -> void:
 	dock.call("set_chat_state", "working", "Opening door.blend in Blender")
 	dock.call("set_chat_state", "working", "Widening the door")
 	_check(
-		(
-			card.call("visible_steps")
-			== PackedStringArray(["Widening the door", "Opened door.blend in Blender"])
-		),
-		"Newest first, the one before ticked: %s" % card.call("visible_steps")
+		card.call("visible_steps") == PackedStringArray(["Widening the door"]),
+		"One live line, replaced by the newest step: %s" % card.call("visible_steps")
 	)
+	var footer: Node = dock.get("_footer")
+	_check(str(footer.call("text")).is_empty(), "The composer never says what is being done")
 	# The agent says what it is about to do, works, then answers.
 	dock.call("append_agent_text", "I'll open **door.blend** first.\nThen widen it.", true)
 	dock.call("finish_agent_response", true)
@@ -123,15 +123,20 @@ func _trail(dock: Control, backend: Node) -> void:
 	say.call({"id": "b", "text": "Editing level.gd", "file": "level.gd", "added": 12, "removed": 3})
 	say.call({"id": "a", "text": "Reading level.gd", "state": "done"})
 	_check(
-		(
-			card.call("visible_steps")
-			== PackedStringArray(
-				["Editing level.gd", "Read level.gd", "The spawn lives in level.gd."]
-			)
-		),
-		"Newest first, the read done: %s" % card.call("visible_steps")
+		card.call("visible_steps") == PackedStringArray(["Editing level.gd"]),
+		"One live line, the newest call: %s" % card.call("visible_steps")
 	)
 	var trail: Node = card.get("_steps")
+	_check(str(trail.call("live_note")).is_empty(), "A thought older than the step stays away")
+	say.call({"text": "Then I'll move the spawn up.", "note": "thought", "state": "done"})
+	_check(
+		str(trail.call("live_note")) == "Then I'll move the spawn up.",
+		"A newer thought is the live line's faint subline: %s" % trail.call("live_note")
+	)
+	_check(
+		card.call("visible_steps") == PackedStringArray(["Editing level.gd"]),
+		"…and the line itself stays: %s" % card.call("visible_steps")
+	)
 	var breathing := 0
 	for dot: Node in trail.find_children("*", "", true, false):
 		breathing += int(dot.has_meta("breathing"))
@@ -161,8 +166,94 @@ func _trail(dock: Control, backend: Node) -> void:
 		(card.call("visible_steps") as PackedStringArray)[0] == "Running the tests",
 		"A failed call keeps its words: %s" % card.call("visible_steps")
 	)
+	await _tests_run(card, trail, backend)
 	dock.call("set_chat_busy", false)
+	card.call("set_details_open", true)
+	var lines: PackedStringArray = card.call("visible_steps")
+	_check(lines.size() == 6, "Opened, the whole record shows: %s" % lines)
+	_check(lines.has("Read level.gd") and lines.has("Then I'll move the spawn up."), str(lines))
 	DirAccess.remove_absolute(picture)
+
+
+## A test run: the live line says the test it checks now, a failure by name under it; done,
+## the line is the summary, and the opened trail lists every result.
+func _tests_run(card: Control, trail: Node, backend: Node) -> void:
+	var run := {
+		"kind": "tests",
+		"id": "tests-1",
+		"label": "Running the scene tests",
+		"now": "Checking mower starts on lawn",
+		"total": 3,
+		"results": [],
+		"done": false,
+		"summary": "",
+	}
+	backend.call("_handle", run.duplicate(true))
+	_check(
+		card.call("visible_steps") == PackedStringArray(["Checking mower starts on lawn"]),
+		"The live line is the test it checks now: %s" % card.call("visible_steps")
+	)
+	run["now"] = "Checking hose reaches flowerbed"
+	run["results"] = [
+		{"name": "mower starts on lawn", "area": "garden", "passed": true, "reason": ""},
+		{"name": "gate closes", "area": "yard", "passed": false, "reason": "the gate is open"},
+	]
+	backend.call("_handle", run.duplicate(true))
+	_check(
+		card.call("visible_steps") == PackedStringArray(["Checking hose reaches flowerbed"]),
+		"…and replaces itself: %s" % card.call("visible_steps")
+	)
+	_check(
+		str(trail.call("live_note")) == "2 of 3 done · 1 failed: gate closes",
+		"How far, and a failure by name: %s" % trail.call("live_note")
+	)
+	run["now"] = ""
+	run["done"] = true
+	run["results"].append(
+		{"name": "hose reaches flowerbed", "area": "garden", "passed": true, "reason": ""}
+	)
+	run["summary"] = "3 checks: 2 passed, 1 failed — gate closes"
+	backend.call("_handle", run.duplicate(true))
+	_check(
+		card.call("visible_steps")[0] == "3 checks: 2 passed, 1 failed — gate closes",
+		"Done, the line is the summary: %s" % card.call("visible_steps")
+	)
+	var results: Node = trail.find_child("Results", true, false)
+	_check(results != null, "The results sit under the run's line")
+	if results != null:
+		var failed: Node = results.find_child("Failed", true, false)
+		_check(
+			failed != null and failed.find_child("Reason", true, false).text == "the gate is open",
+			"A failure says why"
+		)
+		_check(results.find_child("Area", true, false) != null, "Grouped by folder")
+
+
+## New output keeps the end in view while the user is at the bottom; scrolled up, they stay put
+## and a calm "New" pill offers the way down.
+func _follows(dock: Control) -> void:
+	var transcript: ScrollContainer = dock.get("_transcript")
+	var follower: Node = transcript.get("_follower")
+	for index: int in 30:
+		transcript.call("add_message", "Journeyman", "Line %d of a long conversation." % index)
+	for _frame: int in 4:
+		await process_frame
+	var bar := transcript.get_v_scroll_bar()
+	var end := func() -> bool: return transcript.scroll_vertical >= bar.max_value - bar.page - 2
+	_check(bar.max_value > bar.page and end.call(), "At the bottom, new output follows")
+	transcript.scroll_vertical = 0
+	await process_frame
+	_check(not bool(follower.get("following")), "Scrolled up, it stops following")
+	for index: int in 5:
+		transcript.call("add_message", "Journeyman", "More output %d." % index)
+	for _frame: int in 4:
+		await process_frame
+	_check(transcript.scroll_vertical == 0, "…and never yanks the reader down")
+	_check(bool(follower.call("offering")), "A calm pill says there is more below")
+	follower.call("follow")
+	for _frame: int in 3:
+		await process_frame
+	_check(end.call() and not bool(follower.call("offering")), "The pill brings the end back")
 
 
 ## A ready change opens its review by itself; while the user types it waits, and the message

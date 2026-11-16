@@ -1,7 +1,9 @@
 extends RefCounted
-## The visual suite's work trail: Journeyman's tool calls as short lines while it works (newest
-## first, one live line, an edit's +/− lines, a render that landed, a thought between steps,
-## Joinery's progress under the running call), then folded into "Completed in …", then opened.
+## The visual suite's work trail: while Journeyman works, ONE live line that replaces itself
+## (the current call with the clock, the newest thought faint under it), then a test run on that
+## line (the test it checks now, how far, a failure by name), then folded into "Completed in …",
+## then opened to the whole record (an edit's +/− lines, a render that landed, the test results
+## grouped by folder).
 ## [param suite] is visual_sidebar_test.gd, whose `_build`, `_shot` and `_thumbnail` these use;
 ## the screens are taken on a sidebar of their own, with [param beside]'s hidden meanwhile.
 
@@ -39,18 +41,47 @@ static func shots(suite: Variant, light: bool, width: int, beside: Control) -> v
 			"removed": 3,
 		},
 		{"id": "d", "text": "Editing level.gd", "state": "done"},
+		{"id": "e", "text": "Handing the change over"},
 		{
-			"text": "Now I'll hand the change over for its checks.",
+			"text": "Once its checks pass, I'll say what changed.",
 			"note": "thought",
 			"state": "done"
 		},
-		{"id": "e", "text": "Handing the change over"},
 	]:
 		event["kind"] = "trail"
 		chat.call("add_trail", event)
-	chat.set_chat_state("working", "Running scene tests: 3 of 8")
 	card.call("set_elapsed", 23)
 	await suite._shot("trail", light, width, chat)
+	var run := {
+		"kind": "tests",
+		"id": "tests-1",
+		"label": "Running the scene tests",
+		"now": "Checking hose reaches flowerbed",
+		"total": 4,
+		"results":
+		[
+			{"name": "mower starts on lawn", "area": "garden", "passed": true, "reason": ""},
+			{"name": "door opens wider", "area": "house", "passed": true, "reason": ""},
+			{
+				"name": "frame lines up",
+				"area": "house",
+				"passed": false,
+				"reason": "the frame is 4 cm left of the wall",
+			},
+		],
+		"done": false,
+		"summary": "",
+	}
+	chat.call("add_trail", run.duplicate(true))
+	card.call("set_elapsed", 31)
+	await suite._shot("trail-tests", light, width, chat)
+	run["now"] = ""
+	run["done"] = true
+	run["results"].append(
+		{"name": "hose reaches flowerbed", "area": "garden", "passed": true, "reason": ""}
+	)
+	run["summary"] = "4 checks: 3 passed, 1 failed — frame lines up"
+	chat.call("add_trail", run)
 
 	chat.call("add_trail", {"kind": "trail", "id": "e", "text": "", "state": "done"})
 	chat.append_agent_text("The door is 20% wider and the frame still lines up.", true)

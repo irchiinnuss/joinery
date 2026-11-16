@@ -1,24 +1,26 @@
 @tool
 extends VBoxContainer
 ## Journeyman's work trail on a request's card (sidebar_change_card.gd): what it is doing, as
-## it happens, newest first. Every agent's tool calls arrive as the host's "trail" events
-## (bridge/trail.py), so the lines read the same whichever agent runs: "Reading level.gd",
-## "Searching for Spawn", "Modelling the mug in Blender: bevel, 2 segments". Joinery's own
-## progress ("Checking the change…") is a line of its own, or, while a call runs, the quiet
-## line under it ("Running scene tests: 3 of 8"). The agent's short thoughts between the steps
-## sit among them in the faint colour.
+## it happens. Every agent's tool calls arrive as the host's "trail" events (bridge/trail.py),
+## so the lines read the same whichever agent runs: "Reading level.gd", "Searching the code for
+## Spawn", "Modelling the mug in Blender: bevel, 2 segments". Joinery's own progress
+## ("Checking the change…") is a line of its own, or, while a call runs, the quiet line under it.
+## A test run (joinery/test_progress.py) is one line that says the test it checks now, then the
+## run's summary, with every result under it.
 ##
-## Only the newest live line pulses (its dot breathes); every other line is still, with its tick
-## or its error. An edit shows its file's +/− line count; a call that made a picture shows it
-## small under its line. While the work runs the newest [constant LIVE_ROWS] lines show; the
-## whole trail shows when the card's fold is opened.
+## While the work runs, the trail is ONE live line that replaces itself: the current step with
+## its breathing dot (the card puts its clock at the end), and under it, faint, the call's
+## progress or the agent's newest short thought, also replaced. Nothing stacks up.
+##
+## The whole record is kept: when the card's fold is opened ([method show_all]), every line
+## shows, newest first, each with its tick or its error, an edit's +/− line count, a picture
+## that landed and a test run's results.
 
 const UI_THEME := preload("ui_theme.gd")
 const UI_MOTION := preload("ui_motion.gd")
 const UI := preload("ui_components.gd")
 const STYLE := preload("sidebar_style.gd")
-## Lines on show while the work runs, newest first.
-const LIVE_ROWS := 5
+const RESULTS := preload("sidebar_trail_results.gd")
 ## How a line ends -> [icon, tint role].
 const ENDS := {
 	"success": ["success", "success"],
@@ -58,11 +60,26 @@ const IRREGULAR := {
 ## Height of a picture that landed, in units.
 const PICTURE_UNITS := 40.0
 
+## The one live line while the work runs.
+var _live: VBoxContainer
+## Every line, newest first: shown when the fold is opened.
+var _history: VBoxContainer
+var _all := false
+## What the live line said last ([row, words, note]), so only a real change fades in.
+var _said: Array = []
+
 
 func _init() -> void:
 	name = "Trail"
 	theme_type_variation = "JoineryTight"
 	accessibility_name = "What Journeyman is doing"
+	_live = _build_live()
+	add_child(_live)
+	_history = VBoxContainer.new()
+	_history.name = "History"
+	_history.theme_type_variation = "JoineryTight"
+	_history.hide()
+	add_child(_history)
 
 
 ## A progress line from Joinery or the agent: the step before it gets its tick and this one
@@ -71,7 +88,7 @@ func add_line(text: String, detail := "") -> void:
 	_settle_kind("step", "success")
 	var row := _add_row("step", text, detail)
 	_set_live(row, true)
-	_sync_pulse()
+	_sync_live()
 
 
 ## The host's trail event: {id, text, state: running|done|failed, note: tool|thought, file,
@@ -81,6 +98,7 @@ func add_call(event: Dictionary) -> void:
 	if str(event.get("note", "")) == "thought":
 		if not text.is_empty():
 			_add_row("thought", text, text)
+			_sync_live()
 		return
 	var id := str(event.get("id", ""))
 	var row := _find(id)
@@ -102,80 +120,136 @@ func add_call(event: Dictionary) -> void:
 	if state in ["done", "failed"]:
 		_end(row, "success" if state == "done" else "error")
 		_show_picture(row, str(event.get("picture", "")))
-	_sync_pulse()
+	_sync_live()
 
 
-## Progress while a call runs goes under its line ("Running scene tests: 3 of 8"). False when
-## no call is live, so [param text] becomes a line of its own.
+## A test run's event ({id, label, now, total, results, done, summary}): its line says the test
+## it checks now ("Checking mower starts on lawn") with how far it is and any failure by name
+## under it; done, the line is the summary, ticked, or marked when a test failed.
+func add_tests(event: Dictionary) -> void:
+	var id := str(event.get("id", ""))
+	var label := str(event.get("label", "Running the tests"))
+	var results: Array = event.get("results", []) if event.get("results") is Array else []
+	var row := _find(id)
+	if row == null:
+		_settle_kind("step", "success")
+		row = _add_row("call", label, label)
+		row.set_meta("trail_id", id)
+		row.set_meta("tests", true)
+		_set_live(row, true)
+	var failed := results.filter(
+		func(each: Variant) -> bool: return not bool((each as Dictionary).get("passed", true))
+	)
+	var words := _words(row)
+	var note := row.find_child("Note", true, false) as Label
+	if bool(event.get("done", false)):
+		words.text = str(event.get("summary", label))
+		words.tooltip_text = words.text
+		_end(row, "error" if not failed.is_empty() else "success")
+	elif bool(row.get_meta("live", false)):
+		var now := str(event.get("now", ""))
+		words.text = now if not now.is_empty() else label
+		words.tooltip_text = words.text
+		var far := "%d of %d done" % [results.size(), int(event.get("total", 0))]
+		if not failed.is_empty():
+			var last: Dictionary = failed[-1]
+			far += " · %d failed: %s" % [failed.size(), str(last.get("name", ""))]
+		note.text = far
+		note.tooltip_text = far
+		note.show()
+		(row.get_node("Under") as Control).show()
+	var box := row.find_child("Results", true, false) as RESULTS
+	if box == null and not results.is_empty():
+		box = RESULTS.new()
+		note.get_parent().add_child(box)
+	if box != null:
+		box.show_results(results)
+		(row.get_node("Under") as Control).visible = note.visible or box.visible
+	_sync_live()
+
+
+## Progress while a call runs goes under its line ("Importing the result into Godot"). False
+## when no call is live, so [param text] becomes a line of its own.
 func on_progress(text: String) -> bool:
 	var row := _newest_live()
 	if row == null or str(row.get_meta("kind")) != "call":
 		return false
+	# A test run says its own progress; the ticking "Running scene tests: 3 of 8" repeats it.
+	if row.has_meta("tests"):
+		return true
 	for echo: String in ECHOES:
 		if text.begins_with(echo):
 			return true
 	var note := row.find_child("Note", true, false) as Label
 	note.text = text
 	note.tooltip_text = text
-	var under := row.get_node("Under") as Control
-	if not under.visible:
-		under.show()
-		UI_MOTION.fade_in(under)
+	note.show()
+	(row.get_node("Under") as Control).show()
+	_sync_live()
 	return true
 
 
 ## Every live line ends as [param kind] ("success", "stopped" or "error"); the art gate's line
 ## keeps waiting.
 func settle(kind: String) -> void:
-	for row: Node in get_children():
+	for row: Node in _rows():
 		if str(row.get_meta("kind", "")) != "gate":
 			_end(row as Control, kind)
-	_sync_pulse()
+	_sync_live()
 
 
-## All the lines ([param all], when the card's fold is opened), or the newest few.
+## The whole record ([param all], when the card's fold is opened), or the one live line.
 func show_all(all: bool) -> void:
-	var shown := 0
-	for row: Node in get_children():
-		if _gone(row):
-			continue
-		(row as Control).visible = all or shown < LIVE_ROWS
-		shown += 1
+	_all = all
+	_history.visible = all
+	for row: Node in _rows():
+		(row as Control).visible = true
+	if all:
+		UI_MOTION.stagger(_rows())
+	_sync_live()
 
 
-## The newest line's top row, where the card's clock rides while the work runs.
+## The live line's top row, where the card's clock rides while the work runs.
 func live_line() -> HBoxContainer:
-	for row: Node in get_children():
-		if not _gone(row):
-			return row.get_node("Line") as HBoxContainer
-	return null
+	return _live.get_node("Line") as HBoxContainer if _live.visible else null
 
 
-## The words of the lines on show, newest first.
+## The words on show: the live line, or every line newest first when opened.
 func texts() -> PackedStringArray:
 	var shown := PackedStringArray()
-	for row: Node in get_children():
-		if (row as Control).visible and not _gone(row):
+	if _live.visible:
+		shown.append(_live_words().text)
+	elif _history.visible:
+		for row: Node in _rows():
 			shown.append(_words(row).text)
 	return shown
+
+
+## The faint line under the live line ("" when none shows).
+func live_note() -> String:
+	var note := _live.get_node("Under/Note") as Label
+	return note.text if _live.visible and note.visible else ""
+
+
+## True once the trail has any line.
+func has_lines() -> bool:
+	return not _rows().is_empty()
 
 
 ## Lines that are steps or calls (thoughts aside), for "5 steps".
 func step_count() -> int:
 	var count := 0
-	for row: Node in get_children():
-		if str(row.get_meta("kind", "")) != "thought" and not _gone(row):
+	for row: Node in _rows():
+		if str(row.get_meta("kind", "")) != "thought":
 			count += 1
 	return count
 
 
-## True while [param text] is on show as the newest live line or the quiet line under it.
+## True while [param text] is on show as the live line or the quiet line under it.
 func shows(text: String) -> bool:
-	var row := _newest_live()
-	if row == null:
+	if _newest_live() == null:
 		return false
-	var note := row.find_child("Note", true, false) as Label
-	return _words(row).text == text or (note.is_visible_in_tree() and note.text == text)
+	return _live.visible and (_live_words().text == text or live_note() == text)
 
 
 ## The art gate's line ("Waiting for the look"); it pulses until [method end_gate].
@@ -183,7 +257,7 @@ func add_gate(text: String) -> Control:
 	var row := _add_row("gate", text, text)
 	row.name = "GateStep"
 	_set_live(row, true)
-	_sync_pulse()
+	_sync_live()
 	return row
 
 
@@ -192,7 +266,145 @@ func end_gate(row: Control, text: String) -> void:
 	row.set_meta("kind", "step")
 	_end(row, "success")
 	_words(row).text = text
-	_sync_pulse()
+	_sync_live()
+
+
+func _rows() -> Array:
+	return _history.get_children().filter(func(row: Node) -> bool: return not _gone(row))
+
+
+func _build_live() -> VBoxContainer:
+	var live := VBoxContainer.new()
+	live.name = "Live"
+	live.theme_type_variation = "JoineryFlush"
+	live.hide()
+	var line := HBoxContainer.new()
+	line.name = "Line"
+	line.theme_type_variation = "JoineryRowTight"
+	live.add_child(line)
+	var cell := _cell()
+	cell.name = "Cell"
+	line.add_child(cell)
+	var dot := UI.status_dot("working")
+	dot.name = "Dot"
+	cell.add_child(dot)
+	var mark := STYLE.glyph("success")
+	mark.name = "Mark"
+	mark.hide()
+	cell.add_child(mark)
+	var words := UI.label("", "JoineryCaption")
+	words.name = "Words"
+	words.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	words.mouse_filter = Control.MOUSE_FILTER_PASS
+	line.add_child(words)
+	var under := HBoxContainer.new()
+	under.name = "Under"
+	under.theme_type_variation = "JoineryRowTight"
+	under.hide()
+	live.add_child(under)
+	under.add_child(_cell())
+	var note := UI.label("", "JoineryFaint")
+	note.name = "Note"
+	note.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	note.mouse_filter = Control.MOUSE_FILTER_PASS
+	under.add_child(note)
+	return live
+
+
+## The live line follows the newest step: its words, its dot (breathing while it runs) or
+## its end mark, an edit's +/− lines; under it the call's progress, or a thought newer than
+## the step. Only a real change fades in, so a steady line stays still.
+func _sync_live() -> void:
+	var step: Control = null
+	var thought: Control = null
+	for row: Node in _rows():
+		if str(row.get_meta("kind", "")) == "thought":
+			if thought == null:
+				thought = row as Control
+		else:
+			step = row as Control
+			break
+	_live.visible = not _all and (step != null or thought != null)
+	if not _live.visible:
+		_stop_dot()
+		return
+	var words := _live_words()
+	var cell := _live.get_node("Line/Cell") as Control
+	var dot := cell.get_node("Dot") as CanvasItem
+	var mark := cell.get_node("Mark") as TextureRect
+	var said := ""
+	var under := ""
+	if step == null:
+		# Before the first step, the agent's thought is the line, from the trail's own edge.
+		said = _words(thought).text
+		words.theme_type_variation = "JoineryFaint"
+		cell.hide()
+	else:
+		said = _words(step).text
+		words.theme_type_variation = "JoineryCaption"
+		cell.show()
+		var running := bool(step.get_meta("live", false))
+		dot.visible = running
+		mark.visible = not running
+		if running:
+			if not dot.has_meta("breathing"):
+				dot.set_meta("breathing", true)
+				UI_MOTION.breathe(dot)
+		else:
+			_stop_dot()
+			var spec: Array = ENDS.get(str(step.get_meta("end", "success")), ENDS["success"])
+			STYLE.set_glyph(mark, spec[0], spec[1])
+		var note := step.find_child("Note", true, false) as Label
+		if note.visible and not note.text.is_empty() and running:
+			under = note.text
+		elif thought != null:
+			under = _words(thought).text
+	_sync_size(step)
+	words.text = said
+	words.tooltip_text = said
+	var note_label := _live.get_node("Under/Note") as Label
+	note_label.text = under
+	note_label.tooltip_text = under
+	var under_row := _live.get_node("Under") as Control
+	var was := _said.duplicate()
+	_said = [step, said, under]
+	under_row.visible = not under.is_empty()
+	if was.is_empty():
+		UI_MOTION.fade_in(_live)
+		return
+	if was[0] != step or str(was[1]) != said:
+		UI_MOTION.fade_in(words)
+	if under_row.visible and str(was[2]) != under:
+		UI_MOTION.fade_in(under_row)
+
+
+## The live line's "+12 −3", copied from its step.
+func _sync_size(step: Control) -> void:
+	var line := _live.get_node("Line") as HBoxContainer
+	var old := line.get_node_or_null("Size")
+	if old != null:
+		line.remove_child(old)
+		old.queue_free()
+	if step == null or not step.has_meta("size"):
+		return
+	var counts: Array = step.get_meta("size")
+	var size_row := _size_row(str(step.get_meta("file", "")), int(counts[0]), int(counts[1]))
+	line.add_child(size_row)
+	# The clock (the card's) stays last.
+	for child: Node in line.get_children():
+		if child is Label and child.name != "Words" and child != size_row:
+			line.move_child(child, -1)
+
+
+func _stop_dot() -> void:
+	var dot := _live.get_node("Line/Cell/Dot") as CanvasItem
+	if dot.has_meta("breathing"):
+		dot.remove_meta("breathing")
+		UI_MOTION.stop(dot)
+
+
+func _live_words() -> Label:
+	return _live.get_node("Line/Words") as Label
 
 
 func _add_row(kind: String, text: String, detail: String) -> VBoxContainer:
@@ -219,7 +431,8 @@ func _add_row(kind: String, text: String, detail: String) -> VBoxContainer:
 	words.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	words.mouse_filter = Control.MOUSE_FILTER_PASS
 	line.add_child(words)
-	# Under the line, after the dot's column: the call's progress and a picture it made.
+	# Under the line, after the dot's column: the call's progress, a picture it made, a test
+	# run's results.
 	var under := HBoxContainer.new()
 	under.name = "Under"
 	under.theme_type_variation = "JoineryRowTight"
@@ -234,10 +447,10 @@ func _add_row(kind: String, text: String, detail: String) -> VBoxContainer:
 	note.name = "Note"
 	note.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	note.mouse_filter = Control.MOUSE_FILTER_PASS
+	note.hide()
 	body.add_child(note)
-	add_child(row)
-	move_child(row, 0)
-	UI_MOTION.stagger([row])
+	_history.add_child(row)
+	_history.move_child(row, 0)
 	return row
 
 
@@ -259,6 +472,12 @@ func _show_size(row: Control, file: String, added: int, removed: int) -> void:
 	if added == 0 and removed == 0:
 		return
 	var line := row.get_node("Line") as HBoxContainer
+	line.add_child(_size_row(file, added, removed))
+	row.set_meta("size", [added, removed])
+	row.set_meta("file", file)
+
+
+func _size_row(file: String, added: int, removed: int) -> HBoxContainer:
 	var size_row := HBoxContainer.new()
 	size_row.name = "Size"
 	size_row.theme_type_variation = "JoineryRowTight"
@@ -274,8 +493,7 @@ func _show_size(row: Control, file: String, added: int, removed: int) -> void:
 		var count := UI.label(str(part[0]), str(part[1]))
 		count.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
 		size_row.add_child(count)
-	line.add_child(size_row)
-	row.set_meta("size", [added, removed])
+	return size_row
 
 
 ## A render or texture the call made, small under its line. A picture that won't load shows
@@ -308,20 +526,19 @@ func _show_picture(row: Control, path: String) -> void:
 	note.hide()
 	note.get_parent().add_child(picture)
 	(row.get_node("Under") as Control).show()
-	UI_MOTION.fade_in(picture)
 
 
 func _find(id: String) -> Control:
 	if id.is_empty():
 		return null
-	for row: Node in get_children():
+	for row: Node in _rows():
 		if str(row.get_meta("trail_id", "")) == id:
 			return row as Control
 	return null
 
 
 func _newest_live() -> Control:
-	for row: Node in get_children():
+	for row: Node in _rows():
 		if bool(row.get_meta("live", false)):
 			return row as Control
 	return null
@@ -333,7 +550,7 @@ func _set_live(row: Control, on: bool) -> void:
 
 ## Every live line of [param kind] ends as [param end].
 func _settle_kind(kind: String, end: String) -> void:
-	for row: Node in get_children():
+	for row: Node in _rows():
 		if str(row.get_meta("kind", "")) == kind:
 			_end(row as Control, end)
 
@@ -344,9 +561,9 @@ func _end(row: Control, kind: String) -> void:
 	if not bool(row.get_meta("live", false)):
 		return
 	_set_live(row, false)
+	row.set_meta("end", kind)
 	var cell := row.get_node("Line/Cell") as CenterContainer
 	for dot: Node in cell.get_children():
-		UI_MOTION.stop(dot as CanvasItem)
 		cell.remove_child(dot)
 		dot.queue_free()
 	var spec: Array = ENDS.get(kind, ENDS["success"])
@@ -356,26 +573,13 @@ func _end(row: Control, kind: String) -> void:
 	var words := _words(row)
 	words.text = past_tense(words.text) if kind == "success" else settled(words.text)
 	words.tooltip_text = words.text if words.tooltip_text.is_empty() else words.tooltip_text
-	if row.find_child("Picture", true, false) == null:
-		# The progress under a finished call has said its piece.
-		(row.get_node("Under") as Control).hide()
-
-
-## Only the newest live line pulses; every other dot stays still.
-func _sync_pulse() -> void:
-	var newest := _newest_live()
-	for row: Node in get_children():
-		var cell := row.get_node("Line/Cell")
-		for dot: Node in cell.get_children():
-			if not dot is UI.StatusDot:
-				continue
-			if row == newest:
-				if not dot.has_meta("breathing"):
-					dot.set_meta("breathing", true)
-					UI_MOTION.breathe(dot as CanvasItem)
-			elif dot.has_meta("breathing"):
-				dot.remove_meta("breathing")
-				UI_MOTION.stop(dot as CanvasItem)
+	# The progress under a finished call has said its piece; a picture and results stay.
+	(row.find_child("Note", true, false) as Control).hide()
+	var keeps := (
+		row.find_child("Picture", true, false) != null
+		or row.find_child("Results", true, false) != null
+	)
+	(row.get_node("Under") as Control).visible = keeps
 
 
 static func _words(row: Node) -> Label:

@@ -76,6 +76,10 @@ var bridge: Object:
 			var trail := Callable(dock, "add_trail")
 			if not bridge.is_connected("trail_event", trail):
 				bridge.connect("trail_event", trail)
+		if bridge != null and bridge.has_signal("tests_event") and dock != null:
+			var tests := Callable(dock, "add_trail")
+			if not bridge.is_connected("tests_event", tests):
+				bridge.connect("tests_event", tests)
 		if variants != null:
 			variants.call("follow", bridge)
 		if todo != null:
@@ -253,6 +257,12 @@ func on_event(event: Dictionary) -> void:
 			var starting := str(event.get("state", "")) == "running"
 			if each != null and starting and str(event.get("note", "")) != "thought":
 				each.call("set_step", str(event.get("text", "")))
+		"tests":
+			# The test it checks now, then the run's summary.
+			var each := card(id)
+			var said := str(event.get("summary" if event.get("done") else "now", ""))
+			if each != null and not said.is_empty():
+				each.call("set_step", said)
 	_sync()
 
 

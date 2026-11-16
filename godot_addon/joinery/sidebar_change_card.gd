@@ -30,10 +30,10 @@ extends VBoxContainer
 ## A turn keeps one rhythm: the bubble, the progress (status line and steps), the thumbnail and
 ## the error are SPACE.3 apart (JoineryStack); rows inside the progress stay SPACE.1 apart.
 ##
-## While the turn works its trail shows under the status line (sidebar_trail.gd): each tool
-## call as a short line as it happens, newest first, the agent's short thoughts between them,
-## an edit's +/− line count and a picture that landed. Only the newest live line pulses.
-## Opening the folded line shows the whole trail.
+## While the turn works its trail shows under the status line (sidebar_trail.gd) as ONE live
+## line that replaces itself: the current step (with the clock), and under it, faint, the
+## call's progress or the agent's newest short thought. Opening the folded line shows the
+## whole trail: every call, thought, edit size, picture and test result.
 ##
 ## When the turn ends the steps fold away behind the reply's timing line ("Completed in 1:12"),
 ## which the transcript moves into the card's status line ([method adopt_timing]); opening it
@@ -236,7 +236,7 @@ func _init(text := "", context: Array = []) -> void:
 	_fold.toggled.connect(
 		func(open: bool) -> void:
 			_show_all_steps(open)
-			_steps.visible = open and _steps.get_child_count() > 0
+			_steps.visible = open and _steps.has_lines()
 			if _steps.visible:
 				UI_MOTION.fade_in(_steps)
 			_sync_activity()
@@ -388,6 +388,18 @@ func add_step(text: String, detail := "") -> void:
 	_sync_activity()
 
 
+## A test run as it goes (joinery/test_progress.py): the live line says the test it checks
+## now; its line in the trail ends as the run's summary with every result under it.
+func add_tests(event: Dictionary) -> void:
+	if state in ["sending", "failed"]:
+		set_sent()
+	_steps.add_tests(event)
+	if not (_fold.visible or _summary != null):
+		_show_all_steps(false)
+		_steps.visible = _steps.has_lines()
+	_sync_activity()
+
+
 ## A line of the work trail from the host: {id, text, state, note, file, added, removed,
 ## picture} (bridge/trail.py). Apps it names join the status line.
 func add_trail(event: Dictionary) -> void:
@@ -399,7 +411,7 @@ func add_trail(event: Dictionary) -> void:
 		_sync_activity()
 		return
 	_show_all_steps(false)
-	_steps.visible = _steps.get_child_count() > 0
+	_steps.visible = _steps.has_lines()
 	_sync_activity()
 
 
@@ -447,7 +459,7 @@ func adopt_timing(summary: Button, details: Label) -> void:
 ## fades the steps in.
 func set_details_open(open: bool, animate := false) -> void:
 	_show_all_steps(open)
-	_steps.visible = open and _steps.get_child_count() > 0
+	_steps.visible = open and _steps.has_lines()
 	if _steps.visible and animate:
 		UI_MOTION.fade_in(_steps)
 	if _details != null:
