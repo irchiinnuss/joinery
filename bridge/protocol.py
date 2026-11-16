@@ -98,6 +98,27 @@ class ToolActivity(_Msg):
     call_id: str = ""
 
 
+class Trail(_Msg):
+    """One line of the work trail (``bridge.trail``): a tool call as it starts and
+    ends, or a short thought between the steps.
+
+    A call is reported running, then done or failed under the same ``id``; the
+    later events repeat its ``text`` and may add a ``picture`` that landed. An
+    edit says its ``file`` and the lines ``added`` and ``removed``.
+    """
+
+    kind: Literal["trail"] = "trail"
+    id: str = ""
+    text: str
+    state: Literal["running", "done", "failed"] = "running"
+    note: Literal["tool", "thought"] = "tool"
+    file: str = ""
+    added: int = 0
+    removed: int = 0
+    #: A render or texture the call made: an absolute path or res://.
+    picture: str = ""
+
+
 class Preview(_Msg):
     """A before/after artifact for review: image path, clip, or audio A/B."""
 
@@ -179,6 +200,7 @@ class EditorAction(_Msg):
 AgentEvent = (
     Step
     | ToolActivity
+    | Trail
     | Preview
     | Message
     | MessageDelta

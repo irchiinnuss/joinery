@@ -26,7 +26,7 @@ from bridge.protocol import (
     MessageDelta,
     Prompt,
     SidebarMessage,
-    ToolActivity,
+    Trail,
     Usage,
 )
 from joinery import done_when, metrics
@@ -297,8 +297,10 @@ async def _events(
             )
         if isinstance(event, (MessageDelta, Message)):
             timing.response()
-        if isinstance(event, ToolActivity):
-            gateway.progress("Using " + event.server.capitalize() + "…")
+        if isinstance(event, Trail) and event.picture:
+            event = event.model_copy(
+                update={"picture": picture_path(gateway, event.picture)}
+            )
         if isinstance(event, Usage):
             controller.meter.update(event.context_used, event.context_window)
             usage = event
@@ -327,6 +329,27 @@ async def _events(
             continue
         emit(event.model_dump())
     return ok, usage
+
+
+def picture_path(gateway: Any, path: str) -> str:
+    """A picture a tool call named, as a file the sidebar can load: a res:// path
+    from the change's stage when it is there, else from the project; "" when the
+    picture isn't on disk."""
+    found: list[Path] = []
+    if path.startswith("res://"):
+        relative = path.removeprefix("res://")
+        transaction = getattr(gateway, "transaction", None)
+        if transaction is not None:
+            found.append(Path(transaction.stage) / relative)
+        project = getattr(gateway, "project", None)
+        if project is not None:
+            found.append(Path(project) / relative)
+    else:
+        found.append(Path(path))
+    for candidate in found:
+        if candidate.is_absolute() and candidate.is_file():
+            return str(candidate)
+    return ""
 
 
 async def settle_compaction(controller: TurnController) -> None:

@@ -197,7 +197,10 @@ class ChatRecorder:
                 else {"type": "notice", "text": text, "level": level}
             )
             self._save(lambda: chats.append(self.project, self.chat_id, entry))
-        elif kind == "progress":
+        elif kind in {"progress", "trail"}:
+            # Each step on the work trail as it starts, so a reopened chat shows it.
+            if kind == "trail" and event.get("state", "running") != "running":
+                return
             text = str(event.get("text", "")).strip()
             if text and text not in self._steps:
                 self._steps.append(text)

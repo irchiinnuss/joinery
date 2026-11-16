@@ -10,6 +10,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
+from bridge import trail
 from bridge.models import ModelChoice, route
 from bridge.protocol import (
     AgentEvent,
@@ -19,6 +20,7 @@ from bridge.protocol import (
     Models,
     Prompt,
     ToolActivity,
+    Trail,
     Usage,
 )
 from bridge.provider_process import (
@@ -41,6 +43,50 @@ from joinery.stage_access import NO_STAGE, STAGE_ENV
 def _count(source: dict[str, Any], key: str) -> int:
     value = source.get(key)
     return value if isinstance(value, int) and value > 0 else 0
+
+
+def acp_trail(calls: trail.Calls, update: dict[str, Any]) -> Trail:
+    """An ACP agent's tool call (Gemini CLI, opencode) as a line of the work trail:
+    from its kind, the files it names and its raw input, its own title otherwise."""
+    identifier = str(update.get("toolCallId", ""))
+    title = str(update.get("title", "") or "")
+    kind = str(update.get("kind", "") or "")
+    raw = update.get("rawInput")
+    args: dict[str, Any] = raw if isinstance(raw, dict) else {}
+    places = [p for p in update.get("locations") or [] if isinstance(p, dict)]
+    path = str(places[0].get("path", "")) if places else ""
+    diffs = [
+        c
+        for c in update.get("content") or []
+        if isinstance(c, dict) and c.get("type") == "diff"
+    ]
+    if isinstance(args.get("tool"), str) and "server" in args:
+        return calls.start(identifier, "call_tool", args)
+    if trail.tool_name(title) in trail.JOINERY or title.startswith("mcp__"):
+        return calls.start(identifier, title, args)
+    if kind == "edit" or diffs:
+        added = removed = 0
+        for diff in diffs:
+            more, fewer = trail.text_size(
+                str(diff.get("oldText") or ""), str(diff.get("newText") or "")
+            )
+            added, removed = added + more, removed + fewer
+        named = path or (str(diffs[0].get("path", "")) if diffs else "")
+        text = f"Editing {trail.file_name(named)}" if named else title
+        return calls.start_line(
+            identifier, text, file=named, added=added, removed=removed
+        )
+    if kind == "read" and (path or args):
+        return calls.start(identifier, "read", {"path": path, **args})
+    if kind == "search" and args:
+        return calls.start(identifier, "grep", args)
+    if kind == "execute":
+        return calls.start_line(
+            identifier, trail.command_line(args.get("command") or title)
+        )
+    if kind == "fetch" and args:
+        return calls.start(identifier, "web_fetch", args)
+    return calls.start_line(identifier, title or "Working")
 
 
 class ACPUsage:
@@ -517,6 +563,9 @@ class ACPSession:
         )
         self.instructed = True
         streamed = False
+        trail_calls = trail.Calls()
+        #: The agent's thinking since its last step, said as one line before the next.
+        thinking: list[str] = []
         try:
             while not task.done() or not self.events.empty():
                 next_event = asyncio.create_task(self.events.get())
@@ -535,6 +584,27 @@ class ACPSession:
                 if update.get("sessionUpdate") == "config_option_update":
                     self.load_config(update.get("configOptions", []))
                     yield Models(models=self.model_choices)
+                kind = update.get("sessionUpdate")
+                if kind == "agent_thought_chunk":
+                    thinking.append(str(update.get("content", {}).get("text", "")))
+                    continue
+                if thinking and kind in {"agent_message_chunk", "tool_call"}:
+                    if line := trail.thinking("".join(thinking)):
+                        yield line
+                    thinking.clear()
+                if kind == "tool_call":
+                    yield acp_trail(trail_calls, update)
+                elif kind == "tool_call_update" and update.get("status") in {
+                    "completed",
+                    "failed",
+                }:
+                    ended = trail_calls.end(
+                        str(update.get("toolCallId", "")),
+                        update.get("status") == "completed",
+                        [update.get("content"), update.get("rawOutput")],
+                    )
+                    if ended is not None:
+                        yield ended
                 if (
                     update.get("sessionUpdate") == "agent_message_chunk"
                     and update.get("content", {}).get("type") == "text"
@@ -553,6 +623,8 @@ class ACPSession:
                 ):
                     yield usage
             response = await task
+            for ended in trail_calls.end_all():
+                yield ended
             if (usage := self.usage.turn(response.get("usage"))) is not None:
                 yield usage
             yield Done(ok=response.get("stopReason") == "end_turn")

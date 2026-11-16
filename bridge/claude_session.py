@@ -12,6 +12,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
+from bridge import trail
 from bridge.connect_errors import ConnectError, reason_of, tail
 from bridge.models import ModelChoice
 from bridge.protocol import (
@@ -566,6 +567,8 @@ class ClaudeSession:
         #: until its result shows what really happened: one activity per call,
         #: with the outcome it really had.
         calls: dict[str, tuple[str, str]] = {}
+        #: The same calls on the work trail, with what they were doing.
+        trail_calls = trail.Calls()
         try:
             while line := await self.process.stdout.readline():
                 try:
@@ -589,9 +592,13 @@ class ClaudeSession:
                     for part in event.get("message", {}).get("content", []):
                         if part.get("type") == "text" and not streamed:
                             yield Message(text=str(part["text"]))
+                        elif part.get("type") == "thinking":
+                            if thought := trail.thinking(str(part.get("thinking", ""))):
+                                yield thought
                         elif part.get("type") == "tool_use":
                             name = str(part.get("name", ""))
                             call_id = str(part.get("id", ""))
+                            yield trail_calls.start(call_id, name, part.get("input"))
                             reason = permitted(
                                 name, part.get("input"), self.inspection_only
                             )
@@ -616,6 +623,11 @@ class ClaudeSession:
                         if not isinstance(part, dict):
                             continue
                         call_id = str(part.get("tool_use_id", ""))
+                        ended = trail_calls.end(
+                            call_id, not part.get("is_error"), part.get("content")
+                        )
+                        if ended is not None:
+                            yield ended
                         if call_id not in calls:
                             continue
                         name, guess = calls.pop(call_id)
@@ -654,6 +666,8 @@ class ClaudeSession:
                     call_id=call_id,
                 )
             calls.clear()
+            for ended in trail_calls.end_all():
+                yield ended
             await self.process.wait()
             if self.process.returncode and not ok:
                 details = tail((await stderr).decode("utf-8", "replace"))

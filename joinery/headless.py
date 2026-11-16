@@ -60,6 +60,7 @@ EVENTS = frozenset(
         "turn_state",
         "step",
         "tool_activity",
+        "trail",
         "progress",
         "check_problems",
         "usage",
@@ -735,8 +736,10 @@ def describe(event: dict[str, Any]) -> str:
     kind = event.get("kind")
     if kind == "turn_state":
         return f"· {event.get('state', '')}"
-    if kind == "tool_activity" and event.get("allowed") is not False:
-        return f"  {event.get('server', '')} {event.get('tool', '')}".rstrip()
+    if kind == "trail":
+        return trail_line(event)
+    if kind == "progress":
+        return f"  {event.get('text', '')}".rstrip()
     if kind == "check_problems":
         return f"  checks: {len(event.get('problems') or [])} to fix"
     if kind == "notice":
@@ -749,6 +752,25 @@ def describe(event: dict[str, Any]) -> str:
         return f"Chat {event['chat_id']} ({event.get('mode', 'new')})"
     if kind == "tool_activity" and event.get("allowed") is False:
         return f"  refused: {event.get('tool', '')}: {event.get('reason', '')}"
+    return ""
+
+
+def trail_line(event: dict[str, Any]) -> str:
+    """A line of the work trail (bridge.trail) as the sidebar shows it: each call as
+    it starts ("  › Editing level.gd  +12 −3"), a thought between the steps
+    ("  … I'll widen the door first."), a call that failed, a picture that landed."""
+    text = str(event.get("text", ""))
+    state = event.get("state", "running")
+    if event.get("note") == "thought":
+        return f"  … {text}"
+    if state == "running":
+        added, removed = int(event.get("added") or 0), int(event.get("removed") or 0)
+        size = f"  +{added} −{removed}" if added or removed else ""
+        return f"  › {text}{size}"
+    if state == "failed":
+        return f"  ✗ {text}"
+    if event.get("picture"):
+        return f"    picture: {event['picture']}"
     return ""
 
 

@@ -14,6 +14,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
+from bridge import trail
 from bridge.connect_errors import ConnectError, ProviderGone, StderrTail
 from bridge.instructions import ECONOMY_GUIDE, GAME_GUIDE, REVIEW_GUIDE
 from bridge.models import ModelChoice
@@ -24,6 +25,7 @@ from bridge.protocol import (
     Message,
     MessageDelta,
     Prompt,
+    Trail,
     Usage,
 )
 from bridge.provider_process import offered_role, proxy_args, stop_process, turn_text
@@ -125,6 +127,36 @@ def token_usage(data: object, model: str = "") -> Usage | None:
         output_tokens=count(total, "outputTokens"),
         cached_tokens=count(total, "cachedInputTokens"),
     )
+
+
+def codex_trail(calls: trail.Calls, item: dict[str, Any]) -> Trail | None:
+    """A Codex item that started, as a line of the work trail (None for an item that
+    isn't a step: a message, a thought still being written)."""
+    identifier = str(item.get("id", ""))
+    kind = item.get("type")
+    if kind == "mcpToolCall":
+        server = str(item.get("server", ""))
+        tool = str(item.get("tool", ""))
+        name = f"mcp__{server}__{tool}" if server else tool
+        return calls.start(identifier, name, item.get("arguments"))
+    if kind == "commandExecution":
+        return calls.start(identifier, "shell", {"command": item.get("command", "")})
+    if kind == "webSearch":
+        return calls.start(identifier, "web_search", {"query": item.get("query", "")})
+    if kind == "fileChange":
+        changes = [c for c in item.get("changes") or [] if isinstance(c, dict)]
+        added = removed = 0
+        for change in changes:
+            more, fewer = trail.diff_size(str(change.get("diff", "")))
+            added, removed = added + more, removed + fewer
+        first = trail.file_name(changes[0].get("path", "")) if changes else ""
+        text = f"Editing {first}" if first else "Editing files"
+        if len(changes) > 1:
+            text += f" and {len(changes) - 1} more"
+        return calls.start_line(
+            identifier, text, file=first, added=added, removed=removed
+        )
+    return None
 
 
 class CodexSession:
@@ -513,6 +545,7 @@ class CodexSession:
             self._turn_ready.set()
         seen: set[str] = set()
         last_item = ""
+        trail_calls = trail.Calls()
         try:
             while True:
                 event = await asyncio.wait_for(self._events.get(), timeout=180)
@@ -530,6 +563,8 @@ class CodexSession:
                     yield EditorAction(**params["action"])
                 elif method == "item/started":
                     item = params.get("item", {})
+                    if (line := codex_trail(trail_calls, item)) is not None:
+                        yield line
                     if item.get("type") == "mcpToolCall":
                         from bridge.protocol import ToolActivity
 
@@ -550,6 +585,18 @@ class CodexSession:
                     last_item = item
                 elif method == "item/completed":
                     item_data = params.get("item", {})
+                    if item_data.get("type") == "reasoning":
+                        summary = item_data.get("summary")
+                        words = summary if isinstance(summary, list) else [summary]
+                        if line := trail.thinking(" ".join(str(w) for w in words if w)):
+                            yield line
+                    ended = trail_calls.end(
+                        str(item_data.get("id", "")),
+                        str(item_data.get("status", "")) not in {"failed", "declined"},
+                        item_data.get("result"),
+                    )
+                    if ended is not None:
+                        yield ended
                     if (
                         item_data.get("type") == "agentMessage"
                         and item_data.get("id") not in seen
