@@ -161,11 +161,10 @@ func _check_docks(base: Control, classic: bool) -> void:
 		if classic or panels == null:
 			continue
 		# Joinery hides the panels once the editor has loaded its layout, which a
-		# slow machine reaches a little later: give it up to 3 s.
-		var waited := 0
-		while control.is_visible_in_tree() and waited < 180:
-			await get_tree().process_frame
-			waited += 1
+		# slow machine reaches a little later: give it up to 10 s of wall time.
+		var deadline := Time.get_ticks_msec() + 10000
+		while control.is_visible_in_tree() and Time.get_ticks_msec() < deadline:
+			await get_tree().create_timer(0.1).timeout
 		_check(not control.is_visible_in_tree(), type + " starts hidden")
 		var id := str(panels.call("_key", control))
 		panels.call("show_panel", id)

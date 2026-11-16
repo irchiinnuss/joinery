@@ -46,6 +46,8 @@ const GLYPHS := {"Journeyman": "chats", "Review": "check"}
 const ONE_TAB := "joinery_one_tab"
 ## Seconds between looks at Output's mark.
 const MARK_INTERVAL := 0.5
+## How long after start-up the editor may still reopen docks on its own (ms).
+const SETTLE_MS := 20000
 
 var _base: Control
 var _settings: EditorSettings
@@ -56,6 +58,9 @@ var _menu: EditorContextMenuPlugin
 var _rail: Control
 ## True once the user opened a panel, so the start-up passes leave their choice alone.
 var _touched := false
+## When attach ran (ms). Until SETTLE_MS later, docks the editor itself reopens (its default
+## layout on a slow first launch) are closed again rather than saved as the user's choice.
+var _attached_at := -1
 ## What the rail last showed (marks and shown panels), to update it only on a change.
 var _state: Array = []
 var _since_mark := 0.0
@@ -133,6 +138,7 @@ func reapply(bottom := true) -> void:
 ## Joinery menu on [param plugin], and apply the saved preference.
 func attach(plugin: EditorPlugin, rail: Control) -> void:
 	plugin.add_child(self)
+	_attached_at = Time.get_ticks_msec()
 	apply(EditorInterface.get_base_control(), EditorInterface.get_editor_settings())
 	# The editor loads the saved layout (or Joinery's default) after its first file scan,
 	# which reopens the docks it lists: apply the preference again then.
@@ -273,6 +279,7 @@ func hide_panel(id: String) -> void:
 	var dock := _dock(id)
 	if dock == null:
 		return
+	_touched = true
 	if _bottom != null and dock.get_parent() == _bottom:
 		if _bottom.current_tab == _bottom.get_tab_idx_from_control(dock):
 			_bottom.current_tab = -1
@@ -375,7 +382,16 @@ func _on_side_tab(_tab: int) -> void:
 
 func _on_docks_moved() -> void:
 	_on_bottom_changed.call_deferred(-1)
-	_remember_side.call_deferred()
+	if _settling():
+		reapply.call_deferred(false)
+	else:
+		_remember_side.call_deferred()
+
+
+## Still starting up: the user has not opened or hidden a panel and the editor may yet load
+## its layout, so a dock it moves is not a choice to remember.
+func _settling() -> bool:
+	return not _touched and _attached_at >= 0 and Time.get_ticks_msec() - _attached_at < SETTLE_MS
 
 
 ## The × at the right end of the bottom panel's title row.
