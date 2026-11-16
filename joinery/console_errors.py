@@ -64,9 +64,9 @@ MAX_MESSAGE = 300
 MAX_PATTERNS = 40
 STATE = ".joinery/errors.json"
 
-#: Joinery's own lines (its addon, the playtest bot): listed as a Joinery bug, never
-#: sent to the fixer.
-OWN = ("addons/joinery", "joinery/playtest_bot/", "[Joinery]")
+#: Joinery's own lines (its addon, the playtest bot, the backups and stages it keeps in
+#: ``.joinery/``): listed as a Joinery bug, never sent to the fixer.
+OWN = ("addons/joinery", "joinery/playtest_bot/", "[Joinery]", "/.joinery/")
 #: Engine noise every run prints: never listed. The project adds its own with
 #: ``[agents] ignore_errors``.
 NOISE = (
@@ -122,6 +122,9 @@ _REMOTE_PLACE = re.compile(
 _AT = re.compile(r"^\s+at:\s*(?:[^(]*?)\s*\((?P<where>[^)]*)\)\s*$")
 _SOURCE_LINE = re.compile(r"<GDScript Source>\s*(?P<where>[\w./ -]+?\.\w+:\d+)")
 _RES_LINE = re.compile(r"(res://[^\s:()]+):(\d+)")
+# The editor's GDScript language server, on a script it can't parse; the next line is
+# the script's first error ("Class "Player" hides a global script class.").
+_LSP_FAILED = re.compile(r"LSP: Failed to parse script: (?P<path>res://\S+\.gd)\s*$")
 # The engine's and editor's own source: "scene/main/window.cpp:2138".
 _ENGINE_EXT = r"(?:cpp|cc|c|h|hpp|mm|m|inc)"
 _ENGINE_FILE = re.compile(rf"\.{_ENGINE_EXT}:\d+$")
@@ -255,6 +258,7 @@ def parse(text: str, source: str = "output") -> list[Entry]:
     script, test = "", ""
     for index, line in enumerate(lines):
         follow = lines[index + 1 : index + 7]
+        lsp = _LSP_FAILED.search(lines[index - 1]) if index else None
         gut_script = _GUT_SCRIPT.match(line)
         if gut_script is not None:
             script, test = gut_script.group("script"), ""
@@ -306,6 +310,9 @@ def parse(text: str, source: str = "output") -> list[Entry]:
                 script_line = _RES_LINE.search(after)
                 if script_line is not None and not where.startswith("res://"):
                     where = f"{script_line.group(1)}:{script_line.group(2)}"
+            if lsp is not None and not where and not _LSP_FAILED.search(line):
+                # The error the language server found in that script: its place.
+                where = lsp.group("path")
             found.append(
                 Entry(
                     kind, message, where, source, _context(lines, index), line.strip()

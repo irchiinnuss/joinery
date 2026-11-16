@@ -524,6 +524,43 @@ def test_editor_messages_and_joinery_bugs_are_triaged_before_any_agent() -> None
     )
 
 
+LSP_COPIES = (
+    "--- GDScript language server started on port 6005 ---\n"
+    "ERROR: modules/gdscript/language_server/gdscript_workspace.cpp:201 - LSP: Failed"
+    " to parse script: res://.joinery/transactions/dc6f60b6/original/game/mower.gd\n"
+    'ERROR: Class "PushMower" hides a global script class.\n'
+    "ERROR: modules/gdscript/language_server/gdscript_workspace.cpp:201 - LSP: Failed"
+    " to parse script: res://.joinery/addon-backups/1794-bd47/chat_rewind.gd\n"
+    "ERROR: The variable type is being inferred from a Variant value, so it will be"
+    " typed as Variant. (Warning treated as error.)\n"
+    "ERROR: modules/gdscript/language_server/gdscript_workspace.cpp:201 - LSP: Failed"
+    " to parse script: res://game/player.gd\n"
+    'ERROR: Identifier "speed" not declared in the current scope.\n'
+)
+
+
+def test_the_language_servers_errors_in_joinerys_own_copies_are_not_the_games(
+    tmp_path: Path,
+) -> None:
+    entries = ce.parse(LSP_COPIES)
+    # The error after "LSP: Failed to parse script" is that script's.
+    places = [e.where for e in entries]
+    assert places[1] == "res://.joinery/transactions/dc6f60b6/original/game/mower.gd"
+    assert places[3] == "res://.joinery/addon-backups/1794-bd47/chat_rewind.gd"
+    assert places[5] == "res://game/player.gd"
+    verdicts = [ce.triage_entry(e) for e in entries]
+    # Joinery's backups and stages: never the game's, never sent to an agent.
+    assert verdicts[:4] == ["joinery"] * 4
+    # The game's own script still is.
+    assert verdicts[4:] == ["editor", ""]
+
+    desk = Desk(tmp_path, 'fix_errors = "auto"\nfix_errors_cooldown = 0\n')
+    run(lambda: desk.fixer.take_text("output", LSP_COPIES))
+    ((request, _),) = desk.crew.started
+    assert "res://game/player.gd" in request.output
+    assert "not declared" in request.error and "PushMower" not in request.error
+
+
 def test_editor_messages_are_listed_without_an_agent_turn(tmp_path: Path) -> None:
     desk = Desk(tmp_path, 'fix_errors = "auto"\n')
 
