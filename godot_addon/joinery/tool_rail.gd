@@ -378,7 +378,14 @@ func set_panels(panels: Array[Dictionary]) -> void:
 	var signature: Array = []
 	for panel: Dictionary in panels:
 		signature.append(
-			[panel["id"], panel["title"], panel["icon"], panel.get("glyph"), panel["own"]]
+			[
+				panel["id"],
+				panel["title"],
+				panel["icon"],
+				panel.get("glyph"),
+				panel["own"],
+				panel.get("tip", "")
+			]
 		)
 	if signature == _panel_signature:
 		return
@@ -391,6 +398,8 @@ func set_panels(panels: Array[Dictionary]) -> void:
 	for panel: Dictionary in panels:
 		var id := str(panel["id"])
 		var button := _button("Panel" + id.replace(" ", ""), str(panel["title"]))
+		# An entry that opens a picker rather than a dock says so itself ("Open a scene").
+		button.set_meta("tip", str(panel.get("tip", "")))
 		button.pressed.connect(func() -> void: panel_toggled.emit(id))
 		# Joinery's own docks (the sidebar, Review) wear Joinery's glyphs, not Godot's icons.
 		var icon := str(panel["icon"])
@@ -414,6 +423,8 @@ func set_panel_states(shown: Dictionary, output_mark := "") -> void:
 			_sync(item)
 		var title := str(item.button.accessibility_name)
 		var tip := ("Hide " if on else "Show ") + title
+		if not str(item.button.get_meta("tip", "")).is_empty():
+			tip = str(item.button.get_meta("tip"))
 		if id == "Output" and not output_mark.is_empty():
 			tip += " · new " + ("errors" if output_mark == "error" else "warnings")
 		item.button.tooltip_text = tip

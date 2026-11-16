@@ -19,6 +19,9 @@ extends Node
 ##   rather than push the title bar's and the sidebar's buttons past the window's right edge,
 ##   the column opened first closes (make_room), and the one just opened stays.
 ##
+## Scenes, right after FileSystem, is not a dock: it shows Godot's own Quick Open Scene picker
+## (scene_finder.gd), every scene in the project with the ones picked before first.
+##
 ## Ctrl+Alt+I (Cmd+Option+I on macOS) shows or hides Scene and Inspector together, and Inspect
 ## in the 2D view's right-click menu shows the Inspector. Godot's classic view is never
 ## touched: the addon only calls this in Joinery's layout.
@@ -35,6 +38,8 @@ const SIDE_SPLITS := ["DockVSplitLeftL", "DockVSplitLeftR"]
 const CORE := [
 	"Scene", "Inspector", "FileSystem", "Output", "Debugger", "Audio", "Animation", "Shader Editor"
 ]
+## The rail's entry for Godot's Quick Open Scene picker, listed after FileSystem.
+const SCENES := "Scenes"
 ## The side docks Ctrl+Alt+I shows and hides together.
 const COLUMN := ["Scene", "Inspector"]
 ## Joinery's own docks, listed with Joinery's pages instead: the Journeyman sidebar, then the
@@ -51,6 +56,10 @@ const ONE_TAB := "joinery_one_tab"
 const MARK_INTERVAL := 0.5
 ## How long after start-up the editor may still reopen docks on its own (ms).
 const SETTLE_MS := 20000
+const SCENE_FINDER := preload("scene_finder.gd")
+
+## Opens Godot's Quick Open Scene picker for the Scenes entry; tests replace its editor.
+var finder: RefCounted = SCENE_FINDER.new()
 
 var _base: Control
 var _settings: EditorSettings
@@ -224,6 +233,8 @@ func panels() -> Array[Dictionary]:
 	for id: String in CORE:
 		if docks.has(id):
 			out.append(_entry(docks[id], false))
+		if id == "FileSystem":
+			out.append(_scenes_entry())
 	var placed := _side_docks()
 	if _bottom != null:
 		for index: int in _bottom.get_tab_count():
@@ -240,6 +251,8 @@ func panels() -> Array[Dictionary]:
 
 ## True while panel [param id] shows on screen.
 func is_shown(id: String) -> bool:
+	if id == SCENES:
+		return finder.call("picker_open")
 	var dock := _dock(id)
 	return dock != null and dock.is_visible_in_tree()
 
@@ -260,6 +273,10 @@ func toggle(id: String) -> void:
 		if sidebar != null:
 			sidebar.call("toggle")
 			changed.emit()
+		return
+	if id == SCENES:
+		finder.call("pick")
+		changed.emit()
 		return
 	var dock := _dock(id)
 	if dock == null:
@@ -511,6 +528,19 @@ func _entry(dock: Control, own: bool) -> Dictionary:
 		"icon": "" if own else str(dock.get("icon_name")),
 		"glyph": str(GLYPHS.get(_key(dock), "check")),
 		"own": own,
+	}
+
+
+## The Scenes entry: Godot's search icon, and its shortcut in the tooltip.
+func _scenes_entry() -> Dictionary:
+	var keys := str(finder.call("shortcut_text"))
+	return {
+		"id": SCENES,
+		"title": SCENES,
+		"icon": "Search",
+		"glyph": "check",
+		"own": false,
+		"tip": "Open a scene" + (" (%s)" % keys if not keys.is_empty() else ""),
 	}
 
 

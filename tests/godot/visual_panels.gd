@@ -1,8 +1,9 @@
 extends RefCounted
 ## The visual suite's Godot panel screens: the title bar with Godot's screen buttons, the rail
 ## in a short window, the sidebar's header and its show or hide toggle, Files stacked, Scene
-## above Inspector open beside the viewport, and Audio open alone in the bottom panel, each
-## opened from its rail icon (godot_panels.gd). The suite's "layout" screen is the default,
+## above Inspector open beside the viewport, Audio open alone in the bottom panel, each
+## opened from its rail icon (godot_panels.gd), and Godot's Quick Open Scene picker from the
+## rail's Scenes icon and "/open". The suite's "layout" screen is the default,
 ## with every panel hidden. Copied beside visual_editor_test.gd by run_visual_suite.py;
 ## [param suite] is that test, whose `_shot`, `_check`, `_frames` and `_plugin` these use.
 
@@ -34,6 +35,101 @@ static func screens(suite: Variant) -> void:
 	await suite._shot("panels-audio", [base])
 	(items["Audio"].button as Button).pressed.emit()
 	await suite._frames()
+	await scenes(suite)
+
+
+## The rail's Scenes icon, right after FileSystem, shows Godot's own Quick Open Scene picker,
+## with Godot's shortcut in its tooltip. "/open <name>" opens the one scene the name matches,
+## and shows the picker with the name typed in when several do (scene_finder.gd).
+static func scenes(suite: Variant) -> void:
+	var plugin: EditorPlugin = suite._plugin
+	var panels: Node = plugin.get("_panels")
+	var rail: Control = plugin.get("_rail")
+	var items: Dictionary = rail.get("_panel_items")
+	suite._check(items.has("Scenes"), "Scenes is on the rail")
+	if not items.has("Scenes"):
+		return
+	var item: Control = items["Scenes"]
+	var button := item.get("button") as Button
+	var files: Control = items["FileSystem"] if items.has("FileSystem") else null
+	suite._check(
+		files != null and item.get_index() == files.get_index() + 1, "Scenes sits after FileSystem"
+	)
+	var finder: RefCounted = panels.get("finder")
+	var keys := str(finder.call("shortcut_text"))
+	suite._check(not keys.is_empty(), "Godot's Quick Open Scene shortcut is known")
+	suite._check(
+		button.tooltip_text == "Open a scene (%s)" % keys,
+		"The Scenes tooltip names the shortcut: " + button.tooltip_text
+	)
+	var made := await _plant_scenes(suite)
+	button.pressed.emit()
+	await suite.get_tree().create_timer(0.8).timeout
+	var dialog: Window = finder.call("dialog_node")
+	suite._check(dialog != null and dialog.visible, "The Scenes icon shows Godot's picker")
+	if dialog == null:
+		return
+	suite._check(button.button_pressed, "The Scenes icon is raised while the picker shows")
+	await suite._shot("scenes-rail", [rail])
+	await suite._shot("scenes-picker", [dialog], dialog)
+	_cancel(dialog)
+	await suite._frames(2)
+	var dock: Control = plugin.get("_dock")
+	dock.call("run_command", "/open harb")
+	await suite.get_tree().create_timer(0.5).timeout
+	var boxes := dialog.find_children("*", "LineEdit", true, false)
+	suite._check(
+		dialog.visible and not boxes.is_empty() and (boxes[0] as LineEdit).text == "harb",
+		"/open with several matches shows the picker with the name typed in"
+	)
+	await suite._shot("scenes-picker-typed", [dialog], dialog)
+	_cancel(dialog)
+	await suite._frames(2)
+	var was := EditorInterface.get_edited_scene_root()
+	dock.call("run_command", "/open harbour night")
+	await suite.get_tree().create_timer(0.5).timeout
+	var opened := EditorInterface.get_edited_scene_root()
+	suite._check(
+		opened != null and opened.scene_file_path == made[1],
+		"/open with one match opens that scene"
+	)
+	suite._check(not dialog.visible, "One match opens without the picker")
+	if opened != null and opened != was:
+		EditorInterface.close_scene()
+		await suite._frames(4)
+	for path: String in made:
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	DirAccess.remove_absolute(ProjectSettings.globalize_path("res://levels"))
+	EditorInterface.get_resource_filesystem().scan()
+	await suite.get_tree().create_timer(0.5).timeout
+
+
+## Close Godot's picker as Esc does, so it tells its caller nothing was picked.
+static func _cancel(dialog: Window) -> void:
+	dialog.notification(Window.NOTIFICATION_WM_CLOSE_REQUEST)
+	dialog.hide()
+
+
+## Two small level scenes to find, known to Godot's file system once it has scanned.
+static func _plant_scenes(suite: Variant) -> Array[String]:
+	var made: Array[String] = ["res://levels/harbour.tscn", "res://levels/harbour_night.tscn"]
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("res://levels"))
+	for path: String in made:
+		var level := Node3D.new()
+		level.name = path.get_file().get_basename().capitalize().replace(" ", "")
+		var scene := PackedScene.new()
+		scene.pack(level)
+		ResourceSaver.save(scene, path)
+		level.free()
+	var system := EditorInterface.get_resource_filesystem()
+	system.scan()
+	var deadline := Time.get_ticks_msec() + 10000
+	while Time.get_ticks_msec() < deadline:
+		await suite.get_tree().create_timer(0.2).timeout
+		if not system.is_scanning() and system.get_file_type(made[1]) == "PackedScene":
+			break
+	suite._check(system.get_file_type(made[1]) == "PackedScene", "The planted scenes are scanned")
+	return made
 
 
 ## The rail in a short window: its icons overflow and scroll up and down, the wheel over the
