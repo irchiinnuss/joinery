@@ -52,6 +52,9 @@ var visited: PackedInt32Array = PackedInt32Array()
 ## Per cell: the frames the player spent in it (the time-spent heatmap).
 var dwell: PackedInt32Array = PackedInt32Array()
 var start: Vector2i = Vector2i(-1, -1)
+## Where the run began on this level (ground plane): a map built again later (a reload, a
+## new player) floods from where the player is then, but the report's start stays here.
+var began: Vector2 = Vector2(NAN, NAN)
 var built: bool = false
 ## The level's named areas on the ground plane: {name: Rect2} (world units).
 var areas: Dictionary = {}
@@ -107,6 +110,8 @@ func build(player: Node, style: String) -> void:
 	var spent: Dictionary = {}
 	var floors: Array[Vector2] = []
 	var heights: Array[float] = []
+	if not (key == _key and built):
+		began = at
 	if key == _key and built:
 		for index: int in visited.size():
 			var centre := origin + Vector2(index % cols + 0.5, index / cols + 0.5) * cell
@@ -341,7 +346,7 @@ func summary() -> Dictionary:
 		"origin": [snappedf(origin.x, 0.01), snappedf(origin.y, 0.01)],
 		"cols": cols,
 		"rows": rows,
-		"start": [start.x, start.y],
+		"start": _start_cell(),
 		"navigable": open,
 		"visited": seen,
 		"percent": snappedf(100.0 * seen / maxf(open, 1.0), 0.1),
@@ -380,6 +385,14 @@ func save_map(path: String) -> bool:
 			Color.WHITE
 		)
 	return image.save_png(path) == OK
+
+
+## The cell the run began in on this level, else the cell the map was flooded from.
+func _start_cell() -> Array:
+	var cell_at := start
+	if not is_nan(began.x) and _index(_cell_of(began)) >= 0:
+		cell_at = _cell_of(began)
+	return [cell_at.x, cell_at.y]
 
 
 ## The named areas as [{name, rect: [col, row, cols, rows]}] in cells (fractions kept), for
