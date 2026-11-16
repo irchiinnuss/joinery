@@ -2,14 +2,22 @@
 extends PanelContainer
 ## A request's to-do (ADR 0060), above the footer with the agents at work. For a request with
 ## several steps Journeyman shows its steps and what "done" means before it changes anything.
-## While it waits for Go every line is editable in place and has its own remove; Go starts the
-## work with the list as left, Cancel drops it. Once the work runs the list is read-only and
-## the "done when" items are checked after the change passes Joinery's checks: each row turns
-## to Pass, Fail or Inconclusive with its evidence under it, and the header says "2 of 3 done".
-## A Fail goes back to Journeyman once ("Fixing what didn't pass…") before the change opens.
+## Each step is one compact row (todo_step_row.gd): a status circle, a short title and, behind
+## its chevron, the detail the build reads. While it waits for Go the list is the user's to
+## edit: titles and details in place, a remove on every line, Alt+Up / Alt+Down to move a step,
+## and "Add a step"; a step that says what another already says is refused. Go starts the work
+## with the list as left (the build reads exactly that), Cancel drops it.
+##
+## Once the work runs the list is read-only and moves on as the steps are done: the step being
+## worked on pulses and reads in the medium weight, done steps turn to a check and go quiet.
+## The "done when" items are checked after the change passes Joinery's checks: each row turns
+## to Pass, Fail or Inconclusive with its evidence under it. A Fail goes back to Journeyman once
+## ("Fixing what didn't pass…") before the change opens.
 ##
 ## The chevron in the header minimises the card to its one line ("To-do · 3 of 7 done") and
-## opens it again; the sidebar (sidebar_todo.gd) remembers which way each chat left it.
+## opens it again; the sidebar (sidebar_todo.gd) remembers which way each chat left it. While
+## Journeyman works on the to-do that line carries a small live light (still with Reduce
+## motion); waiting for Go, or finished, it has none.
 
 signal go_pressed(line: Dictionary)
 signal cancel_pressed
@@ -22,6 +30,29 @@ const UI_MOTION := preload("ui_motion.gd")
 const UI := preload("ui_components.gd")
 const STYLE := preload("sidebar_style.gd")
 const INDICATOR := preload("activity_indicator.gd")
+const ROW := preload("todo_step_row.gd")
+## As many steps as a to-do holds (done_when.MAX_STEPS).
+const MAX_STEPS := 8
+## Words that don't change what a step says (done_when._GLUE).
+const GLUE := [
+	"a",
+	"an",
+	"the",
+	"and",
+	"of",
+	"to",
+	"in",
+	"on",
+	"at",
+	"by",
+	"beside",
+	"next",
+	"near",
+	"for",
+	"with",
+	"its",
+	"it"
+]
 ## State -> the step line's words.
 const WORDS := {
 	"waiting": "Edit anything, then press Go.",
@@ -32,6 +63,8 @@ const WORDS := {
 	"cancelled": "Cancelled",
 	"dropped": "Set aside for your new message",
 }
+## The states in which Journeyman is at work on the to-do.
+const WORKING := ["going", "steps", "checking", "fixing"]
 ## Result status -> the glyph (ui_components.gd status_icon) and the words for screen readers.
 const LOOKS := {
 	"pass": ["done", "Pass"],
@@ -50,6 +83,10 @@ var fold: Button
 var close: Button
 var go: Button
 var cancel: Button
+## Add a step (while waiting for Go).
+var add: Button
+## The minimised line's live light while Journeyman works.
+var live: Control
 var _dots: Control
 var _status: TextureRect
 var _line: HBoxContainer
@@ -63,7 +100,8 @@ var _footer: HBoxContainer
 ## The agent's done-when items by id, with what was checked: {id: {text, kind, result?}}.
 var _items: Dictionary = {}
 var _order: Array[String] = []
-var _step_texts: Array[String] = []
+## The steps as the host sent them: [{title, detail, state}].
+var _step_data: Array[Dictionary] = []
 
 
 func _init(identifier := "") -> void:
@@ -90,6 +128,11 @@ func _init(identifier := "") -> void:
 	var head := HBoxContainer.new()
 	head.theme_type_variation = "JoineryRowTight"
 	top.add_child(head)
+	live = UI.status_dot("working")
+	live.name = "Live"
+	live.tooltip_text = "Journeyman is working on it"
+	live.hide()
+	head.add_child(live)
 	title_label = STYLE.card_title("To-do")
 	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
@@ -124,10 +167,22 @@ func _init(identifier := "") -> void:
 	_body = VBoxContainer.new()
 	_body.theme_type_variation = "JoineryStack"
 	column.add_child(_body)
+	var steps := VBoxContainer.new()
+	steps.theme_type_variation = "JoineryTight"
+	_body.add_child(steps)
 	_steps = VBoxContainer.new()
 	_steps.theme_type_variation = "JoineryTight"
 	_steps.accessibility_name = "Steps"
-	_body.add_child(_steps)
+	steps.add_child(_steps)
+	add = UI.quiet("Add a step")
+	add.name = "Add"
+	add.accessibility_name = "Add a step"
+	UI.bind_height(add, "sm")
+	STYLE.hug_left(add)
+	UI_MOTION.press_feedback(add)
+	add.pressed.connect(add_step)
+	add.hide()
+	steps.add_child(add)
 	var done := VBoxContainer.new()
 	done.theme_type_variation = "JoineryTight"
 	_body.add_child(done)
@@ -154,12 +209,35 @@ func _init(identifier := "") -> void:
 	_footer.hide()
 
 
-## The host's to-do event: {todo_id, state, steps?, done_when?, results?, summary?}.
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_ENTER_TREE:
+		_sync_live()
+
+
+## The host's to-do event: {todo_id, state?, steps?, details?, step_states?, step?,
+## done_when?, results?, summary?}. A step's progress alone ({step, step_states}) moves the
+## rows on in place.
 func apply(event: Dictionary) -> void:
+	var details: Array = event.get("details", []) if event.get("details") is Array else []
+	var marks: Array = event.get("step_states", []) if event.get("step_states") is Array else []
 	if event.get("steps") is Array:
-		_step_texts.clear()
+		_step_data.clear()
+		var index := 0
 		for step: Variant in event["steps"]:
-			_step_texts.append(str(step))
+			(
+				_step_data
+				. append(
+					{
+						"title": str(step),
+						"detail": str(details[index]) if index < details.size() else "",
+						"state": str(marks[index]) if index < marks.size() else "",
+					}
+				)
+			)
+			index += 1
+	elif not marks.is_empty():
+		for index: int in mini(marks.size(), _step_data.size()):
+			_step_data[index]["state"] = str(marks[index])
 	if event.get("done_when") is Array:
 		_items.clear()
 		_order.clear()
@@ -179,6 +257,8 @@ func apply(event: Dictionary) -> void:
 	state = next
 	if rebuilt:
 		_build()
+	else:
+		_move_rows()
 	match state:
 		"checked":
 			var summary := str(event.get("summary", ""))
@@ -189,7 +269,7 @@ func apply(event: Dictionary) -> void:
 		"cancelled", "dropped":
 			_settle("stopped", str(WORDS[state]))
 		_:
-			_dots.visible = state in ["going", "steps", "checking", "fixing"]
+			_dots.visible = state in WORKING
 			_dots.set("running", _dots.visible)
 			_status.hide()
 			_step.text = str(WORDS.get(state, ""))
@@ -197,6 +277,7 @@ func apply(event: Dictionary) -> void:
 				_step.text = "Making %s at once…" % _step_list(event["together"] as Array)
 			close.visible = false
 	_footer.visible = state == "waiting"
+	add.visible = state == "waiting"
 	if state == "waiting":
 		go.disabled = steps().is_empty()
 		cancel.disabled = false
@@ -222,19 +303,25 @@ func set_minimised(on: bool, animate := false) -> void:
 		minimised_changed.emit(on)
 
 
-## [done, total]: the steps count as done once the work is checked, the "done when" items as
-## each one passes.
+## [done, total]: each step as it is done or skipped (all of them once the work is checked),
+## the "done when" items as each one passes.
 func progress() -> Array[int]:
-	var steps_done := _step_texts.size() if state in ["checking", "fixing", "checked"] else 0
+	var steps_done := 0
+	for row: Control in step_rows():
+		if str(row.get("progress")) in ["done", "skipped"]:
+			steps_done += 1
+	if state in ["checking", "fixing", "checked"]:
+		steps_done = step_rows().size()
 	var passed := 0
 	for id: String in _order:
 		var result: Variant = (_items[id] as Dictionary).get("result")
 		if result is Dictionary and str((result as Dictionary).get("status", "")) == "pass":
 			passed += 1
-	return [steps_done + passed, _step_texts.size() + _order.size()]
+	return [steps_done + passed, step_rows().size() + _order.size()]
 
 
 func _sync_title() -> void:
+	_sync_live()
 	if not minimised:
 		title_label.text = "To-do"
 		title_label.tooltip_text = ""
@@ -242,6 +329,20 @@ func _sync_title() -> void:
 	var counts := progress()
 	title_label.text = "To-do · %d of %d done" % [counts[0], counts[1]]
 	title_label.tooltip_text = _step.text
+
+
+## The minimised line's light: on, and pulsing slowly, while Journeyman works on the to-do.
+func _sync_live() -> void:
+	var on := minimised and state in WORKING
+	if on == live.visible and (not on or live.has_meta("_todo_breathing")):
+		return
+	live.visible = on
+	if on and is_inside_tree():
+		UI_MOTION.breathe(live)
+		live.set_meta("_todo_breathing", true)
+	elif not on:
+		UI_MOTION.stop(live)
+		live.remove_meta("_todo_breathing")
 
 
 ## Still waiting for Go, or working.
@@ -261,16 +362,66 @@ static func _step_list(numbers: Array) -> String:
 	return "steps %s and %s" % [", ".join(words), last]
 
 
+## Whether two step titles say the same thing (done_when.same_step): equal once case and
+## punctuation are set aside, the same words but for "the", "by" and the like, or nearly the
+## same letters; titles that differ in a number ("Room 1", "Room 2") never are.
+static func same_step(first: String, second: String) -> bool:
+	var a := _key(first)
+	var b := _key(second)
+	if a.is_empty() or b.is_empty():
+		return a == b
+	if a == b:
+		return true
+	if _numbers(a) != _numbers(b):
+		return false
+	var words_a := _content(a)
+	if not words_a.is_empty() and words_a == _content(b):
+		return true
+	return a.similarity(b) >= 0.92
+
+
+static func _key(text: String) -> String:
+	var kept := ""
+	for character: String in text.to_lower():
+		kept += character if character.is_valid_identifier() or character.is_valid_int() else " "
+	return " ".join(kept.split(" ", false))
+
+
+static func _numbers(text: String) -> PackedStringArray:
+	var found := PackedStringArray()
+	for word: String in text.split(" ", false):
+		if word.is_valid_int():
+			found.append(word)
+	return found
+
+
+static func _content(text: String) -> Array:
+	var words: Array = []
+	for word: String in text.split(" ", false):
+		if word not in GLUE and word not in words:
+			words.append(word)
+	words.sort()
+	return words
+
+
 func step_text() -> String:
 	return _step.text
 
 
-## The steps as shown (edited text while waiting).
-func steps() -> PackedStringArray:
-	var found := PackedStringArray()
+## The steps' rows as shown, in order (todo_step_row.gd).
+func step_rows() -> Array[Control]:
+	var found: Array[Control] = []
 	for row: Node in _steps.get_children():
 		if not _gone(row):
-			found.append(_row_text(row))
+			found.append(row as Control)
+	return found
+
+
+## The steps' titles as shown (edited while waiting).
+func steps() -> PackedStringArray:
+	var found := PackedStringArray()
+	for row: Control in step_rows():
+		found.append(str(row.call("title_text")))
 	return found
 
 
@@ -301,6 +452,18 @@ func remove_buttons() -> Array[Button]:
 	return found
 
 
+## A new, empty step at the end of the list, its title ready to type (while waiting).
+func add_step() -> Control:
+	if state != "waiting" or step_rows().size() >= MAX_STEPS:
+		return null
+	var row := _step_row({"title": "", "detail": "", "state": ""}, 0, true)
+	_steps.add_child(row)
+	_renumber()
+	UI_MOTION.enter(row)
+	row.call("focus_title")
+	return row
+
+
 func _build() -> void:
 	var editable := state == "waiting"
 	for list: Node in [_steps, _done]:
@@ -308,10 +471,11 @@ func _build() -> void:
 			list.remove_child(child)
 			child.queue_free()
 	var rows: Array = []
-	for index: int in _step_texts.size():
-		var row := _row(str(index + 1), _step_texts[index], editable, "Step %d" % (index + 1))
+	for index: int in _step_data.size():
+		var row := _step_row(_step_data[index], index + 1, editable)
 		_steps.add_child(row)
 		rows.append(row)
+	_renumber()
 	for id: String in _order:
 		var item: Dictionary = _items[id]
 		var row := _done_row(id, item, editable)
@@ -321,20 +485,61 @@ func _build() -> void:
 	UI_MOTION.stagger(rows)
 
 
-## A step: its number, then its words (a field while waiting) and remove.
-func _row(mark: String, text: String, editable: bool, label: String) -> HBoxContainer:
-	var row := HBoxContainer.new()
-	row.theme_type_variation = "JoineryRowTight"
-	# The step's number, quiet: the words carry the meaning.
-	var number := UI.label(mark, "JoineryCaption")
-	number.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	number.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	STYLE.on_theme(
-		number, func() -> void: number.custom_minimum_size.x = UI_THEME.unit(number) * 14.0
-	)
-	row.add_child(number)
-	_words(row, text, editable, label, row)
+func _step_row(data: Dictionary, origin: int, editable: bool) -> Control:
+	var row: Control = ROW.new(str(data["title"]), str(data["detail"]), editable, origin)
+	row.call("set_progress", str(data.get("state", "")))
+	row.connect("remove_requested", _remove)
+	row.connect("move_requested", _move)
+	row.connect("committed", _check_repeat)
 	return row
+
+
+## Each row's place in the list, for its accessible names.
+func _renumber() -> void:
+	var number := 1
+	for row: Control in step_rows():
+		row.set("number", number)
+		row.call("sync_view")
+		number += 1
+	add.disabled = number > MAX_STEPS
+
+
+## The steps' progress, in place: the rows keep their open details and their focus.
+func _move_rows() -> void:
+	var rows := step_rows()
+	for index: int in mini(rows.size(), _step_data.size()):
+		rows[index].call("set_progress", str(_step_data[index].get("state", "")))
+
+
+## A step whose title now says what another step says is refused: a new one goes, an edited
+## one goes back to its last words; the step it repeats is flashed, and the line says which.
+func _check_repeat(row: Control) -> void:
+	var words := str(row.call("title_text"))
+	var rows := step_rows()
+	for other: Control in rows:
+		if other == row or not same_step(str(other.call("title_text")), words):
+			continue
+		var number := rows.find(other) + 1
+		_step.text = "Step %d already says that." % number
+		UI_MOTION.flash(other)
+		if int(row.get("origin")) == 0 and str(row.call("committed_title")).is_empty():
+			_remove(row)
+		else:
+			row.call("undo_title")
+		return
+	if state == "waiting":
+		_step.text = str(WORDS["waiting"])
+	go.disabled = steps().is_empty()
+
+
+## Move [param row] [param by] places up (-1) or down (+1) the list (while waiting).
+func _move(row: Control, by: int) -> void:
+	var to := row.get_index() + by
+	if to < 0 or to >= _steps.get_child_count():
+		return
+	_steps.move_child(row, to)
+	_renumber()
+	row.call("focus_title")
 
 
 ## A done-when item: its state (an empty dot until checked, then Pass, Fail or Inconclusive),
@@ -359,7 +564,7 @@ func _done_row(id: String, item: Dictionary, editable: bool) -> VBoxContainer:
 		var dot := UI.status_dot("working" if state == "checking" else "off")
 		dot.tooltip_text = "Checked after the change"
 		mark = dot
-	STYLE.on_theme(mark, func() -> void: mark.custom_minimum_size.x = UI_THEME.unit(mark) * 14.0)
+	STYLE.on_theme(mark, func() -> void: mark.custom_minimum_size.x = UI_THEME.unit(mark) * 16.0)
 	row.add_child(mark)
 	var words := _words(row, str(item.get("text", "")), editable, "Done when", block)
 	if not status.is_empty():
@@ -374,7 +579,7 @@ func _done_row(id: String, item: Dictionary, editable: bool) -> VBoxContainer:
 			indent,
 			func() -> void:
 				indent.add_theme_constant_override(
-					"margin_left", int(UI_THEME.unit(indent) * 14.0) + UI_THEME.space(indent, 1)
+					"margin_left", int(UI_THEME.unit(indent) * 16.0) + UI_THEME.space(indent, 1)
 				)
 		)
 		indent.add_child(evidence)
@@ -382,8 +587,8 @@ func _done_row(id: String, item: Dictionary, editable: bool) -> VBoxContainer:
 	return block
 
 
-## The row's words: a borderless field to edit in place while waiting, else a label; and a
-## remove button while waiting.
+## A done-when item's words: a borderless field to edit in place while waiting, else a label;
+## and a remove button while waiting.
 func _words(
 	row: HBoxContainer, text: String, editable: bool, label: String, target: Control
 ) -> Control:
@@ -426,6 +631,7 @@ func _words(
 func _remove(target: Control) -> void:
 	target.set_meta("removed", true)
 	UI_MOTION.exit(target, null, target.queue_free)
+	_renumber()
 	go.disabled = steps().is_empty()
 
 
@@ -447,15 +653,24 @@ func _on_go() -> void:
 	for row: Dictionary in done_rows():
 		if not str(row["text"]).is_empty():
 			done.append({"id": row["id"], "text": row["text"]})
-	var kept := PackedStringArray()
-	for step: String in steps():
-		if not step.is_empty():
-			kept.append(step)
+	var kept: Array = []
+	var seen := PackedStringArray()
+	for row: Control in step_rows():
+		var words := str(row.call("title_text"))
+		var repeat := false
+		for earlier: String in seen:
+			repeat = repeat or same_step(earlier, words)
+		if words.is_empty() or repeat:
+			continue
+		seen.append(words)
+		kept.append(
+			{"title": words, "detail": str(row.call("detail_text")), "from": int(row.get("origin"))}
+		)
 	if kept.is_empty():
 		return
 	go.disabled = true
 	_step.text = "Starting…"
-	go_pressed.emit({"todo_id": todo_id, "steps": Array(kept), "done_when": done})
+	go_pressed.emit({"todo_id": todo_id, "steps": kept, "done_when": done})
 
 
 func _on_cancel() -> void:

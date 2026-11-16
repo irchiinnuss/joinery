@@ -2,7 +2,9 @@ extends SceneTree
 ## A request's to-do: the card shows Journeyman's steps and "done when" items before any work;
 ## every line edits in place and has its own remove; Go sends the list as left as a request of
 ## its own ("Go"); the items then read Pass, Fail or Inconclusive with the evidence, on the card
-## and in the review. Cancel drops a to-do; one dropped for a new message steps aside.
+## and in the review. Cancel drops a to-do; one dropped for a new message steps aside. Each step
+## is a short title with its detail behind a chevron; the user adds, moves and removes steps,
+## a repeat is refused, and while the work runs each step is checked off as it is done.
 
 const DOCK_PATH := "res://addons/joinery/journeyman_dock.gd"
 const JOB_SOURCE := """extends RefCounted
@@ -21,6 +23,7 @@ const STEPS := [
 	"Open the gate when the lever is pulled",
 	"Put the key in the vault",
 ]
+const DETAILS := ["Brass lever, 40 cm, on the gate's left post", "", "On the vault's table"]
 const DONE := [
 	{"id": "d1", "text": "The player can reach the vault", "kind": "reach"},
 	{"id": "d2", "text": "The gate opens when the lever is pulled", "kind": "test"},
@@ -95,7 +98,12 @@ func _run() -> void:
 
 	# Journeyman proposes: the card shows the steps and what done means, ready to edit.
 	var event := {
-		"kind": "todo", "todo_id": "t1", "state": "waiting", "steps": STEPS, "done_when": DONE
+		"kind": "todo",
+		"todo_id": "t1",
+		"state": "waiting",
+		"steps": STEPS,
+		"details": DETAILS,
+		"done_when": DONE,
 	}
 	backend.call("_handle", event)
 	var card: Control = tasks.get("todo_card")
@@ -107,24 +115,73 @@ func _run() -> void:
 	var fields := card.find_children("Words", "LineEdit", true, false)
 	_check(fields.size() == 7, "Every line edits in place: %d" % fields.size())
 
+	# Each step's detail waits behind its chevron, and edits in place there too.
+	var rows: Array[Control] = card.call("step_rows")
+	var first: Control = rows[0]
+	_check(not (first.get("_detail_box") as Control).visible, "The detail starts closed")
+	(first.get("chevron") as Button).pressed.emit()
+	_check(first.get("open") and str(first.call("detail_text")) == DETAILS[0], "Opened: detail")
+	_check(first.get("detail") is TextEdit, "The detail edits in place while waiting")
+	(first.get("detail") as TextEdit).text = "Brass lever, 50 cm"
+
+	# A step is added at the end; one that says what step 3 says is refused.
+	var added: Control = card.call("add_step")
+	_check(added != null and (card.call("step_rows") as Array).size() == 4, "Add a step")
+	(added.get("title") as LineEdit).text = "put the KEY in the vault."
+	(added.get("title") as LineEdit).text_submitted.emit("")
+	await process_frame
+	_check((card.call("step_rows") as Array).size() == 3, "The repeat is refused")
+	_check(card.call("step_text") == "Step 3 already says that.", card.call("step_text"))
+	added = card.call("add_step")
+	(added.get("title") as LineEdit).text = "Hide a spare key"
+	(added.get("title") as LineEdit).text_submitted.emit("")
+	# Alt+Up moves it above step 3.
+	var up := InputEventKey.new()
+	up.pressed = true
+	up.alt_pressed = true
+	up.keycode = KEY_UP
+	(added.get("title") as LineEdit).gui_input.emit(up)
+	_check(
+		card.call("steps") == PackedStringArray([STEPS[0], STEPS[1], "Hide a spare key", STEPS[2]]),
+		"Moved up: %s" % card.call("steps")
+	)
+	var named := str((added.get("title") as LineEdit).accessibility_name)
+	_check(named.begins_with("Step 3:"), "Renumbered: %s" % named)
+
 	# The user rewords the first step, removes the second and the look item, presses Go.
 	(fields[0] as LineEdit).text = "Put a lever by the gate"
 	var removes: Array[Button] = card.call("remove_buttons")
-	_check(removes.size() == 7, "Every line has its remove")
+	_check(removes.size() == 8, "Every line has its remove: %d" % removes.size())
 	removes[1].pressed.emit()
-	removes[6].pressed.emit()
+	removes[7].pressed.emit()
 	_check(
-		card.call("steps") == PackedStringArray([STEPS[0].replace("beside", "by"), STEPS[2]]),
+		(
+			card.call("steps")
+			== PackedStringArray([STEPS[0].replace("beside", "by"), "Hide a spare key", STEPS[2]])
+		),
 		"Edited steps: %s" % card.call("steps")
 	)
 	(card.get("go") as Button).pressed.emit()
 	var go := _sent(job, "todo_go")
 	_check(str(go.get("text", "")) == "Go", "Go is a request of its own: %s" % go)
 	_check(str(go.get("todo_id", "")) == "t1", "For this to-do")
-	_check(
-		go.get("steps") == [STEPS[0].replace("beside", "by"), STEPS[2]],
-		"With the steps as left: %s" % [go.get("steps")]
-	)
+	var sent_steps: Array = go.get("steps", [])
+	_check(sent_steps.size() == 3, "With the steps as left: %s" % [sent_steps])
+	var wanted := [
+		[STEPS[0].replace("beside", "by"), "Brass lever, 50 cm", 1],
+		["Hide a spare key", "", 0],
+		[STEPS[2], DETAILS[2], 3],
+	]
+	for index: int in mini(sent_steps.size(), wanted.size()):
+		var sent: Dictionary = sent_steps[index]
+		_check(
+			(
+				str(sent["title"]) == wanted[index][0]
+				and str(sent["detail"]) == wanted[index][1]
+				and int(sent["from"]) == wanted[index][2]
+			),
+			"Step %d as left: %s" % [index + 1, sent]
+		)
 	var ids: Array = []
 	for item: Variant in go.get("done_when", []):
 		ids.append(str((item as Dictionary)["id"]))
@@ -132,22 +189,48 @@ func _run() -> void:
 	_check(_sent(job, "prompt").is_empty(), "Not as a plain prompt")
 
 	# Working: the list is read-only; then the items are checked.
+	var titles: Array = []
+	var details: Array = []
+	for step: Variant in sent_steps:
+		titles.append(str((step as Dictionary)["title"]))
+		details.append(str((step as Dictionary)["detail"]))
 	event = {
 		"kind": "todo",
 		"todo_id": "t1",
 		"state": "going",
-		"steps": go["steps"],
+		"steps": titles,
+		"details": details,
 		"done_when": [DONE[0], DONE[1], DONE[2]],
 	}
 	backend.call("_handle", event)
 	_check(card.find_children("Words", "LineEdit", true, false).is_empty(), "Read-only now")
 	_check(not (card.get("go") as Button).is_visible_in_tree(), "No Go while working")
 	_check(card.call("step_text") == "Working through the steps…", card.call("step_text"))
+
+	# Each step is checked off as Journeyman says it is done, not all at the end.
+	var count: int = (event["steps"] as Array).size()
+	var moves := [["started", "", ""], ["done", "started", ""]]
+	backend.call("_handle", {"kind": "todo", "todo_id": "t1", "step": 1, "step_states": moves[0]})
+	rows = card.call("step_rows")
+	_check(rows[0].get("progress") == "started", "Step 1 is being worked on")
+	_check(card.call("step_text") == "Working through the steps…", "The state stays going")
+	backend.call("_handle", {"kind": "todo", "todo_id": "t1", "step": 2, "step_states": moves[1]})
+	_check(rows[0].get("progress") == "done" and rows[1].get("progress") == "started", "Moved on")
+	_check((card.call("step_rows") as Array)[0] == rows[0], "In place: the rows are the same")
+	_check(card.call("progress") == [1, count + 3], "1 done: %s" % [card.call("progress")])
+	card.call("set_minimised", true)
+	var live: Control = card.get("live")
+	_check(live.visible, "Minimised while working: the live light is on")
+	var line: String = (card.get("title_label") as Label).text
+	_check(line == "To-do · 1 of %d done" % (count + 3), "Counts as it goes: %s" % line)
+	card.call("set_minimised", false)
+	_check(not live.visible, "Open, the step line says it instead")
 	# Steps that need nothing first run at once as tasks (run_steps = "together").
 	backend.call("_handle", {"kind": "todo", "todo_id": "t1", "state": "steps", "together": [1, 3]})
 	_check(card.call("step_text") == "Making steps 1 and 3 at once…", card.call("step_text"))
 	_check(card.call("working"), "Still working while the steps run")
 	backend.call("_handle", {"kind": "todo", "todo_id": "t1", "state": "checking"})
+	_check((card.call("progress") as Array)[0] == count, "Checking: every step is done")
 	_check(card.call("step_text") == "Checking what done means…", "It says it is checking")
 	(
 		backend
@@ -163,9 +246,13 @@ func _run() -> void:
 		)
 	)
 	_check(card.call("step_text") == "1 of 3 done", "Checked: %s" % card.call("step_text"))
-	var rows: Array[Dictionary] = card.call("done_rows")
-	_check(rows[0]["status"] == "fail" and str(rows[0]["evidence"]).contains("Vault"), str(rows))
-	_check(rows[1]["status"] == "inconclusive" and rows[2]["status"] == "pass", str(rows))
+	var results: Array[Dictionary] = card.call("done_rows")
+	_check(
+		results[0]["status"] == "fail" and str(results[0]["evidence"]).contains("Vault"),
+		str(results)
+	)
+	_check(results[1]["status"] == "inconclusive" and results[2]["status"] == "pass", str(results))
+	_check(not live.visible, "Checked: no light")
 	_check(card.find_children("Evidence", "Label", true, false).size() == 3, "Evidence shows")
 	_check((card.get("close") as Button).visible, "It can be dismissed")
 
@@ -174,7 +261,8 @@ func _run() -> void:
 	(card.get("fold") as Button).pressed.emit()
 	_check(card.get("minimised"), "The chevron minimises it")
 	var title: Label = card.get("title_label")
-	_check(title.text == "To-do · 3 of 5 done", "One line: %s" % title.text)
+	_check(title.text == "To-do · 4 of 6 done", "One line: %s" % title.text)
+	_check(not live.visible, "Finished: no live light on the line")
 	_check(not (card.get("_body") as Control).visible, "Only the header line shows")
 	var todo_list: Script = load("res://addons/joinery/sidebar_todo.gd")
 	_check(todo_list.call("minimised", "chat-a"), "The chat remembers it minimised")
