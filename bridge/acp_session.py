@@ -563,7 +563,7 @@ class ACPSession:
         )
         self.instructed = True
         streamed = False
-        trail_calls = trail.Calls()
+        trail_calls = trail.Calls(self.project)
         #: The agent's thinking since its last step, said as one line before the next.
         thinking: list[str] = []
         try:

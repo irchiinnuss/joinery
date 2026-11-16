@@ -545,7 +545,7 @@ class CodexSession:
             self._turn_ready.set()
         seen: set[str] = set()
         last_item = ""
-        trail_calls = trail.Calls()
+        trail_calls = trail.Calls(self.project)
         try:
             while True:
                 event = await asyncio.wait_for(self._events.get(), timeout=180)

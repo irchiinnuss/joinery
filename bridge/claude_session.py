@@ -568,7 +568,7 @@ class ClaudeSession:
         #: with the outcome it really had.
         calls: dict[str, tuple[str, str]] = {}
         #: The same calls on the work trail, with what they were doing.
-        trail_calls = trail.Calls()
+        trail_calls = trail.Calls(self.project)
         try:
             while line := await self.process.stdout.readline():
                 try:

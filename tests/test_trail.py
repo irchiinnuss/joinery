@@ -196,6 +196,46 @@ def test_a_call_runs_then_ends_under_one_id_with_a_picture_it_made() -> None:
     assert [e.state for e in calls.end_all()] == ["done"]
 
 
+def test_a_line_naming_a_project_file_carries_its_res_path(tmp_path: Path) -> None:
+    calls = trail.Calls(tmp_path)
+    inside = str(tmp_path / "levels" / "backyard_blockout.tscn")
+    read = calls.start("r", "Read", {"file_path": inside})
+    assert (read.text, read.file, read.path) == (
+        "Reading backyard_blockout.tscn",
+        "",
+        "res://levels/backyard_blockout.tscn",
+    )
+    edit = calls.start("e", "Edit", {"file_path": "game/level.gd", "new_string": "x"})
+    assert (edit.file, edit.path) == ("level.gd", "res://game/level.gd")
+    godot = {
+        "server": "godot",
+        "tool": "read_file",
+        "arguments": {"path": "res://a.gd"},
+    }
+    assert calls.start("g", "mcp__joinery__call_tool", godot).path == "res://a.gd"
+    # Outside the project, or a name the line doesn't show: no link.
+    assert calls.start("o", "Read", {"file_path": "/etc/hosts"}).path == ""
+    blender = {
+        "server": "blender",
+        "tool": "bevel",
+        "arguments": {"source": "art/mug.blend"},
+    }
+    line = calls.start("b", "mcp__joinery__call_tool", blender)
+    assert "the mug" in line.text and line.path == ""
+    ended = calls.end("r")
+    assert ended is not None and ended.path == "res://levels/backyard_blockout.tscn"
+
+
+def test_project_paths_stay_inside_the_project(tmp_path: Path) -> None:
+    assert trail.project_path("./game/a.gd") == "res://game/a.gd"
+    assert trail.project_path("res://game/a.gd") == "res://game/a.gd"
+    assert trail.project_path("../secret.gd") == ""
+    assert trail.project_path("res://../x.gd") == ""
+    assert trail.project_path("https://example.com/a.gd") == ""
+    assert trail.project_path(str(tmp_path / "a.gd")) == ""
+    assert trail.project_path(str(tmp_path / "a.gd"), tmp_path) == "res://a.gd"
+
+
 def test_codex_items_join_the_trail() -> None:
     calls = trail.Calls()
     command = codex_trail(

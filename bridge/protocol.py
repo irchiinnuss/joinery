@@ -104,7 +104,8 @@ class Trail(_Msg):
 
     A call is reported running, then done or failed under the same ``id``; the
     later events repeat its ``text`` and may add a ``picture`` that landed. An
-    edit says its ``file`` and the lines ``added`` and ``removed``.
+    edit says its ``file`` and the lines ``added`` and ``removed``; a line about a
+    project file carries its ``path`` too.
     """
 
     kind: Literal["trail"] = "trail"
@@ -117,6 +118,9 @@ class Trail(_Msg):
     removed: int = 0
     #: A render or texture the call made: an absolute path or res://.
     picture: str = ""
+    #: The project file the line names (res://), for a link that opens it; "" for a
+    #: file outside the project or none. ``file`` stays the name the line shows.
+    path: str = ""
 
 
 class Preview(_Msg):

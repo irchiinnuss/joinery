@@ -14,8 +14,9 @@ events through this module, so the words are the same whichever agent runs.
 from __future__ import annotations
 
 import difflib
+import os
 import re
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from bridge import shell_words
@@ -146,7 +147,9 @@ class Calls:
     """One turn's tool calls on the trail: each reported running when it starts and
     done or failed when it ends, under its id, with the same line."""
 
-    def __init__(self) -> None:
+    def __init__(self, project: Path | None = None) -> None:
+        #: The project folder: a call's absolute path inside it becomes its res:// path.
+        self.project = project
         self._open: dict[str, Trail] = {}
         #: Calls that search, whose exit code 1 only means nothing matched.
         self._searches: set[str] = set()
@@ -156,7 +159,12 @@ class Calls:
         """A call the agent ``name``d with ``arguments`` has started."""
         file, added, removed = edit_size(name, arguments)
         event = self.start_line(
-            call_id, describe(name, arguments), file=file, added=added, removed=removed
+            call_id,
+            describe(name, arguments),
+            file=file,
+            added=added,
+            removed=removed,
+            path=named_path(name, arguments) or file,
         )
         if searches(name, arguments):
             self._searches.add(event.id)
@@ -170,16 +178,22 @@ class Calls:
         file: str = "",
         added: int = 0,
         removed: int = 0,
+        path: str = "",
     ) -> Trail:
-        """A call already described (an ACP agent's own title) has started."""
+        """A call already described (an ACP agent's own title) has started. ``path``
+        (or else ``file``) is the file it names, as the agent gave it."""
         self._count += 1
         identifier = call_id or f"call-{self._count}"
+        line = short(text) or "Working"
+        linked = project_path(path or file, self.project)
         event = Trail(
             id=identifier,
-            text=short(text) or "Working",
+            text=line,
             file=file_name(file),
             added=added,
             removed=removed,
+            # Only a name the line shows becomes a link.
+            path=linked if linked and file_name(linked) in line else "",
         )
         self._open[identifier] = event
         return event
@@ -262,6 +276,38 @@ def file_name(path: object) -> str:
     """A path's last part ("res://game/level.gd" -> "level.gd")."""
     text = str(path or "").strip().rstrip("/")
     return PurePosixPath(text.removeprefix("res://")).name if text else ""
+
+
+def named_path(name: str, arguments: object = None) -> str:
+    """The file a call names in its arguments ("" when none), as the agent gave it."""
+    args = arguments if isinstance(arguments, dict) else {}
+    if tool_name(name).lower() == "call_tool" and isinstance(
+        args.get("arguments"), dict
+    ):
+        return _path(args["arguments"])
+    return _path(args)
+
+
+def project_path(path: str, project: Path | None = None) -> str:
+    """``path`` as a res:// path when it is in the project: res:// as it is, a relative
+    path from the project folder (where the agent works), an absolute one inside
+    ``project``; "" for anything else."""
+    text = str(path or "").strip()
+    if not text or "\n" in text or "://" in text.removeprefix("res://"):
+        return ""
+    pure = PurePosixPath(text.removeprefix("res://"))
+    if pure.is_absolute():
+        if text.startswith("res://") or project is None:
+            return ""
+        try:
+            inside = Path(os.path.realpath(text)).relative_to(os.path.realpath(project))
+        except ValueError:
+            return ""
+        pure = PurePosixPath(inside.as_posix())
+    parts = [part for part in pure.parts if part != "."]
+    if not parts or ".." in parts:
+        return ""
+    return "res://" + "/".join(parts)
 
 
 def describe(name: str, arguments: object = None) -> str:
