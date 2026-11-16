@@ -260,14 +260,24 @@ OWNED_NOTE = (
 
 
 def owned_changes(project: Path, paths: Iterable[str]) -> list[str]:
-    """The Joinery-owned game files (core, test harness) among ``paths``."""
-    from joinery import core_update
+    """The Joinery-owned game files (core, test harness) among ``paths``.
+
+    A source folder's ``.gdignore`` marker is not one: Joinery's tools write it
+    themselves the first time they put a source there (the music tool into
+    ``audio/sources/`` and ``recipes/``), the same empty file ``update-core``
+    would add, so it never holds a change on its own.
+    """
+    from joinery import core_update, source_folders
 
     try:
         owned = core_update.owned(project)
     except (OSError, ValueError):
         return []
-    return sorted({p.removeprefix("res://") for p in paths}.intersection(owned))
+    markers = {
+        f"{folder}/{source_folders.MARKER}" for folder in source_folders.SOURCE_ONLY
+    }
+    found = {p.removeprefix("res://") for p in paths}.intersection(owned)
+    return sorted(found - markers)
 
 
 def owned_note(paths: Sequence[str]) -> str:

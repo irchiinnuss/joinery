@@ -573,3 +573,24 @@ def test_a_change_to_joinerys_own_harness_always_waits(tmp_path: Path) -> None:
     assert auto_accept.held(changes=[{"path": "game/level.gd"}]) == []
     # Journeyman is told to fix the game or its own test, never the harness.
     assert "never edit Joinery's shared core or test harness" in REVIEW_GUIDE
+
+
+def test_a_tools_own_source_folder_marker_is_not_a_harness_change(
+    tmp_path: Path,
+) -> None:
+    from joinery import core_update
+    from tests.blueprints.godot_run import make_project
+
+    game = make_project(tmp_path, "blank")
+    # A project whose source folders lost their markers: update-core owns them.
+    for folder in ("audio/sources", "recipes"):
+        (game / folder).mkdir(parents=True, exist_ok=True)
+        (game / folder / ".gdignore").unlink(missing_ok=True)
+    assert "audio/sources/.gdignore" in core_update.owned(game)
+    # The music tool writes them with its first patch: no harness hold.
+    paths = ["audio/sources/.gdignore", "recipes/.gdignore", "audio/music/theme.ogg"]
+    assert auto_accept.owned_changes(game, paths) == []
+    # The real harness still holds alongside them.
+    assert auto_accept.owned_changes(game, [*paths, "tests/support/play.gd"]) == [
+        "tests/support/play.gd"
+    ]
