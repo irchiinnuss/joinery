@@ -19,7 +19,9 @@ enemies it can see, or down the most open direction, never at walls or ceilings
   file in the project is tool-made (``joinery.lock``); otherwise it is silent.
 * **Cover** (630x500, itch.io's size): Krita in the worker crops a screenshot
   and sets the title over it, saved as ``share/media/cover.kra`` (the native
-  source) and exported as PNG.
+  source) and exported as PNG. The bot notes where the HUD was in each picture;
+  a HUD bar along the bottom is cropped away and the title goes where no HUD
+  part is, so the title never sits over the HUD.
 
 The worker's ffmpeg and Krita must be the versions pinned in
 ``policy/share.toml``. Each run writes ``share/recipes/media.json`` (seeds,
@@ -71,6 +73,14 @@ TRAILER_GAME_SECONDS = 26.0
 TITLE_SECONDS = 3.0
 END_SECONDS = 2.5
 COVER_SIZE = (630, 500)
+#: Cover title: left margin, the baseline's distance from the bottom (or the top
+#: of the text from the top), in cover pixels.
+COVER_MARGIN = 32
+COVER_BASELINE = 44
+#: A HUD bar starting below this share of the screen's height is cropped off the
+#: cover, unless that would cut more than COVER_MAX_CUT of the picture.
+HUD_BAR_FROM = 0.6
+COVER_MAX_CUT = 0.3
 
 Progress = Callable[[str], None]
 
@@ -322,6 +332,9 @@ async def screenshots(project: Path, seed: int, say: Progress) -> dict[str, Any]
         "files": kept,
         "size": list(min(sizes)),
         "cover_from": kept[chosen.index(busiest)],
+        "cover_hud": hud_rects(
+            taken[busiest].with_name(taken[busiest].stem + ".hud.json")
+        ),
     }
     note = store_size_note(sizes)
     if note:
@@ -485,7 +498,9 @@ async def trailer(project: Path, seed: int, say: Progress) -> dict[str, Any]:
     options = playtest.Options(
         project=project, seconds=TRAILER_GAME_SECONDS + 1, seed=seed, media=True
     )
-    playtest._ensure_imported(playtest.godot_binary(), project, playtest._env(run_dir, {}))
+    playtest._ensure_imported(
+        playtest.godot_binary(), project, playtest._env(run_dir, {})
+    )
     say("Recording a seeded run with Movie Maker")
     command = [
         str(binary), "--path", str(project), "--write-movie", str(movie),
@@ -593,14 +608,103 @@ def _avi_size(path: Path) -> tuple[int, int]:
 # --- Cover ------------------------------------------------------------------------------
 
 
-def cover_script(source: str, title: str, family: str) -> str:
+Rect = tuple[float, float, float, float]
+
+
+def hud_rects(path: Path) -> list[list[float]]:
+    """The HUD parts the bot noted beside a picture: [x, y, w, h] in shares of it."""
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    found: list[list[float]] = []
+    for rect in raw if isinstance(raw, list) else []:
+        if (
+            isinstance(rect, list)
+            and len(rect) == 4
+            and all(isinstance(v, int | float) for v in rect)
+        ):
+            found.append([float(v) for v in rect])
+    return found
+
+
+def title_size(title: str) -> int:
+    return 56 if len(title) <= 14 else 44 if len(title) <= 22 else 34
+
+
+def cover_layout(
+    hud: list[list[float]], source: tuple[int, int], title: str
+) -> dict[str, Any]:
+    """Where the cover comes from and where its title goes, kept off the HUD.
+
+    ``keep`` is the share of the screenshot's height kept from the top: a HUD bar
+    along the bottom (parts starting below HUD_BAR_FROM) is cropped off when that
+    keeps most of the picture. ``title`` is "bottom" (the usual place, over a
+    shade) unless a HUD part left in the cover lies under it there and not at the
+    top; then "top".
+    """
+    width, height = COVER_SIZE
+    low = [r for r in hud if r[1] >= HUD_BAR_FROM]
+    keep = min((r[1] for r in low), default=1.0)
+    if keep < 1.0 - COVER_MAX_CUT:
+        keep = 1.0
+    # The cover: the kept part scaled to cover W x H, centred.
+    sw, sh = float(source[0] or 1), float(source[1] or 1) * keep
+    scale = max(width / sw, height / sh)
+    left, top = (sw * scale - width) / 2, (sh * scale - height) / 2
+    shown: list[Rect] = []
+    for x, y, w, h in hud:
+        if y >= keep:
+            continue
+        box = (
+            x * source[0] * scale - left,
+            y * source[1] * scale - top,
+            w * source[0] * scale,
+            min(h, keep - y) * source[1] * scale,
+        )
+        shown.append(box)
+    size = title_size(title)
+    wide = min(width - 2 * COVER_MARGIN, round(len(title) * size * 0.62))
+    bottom: Rect = (
+        COVER_MARGIN,
+        height - COVER_BASELINE - size,
+        wide,
+        size + COVER_BASELINE * 0.4,
+    )
+    upper: Rect = (COVER_MARGIN, COVER_MARGIN * 0.5, wide, size + COVER_MARGIN * 0.5)
+
+    def covered(area: Rect) -> float:
+        return sum(_overlap(area, part) for part in shown)
+
+    place = "bottom"
+    if covered(bottom) > 0 and covered(upper) < covered(bottom):
+        place = "top"
+    return {"keep": round(keep, 4), "title": place, "size": size}
+
+
+def _overlap(a: Rect, b: Rect) -> float:
+    w = min(a[0] + a[2], b[0] + b[2]) - max(a[0], b[0])
+    h = min(a[1] + a[3], b[1] + b[3]) - max(a[1], b[1])
+    return max(w, 0.0) * max(h, 0.0)
+
+
+def cover_script(
+    source: str,
+    title: str,
+    family: str,
+    layout: dict[str, Any] | None = None,
+) -> str:
     """The Krita script that composes the cover; saved as the replayable recipe."""
     width, height = COVER_SIZE
+    layout = layout or {"keep": 1.0, "title": "bottom"}
+    keep = float(layout.get("keep", 1.0))
+    at_top = layout.get("title") == "top"
     escaped = title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    size = 56 if len(title) <= 14 else 44 if len(title) <= 22 else 34
+    size = title_size(title)
+    baseline = COVER_MARGIN * 0.5 + size if at_top else height - COVER_BASELINE
     svg = (
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}pt" height="{height}pt" '
-        f'viewBox="0 0 {width} {height}"><text x="32" y="{height - 44}" '
+        f'viewBox="0 0 {width} {height}"><text x="{COVER_MARGIN}" y="{baseline:g}" '
         f'style="font-family:{family};font-weight:bold;font-size:{size}px;fill:#ffffff">'
         f"{escaped}</text></svg>"
     )
@@ -615,8 +719,14 @@ import os
 os.chdir("/work")
 app = Krita.instance()
 W, H = {width}, {height}
+KEEP = {keep!r}
+TITLE_AT_TOP = {at_top!r}
 shot = app.openDocument(os.path.abspath({source!r}))
 shot.setBatchmode(True)
+if KEEP < 1.0:
+    # The HUD bar along the bottom stays out of the cover.
+    shot.crop(0, 0, shot.width(), round(shot.height() * KEEP))
+    shot.waitForDone()
 scale = max(W / shot.width(), H / shot.height())
 nw, nh = round(shot.width() * scale), round(shot.height() * scale)
 shot.scaleImage(nw, nh, int(shot.xRes()), int(shot.yRes()), "Bicubic")
@@ -635,7 +745,9 @@ root.addChildNode(picture, None)
 shade = document.createNode("Shade", "paintlayer")
 rows = bytearray()
 for y in range(H):
-    alpha = 0 if y < H * 0.55 else int(190 * (y - H * 0.55) / (H * 0.45))
+    # Darker toward the title's edge, so white text reads over any picture.
+    depth = (H * 0.45 - y) if TITLE_AT_TOP else (y - H * 0.55)
+    alpha = 0 if depth <= 0 else int(190 * depth / (H * 0.45))
     rows += bytes((0, 0, 0, alpha)) * W
 shade.setPixelData(bytes(rows), 0, 0, W, H)
 root.addChildNode(shade, picture)
@@ -650,7 +762,9 @@ document.close()
 '''
 
 
-async def cover(project: Path, source: str, say: Progress) -> dict[str, Any]:
+async def cover(
+    project: Path, source: str, say: Progress, hud: list[list[float]] | None = None
+) -> dict[str, Any]:
     if not (project / source).is_file():
         raise MediaError("Make the screenshots first: the cover is made from one.")
     tools = pins()
@@ -658,7 +772,9 @@ async def cover(project: Path, source: str, say: Progress) -> dict[str, Any]:
     (project / WORK).mkdir(parents=True, exist_ok=True)
     shutil.copyfile(project / source, project / staged)
     (project / RECIPES).mkdir(parents=True, exist_ok=True)
-    script = cover_script(staged.as_posix(), game_name(project), tools["font_family"])
+    name = game_name(project)
+    layout = cover_layout(hud or [], png_size(project / source), name)
+    script = cover_script(staged.as_posix(), name, tools["font_family"], layout)
     (project / COVER_SCRIPT).write_text(script, encoding="utf-8")
     (project / MEDIA).mkdir(parents=True, exist_ok=True)
     say("Composing the cover in Krita")
@@ -676,6 +792,7 @@ async def cover(project: Path, source: str, say: Progress) -> dict[str, Any]:
         "script": COVER_SCRIPT.as_posix(),
         "krita": tools["krita"],
         "size": list(COVER_SIZE),
+        "layout": layout,
         "files": [(MEDIA / "cover.png").as_posix(), (MEDIA / "cover.kra").as_posix()],
     }
 
@@ -709,7 +826,8 @@ async def make(
     if "cover" in only:
         shots = recipe.get("screenshots", {})
         source = str(shots.get("cover_from", "")) if isinstance(shots, dict) else ""
-        recipe["cover"] = await cover(project, source, say)
+        hud = shots.get("cover_hud", []) if isinstance(shots, dict) else []
+        recipe["cover"] = await cover(project, source, say, hud)
     recipe["outputs"] = {
         path.relative_to(project).as_posix(): digest(path)
         for path in sorted((project / MEDIA).rglob("*"))

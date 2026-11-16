@@ -376,7 +376,6 @@ def test_candidates_move_off_views_blocked_up_close() -> None:
     assert share_media.candidates({**report, "blocked_views": []}).count(900) == 1
 
 
-
 def test_the_cover_comes_from_a_shot_with_something_in_the_middle() -> None:
     thumbs = {300: _thumb(9), 900: _thumb(40, stripes=1), 1500: _thumb(20, stripes=8)}
     # Without framed moments the most detailed shot wins (900); with them, the
@@ -536,6 +535,34 @@ def test_cover_script_escapes_the_title() -> None:
     assert "Moss &amp; &lt;Rain&gt;" in script
     assert "share/media/cover.kra" in script and "W, H = 630, 500" in script
     compile(script, "cover.py", "exec")
+
+
+def test_cover_crops_off_a_hud_bar_along_the_bottom() -> None:
+    # Ironworks: a bar of panels and text across the bottom 12% of the frame.
+    hud = [[0.0, 0.88, 1.0, 0.12], [0.02, 0.9, 0.1, 0.05], [0.49, 0.49, 0.02, 0.02]]
+    layout = share_media.cover_layout(hud, (1920, 1080), "Ironworks")
+    assert layout == {"keep": 0.88, "title": "bottom", "size": 56}
+    script = share_media.cover_script("s.png", "Ironworks", "DejaVu Sans", layout)
+    assert "KEEP = 0.88" in script and "TITLE_AT_TOP = False" in script
+    compile(script, "cover.py", "exec")
+
+
+def test_cover_title_moves_up_when_hud_parts_sit_where_it_would_go() -> None:
+    # Health and ammo in the lower left, too high up to crop away: the title goes on top.
+    hud = [[0.02, 0.55, 0.3, 0.4]]
+    layout = share_media.cover_layout(hud, (1920, 1080), "Ironworks")
+    assert layout["keep"] == 1.0 and layout["title"] == "top"
+    script = share_media.cover_script("s.png", "Ironworks", "DejaVu Sans", layout)
+    assert 'y="72"' in script and "TITLE_AT_TOP = True" in script
+    # No HUD noted (an older recipe): as before.
+    assert share_media.cover_layout([], (1920, 1080), "Ironworks")["title"] == "bottom"
+
+
+def test_hud_rects_are_read_from_the_bot_s_note(tmp_path: Path) -> None:
+    note = tmp_path / "shot_000120.hud.json"
+    note.write_text('[[0, 0.9, 1, 0.1], "junk", [1, 2]]')
+    assert share_media.hud_rects(note) == [[0.0, 0.9, 1.0, 0.1]]
+    assert share_media.hud_rects(tmp_path / "missing.json") == []
 
 
 def test_media_policy_pins_worker_tools() -> None:

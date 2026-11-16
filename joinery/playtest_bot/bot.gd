@@ -788,6 +788,12 @@ func _shot(name: String) -> void:
 		var height := int(image.get_height() * shot_width / float(maxi(image.get_width(), 1)))
 		image.resize(shot_width, maxi(height, 1), Image.INTERPOLATE_BILINEAR)
 	image.save_png(out_dir.path_join(name))
+	if framer != null:
+		# Where the HUD was, beside the picture: a cover made from it keeps its title off it.
+		var path := out_dir.path_join(name.get_basename() + ".hud.json")
+		var hud := FileAccess.open(path, FileAccess.WRITE)
+		if hud != null:
+			hud.store_string(JSON.stringify(framer.call(&"hud_rects", root)))
 
 
 func _finish() -> void:

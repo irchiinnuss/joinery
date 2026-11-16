@@ -30,6 +30,10 @@ const GOAL_GROUPS: Array[StringName] = [
 	&"interactable",
 ]
 const SIGHT := 35.0
+## HUD parts listed with a picture, at most; and the share of the screen past which a control
+## is a backdrop (a fade, a full-screen container), not a HUD part.
+const HUD_LIMIT := 64
+const HUD_BACKDROP := 0.5
 const RETARGET := 45
 const FAN := 16
 const PITCH_LOW := -0.22
@@ -202,6 +206,60 @@ func _framed(camera: Camera3D, body: Node3D) -> bool:
 		return false
 	var forward := -camera.global_basis.z
 	return forward.angle_to(aim) < FRAMED_ANGLE and _visible(eye, _target, body)
+
+
+## Where the HUD is on screen, for a cover that keeps its title off it: each visible control
+## that draws something (text, a picture, a filled panel or bar), as [x, y, w, h] in shares
+## of the window. Controls in their own viewports are left out.
+static func hud_rects(viewport: Viewport) -> Array:
+	var found: Array = []
+	var screen := viewport.get_visible_rect().size
+	if screen.x <= 0.0 or screen.y <= 0.0:
+		return found
+	var stack: Array[Node] = [viewport]
+	while not stack.is_empty() and found.size() < HUD_LIMIT:
+		var node: Node = stack.pop_back()
+		if node is CanvasItem and not (node as CanvasItem).is_visible_in_tree():
+			continue
+		if node is Control and _draws(node as Control):
+			var control := node as Control
+			var xform := control.get_global_transform_with_canvas()
+			var rect := Rect2(xform.origin, control.size * xform.get_scale())
+			rect = rect.intersection(Rect2(Vector2.ZERO, screen))
+			var share := rect.get_area() / (screen.x * screen.y)
+			if rect.has_area() and share < HUD_BACKDROP:
+				(
+					found
+					. append(
+						[
+							snappedf(rect.position.x / screen.x, 0.001),
+							snappedf(rect.position.y / screen.y, 0.001),
+							snappedf(rect.size.x / screen.x, 0.001),
+							snappedf(rect.size.y / screen.y, 0.001),
+						]
+					)
+				)
+		for child: Node in node.get_children():
+			if not child is SubViewport:
+				stack.append(child)
+	return found
+
+
+static func _draws(control: Control) -> bool:
+	if control is Label or control is Button:
+		return not str(control.get(&"text")).strip_edges().is_empty()
+	if control is RichTextLabel:
+		return not (control as RichTextLabel).get_parsed_text().strip_edges().is_empty()
+	if control is TextureRect:
+		return (control as TextureRect).texture != null
+	if control is ColorRect:
+		return (control as ColorRect).color.a > 0.05
+	if control is Range:
+		return true
+	if control is Panel or control is PanelContainer:
+		var box := control.get_theme_stylebox(&"panel")
+		return box != null and not box is StyleBoxEmpty
+	return false
 
 
 func _rids(body: Node3D) -> Array[RID]:
