@@ -71,6 +71,14 @@ const ALLOWED := [
 	},
 	{
 		"kind": "overflow",
+		"class": "Button",
+		"text": "",
+		"inside": "EditorSceneTabs",
+		"reason":
+		"Stock Godot scene tabs: once the tabs fill the bar, + moves into its own slot beside it",
+	},
+	{
+		"kind": "overflow",
 		"class": "EditorInspector",
 		"text": "",
 		"reason": "Stock Godot Inspector in a side column: it fills the dock margin by design",
@@ -571,10 +579,10 @@ static func _contrast(control: Control) -> String:
 # --- overflow --------------------------------------------------------------------
 
 
-static func _overflow(control: Control, window: Rect2, clip: Rect2) -> String:
+static func _overflow(control: Control, window: Rect2, clip: Rect2, parent_too := true) -> String:
 	var rect := control.get_global_rect()
 	var parent := control.get_parent() as Control
-	if parent != null and not control.top_level and not parent is ScrollContainer:
+	if parent_too and parent != null and not control.top_level and not parent is ScrollContainer:
 		var outer := parent.get_global_rect()
 		# Marked sidebar rows reach into the dock's gutter on purpose (the transcript's
 		# scrollbar, icon buttons' glyph padding): they need only stay inside the dock.
@@ -679,7 +687,14 @@ static func wanted(screen: String) -> bool:
 static func snapshot(screen: String, viewport: Viewport, roots: Array) -> bool:
 	if not wanted(screen):
 		return true
-	var frame: Image = null
+	var frame := capture(screen, viewport)
+	run(screen, roots, viewport.get_visible_rect(), frame, viewport)
+	return frame != null
+
+
+## Save [param viewport] as <screen>.png in JOINERY_CAPTURE_DIR and return the image, or print
+## "VISUAL-MISSING <screen>" and return null when nothing could be captured.
+static func capture(screen: String, viewport: Viewport) -> Image:
 	var directory := OS.get_environment("JOINERY_CAPTURE_DIR")
 	if not directory.is_empty() and DisplayServer.get_name() != "headless":
 		DirAccess.make_dir_recursive_absolute(directory)
@@ -689,8 +704,57 @@ static func snapshot(screen: String, viewport: Viewport, roots: Array) -> bool:
 			var file := screen + ".png"
 			if image.save_png(directory.path_join(file)) == OK:
 				print("VISUAL-CAPTURE ", file)
-				frame = image
-	if frame == null:
-		print("VISUAL-MISSING ", screen)
-	run(screen, roots, viewport.get_visible_rect(), frame, viewport)
-	return frame != null
+				return image
+	print("VISUAL-MISSING ", screen)
+	return null
+
+
+## Only the overflow check, on interactive controls: each one shown under [param roots] must
+## sit inside its parent and inside [param window]. Used for whole-editor layouts, where Godot's
+## own panels would bring their unstyled text and colours into the other checks.
+static func bounds(screen: String, roots: Array, window: Rect2) -> Array[String]:
+	var findings: Array[String] = []
+	for root: Variant in roots:
+		if root is Node and is_instance_valid(root):
+			_walk_bounds(screen, root, root, window, Rect2(-1e7, -1e7, 2e7, 2e7), findings)
+	for line: String in findings:
+		print(line)
+	print("UI-CHECKED %s %d" % [screen, findings.size()])
+	return findings
+
+
+static func _walk_bounds(
+	screen: String, root: Node, node: Node, window: Rect2, clip: Rect2, findings: Array[String]
+) -> void:
+	if node != root and node is Window:
+		return
+	if node is CanvasItem and not (node as CanvasItem).visible:
+		return
+	var inner := clip
+	if node is Control:
+		var control := node as Control
+		var rect := control.get_global_rect()
+		if rect.size.x <= 0.0 or rect.size.y <= 0.0 or not rect.intersects(clip, true):
+			return
+		if control.modulate.a <= 0.01 or control.self_modulate.a <= 0.01:
+			return
+		if _interactive(control) and control.mouse_filter != Control.MOUSE_FILTER_IGNORE:
+			# ALLOWED may excuse a stock control reaching past its parent, never past the window.
+			var overflow := _overflow(control, window, clip)
+			if not overflow.is_empty() and _allowed("overflow", control):
+				overflow = _overflow(control, window, clip, false)
+			if not overflow.is_empty():
+				findings.append(_line(screen, "overflow", _path(root, control), overflow))
+		if control.clip_contents or control is ScrollContainer:
+			inner = clip.intersection(rect)
+	for child: Node in node.get_children():
+		_walk_bounds(screen, root, child, window, inner, findings)
+
+
+static func _interactive(control: Control) -> bool:
+	if control is ScrollBar:
+		return false
+	for type_name: String in INTERACTIVE:
+		if control.is_class(type_name):
+			return true
+	return false
