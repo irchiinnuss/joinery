@@ -23,9 +23,10 @@ elif a[0] == "update-addon":
     print(json.dumps({"state": "scheduled", "helper": 7, "project": "p"}))
 elif a[0] == "status" and os.environ.get("STATUS"):
     needs = os.environ["STATUS"] == "needs"
+    # Like the real CLI: one object over many lines.
     print(json.dumps({"docker": "ok", "tools": [{"id": "blender"}], "notice": {
         "state": "needs_image", "text": "Blender and Krita need a refresh before they can work.",
-        "action": {"id": "rebuild", "label": "Refresh tools"}} if needs else None}))
+        "action": {"id": "rebuild", "label": "Refresh tools"}} if needs else None}, indent=2))
 elif a[0] == "status":
     seen = os.environ["CALLS"] + ".status"
     count = int(open(seen).read()) + 1 if os.path.exists(seen) else 1
@@ -33,7 +34,7 @@ elif a[0] == "status":
     up = count >= 2
     print(json.dumps({"docker": "ok" if up else "Docker is not running.", "tools": [],
         "notice": None if up else {"state": "needs_docker", "text": "Blender needs Docker.",
-        "action": {"id": "start_docker", "label": "Start Docker"}}}))
+        "action": {"id": "start_docker", "label": "Start Docker"}}}, indent=2))
 elif a[0] == "bootstrap" and "--join" in a:
     import time
     print(json.dumps({"state": "running", "progress": 0.5, "step": 2, "steps": 4,

@@ -134,3 +134,25 @@ static func finish(job: RefCounted, done: Callable) -> RefCounted:
 		return job
 	done.call(result)
 	return null
+
+
+## [param text] as JSON, or null when it is empty or not JSON. Unlike JSON.parse_string it prints
+## nothing: command output and files that are still being written are read many times a minute.
+static func parse(text: String) -> Variant:
+	var json := JSON.new()
+	return json.data if json.parse(text) == OK else null
+
+
+## The JSON object a command printed: its whole output (one line, or one object printed over
+## several lines), else its last line that is an object; {} when there is none.
+static func object(output: String) -> Dictionary:
+	var whole: Variant = parse(output.strip_edges())
+	if whole is Dictionary:
+		return whole
+	var lines := output.split("\n", false)
+	lines.reverse()
+	for line: String in lines:
+		var parsed: Variant = parse(line)
+		if parsed is Dictionary:
+			return parsed
+	return {}

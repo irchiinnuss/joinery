@@ -221,7 +221,7 @@ func _look_for_refresh() -> void:
 	var path := refresh_state_path if not refresh_state_path.is_empty() else _state_file()
 	if not FileAccess.file_exists(path):
 		return
-	var state: Variant = JSON.parse_string(FileAccess.get_file_as_string(path))
+	var state: Variant = COMMAND.parse(FileAccess.get_file_as_string(path))
 	if not state is Dictionary or str((state as Dictionary).get("state", "")) != "running":
 		return
 	# Godot can't ask about a process it didn't start: --join says whether it still runs.
@@ -537,12 +537,6 @@ func _project() -> String:
 	return ProjectSettings.globalize_path("res://").rstrip("/")
 
 
-## The last JSON object line in [param output], or {}.
+## The JSON object in [param output] (`joinery status` prints one over many lines), or {}.
 static func _json(output: String) -> Dictionary:
-	var lines := output.split("\n", false)
-	lines.reverse()
-	for line: String in lines:
-		var parsed: Variant = JSON.parse_string(line)
-		if parsed is Dictionary:
-			return parsed
-	return {}
+	return COMMAND.object(output)

@@ -902,7 +902,7 @@ func _process(_delta: float) -> void:
 
 
 func _line(slot: String, line: String) -> void:
-	var parsed: Variant = JSON.parse_string(line)
+	var parsed: Variant = COMMAND.parse(line)
 	if not parsed is Dictionary:
 		return
 	var data: Dictionary = parsed

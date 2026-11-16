@@ -853,10 +853,4 @@ func _process(_delta: float) -> void:
 
 
 static func _parse(output: String) -> Dictionary:
-	var lines := output.strip_edges().split("\n", false)
-	lines.reverse()
-	for line: String in lines:
-		var parsed: Variant = JSON.parse_string(line)
-		if parsed is Dictionary:
-			return parsed
-	return {}
+	return COMMAND.object(output)

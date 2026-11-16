@@ -105,7 +105,7 @@ func _process(_delta: float) -> void:
 	set_process(false)
 	var data: Dictionary = {}
 	for line: String in str(result.get("output", "")).split("\n", false):
-		var parsed: Variant = JSON.parse_string(line)
+		var parsed: Variant = COMMAND.parse(line)
 		if parsed is Dictionary:
 			data = parsed
 	if int(result.get("code", 1)) != 0 and not data.has("error"):

@@ -146,7 +146,7 @@ func _process(_delta: float) -> void:
 func _finished(result: Dictionary) -> void:
 	if int(result.get("code", 1)) != 0:
 		return
-	var data: Variant = JSON.parse_string(str(result.get("output", "")).get_slice("\n", 0))
+	var data: Variant = COMMAND.parse(str(result.get("output", "")).get_slice("\n", 0))
 	if data is Dictionary:
 		apply(data)
 

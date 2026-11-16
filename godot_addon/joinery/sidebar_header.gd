@@ -265,7 +265,7 @@ func _process(_delta: float) -> void:
 
 func _repaired(result: Dictionary) -> void:
 	_banner_action.disabled = false
-	var answer: Variant = JSON.parse_string(str(result.get("output", "")).get_slice("\n", 0))
+	var answer: Variant = COMMAND.parse(str(result.get("output", "")).get_slice("\n", 0))
 	if int(result.get("code", 1)) == 0:
 		reconnect_pressed.emit()
 	else:

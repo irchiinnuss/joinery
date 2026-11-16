@@ -16,6 +16,7 @@ extends RefCounted
 ## which region each bone is in. Objects MPFB2 made as clothes or hair (extras.joinery_role)
 ## are picked whole. [method region_overlay] draws a region over the mesh, skinned like it.
 
+const COMMAND := preload("command_job.gd")
 ## MPFB2 roles of objects worn on the body, not part of it (blender_regions.WORN_ROLES).
 const WORN := ["clothes", "hair", "eyes", "eyebrows", "eyelashes", "teeth", "tongue", "proxymeshes"]
 
@@ -77,7 +78,7 @@ static func material_maps(material: Material) -> Dictionary:
 		return {}
 	var maps: Variant = extras.get("joinery_maps", {})
 	if maps is String:
-		maps = JSON.parse_string(maps)
+		maps = COMMAND.parse(maps)
 	return maps if maps is Dictionary else {}
 
 
@@ -179,7 +180,7 @@ static func node_regions(instance: Node) -> Dictionary:
 		return {}
 	var regions: Variant = extras.get("joinery_regions", {})
 	if regions is String:
-		regions = JSON.parse_string(regions)
+		regions = COMMAND.parse(regions)
 	if not regions is Dictionary:
 		return {}
 	var found := {}

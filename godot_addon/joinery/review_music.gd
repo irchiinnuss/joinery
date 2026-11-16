@@ -15,6 +15,7 @@ const UI_MOTION := preload("ui_motion.gd")
 const UI := preload("ui_components.gd")
 const TRACK := preload("music_track.gd")
 const TIMELINE := preload("audio_timeline.gd")
+const COMMAND := preload("command_job.gd")
 const LOUDNESS := "[−-]?\\d+(?:\\.\\d+)?(?:\\s*→\\s*[−-]?\\d+(?:\\.\\d+)?)?\\s*LUFS"
 
 ## The track description on show ({} without one).
@@ -104,7 +105,7 @@ static func proposed(diff: String, path: String) -> Dictionary:
 			inside = line.substr(4).trim_prefix("b/").strip_edges() == path
 		elif inside and line.begins_with("+metadata/" + TRACK.META):
 			var raw := line.substr(line.find("=") + 1).strip_edges()
-			var parsed: Variant = JSON.parse_string(raw.replace('&"', '"'))
+			var parsed: Variant = COMMAND.parse(raw.replace('&"', '"'))
 			if parsed is Dictionary and (parsed as Dictionary).get("layers") is Array:
 				return parsed
 	return {}

@@ -350,7 +350,7 @@ func _process(_delta: float) -> void:
 	var lines := _streamed + str(done.get("output", "")).split("\n", false)
 	_streamed = PackedStringArray()
 	for line: String in lines:
-		var parsed: Variant = JSON.parse_string(line)
+		var parsed: Variant = COMMAND.parse(line)
 		if parsed is Dictionary and not (parsed as Dictionary).has("progress"):
 			data = parsed
 	if data.is_empty() and int(done.get("code", 1)) != 0:
@@ -360,7 +360,7 @@ func _process(_delta: float) -> void:
 
 
 func _progress(line: String) -> void:
-	var parsed: Variant = JSON.parse_string(line)
+	var parsed: Variant = COMMAND.parse(line)
 	if not parsed is Dictionary or not (parsed as Dictionary).has("progress"):
 		return
 	var step := str(parsed.get("stage", ""))

@@ -6,6 +6,7 @@ extends HBoxContainer
 ## like any other, with their own rows in the Review tab. Tidy opens "/tidy" (ADR 0074).
 
 const UI := preload("ui_components.gd")
+const COMMAND := preload("command_job.gd")
 ## The checks' saved reports, inside the project.
 const REPORTS := {
 	"access": "res://.joinery/checks/access.json", "perf": "res://.joinery/checks/perf.json"
@@ -102,7 +103,7 @@ func refresh() -> void:
 
 
 static func _read(check: String, path: String, stamp: int) -> Dictionary:
-	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(path))
+	var parsed: Variant = COMMAND.parse(FileAccess.get_file_as_string(path))
 	if not parsed is Dictionary:
 		return {"stamp": stamp, "words": "", "score": 100}
 	var data := parsed as Dictionary
