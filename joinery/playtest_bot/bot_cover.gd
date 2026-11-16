@@ -61,6 +61,12 @@ var _skip: Dictionary = {}
 var _goal: int = -1
 var _goal_since: int = 0
 var _key: String = ""
+## The cell the player stood in last frame (-1 none): a step from it to the next cell shows
+## the way between them is open, whatever the probes said.
+var _last_cell: int = -1
+## Ways the player walked, as cell * 8 + wall bit: no probe walls them again (a doorway's
+## jamb the probe's line grazes, a door probed while it was still opening).
+var _passed: Dictionary = {}
 
 
 func _init(scene_tree: SceneTree) -> void:
@@ -126,6 +132,8 @@ func build(player: Node, style: String) -> void:
 			dwell[index] += int(spent[centre])
 	_skip.clear()
 	_goal = -1
+	_last_cell = -1
+	_passed.clear()
 	start = _cell_of(at)
 	_map(player)
 	for item: int in floors.size():
@@ -149,6 +157,31 @@ func visit(at: Vector3, frame: int) -> void:
 		visited[here] = frame + 1
 	if here == _goal:
 		_goal = -1
+	if here != _last_cell:
+		_walked(_last_cell, here)
+		_last_cell = here
+
+
+## The player walked from cell [param from] into the next cell [param to] (or over one, a short
+## jump): no wall stands between them, now or after a later probe. A door probed while it was
+## still sliding open, or a doorway whose jamb the probe's line grazes, keeps its wall bits
+## otherwise, and once the player is somewhere else (sent back to a checkpoint) the grid has
+## no way back through it. A respawn's jump across the map clears nothing.
+func _walked(from: int, to: int) -> void:
+	if mode != "3d" or from < 0 or to < 0 or from >= _walls.size() or to >= _walls.size():
+		return
+	var step := Vector2i(to % cols, to / cols) - Vector2i(from % cols, from / cols)
+	for way: int in DIRS.size():
+		var bits := Vector2i(-1, -1)
+		if step == DIRS[way]:
+			bits = Vector2i(way, way ^ 1)
+		elif step == DIRS[way] * 2:
+			bits = Vector2i(way + 4, (way ^ 1) + 4)
+		if bits.x >= 0:
+			_passed[from * 8 + bits.x] = true
+			_passed[to * 8 + bits.y] = true
+			_set_wall(from, bits.x, false)
+			_set_wall(to, bits.y, false)
 
 
 ## The next place to walk to from [param at] to see more of the level (a world position), or
@@ -459,7 +492,7 @@ func _find_walls(player: Node, index: int, open: PackedByteArray) -> void:
 			if target < 0 or open[target] == 0:
 				continue
 		var back := (way ^ 1) + (bit - way)
-		var blocked := _wall_between(player, index, target)
+		var blocked := not _passed.has(index * 8 + bit) and _wall_between(player, index, target)
 		_set_wall(index, bit, blocked)
 		_set_wall(target, back, blocked)
 

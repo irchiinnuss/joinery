@@ -678,8 +678,10 @@ func _open_door(door: Node) -> void:
 	_opened.append(name)
 	if not name in doors:
 		doors.append(name)
-	# The door slides away: probe its doorway again once it has.
+	# The door slides away: probe its doorway again once it has, and later once more (a slow
+	# door may still be in the way at the first look).
 	_reprobe[_frame + 60] = (door as Node3D).global_position
+	_reprobe[_frame + 240] = (door as Node3D).global_position
 
 
 ## Doors opened by anything with an `is_open` (a door prop under the marker) count too, and
@@ -946,7 +948,7 @@ func _obstacle() -> String:
 		text += ", closest %s m" % closest
 	var here := _round(_at())
 	if not _reachable(_goal):
-		text += "; the map has no way there from (%s, %s, %s)" % here
+		text += "; the bot's map of the level has no way there from (%s, %s, %s)" % here
 	elif _still_for() >= 20.0:
 		text += "; stuck at (%s, %s, %s) for %d s" % (here + [roundi(_still_for())])
 	if deaths > 0:
