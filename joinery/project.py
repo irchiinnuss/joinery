@@ -195,6 +195,13 @@ def create_project(
         raise
 
 
+#: A new project's .gitignore: Godot's cache, local output, and the junk files
+#: operating systems drop into folders, so they never land in the timeline.
+GITIGNORE = (
+    ".godot/\nout/\n\n# Operating system files\n.DS_Store\n._*\nThumbs.db\ndesktop.ini\n"
+)
+
+
 def _scaffold(path: Path, name: str, selection: Selection) -> None:
     for directory in ASSET_DIRS:
         (path / directory).mkdir()
@@ -207,7 +214,7 @@ def _scaffold(path: Path, name: str, selection: Selection) -> None:
     text = (TEMPLATE / "project.godot").read_text().replace("{{name}}", name)
     (path / "project.godot").write_text(text)
     (path / "joinery.lock").write_text("version = 1\n")
-    (path / ".gitignore").write_text(".godot/\nout/\n")
+    (path / ".gitignore").write_text(GITIGNORE)
     (path / ".gitattributes").write_text((ROOT / ".gitattributes").read_text())
     write_agent_wiring(path)
     # Project memory every agent reads, and each agent's own file pointing at it.

@@ -289,3 +289,11 @@ def test_new_writes_the_history_choice(tmp_path: Path) -> None:
     code, project = _cli_new(tmp_path, "bad", "--history", "custom")
     assert code == 1
     assert not project.exists()
+
+
+def test_new_project_ignores_operating_system_junk(tmp_path: Path) -> None:
+    project = tmp_path / "game"
+    create_project(project, "G", Selection(["godot"], []), load_catalog())
+    rules = (project / ".gitignore").read_text().splitlines()
+    for rule in (".godot/", "out/", ".DS_Store", "._*", "Thumbs.db", "desktop.ini"):
+        assert rule in rules
