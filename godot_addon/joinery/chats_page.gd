@@ -157,22 +157,10 @@ func row_for(chat_id: String) -> ChatRow:
 
 ## Show or hide the page in place of the conversation, restoring what was there.
 func set_open(open: bool) -> void:
-	var content := get_parent()
-	if content == null:
+	if get_parent() == null:
 		visible = open
 		return
-	for child: Node in content.get_children():
-		if child == self or not child is CanvasItem:
-			continue
-		var item := child as CanvasItem
-		if open:
-			if not item.has_meta("before_chats"):
-				item.set_meta("before_chats", item.visible)
-			item.visible = false
-		elif item.has_meta("before_chats"):
-			item.visible = item.get_meta("before_chats")
-			item.remove_meta("before_chats")
-	visible = open
+	STYLE.hold_parts(self, open, "chats")
 	if open:
 		scroll_vertical = 0
 

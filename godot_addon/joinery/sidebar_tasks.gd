@@ -134,7 +134,8 @@ static func attach(sidebar: Control, content: Control, before: Control) -> VBoxC
 	tasks.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(tasks)
 	var fit := func() -> void:
-		scroll.visible = tasks.visible
+		# Never over a page shown in the conversation's place (Chats, Settings).
+		STYLE.show_part(scroll, tasks.visible)
 		var cap := sidebar.size.y * CARDS_SHARE
 		var need := tasks.get_combined_minimum_size().y
 		scroll.custom_minimum_size.y = minf(need, cap)

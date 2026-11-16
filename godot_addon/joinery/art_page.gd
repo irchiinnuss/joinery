@@ -162,21 +162,9 @@ func _ready() -> void:
 
 ## Show or hide the page in place of the conversation, restoring what was there.
 func set_open(open: bool) -> void:
-	var content := get_parent()
-	if content == null:
+	if get_parent() == null:
 		visible = open
 		return
-	for child: Node in content.get_children():
-		if child == self or not child is CanvasItem:
-			continue
-		var item := child as CanvasItem
-		if open:
-			if not item.has_meta("before_art"):
-				item.set_meta("before_art", item.visible)
-			item.visible = false
-		elif item.has_meta("before_art"):
-			item.visible = item.get_meta("before_art")
-			item.remove_meta("before_art")
 	if not open:
 		# Opened again, the page waits for the bridge's answer rather than show an old look
 		# with an Approve that no longer means anything.
@@ -185,7 +173,7 @@ func set_open(open: bool) -> void:
 		_expanded = {}
 	if open and not visible:
 		_scroll.scroll_vertical = 0
-	visible = open
+	STYLE.hold_parts(self, open, "art")
 	if not open:
 		_ticket += 1
 

@@ -7,6 +7,8 @@ extends RefCounted
 const UI_THEME := preload("ui_theme.gd")
 const UI_MOTION := preload("ui_motion.gd")
 const COLUMN := preload("sidebar_column.gd")
+## Meta key prefix: what a part showed before a page took its place ([method hold_parts]).
+const HELD := "_joinery_held_"
 
 
 ## Give [param control] the [param variation] panel with its side padding set to SPACE
@@ -352,9 +354,45 @@ static func centered_column(page: Control, max_w := "column") -> Container:
 				# Its own visible property only: a parent hiding (Settings open) is not a change.
 				if target.visible != bool(target.get_meta("_joinery_shown", true)):
 					target.set_meta("_joinery_shown", target.visible)
-					column.visible = target.visible
+					show_part(column, target.visible)
 		)
 	return column
+
+
+## Show [param page] in place of the conversation, or close it ([param open]): the sidebar
+## content's other parts hide while it shows and come back as they were. [param key] names the
+## page ("chats", "settings", "art"); pages can open over each other.
+static func hold_parts(page: Control, open: bool, key: String) -> void:
+	var content := page.get_parent()
+	var meta := HELD + key
+	if content != null:
+		for child: Node in content.get_children():
+			if child == page or not child is CanvasItem:
+				continue
+			var item := child as CanvasItem
+			if open:
+				if not item.has_meta(meta):
+					item.set_meta(meta, item.visible)
+				item.visible = false
+			elif item.has_meta(meta):
+				var shown: bool = item.get_meta(meta)
+				item.remove_meta(meta)
+				# With another page still open over it, that page brings it back.
+				show_part(item, shown)
+	page.visible = open
+
+
+## Show or hide [param item], a part of the sidebar's content. While a page shows in its place
+## ([method hold_parts]) it stays hidden and shows as asked when the page closes; a part that
+## changes on its own (a task card arrives, the sidebar resizes) never shows over a page.
+static func show_part(item: CanvasItem, on: bool) -> void:
+	var held := false
+	for meta: StringName in item.get_meta_list():
+		if str(meta).begins_with(HELD):
+			item.set_meta(meta, on)
+			held = true
+	if not held:
+		item.visible = on
 
 
 ## In Joinery's layout the sidebar is alone in its dock slot, which hides its tabs. There the

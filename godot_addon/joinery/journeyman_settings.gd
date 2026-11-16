@@ -120,22 +120,10 @@ static func attach(sidebar: Control, header: Control, content: Control) -> Scrol
 
 ## Show the page in place of the header, chat, review and composer, then restore them.
 func set_open(open: bool) -> void:
-	var content := get_parent()
-	if content == null:
+	if get_parent() == null:
 		visible = open
 		return
-	for child: Node in content.get_children():
-		if child == self or not child is CanvasItem:
-			continue
-		var item := child as CanvasItem
-		if open:
-			if not item.has_meta("before_settings"):
-				item.set_meta("before_settings", item.visible)
-			item.visible = false
-		elif item.has_meta("before_settings"):
-			item.visible = item.get_meta("before_settings")
-			item.remove_meta("before_settings")
-	visible = open
+	STYLE.hold_parts(self, open, "settings")
 	if open:
 		_status.hide()
 		_sync_prefs()
