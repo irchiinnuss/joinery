@@ -370,7 +370,8 @@ func _check_adopt_and_release() -> void:
 	h.expect(rig != null and rig.is_inside_tree(), "the running level gets the rig")
 	var player: Node3D = Game.local_player() as Node3D
 	if player != null and rig != null:
-		h.expect(rig.get_parent() == player, "on the local player")
+		# Under the player: a project may mount the rig on a node of its own there.
+		h.expect(player.is_ancestor_of(rig), "on the local player")
 		h.expect(not player.is_physics_processing(), "which the rig now moves")
 	VR.adopt_interface(started)
 	h.expect(h.fire_count(changes) == 1, "adopting it again fires nothing")
