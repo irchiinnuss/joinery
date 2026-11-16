@@ -94,3 +94,36 @@ static func shots(suite: Variant, light: bool, width: int, beside: Control) -> v
 	host.queue_free()
 	await suite._frames(2)
 	behind.show()
+
+
+## A sound made in SuperCollider waits for review: the card's calm note names it with its tool,
+## and offers Preview and Ask to fix; Ask to fix asks about that asset.
+static func preview_note(suite: Variant, light: bool, width: int, chat: Control) -> void:
+	var review: Object = chat.get("_review")
+	var asked: Array[String] = []
+	var ask := func(path: String) -> void: asked.append(path)
+	review.connect("revise_requested", ask)
+	(
+		chat
+		. show_file_review(
+			"Make the engine hum lower",
+			"~ audio/engine_sound.scd\n~ audio/engine_sound.wav",
+			[],
+			[
+				{"path": "audio/engine_sound.wav", "change": "modified"},
+				{"path": "audio/engine_sound.scd", "change": "modified"},
+			],
+		)
+	)
+	var card: Control = chat.get("_transcript").call("current_card")
+	var row: Control = card.call("review_row")
+	suite._check(
+		row.call("note_text") == "Changed in SuperCollider: engine sound",
+		"The note names the asset and its tool: %s" % row.call("note_text")
+	)
+	await suite._shot("review-note", light, width, chat)
+	(row.find_child("Asktofix", true, false) as Button).pressed.emit()
+	suite._check(
+		asked == ["audio/engine_sound.scd"], "Ask to fix asks about that asset: %s" % [asked]
+	)
+	review.disconnect("revise_requested", ask)

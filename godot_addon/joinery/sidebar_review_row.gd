@@ -20,6 +20,7 @@ const UI_MOTION := preload("ui_motion.gd")
 const UI := preload("ui_components.gd")
 const STYLE := preload("sidebar_style.gd")
 const GLANCE := preload("review_glance.gd")
+const NOTE := preload("sidebar_preview_note.gd")
 ## The preview is 16:9 and at most this tall (logical px).
 const PREVIEW_MAX_H := 360
 const PREVIEW_RATIO := 9.0 / 16.0
@@ -46,6 +47,10 @@ var _actions: HBoxContainer
 var _discard: Button
 var _accept: Button
 var _open: Button
+## "Changed in SuperCollider: engine sound · Preview · Ask to fix".
+var _note: NOTE
+## The caption and the note, one tight group.
+var _facts: VBoxContainer
 
 
 func _init() -> void:
@@ -99,9 +104,13 @@ func _init() -> void:
 	)
 	_frame.resized.connect(_fit_preview)
 	# The caption: what changed, by name, with a chevron into the panel's details.
+	# The caption and the preview note read as one group.
+	_facts = VBoxContainer.new()
+	_facts.theme_type_variation = "JoineryTight"
+	column.add_child(_facts)
 	var caption := HBoxContainer.new()
 	caption.theme_type_variation = "JoineryRowTight"
-	column.add_child(caption)
+	_facts.add_child(caption)
 	_line = UI.label("", "JoineryCaption")
 	_line.name = "Caption"
 	_line.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -120,6 +129,18 @@ func _init() -> void:
 		func() -> void: _details.custom_minimum_size.x = UI_THEME.control_h(_details, "xs")
 	)
 	caption.add_child(_details)
+	_note = NOTE.new()
+	_note.preview_requested.connect(
+		func(path: String) -> void:
+			if _review != null and _review.has_method("preview"):
+				_review.call("preview", path)
+	)
+	_note.fix_requested.connect(
+		func(path: String) -> void:
+			if _review != null and _review.has_method("ask_to_fix"):
+				_review.call("ask_to_fix", path)
+	)
+	_facts.add_child(_note)
 	_ways_line = HBoxContainer.new()
 	_ways_line.theme_type_variation = "JoineryRow"
 	_ways_line.hide()
@@ -226,11 +247,19 @@ func refresh(media: Array = []) -> void:
 	_open.visible = decidable and not simple
 	_open.text = "Review %d changes" % count if count > 1 else "Review"
 	ways.visible = decidable
+	var owned: Array = glance.get("owned", []) if decidable else []
+	_note.show_items(owned, bool(glance.get("can_fix", false)))
+	_facts.visible = _line.get_parent().visible or _note.visible
 	var was := visible
 	visible = waiting and (_frame.visible or decidable)
 	_fit_width.call_deferred()
 	if visible and not was:
 		UI_MOTION.reveal(self)
+
+
+## The preview note's words ("" when it doesn't show).
+func note_text() -> String:
+	return _note.text()
 
 
 ## The line of facts on show ("" without one).

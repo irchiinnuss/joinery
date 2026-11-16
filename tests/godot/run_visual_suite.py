@@ -103,6 +103,7 @@ SIDEBAR_STATES = (
     "sound-pass",
     "review-waiting",
     "review-waiting-big",
+    "review-note",
     "departures",
     "accepted",
     "unplayed",

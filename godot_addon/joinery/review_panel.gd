@@ -60,6 +60,7 @@ const SNAPSHOT := preload("review_snapshot.gd")
 const RAIL := preload("review_rail.gd")
 const DRAWER := preload("review_drawer.gd")
 const LAYOUT := preload("review_layout.gd")
+const OWNERS := preload("review_owners.gd")
 const ACCEPTED := "Change accepted"
 const REJECTED := "Discarded"
 const SCENE_NOTE := "The change is shown in the viewport."
@@ -100,6 +101,8 @@ var _details: DETAILS
 var _open_link: Button
 var _revise: Button
 var _revise_path := ""
+## The assets the change made or changed, with their tools (review_owners.gd).
+var _owned: Array = []
 var _error_row: HBoxContainer
 var _error_icon: TextureRect
 var _error: Label
@@ -197,6 +200,7 @@ func show_scene_review(summary: String, count: int, media: Array = []) -> void:
 	_scene_note.visible = not _media.visible
 	_open_link.visible = SNAPSHOT.can_open()
 	_revise_path = ""
+	_owned = []
 	_rail.sync_links()
 	_sync_details()
 	_set_details(false, false)
@@ -223,6 +227,7 @@ func show_file_review(
 	_details.show_changes(diff, listed)
 	_summary.show_review({"changes": listed, "diff": diff})
 	_revise_path = _asset_path(media, listed)
+	_owned = OWNERS.owned(media, listed)
 	_rail.sync_links()
 	_measure()
 	_sync_details()
@@ -261,7 +266,25 @@ func glance() -> Dictionary:
 		"thumbnail": _media.thumbnail(),
 		"before": _before_picture(),
 		"title": _title.text,
+		"owned": _owned,
+		"can_fix": not revise_requested.get_connections().is_empty(),
 	}
+
+
+## Show [param path]'s preview (the chat card's Preview): its item in the stage, and the panel.
+func preview(path: String) -> void:
+	var items: Array = _media.get("_items")
+	for index: int in items.size():
+		if str((items[index] as Dictionary).get("path", "")).trim_prefix("res://") == path:
+			_media.select_item(index)
+			break
+	request_show()
+
+
+## Ask Journeyman to fix [param path] before accepting (the chat card's Ask to fix): the same
+## as the rail's Ask for changes.
+func ask_to_fix(path: String) -> void:
+	revise_requested.emit(path if not path.is_empty() else _revise_path)
 
 
 ## The first picture's "before" side, when a change has both sides as images (an edited

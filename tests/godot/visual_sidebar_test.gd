@@ -57,6 +57,7 @@ Walk the pier, refill the lamps, fix what the storm breaks.
 ## Online
 None. One player.
 """
+const TRAIL := preload("visual_trail.gd")
 
 var _checks: GDScript
 var _theme: GDScript
@@ -284,6 +285,7 @@ func _states(light: bool, width: int) -> void:
 		)
 	)
 	await _shot("review-waiting-big", light, width, chat)
+	await TRAIL.preview_note(self, light, width, chat)
 	(
 		chat
 		. show_file_review(
