@@ -443,3 +443,54 @@ def test_the_scene_tests_say_how_many_are_done(
     asyncio.run(submission.run_scene_tests(tx.stage, scripts, tx=tx, note=said.append))
     assert said[-1] == f"{len(scripts)} of {len(scripts)}"
     assert said[0] == f"1 of {len(scripts)}"
+
+
+CRASH = (
+    "FAIL: completing a level unlocks\n"
+    "================================================================\n"
+    "handle_crash: Program crashed with signal 11\n"
+    "ERROR: FATAL: Index p_index = 1 is out of bounds (size() = 0).\n"
+    "       [0] create_host (res://features/steam/steam_transport.gd:34)\n"
+)
+
+
+def test_a_crash_that_hangs_is_stopped_early_and_never_tried_twice(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Godot crashed and its crash handler hangs (an emulated worker): the run is
+    stopped once nothing new comes, not at its limit, and not run a second time."""
+    tx = _transaction(tmp_path)
+    (tx.stage / "tests/test_gun.gd").write_text(TEST_HANGS)
+    runs: list[str] = []
+
+    async def offline(argv: list[str], root: Path, seconds: int, **k: Any) -> Result:
+        if "--import" in argv:
+            return Result(True, "", "", 0.0)
+        script = argv[argv.index("-s") + 1].removeprefix("res://")
+        runs.append(script)
+        if script == "tests/test_gun.gd":
+            raise WorkerStalled(k["stall"], CRASH)
+        return Result(True, "PASS", "", 0.0)
+
+    monkeypatch.setattr("joinery.submission.run_offline", offline)
+    (problem,) = _run(tx, [])
+    assert runs.count("tests/test_gun.gd") == 1
+    assert "crashed: Godot itself stopped with signal 11" in problem.message
+    assert "steam_transport.gd:34" in problem.message
+
+
+def test_the_worker_watches_for_a_crash_as_it_does_for_a_script_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _spawn_python(
+        monkeypatch,
+        "import time\n"
+        "print('handle_crash: Program crashed with signal 11', flush=True)\n"
+        "time.sleep(60)\n",
+    )
+
+    async def go() -> None:
+        with pytest.raises(WorkerStalled):
+            await run_offline(["godot"], tmp_path, 60, warm=False, stall=1.0)
+
+    asyncio.run(asyncio.wait_for(go(), 15))

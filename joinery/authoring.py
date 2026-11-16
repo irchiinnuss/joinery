@@ -99,8 +99,10 @@ class WorkerStalled(WorkerTimeout):
         self.idle = idle
 
 
-#: What Godot prints when a script stops at an error (or never compiles).
-STALL_SIGNS = ("SCRIPT ERROR:", "Parse Error:")
+#: What Godot prints when a script stops at an error (or never compiles), or when
+#: Godot itself crashed: an emulated worker can hang in the crash handler after
+#: "Program crashed" instead of exiting.
+STALL_SIGNS = ("SCRIPT ERROR:", "Parse Error:", "handle_crash: Program crashed")
 
 
 class _Progress:

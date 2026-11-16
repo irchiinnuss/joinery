@@ -349,6 +349,15 @@ Importer = Callable[[Path], Awaitable[None]]
 #: What Godot prints when a script error stops a function: a SceneTree test whose
 #: ``_run`` stops there never reaches its quit(), so it hangs until killed.
 SCRIPT_ERROR = "SCRIPT ERROR:"
+#: What Godot prints when it crashed (a segfault in the engine or an extension).
+#: The same files crash the same way again, so it is never tried twice.
+CRASHED = "handle_crash: Program crashed"
+_SIGNAL = re.compile(r"Program crashed with signal (\d+)")
+
+
+def stopped_by_error(output: str) -> bool:
+    """A script error or a crash stopped the run: running it again hangs again."""
+    return SCRIPT_ERROR in output or CRASHED in output
 
 
 def timeout_text(
@@ -358,7 +367,16 @@ def timeout_text(
     what it printed before it was stopped, ``stalled`` the seconds it printed
     nothing new after a script error when that stopped it early."""
     times = "twice" if tries > 1 else "once"
-    if stalled:
+    if CRASHED in output:
+        signal = _SIGNAL.search(output)
+        how = f" with signal {signal.group(1)}" if signal else ""
+        said = (
+            f"crashed: Godot itself stopped{how} and never quit, so it was stopped "
+            "too. The backtrace below names the script line it was running; fix "
+            "that (often a call into an extension or a null object), then check "
+            "again."
+        )
+    elif stalled:
         said = (
             "was stopped: a script error stopped it before it called quit(), and "
             f"it printed nothing new for {stalled:g} s after. Fix the error (the "
@@ -464,7 +482,7 @@ async def _run_all(
                 printed = str(getattr(stopped, "output", "") or "")
                 if isinstance(stopped, WorkerStalled):
                     stalled = stopped.idle
-                if SCRIPT_ERROR in printed:
+                if stopped_by_error(printed):
                     break
                 continue
             return script, Outcome(passed(got), got.output[-_FAIL_TAIL:].strip())
@@ -473,7 +491,7 @@ async def _run_all(
             False,
             text,
             timed_out=True,
-            stalled=SCRIPT_ERROR in printed,
+            stalled=stopped_by_error(printed),
             seconds=seconds,
         )
 
