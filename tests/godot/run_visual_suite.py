@@ -219,6 +219,9 @@ EDITOR_SCREENS = (
 )
 # The window sizes visual_layouts_test.gd lays the editor out at, in logical pixels.
 LAYOUT_SIZES = ((1024, 600), (1280, 720), (1366, 768), (1920, 1080))
+# The short windows it shows a review with long notes in, Details closed, under the 3D view
+# and the script editor.
+LAYOUT_SHORT = ((1024, 600), (1280, 640), (1280, 720))
 STARTUP_SCREENS = (
     "agent-connect",
     "agent-signin",
@@ -508,6 +511,10 @@ def layout_names() -> list[str]:
                         parts.append(sidebar)
                         parts += ["review"] if review else []
                         names.append("-".join(parts))
+    for width, height in LAYOUT_SHORT:
+        for sidebar in ("nosidebar", "sidebar", "wide"):
+            for screen in ("3d", "script"):
+                names.append(f"layout-{width}x{height}-{sidebar}-review-long-{screen}")
     return names
 
 

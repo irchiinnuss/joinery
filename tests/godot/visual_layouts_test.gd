@@ -7,6 +7,8 @@ extends EditorPlugin
 ## sidebar's change card and the review's details expanded. Each combination is captured and
 ## every visible interactive control must stay inside the window and inside its parent
 ## (ui_checks.bounds); in each size the Play menu and the sidebar's menus open inside the window.
+## Last, a change with long reviewer notes and Details closed, in the bottom panel of short
+## windows, under the 3D view and the script editor: its links, Discard and Accept show whole.
 ##
 ## Installed by run_visual_suite.py into a disposable testbed copy beside ui_checks.gd, and run
 ## in one theme: sizes, not colours, are what this checks.
@@ -18,6 +20,15 @@ const SIZES := [Vector2i(1024, 600), Vector2i(1280, 720), Vector2i(1366, 768), V
 const SIDEBAR := ["nosidebar", "sidebar", "wide"]
 ## How wide "wide" drags the sidebar, in logical pixels (as far as the layout lets it).
 const WIDE := 1000
+## Short windows for a review with long notes and its details closed.
+const SHORT := [Vector2i(1024, 600), Vector2i(1280, 640), Vector2i(1280, 720)]
+## A reviewer's note long enough to fill the rail's middle.
+const LONG_NOTE := (
+	"game/tools/push_mower.gd: while turning, the visible mower trails the player's facing by"
+	+ " up to a quarter turn, because the mesh's yaw is eased toward the body's yaw every"
+	+ " frame instead of being parented to it; at walking speed the handle visibly leaves the"
+	+ " player's hands, and a sharp turn makes the blades point the wrong way for half a second."
+)
 
 var _checks: GDScript
 var _failed := false
@@ -94,6 +105,7 @@ func _run() -> void:
 						await _arrange(column, files, sidebar, review)
 						await _shot(_name(size, column, files, sidebar, review))
 		await _menus(size)
+	await _long_review()
 	await _arrange(false, false, "sidebar", false)
 	window.size = was
 	await _frames(2)
@@ -219,6 +231,75 @@ func _sidebar_column() -> Control:
 			return node as Control
 		node = node.get_parent()
 	return null
+
+
+## A code change with long reviewer notes, Details closed, in the bottom panel of a short
+## window with the sidebar hidden, at its width and wide, under the 3D view and under the
+## script editor (whose least height is larger): the links and Discard and Accept under the
+## notes stay whole inside the window and inside every part that clips them.
+func _long_review() -> void:
+	var lines := PackedStringArray(
+		["--- a/game/tools/push_mower.gd", "+++ b/game/tools/push_mower.gd", "@@ -12,9 +12,14 @@"]
+	)
+	for index: int in 24:
+		lines.append("+\tvar yaw_%d := lerp_angle(mesh.rotation.y, body.rotation.y, delta)" % index)
+	_dock.call(
+		"show_file_review",
+		"Keep the push mower in the player's hands while turning, at every walking speed",
+		"\n".join(lines),
+		[],
+		[{"path": "game/tools/push_mower.gd", "change": "modified"}],
+		"tx-layout-long"
+	)
+	var panel: Control = _plugin.get("_review_panel")
+	panel.call("set_details_open", false)
+	(
+		panel
+		. call(
+			"show_glance",
+			{
+				"facts": ["Turning lag up to 90°", "Handle offset 0.4 m at walking speed"],
+				"review_notes":
+				[
+					{"severity": "warn", "text": LONG_NOTE},
+					{"severity": "warn", "text": LONG_NOTE},
+					{"severity": "info", "text": LONG_NOTE},
+				],
+				"reviewer_status": "done",
+			}
+		)
+	)
+	var window := get_tree().root
+	for size: Vector2i in SHORT:
+		window.size = Vector2i(Vector2(size) * _scale)
+		await _frames(8)
+		for sidebar: String in SIDEBAR:
+			for screen: String in ["3D", "Script"]:
+				EditorInterface.set_main_screen_editor(screen)
+				await _arrange(false, false, sidebar, true)
+				var name := (
+					"%s-long-%s" % [_name(size, false, false, sidebar, true), screen.to_lower()]
+				)
+				await _shot(name)
+				for part: String in ["_accept", "_reject", "_details_button", "_revise"]:
+					_whole(name, part.trim_prefix("_"), panel.get(part) as Control)
+	EditorInterface.set_main_screen_editor("3D")
+
+
+## [param control] shows in full: inside the window and every ancestor that clips it.
+func _whole(screen: String, label: String, control: Control) -> void:
+	_check(control != null and control.is_visible_in_tree(), "%s: %s shows" % [screen, label])
+	if control == null or not control.is_visible_in_tree():
+		return
+	var rect := control.get_global_rect().grow(-1.0)
+	var room := get_tree().root.get_visible_rect()
+	var node := control.get_parent()
+	while node is Control:
+		var holder := node as Control
+		if holder.clip_contents or holder is ScrollContainer:
+			room = room.intersection(holder.get_global_rect())
+		node = node.get_parent()
+	_check(room.encloses(rect), "%s: %s is whole on screen: %s in %s" % [screen, label, rect, room])
 
 
 func _shot(name: String) -> void:
