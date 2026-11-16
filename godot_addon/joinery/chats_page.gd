@@ -11,7 +11,8 @@ extends ScrollContainer
 ## tooltip (its full text), so no tooltip covers the next row needlessly; an agent mark leads
 ## the row only when the chats use different agents. Choosing a row opens that chat. The
 ## pencil (or a double click, or F2) renames it in place: Enter or leaving the field saves, Esc
-## cancels.
+## cancels. The chat Journeyman is working in, open or not, shows a small accent dot in the
+## time's place ([method set_working]).
 
 signal closed
 signal chosen(chat_id: String)
@@ -78,9 +79,10 @@ func _ready() -> void:
 	STYLE.page_edges(self, _body)
 
 
-## Show [param chats] (chat_store.gd's list); [param current] is the open chat's id.
-## [param now] fixes the clock for tests (-1: the real time).
-func show_chats(chats: Array[Dictionary], current: String, now := -1) -> void:
+## Show [param chats] (chat_store.gd's list); [param current] is the open chat's id and
+## [param working] the one Journeyman works in ("" for none). [param now] fixes the clock for
+## tests (-1: the real time).
+func show_chats(chats: Array[Dictionary], current: String, now := -1, working := "") -> void:
 	for child: Node in _list.get_children():
 		_list.remove_child(child)
 		child.queue_free()
@@ -100,6 +102,7 @@ func show_chats(chats: Array[Dictionary], current: String, now := -1) -> void:
 			caption.name = day
 			_list.add_child(_header(caption, _list.get_child_count() > 0))
 		var row := ChatRow.new(chat, chat["id"] == current, clock, providers.size() > 1)
+		row.set_working(chat["id"] == working and not working.is_empty())
 		row.pressed.connect(func() -> void: chosen.emit(str(chat["id"])))
 		row.title_changed.connect(
 			func(title: String) -> void: rename_requested.emit(str(chat["id"]), title)
@@ -155,6 +158,12 @@ func row_for(chat_id: String) -> ChatRow:
 	return _rows.get(chat_id)
 
 
+## Mark [param chat_id] as the chat Journeyman works in ("" marks none).
+func set_working(chat_id: String) -> void:
+	for id: String in _rows:
+		_rows[id].set_working(id == chat_id and not chat_id.is_empty())
+
+
 ## Show or hide the page in place of the conversation, restoring what was there.
 func set_open(open: bool) -> void:
 	if get_parent() == null:
@@ -180,6 +189,9 @@ class ChatRow:
 	var caption: Label
 	## True for the open chat: its row is highlighted.
 	var current := false
+	## True while Journeyman works in this chat: a dot stands in the time's place.
+	var working := false
+	var _dot: Control
 	var _open: Button
 	var _field: LineEdit
 	var _rename: Button
@@ -240,6 +252,11 @@ class ChatRow:
 		caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		caption.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		_slot.add_child(caption)
+		_dot = UI.status_dot("working")
+		_dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_dot.size_flags_horizontal = Control.SIZE_SHRINK_END
+		_dot.hide()
+		_slot.add_child(_dot)
 		_rename = Button.new()
 		_rename.theme_type_variation = "JoineryIconButton"
 		_rename.tooltip_text = "Rename (F2)"
@@ -317,6 +334,15 @@ class ChatRow:
 		)
 		return mark
 
+	## Working: the accent dot in the time's place, and screen readers hear it.
+	func set_working(on: bool) -> void:
+		working = on
+		_dot.visible = on
+		caption.visible = not on
+		var told := _open.accessibility_description.trim_suffix(" · Working")
+		_open.accessibility_description = told + (" · Working" if on else "")
+		_dot.tooltip_text = "Journeyman is working in this chat" if on else ""
+
 	## Pointed at: the pencil fades in over the time, in the same slot; otherwise the time.
 	func set_pointed(pointed: bool) -> void:
 		_pointed = pointed and not _field.visible
@@ -328,9 +354,11 @@ class ChatRow:
 		if is_inside_tree():
 			UI_MOTION.tween_to(self, _rename, "modulate:a", shown)
 			UI_MOTION.tween_to(self, caption, "modulate:a", 1.0 - shown)
+			UI_MOTION.tween_to(self, _dot, "modulate:a", 1.0 - shown)
 		else:
 			_rename.modulate.a = shown
 			caption.modulate.a = 1.0 - shown
+			_dot.modulate.a = 1.0 - shown
 
 	func _hover() -> void:
 		if is_inside_tree():

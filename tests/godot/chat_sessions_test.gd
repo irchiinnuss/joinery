@@ -9,6 +9,7 @@ const OLDER := "20261101-090000-bbbbbb"
 const ACCEPTED := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 const REVERTED := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 const PRUNED := "cccccccccccccccccccccccccccccccc"
+const NAMED := "20261112-090000-dddddd"
 
 var _failed := false
 
@@ -80,6 +81,93 @@ func _fixtures() -> void:
 		],
 		3 * 86400
 	)
+
+
+## New chat while Journeyman works: the working chat keeps running out of sight, a message
+## from the new chat waits for it, and opening the working chat again shows it live.
+func _while_working(chat: Control, backend: Node, sessions: Node) -> void:
+	var sent: Array[String] = []
+	chat.connect(
+		"prompt_submitted",
+		func(text: String, _targets: Array) -> void:
+			sent.append("%s|%s" % [text, backend.get("chat_id")])
+	)
+	var stops: Array[bool] = []
+	chat.connect("cancel_requested", func() -> void: stops.append(true))
+	var composer: Control = chat.get("_composer")
+	chat.set_chat_state("connected", "")
+	sessions.call("open_chat", OLDER)
+	sessions.call("continue_chat")
+	var running: Control = chat.get("_transcript")
+	chat.call("_on_submit", "Add rain")
+	chat.set_chat_busy(true)
+	chat.call("_on_sent")
+	_check(sent == ["Add rain|" + OLDER], "The request went out: %s" % [sent])
+	_check(composer.get("_busy"), "Stop stands in for Send while it works")
+
+	sessions.call("new_chat")
+	var fresh: Control = chat.get("_transcript")
+	_check(fresh != running and fresh.visible, "New chat opens while Journeyman works")
+	_check(not running.visible and running.is_inside_tree(), "The working chat runs on, hidden")
+	_check(fresh.call("current_card") == null, "The new chat is empty")
+	_check(backend.get("chat_id") == "", "Its first message starts a chat of its own")
+	_check(not composer.get("_busy"), "The new chat has Send, not the other chat's Stop")
+	var waits: String = chat.get("OTHER_WAIT")
+	var placeholder := str(composer.get("prompt").placeholder_text)
+	_check(placeholder.begins_with(waits), "The message box says it would wait: " + placeholder)
+	chat.append_agent_text("Rain falls on the pier.", true)
+	_check(
+		str(running.call("get_parsed_text")).contains("Rain falls on the pier."),
+		"Its reply reaches the working chat"
+	)
+	_check(not str(fresh.call("get_parsed_text")).contains("Rain falls"), "Not the chat on screen")
+	_check(sessions.call("working_id") == OLDER, "The working chat is known")
+	sessions.call("open_list")
+	var page: Control = sessions.get("page")
+	_check(page.call("row_for", OLDER).get("working"), "The Chats list marks it")
+	_check(not page.call("row_for", LATEST).get("working"), "And only it")
+	sessions.call("new_chat")
+	_check(chat.get("_transcript") == fresh, "New chat again keeps the empty chat")
+
+	# A message from the new chat waits for the other chat, then goes out as a new chat.
+	chat.call("_on_submit", "Make a lighthouse")
+	var queue: Control = fresh.get("queue")
+	_check(queue.call("size_queued") == 1, "It waits in the new chat's queue")
+	_check(queue.get("heading").text == waits, "Saying what it waits for")
+	_check(sent.size() == 1, "Nothing went out yet")
+	sessions.call("open_chat", OLDER)
+	_check(chat.get("_transcript") == fresh, "A chat with a queued message stays until it goes")
+
+	# The working chat's turn ends: its card finishes out of sight, and the queued one goes.
+	chat.show_timing({"outcome": "done", "total_ms": 4000})
+	chat.set_chat_busy(false)
+	var rain: Control = running.call("current_card")
+	_check(rain.get("state") == "done", "The working chat's card finished: %s" % rain.get("state"))
+	_check(sent.size() == 2 and sent[1] == "Make a lighthouse|", "Then the queued one: %s" % [sent])
+	_check(fresh.call("current_card") != null, "On the new chat's own card")
+	chat.set_chat_busy(true)
+	chat.call("_on_sent")
+
+	# Back to the first chat while the new one works: as it was left, its reply and all.
+	sessions.call("open_chat", OLDER)
+	_check(chat.get("_transcript") == running and running.visible, "The kept chat comes back")
+	_check(not fresh.visible and fresh.is_inside_tree(), "The new one runs on, hidden")
+	_check(backend.get("chat_id") == OLDER, "Its next message continues it")
+	_check(not sessions.get("viewing"), "It takes messages")
+	_check(not composer.get("_busy"), "Send, since the work is in the other chat")
+	# The host names the new chat: it stays the one at work, and this one keeps its id.
+	backend.call("_handle", {"kind": "chat", "chat_id": NAMED, "mode": "new"})
+	_check(sessions.call("current_id") == OLDER, "The chat on screen keeps its id")
+	_check(backend.get("chat_id") == OLDER, "And its next message continues it")
+	_check(sessions.call("working_id") == NAMED, "The new chat is at work")
+	sessions.call("open_chat", NAMED)
+	_check(chat.get("_transcript") == fresh, "Opening it shows it live")
+	_check(composer.get("_busy"), "With its Stop")
+	chat.call("_request_cancel")
+	_check(stops.size() == 1, "Stop stops it")
+	chat.show_timing({"outcome": "cancelled", "total_ms": 1000})
+	chat.set_chat_busy(false)
+	_check(sessions.call("working_id") == "", "Nothing works now")
 
 
 func _run() -> void:
@@ -258,12 +346,6 @@ func _run() -> void:
 	notices = transcript.call("notice_texts")
 	_check(not notices.has("Continued this chat; the agent remembers it."), "%s" % [notices])
 
-	# While Journeyman works the chat can't change under it.
-	chat.set_chat_busy(true)
-	sessions.call("new_chat")
-	_check(transcript.call("current_card") != null, "New chat waits for the request")
-	chat.set_chat_busy(false)
-
 	# New chat: an empty conversation, and the next prompt starts a chat of its own.
 	sessions.call("new_chat")
 	_check(transcript.call("current_card") == null, "New chat clears the conversation")
@@ -271,6 +353,7 @@ func _run() -> void:
 	backend.call("_handle", {"kind": "chat", "chat_id": "20261111-090000-cccccc", "mode": "new"})
 	_check(sessions.call("current_id") == "20261111-090000-cccccc", "The host names it")
 	_check(sessions.get("shown_id") == "20261111-090000-cccccc", "And it is the one on screen")
+	await _while_working(chat, backend, sessions)
 
 	backend.queue_free()
 	chat.queue_free()

@@ -55,6 +55,8 @@ const SUGGESTIONS := preload("res://addons/joinery/sidebar_suggestions.gd")
 const OPENER := preload("res://addons/joinery/review_opener.gd")
 const REVIEW_PATH := "res://addons/joinery/review_panel.gd"
 const REVIEW_WAIT := "Next message…"
+## While another chat is working, a message sent here waits for it.
+const OTHER_WAIT := "Sends when the other chat finishes"
 const PERSONA := "Journeyman"
 const DISCARDED := "Discarded"
 const BRIEF := preload("res://addons/joinery/sidebar_brief.gd")
@@ -75,6 +77,9 @@ var _brief: BRIEF
 var _content: VBoxContainer
 var _header: HEADER_SCRIPT
 var _transcript: HISTORY_SCRIPT
+## The conversation Journeyman's own request is in: the shown one, or a chat left running
+## while another is open (chat_sessions.gd). Its replies, steps and decision go there.
+var _turn_log: HISTORY_SCRIPT
 var _settings: SETTINGS_SCRIPT
 ## Saved chats: the Chats page, New chat, restoring a chat (chat_sessions.gd).
 var _chats: CHATS_SCRIPT
@@ -135,16 +140,8 @@ func _ready() -> void:
 	_header.notice.check_requested.connect(func() -> void: run_command("/tools"))
 	_header.notice.setup_requested.connect(func() -> void: setup_requested.emit())
 	_content.add_child(_header)
-	_transcript = HISTORY_SCRIPT.new()
-	_transcript.accessibility_name = "Conversation"
-	_transcript.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_transcript.example_chosen.connect(_fill_prompt)
-	_transcript.connect_requested.connect(func() -> void: connect_requested.emit())
-	_transcript.retry_requested.connect(_retry)
-	_transcript.revert_requested.connect(func(id: String) -> void: _slash.revert(id))
+	_transcript = make_transcript()
 	_content.add_child(_transcript)
-	_transcript.queue.edit_requested.connect(_edit_queued)
-	_transcript.queue.send_requested.connect(_drain)
 	_footer = FOOTER_SCRIPT.new()
 	_footer.review_requested.connect(func() -> void: review_requested.emit())
 	_composer = COMPOSER_SCRIPT.new()
@@ -193,6 +190,29 @@ func _ready() -> void:
 	_settings.apply_all()
 	if Engine.is_editor_hint():  # Which app needs something, from the cache.
 		_slash.check_readiness.call_deferred()
+
+
+## A conversation view wired to this sidebar, with the shown one's settings: the first, and
+## each chat opened while another keeps running out of sight (chat_sessions.gd).
+func make_transcript() -> HISTORY_SCRIPT:
+	var view := HISTORY_SCRIPT.new()
+	view.accessibility_name = "Conversation"
+	view.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	view.example_chosen.connect(_fill_prompt)
+	view.connect_requested.connect(func() -> void: connect_requested.emit())
+	view.retry_requested.connect(_retry)
+	view.revert_requested.connect(func(id: String) -> void: _slash.revert(id))
+	var shown := _transcript
+	var wire := func() -> void:
+		view.queue.edit_requested.connect(_edit_queued)
+		view.queue.send_requested.connect(_drain)
+		if is_instance_valid(shown):
+			view.set_text_scale(shown.get("_text_scale"))
+			view.set_show_timings(shown.get("_show_timings"))
+			view.set_retry_allowed(shown.get("_retry_allowed"))
+			view.set_connection(connection_state)
+	view.ready.connect(wire, CONNECT_ONE_SHOT)
+	return view
 
 
 func _exit_tree() -> void:
@@ -281,7 +301,7 @@ func _on_notice(text: String, kind: String) -> void:
 		# The card says it in place ("Not sent. …") with Retry.
 		_failure = text
 		return
-	_transcript.add_notice(text, kind)
+	_turn().add_notice(text, kind)
 
 
 func _on_bridge_preview(event: Dictionary) -> void:
@@ -409,6 +429,7 @@ func _occupied() -> bool:
 
 func _enqueue(entry: String) -> void:
 	_command_popup.close()
+	_transcript.queue.heading.text = OTHER_WAIT if _parked() else "Queued"
 	if not _transcript.queue.push(entry, target_snapshot()):
 		show_status("The queue is full. Remove a message or wait for a reply.", 4.0)
 		return
@@ -451,6 +472,7 @@ func fill_composer(text := "") -> void:
 
 func _send_request(card: Control) -> void:
 	_active_card = card
+	_turn_log = _transcript
 	_failure = ""
 	if not card.is_connected("failed", _on_card_failed):
 		card.connect("failed", _on_card_failed)
@@ -482,7 +504,7 @@ func _on_card_failed(reason: String) -> void:
 ## Stop takes Send's slot while Journeyman works or a request is on its way to it.
 func _sync_send_slot() -> void:
 	var card := _card()
-	_composer.set_busy(_busy or (card != null and card.state == "sending"))
+	_composer.set_busy(not _parked() and (_busy or (card != null and card.state == "sending")))
 	_composer.set_placeholder(_waiting_placeholder())
 
 
@@ -594,6 +616,8 @@ func _sync() -> void:
 	var command: String = _slash.running()
 	if not command.is_empty():
 		_footer.set_mode("command", command)
+	elif _busy and _parked():
+		_footer.set_mode("idle")
 	elif _busy:
 		_footer.set_mode("idle")  # The work shows in the chat only; the composer keeps Stop.
 	elif _review_pending:
@@ -606,6 +630,8 @@ func _sync() -> void:
 
 ## While Send would queue, the message box says so.
 func _waiting_placeholder() -> String:
+	if _parked() and _occupied():
+		return OTHER_WAIT + "…"
 	if _review_pending:
 		return REVIEW_WAIT
 	return REVIEW_WAIT if _occupied() and connection_state == "connected" else ""
@@ -750,7 +776,7 @@ func set_chat_busy(busy: bool) -> void:
 			else:
 				card.finish(_outcome)
 		if was_busy and _outcome != "done":
-			_transcript.queue.pause()
+			_turn().queue.pause()
 	_sync_send_slot()
 	_sync()
 	if not busy and was_busy:
@@ -779,14 +805,14 @@ func show_timing(event: Dictionary) -> void:
 	_outcome = (
 		"done" if outcome == "done" else "cancelled" if outcome == "cancelled" else "failed"
 	)
-	var placed := _transcript.show_timing(event)
+	var placed := _turn().show_timing(event)
 	if _outcome == "cancelled" and not placed:
-		_transcript.add_decision("Stopped", "stopped", _card())
+		_turn().add_decision("Stopped", "stopped", _card())
 
 
 func append_agent_text(text: String, new_message: bool) -> void:
 	_on_sent()
-	_transcript.append_delta(PERSONA, text, new_message or not _assistant_open)
+	_turn().append_delta(PERSONA, text, new_message or not _assistant_open)
 	_assistant_open = true
 
 
@@ -795,22 +821,32 @@ func show_agent_message(text: String) -> void:
 	if card != null and card.state == "sending" and _bridge != null:
 		# Before the bridge sent the request, anything it says is a delivery failure.
 		_failure = text
-		_transcript.add_notice(text, "error")
+		_turn().add_notice(text, "error")
 		return
 	_on_sent()
 	finish_agent_response(false)
-	_transcript.add_message(PERSONA, text)
+	_turn().add_message(PERSONA, text)
 
 
 func finish_agent_response(_ok: bool) -> void:
-	_transcript.finish_response()
+	_turn().finish_response()
 	_assistant_open = false
 
 
 func _card() -> Control:
 	if is_instance_valid(_active_card):
 		return _active_card
-	return _transcript.current_card() if _transcript != null else null
+	return _turn().current_card() if _transcript != null else null
+
+
+## The conversation Journeyman's request is in ([member _turn_log]), else the shown one.
+func _turn() -> HISTORY_SCRIPT:
+	return _turn_log if is_instance_valid(_turn_log) else _transcript
+
+
+## Journeyman's request runs in a chat that is not on screen.
+func _parked() -> bool:
+	return _turn() != _transcript
 
 
 # --- Review ------------------------------------------------------------------------------------
@@ -867,7 +903,7 @@ func hide_edit_review(message: String = "", kind := "info") -> void:
 		refresh_revertible()
 	if not message.is_empty():
 		finish_agent_response(false)
-		_transcript.add_decision(message, decided, _card() if was_pending else null)
+		_turn().add_decision(message, decided, _card() if was_pending else null)
 	_resume_held()
 	_drain()
 
