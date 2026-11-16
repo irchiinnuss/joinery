@@ -119,8 +119,12 @@ SAVE_DESIGN_DOC = "save_design_doc"
 ROLE_ONLY = frozenset({REVIEW_REPORT, DIAGNOSIS_REPORT, REPRODUCE, DESIGN_REPORT})
 #: A request's to-do, shown to the user before the work (ADR 0060): the lead's alone.
 PROPOSE_TODO = "propose_todo"
+#: A to-do's step started, done or skipped while it is built: the lead's alone too.
+TODO_STEP = "todo_step"
 #: Only the lead starts more agents (parallel tasks and variants) or shows a to-do.
-LEAD_ONLY = frozenset({"start_task", "start_variants", PROPOSE_TODO, SAVE_DESIGN_DOC})
+LEAD_ONLY = frozenset(
+    {"start_task", "start_variants", PROPOSE_TODO, TODO_STEP, SAVE_DESIGN_DOC}
+)
 
 
 @dataclass(frozen=True)
@@ -251,6 +255,7 @@ REGISTRY_TOOLS: tuple[str, ...] = (
     "start_task",
     "start_variants",
     "propose_todo",
+    TODO_STEP,
     "task_status",
     "playtest",
     "access_check",
@@ -516,7 +521,7 @@ def role_violation(
             return Verdict(
                 Severity.DENY,
                 "A task works without a to-do of its own; do the work."
-                if tool == PROPOSE_TODO
+                if tool in {PROPOSE_TODO, TODO_STEP}
                 else "A task can't start further tasks; do this part yourself."
                 if tool in LEAD_ONLY
                 else "That tool belongs to another agent role.",

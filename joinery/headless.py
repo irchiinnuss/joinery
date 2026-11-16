@@ -411,7 +411,7 @@ async def _follow(
             for why in event.get("reasons") or []:
                 if str(why) not in outcome.auto_accept_held:
                     outcome.auto_accept_held.append(str(why))
-        elif kind == "todo" and not event.get("task_id"):
+        elif kind == "todo" and not event.get("task_id") and "state" in event:
             state = str(event.get("state", ""))
             waiting = event if state == "waiting" else None
         answer = _no_editor(event)
@@ -754,6 +754,11 @@ def describe(event: dict[str, Any]) -> str:
         return f"  {event.get('text', '')}".rstrip()
     if kind == "check_problems":
         return f"  checks: {len(event.get('problems') or [])} to fix"
+    if kind == "todo" and event.get("step") and not event.get("task_id"):
+        from joinery.done_when import step_progress
+
+        mark = "✓ " if event.get("step_state") == "done" else ""
+        return f"  {mark}{step_progress(event)}"
     if kind == "notice":
         return f"  {event.get('text', '')}"
     if kind == "file_preview":

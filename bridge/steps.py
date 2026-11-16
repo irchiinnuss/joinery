@@ -5,6 +5,8 @@ With ``[agents] run_steps = "together"`` a to-do (ADR 0060) whose steps say, thr
 parallel tasks of the crew (ADR 0036), each its own change the user reviews on its
 own. The lead agent takes no turn meanwhile: it hears back once, when every step is
 done (in review, or decided when other steps depend on them) or as soon as one fails.
+Each step is checked off on the to-do as its task moves on: started while it works, done
+once its change waits for review (or nothing needed changing), back to do if it failed.
 
 Nothing here knows which provider runs the tasks.
 """
@@ -29,6 +31,13 @@ Emit = Callable[[dict[str, Any]], None]
 POLL = 0.25
 #: States in which a step didn't make its change.
 FAILED = frozenset({"failed", "stopped"})
+#: A step's task state -> the step's progress on the to-do.
+PROGRESS = {
+    WORKING: "started",
+    IN_REVIEW: "done",
+    "accepted": "done",
+    "done": "done",
+}
 
 
 def title(number: int, step: str) -> str:
@@ -86,17 +95,18 @@ class StepRun:
         started: list[tuple[int, Task]] = []
         try:
             for index in together:
+                step = todo.step_line(index)
                 parts = STEP_PROMPT.fill(
                     number=index + 1,
                     count=len(todo.steps),
-                    step=todo.steps[index],
+                    step=step,
                     request=todo.request,
                 )
                 task = self.crew.add(
                     title(index + 1, todo.steps[index]),
-                    todo.steps[index],
+                    step,
                     origin="lead",
-                    prompt=self._for_step(base, todo.steps[index]),
+                    prompt=self._for_step(base, step),
                     text=parts["text"],
                     rules=parts["rules"],
                 )
@@ -117,11 +127,17 @@ class StepRun:
         self.crew.pump()
         # Steps other steps need must be decided first: the agent builds on accepted ones.
         decided = len(together) < len(todo.steps)
+        mark = self._marker(todo, started)
+        self.crew.observers.append(mark)
+        for _, task in started:
+            mark(task)
         try:
             await self._wait(started, decided, numbers)
         except asyncio.CancelledError:
             await self._stop(started)
             raise
+        finally:
+            self.crew.observers.remove(mark)
         now = time.time()
         return [
             done_when.StepOutcome(
@@ -135,6 +151,25 @@ class StepRun:
             )
             for index, task in started
         ]
+
+    def _marker(
+        self, todo: done_when.Todo, started: list[tuple[int, Task]]
+    ) -> Callable[[Task], None]:
+        """A crew observer that checks each step off on the to-do as its task moves."""
+        steps = {task.id: index for index, task in started}
+
+        def mark(task: Task) -> None:
+            index = steps.get(task.id)
+            if index is None:
+                return
+            state = PROGRESS.get(task.state, "")
+            if task.state == QUEUED or todo.state(index) == state:
+                return
+            todo.mark(index, state)
+            note = task.message if not state else ""
+            self.emit(done_when.step_event(todo, index + 1, note))
+
+        return mark
 
     async def _wait(
         self, started: list[tuple[int, Task]], decided: bool, numbers: list[int]

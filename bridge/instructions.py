@@ -306,8 +306,10 @@ VARIANT_MIX_PROMPT = RolePrompt(
 #: A request that takes several steps: the to-do and its done-when items (ADR 0060).
 TODO_GUIDE = (
     "When a request takes several steps (a lever that opens a door, a key room and its "
-    "key), call propose_todo before changing anything: the steps in the user's words "
-    "and done_when items Joinery can check after your change: reach (the playtest bot "
+    "key), call propose_todo before changing anything: each step a short title in the "
+    "user's words (8 words at most) and a detail with the names, sizes and files the "
+    "build needs, no step twice; and done_when items Joinery can check after your "
+    "change: reach (the playtest bot "
     "must get to a place, named like its node), no_errors (seconds of play without "
     "errors), test (a test you write in the change for behaviour, such as the door "
     "opening when the lever is pulled: a GUT test when the project has GUT, otherwise "
@@ -326,8 +328,7 @@ TODO_GUIDE = (
     "repeating the list; the user's Go starts the work. If it returns running_steps, "
     "end your turn the same way; Joinery makes those steps and comes back to you. "
     "If it returns build_next, end your turn the same way; the build starts from "
-    "your to-do in a fresh session, so write each step with the names, sizes and "
-    "files it needs. "
+    "your to-do in a fresh session. "
     "Skip it for small, one-step requests. "
 )
 

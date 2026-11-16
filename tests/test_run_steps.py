@@ -263,10 +263,17 @@ def test_go_runs_independent_steps_as_tasks_and_skips_the_lead_when_none_are_lef
             assert "Don't call start_task, start_variants or propose_todo" in (
                 test.task_prompts[0].rules
             )
-            states = [e["state"] for e in test.of("todo")]
+            states = [e["state"] for e in test.of("todo") if "state" in e]
             assert states == ["steps", "checked"]
+            # Each step is checked off as its task moves on, not all at the end.
+            marks = [
+                (e["step"], e["step_state"]) for e in test.of("todo") if "step" in e
+            ]
+            assert (1, "started") in marks and (2, "started") in marks
+            assert (1, "done") in marks and (2, "done") in marks
+            assert marks.index((1, "started")) < marks.index((1, "done"))
             assert test.of("todo")[0]["together"] == [1, 2]
-            (checked,) = [e for e in test.of("todo") if e["state"] == "checked"]
+            (checked,) = [e for e in test.of("todo") if e.get("state") == "checked"]
             assert checked["results"][0]["status"] == "inconclusive"
             assert "separate changes" in checked["results"][0]["evidence"]
             (note,) = [m for m in test.of("message") if "at the same time" in m["text"]]

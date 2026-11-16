@@ -80,6 +80,7 @@ JOINERY = {
     "submit_for_review": "Handing the change over",
     "precheck": "Checking the change",
     "propose_todo": "Writing the to-do",
+    "todo_step": "Checking off a step",
     "start_task": "Starting a task: {title}",
     "start_variants": "Trying a few ways",
     "task_status": "Checking on a task",

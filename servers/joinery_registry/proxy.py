@@ -38,6 +38,13 @@ class DoneWhenArgument(BaseModel):
     seconds: Annotated[float, Field(ge=10, le=300)] | None = None
 
 
+class StepArgument(BaseModel):
+    """One step of a to-do: the short line the user sees and what the build needs."""
+
+    title: Annotated[str, Field(min_length=1, max_length=80)]
+    detail: Annotated[str, Field(max_length=600)] | None = None
+
+
 class DesignEvidenceArgument(BaseModel):
     """One place in the project a design finding rests on."""
 
@@ -276,21 +283,40 @@ def make_server(socket: Path, role: str | None = None) -> MCPServer[Any]:
     @server.tool()
     @tool_errors
     async def propose_todo(
-        steps: Annotated[list[str], Field(min_length=1, max_length=8)],
+        steps: Annotated[list[StepArgument | str], Field(min_length=1, max_length=8)],
         done_when: Annotated[list[DoneWhenArgument], Field(max_length=6)] | None = None,
         after: Annotated[list[list[int]], Field(max_length=8)] | None = None,
     ) -> dict[str, Any]:
-        """For a request that takes several steps, before changing anything: show the user your to-do. steps: 1 to 8 short lines in the user's words. done_when: up to 6 items that say when the request is done, each checked by Joinery after your change passes its checks, with its result shown in the review; a failed item comes back to you once to fix. Each item is {text, kind, target?, seconds?}: kind 'reach' (target: a place named like its node, 'key room'; the playtest bot must get there), 'no_errors' (seconds of play with no crash or script error, default 60), 'test' (target: the res:// test you write in the change, e.g. that the door opens when the lever is pulled: a GUT test when the project has GUT, otherwise res://tests/test_<name>.gd extending SceneTree that checks in _initialize() and calls quit(0) on pass, or prints 'FAIL: <why>' and calls quit(1); both run with the project's tests), 'check' (target: tests, godot_import, art_bible, references, provenance or dependencies), or 'look' (only the user can judge). after: optional, one list per step of the earlier step numbers it needs done first ([] for a step that needs nothing, such as a second separate model); omitted, each step needs the one before. status 'waiting_for_go': end your turn now without changing anything; the user's Go starts the work. status 'running_steps': Joinery runs the independent steps as parallel tasks; end your turn now, you hear back when they are done. status 'go': carry on. Skip it for small, one-step requests."""
+        """For a request that takes several steps, before changing anything: show the user your to-do. steps: 1 to 8 {title, detail}: title a short line in the user's words (8 words at most, 'Mower: pull-cord handle and fuel cap'), detail what building it needs (names, sizes, files, placement), shown when the user opens the step; a step said twice is kept once. done_when: up to 6 items that say when the request is done, each checked by Joinery after your change passes its checks, with its result shown in the review; a failed item comes back to you once to fix. Each item is {text, kind, target?, seconds?}: kind 'reach' (target: a place named like its node, 'key room'; the playtest bot must get there), 'no_errors' (seconds of play with no crash or script error, default 60), 'test' (target: the res:// test you write in the change, e.g. that the door opens when the lever is pulled: a GUT test when the project has GUT, otherwise res://tests/test_<name>.gd extending SceneTree that checks in _initialize() and calls quit(0) on pass, or prints 'FAIL: <why>' and calls quit(1); both run with the project's tests), 'check' (target: tests, godot_import, art_bible, references, provenance or dependencies), or 'look' (only the user can judge). after: optional, one list per step of the earlier step numbers it needs done first ([] for a step that needs nothing, such as a second separate model); omitted, each step needs the one before. status 'waiting_for_go': end your turn now without changing anything; the user's Go starts the work. status 'running_steps': Joinery runs the independent steps as parallel tasks; end your turn now, you hear back when they are done. status 'go': carry on. Skip it for small, one-step requests."""
         return await rpc(
             socket,
             "propose_todo",
             {
-                "steps": steps,
+                "steps": [
+                    step.model_dump(exclude_none=True)
+                    if isinstance(step, StepArgument)
+                    else step
+                    for step in steps
+                ],
                 "done_when": [
                     item.model_dump(exclude_none=True) for item in done_when or []
                 ],
                 **({"after": after} if after is not None else {}),
             },
+        )
+
+    @server.tool()
+    @tool_errors
+    async def todo_step(
+        step: Annotated[int, Field(ge=1, le=8)],
+        state: Literal["started", "done", "skipped"],
+        note: Annotated[str, Field(max_length=160)] | None = None,
+    ) -> dict[str, Any]:
+        """While building your to-do after Go: say a step (its number) is 'started', 'done' or 'skipped' (note: why, one line). The user's to-do card checks it off at once."""
+        return await rpc(
+            socket,
+            "todo_step",
+            {"step": step, "state": state, **({"note": note} if note else {})},
         )
 
     @server.tool()

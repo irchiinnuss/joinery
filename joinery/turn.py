@@ -441,6 +441,9 @@ class TurnController:
         self.todo: done_when.Todo | None = None
         #: A to-do proposed and waiting for the user's Go (nothing may change meanwhile).
         self.pending_todo: done_when.Todo | None = None
+        #: The to-do a new message set aside while it waited for Go: the agent's next
+        #: to-do in this chat takes its place on the same card rather than a second one.
+        self._set_aside = ""
         #: Steps the harness runs as parallel tasks once the agent ends this prompt
         #: (0-based, ``[agents] run_steps = "together"``); nothing may change meanwhile.
         self.steps_together: list[int] = []
@@ -496,8 +499,10 @@ class TurnController:
         if self.state not in {TurnState.IDLE, TurnState.IN_REVIEW}:
             raise ValueError("Journeyman is still working on the last request.")
         waiting, self.pending_todo = self.pending_todo, None
+        self._set_aside = ""
         if waiting is not None and (todo is None or todo.id != waiting.id):
             self.emit({"kind": "todo", "todo_id": waiting.id, "state": "dropped"})
+            self._set_aside = waiting.id
         self.todo = todo
         self.steps_together = []
         self.stepping = False
@@ -586,6 +591,10 @@ class TurnController:
                 "This request has its to-do already; work through it and submit."
             )
         todo = done_when.proposal(params, self.request)
+        if self._set_aside:
+            # The user's message reworked the list waiting for Go: the same card updates.
+            todo = replace(todo, id=self._set_aside)
+            self._set_aside = ""
         wait = done_when.waits_for_go(
             todo, done_when.go_mode(self.gateway.project), unattended=self._unattended()
         ) and not (self._staged() or self.live_edits)
@@ -652,8 +661,45 @@ class TurnController:
         self.emit({"kind": "todo", "todo_id": todo_id, "state": "cancelled"})
         return True
 
+    def todo_step(self, params: dict[str, Any]) -> dict[str, Any]:
+        """The building agent's word on one step (``todo_step``): started, done or
+        skipped. The card checks it off at once and counts what is done."""
+        todo = self.todo
+        if todo is None:
+            if self.pending_todo is not None:
+                raise ValueError(WAITING_FOR_GO)
+            raise ValueError("This request has no to-do; just do the work.")
+        number = params.get("step")
+        if (
+            not isinstance(number, int)
+            or isinstance(number, bool)
+            or not 1 <= number <= len(todo.steps)
+        ):
+            raise ValueError(f"step is the step's number, 1 to {len(todo.steps)}.")
+        state = params.get("state")
+        if state not in done_when.STEP_STATES:
+            raise ValueError("state is started, done or skipped.")
+        note = params.get("note") or ""
+        if not isinstance(note, str) or len(note) > 160:
+            raise ValueError("note is one short line.")
+        note = " ".join(note.split())
+        todo.mark(number - 1, str(state))
+        self.emit(done_when.step_event(todo, number, note))
+        if state == "started":
+            self.gateway.progress(
+                f"Step {number} of {len(todo.steps)}: {todo.steps[number - 1]}…"
+            )
+        finished = sum(
+            1 for i in range(len(todo.steps)) if todo.state(i) in {"done", "skipped"}
+        )
+        return {"status": "ok", "finished": finished, "steps": len(todo.steps)}
+
     def todo_event(self, state: str, **extra: Any) -> None:
         if self.todo is not None:
+            if state in {"checking", "checked"}:
+                # The change is made: every step not skipped is done.
+                self.todo.finish()
+                extra = {"step_states": self.todo.as_dict()["step_states"], **extra}
             self.emit(
                 {"kind": "todo", "todo_id": self.todo.id, "state": state, **extra}
             )

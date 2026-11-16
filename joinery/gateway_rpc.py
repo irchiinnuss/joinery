@@ -539,6 +539,14 @@ class GatewayRPC:
                 if self.gateway.turn is None:
                     raise ValueError("No user request is open.")
                 data = self.gateway.turn.propose_todo(params)
+            elif method == "todo_step":
+                if self.worker or self.inspection_only or self.role not in {"", "lead"}:
+                    raise ValueError(
+                        "Only Journeyman's own request checks off its to-do's steps."
+                    )
+                if self.gateway.turn is None:
+                    raise ValueError("No user request is open.")
+                data = self.gateway.turn.todo_step(params)
             elif method == "delegate":
                 if self.inspection_only or self.delegate is None:
                     raise ValueError("Nested specialist delegation is unavailable.")
@@ -694,7 +702,7 @@ class GatewayRPC:
                 data = self.task_status(str(params.get("id", "")))
             else:
                 raise ValueError(
-                    "The model interface supports inventory, schema, call, submit, propose_todo, blockout, grow_level, make_variant, playtest, the checks, sound_audit, tidy_check, tidy_remove, rerecord_replay, save_design_doc and the running game's inspect_game and drive_game; no approval methods."
+                    "The model interface supports inventory, schema, call, submit, propose_todo, todo_step, blockout, grow_level, make_variant, playtest, the checks, sound_audit, tidy_check, tidy_remove, rerecord_replay, save_design_doc and the running game's inspect_game and drive_game; no approval methods."
                 )
             project = getattr(self.gateway, "project", None)
             if method in COMPACTED and isinstance(project, Path):

@@ -11,6 +11,16 @@ more whatever; ``"always"``; ``"never"``). After the change passes Joinery's che
 checked and the review shows Pass, Fail or Inconclusive with the evidence. A Fail goes back
 to the agent once before the user sees the change.
 
+Each step is a short title the card shows (a few words, "Mower: pull-cord handle and fuel
+cap") and its detail, the names, sizes and files the build needs, behind the title. A step
+the agent wrote as one long line keeps it all as its detail, under its first clause as the
+title. A step said twice (the same or nearly the same title) is kept once, both when the
+agent proposes the list and when the user edits it.
+
+While the to-do is built the agent says as it starts, finishes or skips each step
+(``todo_step``), and steps run as parallel tasks are marked as their tasks finish, so the
+card and ``joinery run`` show real progress ("4 of 8 done").
+
 The agent may say which steps need which (``after``): a step that needs nothing before it
 is independent. With ``[agents] run_steps = "together"`` the harness runs the independent
 steps as parallel tasks (ADR 0036) and comes back to the agent only at the end or when a
@@ -42,8 +52,9 @@ import re
 import sys
 import tomllib
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field, replace
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Literal
 
@@ -58,6 +69,11 @@ DEFAULT_GO = "auto"
 #: ``[agents] run_steps``: whether independent steps run as parallel tasks.
 RUN_STEPS = ("one_by_one", "together")
 MAX_STEPS = 8
+#: A step's title (the card's line) and its detail (what the build needs), in characters.
+TITLE_CHARS = 80
+DETAIL_CHARS = 600
+#: A step's progress while the to-do is built ("" before it starts).
+STEP_STATES = ("started", "done", "skipped")
 MAX_DONE_WHEN = 6
 #: The seed every check run plays with, so a result replays exactly.
 SEED = 4242
@@ -103,11 +119,16 @@ class Todo:
 
     id: str
     request: str
+    #: Each step's title: the short line the card shows.
     steps: list[str]
     done_when: list[Criterion] = field(default_factory=list)
     #: For each step, the numbers (1-based) of the earlier steps it needs done first. A
     #: step the agent said nothing about needs the one before it.
     after: list[list[int]] = field(default_factory=list)
+    #: Each step's detail (names, sizes, files the build needs); "" for none.
+    details: list[str] = field(default_factory=list)
+    #: Each step's progress while it is built: "", started, done or skipped.
+    states: list[str] = field(default_factory=list)
 
     def needs(self, index: int) -> list[int]:
         """The step numbers step ``index`` (0-based) needs first."""
@@ -115,13 +136,73 @@ class Todo:
             return list(self.after[index])
         return [index] if index > 0 else []
 
+    def detail(self, index: int) -> str:
+        return self.details[index] if index < len(self.details) else ""
+
+    def state(self, index: int) -> str:
+        return self.states[index] if index < len(self.states) else ""
+
+    def step_line(self, index: int) -> str:
+        """The step as the build hears it: its title, then its detail."""
+        title, detail = self.steps[index], self.detail(index)
+        if not detail or _key(detail) == _key(title):
+            return title
+        if detail.startswith(title):
+            return detail
+        return f"{title}: {detail}"
+
+    def mark(self, index: int, state: str) -> None:
+        """Set step ``index`` (0-based) to ``state`` ("", started, done or skipped)."""
+        self.states = [self.state(i) for i in range(len(self.steps))]
+        self.states[index] = state
+
+    def finish(self) -> None:
+        """The change is made: every step not skipped is done."""
+        self.states = [
+            "skipped" if self.state(i) == "skipped" else "done"
+            for i in range(len(self.steps))
+        ]
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "todo_id": self.id,
             "steps": list(self.steps),
+            "details": [self.detail(i) for i in range(len(self.steps))],
             "after": [self.needs(i) for i in range(len(self.steps))],
+            "step_states": [self.state(i) for i in range(len(self.steps))],
             "done_when": [c.as_dict() for c in self.done_when],
         }
+
+
+def step_event(todo: Todo, number: int, note: str = "") -> dict[str, Any]:
+    """The shared event for one step's progress, the same for every agent and host: the
+    card moves step ``number`` (1-based) on and counts "4 of 8 done"; ``joinery run``
+    prints a line (:func:`step_progress`). It carries no ``state``: the to-do's own
+    state (going, steps, checking…) stays as it was."""
+    event: dict[str, Any] = {
+        "kind": "todo",
+        "todo_id": todo.id,
+        "step": number,
+        "step_state": todo.state(number - 1),
+        "step_states": [todo.state(i) for i in range(len(todo.steps))],
+        "title": todo.steps[number - 1],
+    }
+    if note:
+        event["note"] = note
+    return event
+
+
+def step_progress(event: dict[str, Any]) -> str:
+    """A step event in words: 'Step 2 of 8 done: Open the gate'."""
+    states = event.get("step_states") or []
+    words = {"started": "started", "done": "done", "skipped": "skipped"}.get(
+        str(event.get("step_state", "")), "to do again"
+    )
+    line = (
+        f"Step {event.get('step')} of {len(states)} {words}: {event.get('title', '')}"
+    )
+    note = str(event.get("note", "") or "")
+    return f"{line} ({note})" if note else line
 
 
 @dataclass
@@ -151,11 +232,145 @@ def _line(value: Any, what: str, limit: int) -> str:
     return text
 
 
+#: Where a long step's first clause ends: a colon, semicolon, dash or bracket, a comma
+#: or a full stop.
+_CLAUSE = re.compile(r":\s|;|\s[-–—]\s|\s\(|,\s|\.\s")
+#: A title longer than this many words is cut there.
+TITLE_WORDS = 8
+
+
+def short_title(text: str) -> str:
+    """A step's title from a long line: its first clause of three words or more, at most
+    ``TITLE_WORDS`` words. A line short enough already is its own title."""
+    words = " ".join(text.split())
+    if len(words.split()) <= TITLE_WORDS + 2 and len(words) <= 60:
+        return words
+    head = words
+    for match in _CLAUSE.finditer(words):
+        if len(words[: match.start()].split()) >= 3:
+            head = words[: match.start()]
+            break
+    cut = head.split()
+    if len(cut) > TITLE_WORDS:
+        head = " ".join(cut[:TITLE_WORDS]).rstrip(",;:") + "…"
+    return head.rstrip(".,;: ")[:TITLE_CHARS]
+
+
+#: Words that don't change what a step says: "by the gate" is "beside the gate".
+_GLUE = frozenset(
+    [
+        "a",
+        "an",
+        "the",
+        "and",
+        "of",
+        "to",
+        "in",
+        "on",
+        "at",
+        "by",
+        "beside",
+        "next",
+        "near",
+        "for",
+        "with",
+        "its",
+        "it",
+    ]
+)
+
+
+def _key(text: str) -> str:
+    return " ".join(re.sub(r"[^\w\s]", " ", text.lower()).split())
+
+
+def same_step(first: str, second: str) -> bool:
+    """Whether two step titles say the same thing: equal once case and punctuation
+    are set aside, or nearly so ("Put a lever by the gate", "Put a lever beside the
+    gate"). Titles that differ in a number ("Room 1", "Room 2") never are."""
+    a, b = _key(first), _key(second)
+    if not a or not b:
+        return a == b
+    if a == b:
+        return True
+    if re.findall(r"\d+", a) != re.findall(r"\d+", b):
+        return False
+    words_a, words_b = set(a.split()) - _GLUE, set(b.split()) - _GLUE
+    if words_a and words_a == words_b:
+        return True
+    return SequenceMatcher(None, a, b).ratio() >= 0.92
+
+
+def _detail(value: Any) -> str:
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise TypeError("A step's detail is text.")
+    lines = [" ".join(line.split()) for line in value.strip().splitlines()]
+    text = "\n".join(line for line in lines if line)
+    if len(text) > DETAIL_CHARS:
+        raise ValueError(f"Keep each step's detail under {DETAIL_CHARS} characters.")
+    return text
+
+
+def _step(value: Any) -> tuple[str, str]:
+    """A proposed step: {title, detail?}, or one line of words (its first clause becomes
+    the title, the whole line the detail). A title that runs long is shortened the same
+    way, with the whole of it kept in the detail."""
+    if isinstance(value, dict):
+        title = _line(value.get("title"), "step title", DETAIL_CHARS)
+        detail = _detail(value.get("detail"))
+    else:
+        title, detail = _line(value, "step", DETAIL_CHARS), ""
+    short = short_title(title)
+    if short != title:
+        detail = (
+            f"{title}\n{detail}"
+            if detail and _key(title) not in _key(detail)
+            else (detail or title)
+        )
+    return short, detail
+
+
+def _distinct(titles: list[str]) -> tuple[dict[int, int], list[int]]:
+    """For each step (0-based), where it lands once steps said twice are kept once (a
+    repeat lands on the first step that says the same), and the steps kept."""
+    into: dict[int, int] = {}
+    kept: list[int] = []
+    for index, title in enumerate(titles):
+        same = next((into[j] for j in kept if same_step(titles[j], title)), None)
+        if same is None:
+            into[index] = len(kept)
+            kept.append(index)
+        else:
+            into[index] = same
+    return into, kept
+
+
+def _kept(
+    titles: list[str], details: list[str], after: list[list[int]]
+) -> tuple[list[str], list[str], list[list[int]]]:
+    """The steps with repeats folded into the first that says the same (its detail kept,
+    or the repeat's when it had none), and ``after`` renumbered to match."""
+    into, first = _distinct(titles)
+    kept_titles = [titles[i] for i in first]
+    kept_details = [details[i] for i in first]
+    for index in range(len(titles)):
+        if index not in first and not kept_details[into[index]]:
+            kept_details[into[index]] = details[index]
+    kept_after = [
+        sorted({into[n - 1] + 1 for n in after[i] if into[n - 1] < into[i]})
+        for i in first
+    ]
+    return kept_titles, kept_details, kept_after
+
+
 def proposal(params: dict[str, Any], request: str = "") -> Todo:
-    """The agent's ``propose_todo`` arguments, checked: {steps, done_when}."""
+    """The agent's ``propose_todo`` arguments, checked: {steps, done_when, after?}. Each
+    step is {title, detail?} or one line of words; a step said twice is kept once."""
     steps = params.get("steps")
     if not isinstance(steps, list) or not 1 <= len(steps) <= MAX_STEPS:
-        raise ValueError(f"steps is a list of 1 to {MAX_STEPS} short lines.")
+        raise ValueError(f"steps is a list of 1 to {MAX_STEPS} steps.")
     items = params.get("done_when") or []
     if not isinstance(items, list) or len(items) > MAX_DONE_WHEN:
         raise ValueError(f"done_when is a list of up to {MAX_DONE_WHEN} items.")
@@ -196,12 +411,19 @@ def proposal(params: dict[str, Any], request: str = "") -> Todo:
                 seconds=float(seconds),
             )
         )
+    shaped = [_step(step) for step in steps]
+    titles, details, after = _kept(
+        [title for title, _ in shaped],
+        [detail for _, detail in shaped],
+        _after(params.get("after"), len(steps)),
+    )
     return Todo(
         id=uuid.uuid4().hex[:12],
         request=request.strip()[:4000],
-        steps=[_line(step, "step", 200) for step in steps],
+        steps=titles,
         done_when=criteria,
-        after=_after(params.get("after"), len(steps)),
+        after=after,
+        details=details,
     )
 
 
@@ -230,13 +452,41 @@ def _after(value: Any, count: int) -> list[list[int]]:
 
 def edited(todo: Todo, data: dict[str, Any]) -> Todo:
     """The to-do as the user left it on the card: steps reworded or removed, "done when"
-    items reworded or removed by id. Kinds and targets stay the agent's."""
-    steps = data.get("steps", todo.steps)
+    items reworded or removed by id, steps added or moved. Kinds and targets stay the
+    agent's. A step is {title, detail?, from?} (``from``: the agent's step number it
+    was, so what it needs follows it) or a line of words; a step said twice is kept
+    once."""
+    steps = data.get("steps")
+    if steps is None:
+        steps = [
+            {"title": t, "detail": todo.detail(i), "from": i + 1}
+            for i, t in enumerate(todo.steps)
+        ]
     if not isinstance(steps, list):
         raise TypeError("The to-do's steps are a list.")
-    kept_steps = [" ".join(str(s).split())[:200] for s in steps if str(s).strip()]
-    if not kept_steps:
+    titles, details, origins = _edited_steps(todo, steps)
+    if not titles:
         raise ValueError("Keep at least one step, or cancel the to-do.")
+    into, first = _distinct(titles)
+    first = first[:MAX_STEPS]
+    where = {origins[i]: p for p, i in enumerate(first) if origins[i]}
+    after: list[list[int]] = []
+    for p, i in enumerate(first):
+        needs: set[int] = set()
+        if not origins[i]:
+            # A step the user added needs the one before it.
+            needs = {p} if p else set()
+        for n in todo.needs(origins[i] - 1) if origins[i] else []:
+            if n in where and where[n] < p:
+                needs.add(where[n] + 1)
+            elif p:
+                # What it needed went or moved below it: it needs the one before.
+                needs.add(p)
+        after.append(sorted(needs))
+    kept_details = [details[i] for i in first]
+    for index, lands in into.items():
+        if lands < len(first) and not kept_details[lands]:
+            kept_details[lands] = details[index]
     by_id = {c.id: c for c in todo.done_when}
     items = data.get("done_when", [c.as_dict() for c in todo.done_when])
     if not isinstance(items, list):
@@ -248,10 +498,70 @@ def edited(todo: Todo, data: dict[str, Any]) -> Todo:
         text = " ".join(str(item.get("text", "")).split())[:160]
         if text:
             kept.append(replace(by_id[str(item["id"])], text=text))
-    kept_steps = kept_steps[:MAX_STEPS]
-    # Steps removed or added: the numbers no longer line up, so each needs the one before.
-    after = todo.after if len(kept_steps) == len(todo.steps) else []
-    return replace(todo, steps=kept_steps, done_when=kept, after=after)
+    return replace(
+        todo,
+        steps=[titles[i] for i in first],
+        details=kept_details,
+        done_when=kept,
+        after=after,
+        states=[],
+    )
+
+
+def _edited_steps(
+    todo: Todo, steps: list[Any]
+) -> tuple[list[str], list[str], list[int]]:
+    """The card's steps as titles, details and the agent's step number each was (0 for
+    one the user added). A line of words that matches one of the agent's titles keeps
+    that step's detail; when the lines are as many as the agent's steps, a reworded
+    line is the step in its place."""
+    titles: list[str] = []
+    details: list[str] = []
+    origins: list[int] = []
+    used: set[int] = set()
+    lines = [s for s in steps if not isinstance(s, dict) and str(s).strip()]
+    in_place = len(lines) == len(steps) == len(todo.steps)
+    for position, step in enumerate(steps):
+        if isinstance(step, dict):
+            text = " ".join(str(step.get("title", "") or "").split())
+            detail = "\n".join(
+                " ".join(line.split())
+                for line in str(step.get("detail", "") or "").splitlines()
+                if line.strip()
+            )[:DETAIL_CHARS]
+            origin = step.get("from")
+            number = (
+                origin
+                if isinstance(origin, int)
+                and not isinstance(origin, bool)
+                and 1 <= origin <= len(todo.steps)
+                and origin not in used
+                else 0
+            )
+        else:
+            text, detail = " ".join(str(step).split()), ""
+            number = next(
+                (
+                    i + 1
+                    for i, title in enumerate(todo.steps)
+                    if i + 1 not in used and _key(title) == _key(text)
+                ),
+                0,
+            )
+            if not number and in_place and position + 1 not in used:
+                number = position + 1
+            detail = todo.detail(number - 1) if number else ""
+        if not text:
+            continue
+        if len(text) > TITLE_CHARS:
+            short = short_title(text)
+            detail = detail or text
+            text = short
+        used.add(number)
+        titles.append(text)
+        details.append(detail)
+        origins.append(number)
+    return titles, details, origins
 
 
 def go_mode(project: Path) -> str:
@@ -353,7 +663,9 @@ SPLIT_MODES = ("big", "never")
 #: A to-do of at least this many steps is a big request.
 SPLIT_STEPS = 3
 #: Requests that are big whatever their step count: a level's whole layout.
-_BIG_REQUEST = re.compile(r"\b(blockout|greybox|grey-box|gray-box|block out)\b", re.IGNORECASE)
+_BIG_REQUEST = re.compile(
+    r"\b(blockout|greybox|grey-box|gray-box|block out)\b", re.IGNORECASE
+)
 
 
 def split_mode(project: Path) -> str:
@@ -391,15 +703,28 @@ def waits_for_go(todo: Todo, mode: str, *, unattended: bool = False) -> bool:
     return len(todo.steps) >= 2
 
 
+#: The build's one line on progress: the card checks each step off as it is done.
+PROGRESS_LINE = (
+    "Call todo_step(step, 'started') as you begin each step and todo_step(step, 'done') "
+    "(or 'skipped', with a note) when it is finished, so the user sees progress. "
+)
+
+
+def _numbered(todo: Todo, indexes: Iterable[int]) -> str:
+    """The steps at ``indexes`` (0-based) as the build hears them, numbered."""
+    return "\n".join(f"{i + 1}. {todo.step_line(i)}" for i in indexes)
+
+
 def go_prompt(todo: Todo) -> str:
     """What the agent hears when the user presses Go: the to-do as the user left it."""
-    steps = "\n".join(f"{n}. {step}" for n, step in enumerate(todo.steps, 1))
+    steps = _numbered(todo, range(len(todo.steps)))
     done = "\n".join(f"- {c.text}" for c in todo.done_when) or "- (none)"
     return (
         "The user pressed Go on your to-do, as they left it (they may have edited or "
         "removed items):\n"
         f"Steps:\n{steps}\nDone when:\n{done}\n"
         "Work through the steps now as one change and submit it with submit_for_review. "
+        f"{PROGRESS_LINE}"
         "Joinery checks each done-when item after the change passes its checks; don't "
         "propose the to-do again.\n\n"
         f"The request was: {todo.request}"
@@ -409,13 +734,14 @@ def go_prompt(todo: Todo) -> str:
 def build_prompt(todo: Todo) -> str:
     """What the build step of a planned request hears (ADR 0090): its own plan, in a
     fresh session that didn't see the planning."""
-    steps = "\n".join(f"{n}. {step}" for n, step in enumerate(todo.steps, 1))
+    steps = _numbered(todo, range(len(todo.steps)))
     done = "\n".join(f"- {c.text}" for c in todo.done_when) or "- (none)"
     return (
         "You planned this request in an earlier session; build it now from the plan. "
         "Read only what a step needs.\n"
         f"Steps:\n{steps}\nDone when:\n{done}\n"
         "Work through the steps as one change and submit it with submit_for_review. "
+        f"{PROGRESS_LINE}"
         "Joinery checks each done-when item after the change passes its checks; don't "
         "propose the to-do again.\n\n"
         f"The request was: {todo.request}"
@@ -464,7 +790,7 @@ def steps_prompt(todo: Todo, outcomes: list[StepOutcome]) -> str:
     """What the agent hears after the independent steps ran as parallel tasks."""
     ran = step_words([o.number for o in outcomes])
     left = remaining(todo, outcomes)
-    steps = "\n".join(f"{i + 1}. {todo.steps[i]}" for i in left) or "(none)"
+    steps = _numbered(todo, left) or "(none)"
     done = "\n".join(f"- {c.text}" for c in todo.done_when) or "- (none)"
     return (
         f"Joinery ran {ran} of your to-do as parallel tasks, each its own change the "
@@ -472,7 +798,8 @@ def steps_prompt(todo: Todo, outcomes: list[StepOutcome]) -> str:
         + "\n".join(o.line() for o in outcomes)
         + "\nDo the steps left now as one change, on top of what was accepted, and "
         "submit it with submit_for_review. Don't redo a step that was made. If a step "
-        "failed, make it yourself if you can; otherwise tell the user plainly why not.\n"
+        "failed, make it yourself if you can; otherwise tell the user plainly why not. "
+        f"{PROGRESS_LINE}\n"
         f"Steps left:\n{steps}\nDone when:\n{done}\n\n"
         f"The request was: {todo.request}"
     )
