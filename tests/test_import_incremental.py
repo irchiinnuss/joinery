@@ -64,9 +64,9 @@ def test_seeding_keeps_an_existing_cache_and_needs_one_to_copy(tmp_path: Path) -
 def test_the_import_limit_is_set_by_the_project_or_scales_under_emulation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("joinery.submission.platform.machine", lambda: "x86_64")
+    monkeypatch.setattr("joinery.worker_platform.platform.machine", lambda: "x86_64")
     assert submission.import_seconds(tmp_path) == submission.IMPORT_SECONDS
-    monkeypatch.setattr("joinery.submission.platform.machine", lambda: "arm64")
+    monkeypatch.setattr("joinery.worker_platform.platform.machine", lambda: "arm64")
     assert submission.import_seconds(tmp_path) == (
         submission.IMPORT_SECONDS * submission.EMULATED_FACTOR
     )

@@ -9,7 +9,7 @@ decides what happens next: that is the turn controller's job.
 from __future__ import annotations
 
 import asyncio
-import platform
+import os
 import re
 import secrets
 import shutil
@@ -28,12 +28,14 @@ from joinery import (
     replays,
     saves,
     scene_variants,
+    worker_platform,
 )
 from joinery import (
     scene_tests as scene_cache,
 )
 from joinery.art_approval import approved
 from joinery.art_approval import fingerprint as bible_fingerprint
+from joinery.authoring import IMAGE as CREATIVE_IMAGE
 from joinery.authoring import WorkerTimeout, run_offline
 from joinery.bible_rules import check_rules, load_rules, ui_resources
 from joinery.bible_schema import REFERENCE_DIR
@@ -128,8 +130,11 @@ IMPORT_ARGV = (
 #: may take on a worker that runs natively. ``[checks] scene_test_seconds`` sets it.
 SCENE_TESTS_MAX = 20
 SCENE_TEST_SECONDS = 120
-#: The worker is linux/amd64; on an arm64 host it runs emulated, several times slower.
+#: A linux/amd64 worker on an arm64 host runs emulated, several times slower.
 EMULATED_FACTOR = 2
+#: Folders Godot never imports from (beside any folder holding a .gdignore).
+_NOT_SCANNED = frozenset({".git", ".godot", ".joinery", ".venv", "__pycache__"})
+_BLENDER_OFF = re.compile(r"^\s*import/blender/enabled\s*=\s*false\s*$", re.MULTILINE)
 #: The whole of one check (precheck or submit): Godot's import, then the tests.
 #: The agent's tool waits at most ``gateway_rpc.RPC_SECONDS`` (900) for the
 #: answer, so the checks stop in time to give one: tests still running then are
@@ -159,6 +164,36 @@ _OPENXR_ON = re.compile(r"^openxr/enabled=true$", re.MULTILINE)
 _UNKNOWN_NAME = re.compile(r"Identifier not found: (\w+)")
 #: The autoloads a project declares, by name.
 _AUTOLOAD_LINE = re.compile(r'^(\w+)="\*?res://', re.MULTILINE)
+
+
+def imports_blend(stage: Path) -> bool:
+    """Godot's import of ``stage`` reads a .blend file (one outside every folder
+    with a .gdignore), which needs Blender beside Godot."""
+    try:
+        config = (stage / "project.godot").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        config = ""
+    if _BLENDER_OFF.search(config):
+        return False
+    for _directory, folders, names in os.walk(stage):
+        if ".gdignore" in names:
+            folders[:] = []
+            continue
+        folders[:] = [f for f in folders if f not in _NOT_SCANNED]
+        if any(name.lower().endswith(".blend") for name in names):
+            return True
+    return False
+
+
+def check_image(stage: Path) -> str:
+    """The image Godot's checks of ``stage`` run in: the Godot check worker,
+    built for this host so it runs natively, when it is there and the import
+    needs no Blender; otherwise the creative worker, which has Blender."""
+    if worker_platform.present(worker_platform.GODOT_WORKER) is None:
+        return CREATIVE_IMAGE
+    if imports_blend(stage):
+        return CREATIVE_IMAGE
+    return worker_platform.GODOT_WORKER
 
 
 def is_reference(path: str) -> bool:
@@ -620,6 +655,11 @@ async def checks(
 
     budget = check_seconds(tx.project)
     deadline = time.monotonic() + budget
+    image = (
+        await asyncio.to_thread(check_image, tx.stage)
+        if godot or tests or scene_tests
+        else CREATIVE_IMAGE
+    )
 
     async def measured() -> list[Problem]:
         if not rules:
@@ -648,10 +688,12 @@ async def checks(
         found: list[Problem] = []
         testing = bool(tests) or bool(scene_tests)
         if godot or (testing and not current):
-            limit = import_seconds(tx.project)
+            limit = import_seconds(tx.project, image)
             try:
                 with timed("review_import"):
-                    got = await worker_run(list(IMPORT_ARGV), tx.stage, limit)
+                    got = await worker_run(
+                        list(IMPORT_ARGV), tx.stage, limit, image=image
+                    )
             except WorkerTimeout as stopped:
                 # Said as the import's own problem: the look check still counts.
                 found.append(import_timeout(limit, stopped.output))
@@ -670,7 +712,7 @@ async def checks(
             if imported is not None:
                 imported()
         if tests:
-            found += await run_tests(tx.stage, tests, timed)
+            found += await run_tests(tx.stage, tests, timed, image=image)
         if scene_tests:
             found += await run_scene_tests(
                 tx.stage,
@@ -683,6 +725,7 @@ async def checks(
                 report=report,
                 deadline=deadline,
                 budget=budget,
+                image=image,
             )
         if replays_on:
             found += await run_replays(tx, imported=godot or testing, timed=timed)
@@ -742,15 +785,15 @@ async def worker_run(
 IMPORT_SECONDS = 300
 
 
-def import_seconds(project: Path) -> int:
+def import_seconds(project: Path, image: str = CREATIVE_IMAGE) -> int:
     """How long one Godot import may take in the offline worker: ``[checks]
     import_seconds`` when the project sets it, otherwise ``IMPORT_SECONDS``,
-    doubled when the worker runs emulated (an arm64 host running the amd64
-    worker). An import past it is a problem of its own (``import_timeout``)."""
+    doubled when ``image`` runs emulated (an amd64 worker on an arm64 host). An
+    import past it is a problem of its own (``import_timeout``)."""
     setting = _checks_setting(project, "import_seconds")
     if setting is not None:
         return setting
-    return IMPORT_SECONDS * (EMULATED_FACTOR if _emulated() else 1)
+    return IMPORT_SECONDS * (EMULATED_FACTOR if _emulated(image) else 1)
 
 
 def import_timeout(seconds: int, output: str = "") -> Problem:
@@ -777,7 +820,7 @@ def worker_ready(got: Result) -> None:
 
 
 async def run_tests(
-    stage: Path, folders: list[str], timed: Any = None
+    stage: Path, folders: list[str], timed: Any = None, image: str = CREATIVE_IMAGE
 ) -> list[Problem]:
     """Run the project's GUT tests; a failure or a timeout is a problem to fix."""
     argv = [
@@ -792,7 +835,7 @@ async def run_tests(
         "-gexit",
     ]
     with timed("review_tests") if timed is not None else nullcontext():
-        got = await worker_run(argv, stage, OFFLINE_SECONDS)
+        got = await worker_run(argv, stage, OFFLINE_SECONDS, image=image)
     worker_ready(got)
     if got.ok and "SCRIPT ERROR:" not in got.output:
         return []
@@ -830,14 +873,14 @@ def unfinished_problem(unfinished: dict[str, str], budget: float) -> Problem:
     return Problem("checks", text, list(unfinished), fixable=False)
 
 
-def scene_test_seconds(project: Path) -> int:
+def scene_test_seconds(project: Path, image: str = CREATIVE_IMAGE) -> int:
     """Each SceneTree test's time limit: ``[checks] scene_test_seconds`` when the
-    project sets it, otherwise the native limit, scaled up when the worker runs
-    emulated (an arm64 host running the amd64 worker)."""
+    project sets it, otherwise the native limit, scaled up when ``image`` runs
+    emulated (an amd64 worker on an arm64 host)."""
     setting = _checks_setting(project, "scene_test_seconds")
     if setting is not None:
         return setting
-    return SCENE_TEST_SECONDS * (EMULATED_FACTOR if _emulated() else 1)
+    return SCENE_TEST_SECONDS * (EMULATED_FACTOR if _emulated(image) else 1)
 
 
 def _checks_setting(project: Path, name: str) -> int | None:
@@ -863,9 +906,9 @@ def _ending(run: TestRun | None) -> Iterator[None]:
             run.end()
 
 
-def _emulated() -> bool:
-    """The linux/amd64 worker runs emulated on this (arm64) host."""
-    return platform.machine().lower() in {"arm64", "aarch64"}
+def _emulated(image: str = CREATIVE_IMAGE) -> bool:
+    """``image`` runs emulated on this host (an amd64 worker on arm64)."""
+    return worker_platform.emulated(image)
 
 
 async def run_scene_tests(
@@ -880,6 +923,7 @@ async def run_scene_tests(
     report: Callable[[dict[str, Any]], None] | None = None,
     deadline: float | None = None,
     budget: float = 0,
+    image: str = CREATIVE_IMAGE,
 ) -> list[Problem]:
     """Run each SceneTree test headless (``godot -s``), several at once; one that
     exits non-zero, prints a ``FAIL`` line or a script error, or never quits fails.
@@ -895,8 +939,8 @@ async def run_scene_tests(
     (``unfinished_problem``).
     """
 
-    seconds = scene_test_seconds(tx.project if tx is not None else stage)
-    stall = SCENE_TEST_STALL_SECONDS * (EMULATED_FACTOR if _emulated() else 1)
+    seconds = scene_test_seconds(tx.project if tx is not None else stage, image)
+    stall = SCENE_TEST_STALL_SECONDS * (EMULATED_FACTOR if _emulated(image) else 1)
 
     async def run(root: Path, script: str) -> Result:
         # A settings file of its own: no test sees another's. A run past the limit
@@ -908,6 +952,7 @@ async def run_scene_tests(
             seconds,
             warm=False,
             stall=stall,
+            image=image,
         )
         worker_ready(got)
         return got
@@ -931,8 +976,9 @@ async def run_scene_tests(
             got = await worker_run(
                 list(IMPORT_ARGV),
                 root,
-                import_seconds(tx.project if tx is not None else stage),
+                import_seconds(tx.project if tx is not None else stage, image),
                 warm=False,
+                image=image,
             )
         except WorkerTimeout:
             # The copy keeps the project's import cache: its tests still run.

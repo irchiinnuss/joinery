@@ -132,9 +132,9 @@ def test_a_test_that_finishes_on_the_second_try_passes(
 def test_the_limit_is_set_by_the_project_or_scales_under_emulation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("joinery.submission.platform.machine", lambda: "x86_64")
+    monkeypatch.setattr("joinery.worker_platform.platform.machine", lambda: "x86_64")
     assert submission.scene_test_seconds(tmp_path) == submission.SCENE_TEST_SECONDS
-    monkeypatch.setattr("joinery.submission.platform.machine", lambda: "arm64")
+    monkeypatch.setattr("joinery.worker_platform.platform.machine", lambda: "arm64")
     assert submission.scene_test_seconds(tmp_path) == (
         submission.SCENE_TEST_SECONDS * submission.EMULATED_FACTOR
     )
@@ -149,9 +149,9 @@ def test_a_stage_import_gets_more_time_under_emulation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Three 1024 px PBR maps took the emulated worker past the old 180 s.
-    monkeypatch.setattr("joinery.submission.platform.machine", lambda: "x86_64")
+    monkeypatch.setattr("joinery.worker_platform.platform.machine", lambda: "x86_64")
     assert submission.import_seconds(tmp_path) == submission.IMPORT_SECONDS
-    monkeypatch.setattr("joinery.submission.platform.machine", lambda: "arm64")
+    monkeypatch.setattr("joinery.worker_platform.platform.machine", lambda: "arm64")
     assert submission.import_seconds(tmp_path) == submission.IMPORT_SECONDS * 2 > 180
 
 

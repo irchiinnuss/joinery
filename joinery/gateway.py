@@ -1606,12 +1606,14 @@ class ProjectGateway:
         self.progress("Importing the result into Godot…")
         with self.span("import"):
             # Its own worker starts each time: a busy Docker is asked again.
+            image = await asyncio.to_thread(submission.check_image, tx.stage)
             imported = await submission.worker_run(
                 list(submission.IMPORT_ARGV),
                 tx.stage,
-                submission.import_seconds(self.project),
+                submission.import_seconds(self.project, image),
                 runner=run_offline,
                 warm=False,
+                image=image,
             )
         submission.worker_ready(imported)
         if (
