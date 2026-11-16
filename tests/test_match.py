@@ -227,6 +227,16 @@ def test_environment_and_ui_tables_parse_and_refuse_bad_values() -> None:
         parse_rules('[environment]\ntonemap = "sepia"\n')
 
 
+def test_normal_and_orm_maps_are_not_held_to_the_palette(planted: Path) -> None:
+    for name in ("wall_normal.png", "wall_orm.png"):
+        (planted / "art/textures" / name).write_bytes(png(64, 64))
+    audit = run_audit(planted)
+    # Still the two colour textures, one of them off: the data maps are not sampled.
+    assert {a.id: a.score for a in audit.areas}["palette"] == 50
+    found = by(audit, "palette")
+    assert not any(path.endswith(("_normal.png", "_orm.png")) for path in found)
+
+
 # --- The audit -----------------------------------------------------------------------
 
 

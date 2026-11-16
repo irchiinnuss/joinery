@@ -24,6 +24,7 @@ from joinery.bible_rules import (
     delta_e_2000,
     hex_rgb,
     image_size,
+    is_data_map,
     is_off_palette,
     material_texel_readings,
     measure_glb,
@@ -104,7 +105,12 @@ async def images(audit: _Audit, paths: list[str]) -> None:
     palette_images = [
         p
         for p in paths
-        if palette and _suffix(p) in _IMAGES and _in_folders(rules.palette.folders, p)
+        if palette
+        and _suffix(p) in _IMAGES
+        and _in_folders(rules.palette.folders, p)
+        # Normal and ORM maps hold directions and packed values, not colours: the
+        # submit check skips them too.
+        and not is_data_map(p)
     ]
     texture_rules = rules.textures
     for path in paths:
