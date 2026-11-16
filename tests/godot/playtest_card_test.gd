@@ -75,7 +75,8 @@ func _report() -> Dictionary:
 	return {
 		"counts": {"critical": 0, "high": 1, "medium": 0, "low": 5, "note": 0},
 		"items": items,
-		"seed": 4821,
+		# As JSON brings it: a float.
+		"seed": 4821.0,
 		"played_seconds": 120.0,
 		"summary": "Played 2:00 (seed 4821): 1 high, 5 low.",
 		"coverage":
@@ -84,8 +85,16 @@ func _report() -> Dictionary:
 			"visited": 4,
 			"navigable": 10,
 			"start": [0, 0],
+			"origin": [-4.0, -2.0],
+			"cell": 2.0,
 			"grid": ["##..", "#  .", "#..."],
+			"areas":
+			[
+				{"name": "LeverRoom", "rect": [0.0, 0.0, 2.0, 3.0]},
+				{"name": "Vault", "rect": [2.0, 0.0, 2.0, 3.0]},
+			],
 		},
+		"reach": [{"target": "vault", "node": "Vault", "reached": false, "at": [3.0, 1.0]}],
 		"heatmap":
 		{
 			"runs": 3,
@@ -158,17 +167,26 @@ func _run() -> void:
 	var map: Control = card.find_child("CoverageMap", true, false)
 	_check(map != null and map.is_visible_in_tree(), "The map shows")
 	_check(map.call("counts") == [4, 6], "Reached and unreached cells: %s" % [map.call("counts")])
+	_check(card.call("missed_key_shown"), "Some floor wasn't reached: the key says so")
+	# The map reads as the level: its rooms by name, the start and the place to reach.
+	var names: PackedStringArray = map.call("label_words")
+	_check(names == PackedStringArray(["Lever Room", "Vault", "Start", "Vault"]), "%s" % names)
 	# The last runs' heat on the same map: deaths and stuck on, time spent one click away.
 	var layers: PackedStringArray = card.call("layer_words")
-	_check(layers == PackedStringArray(["Deaths 2", "Stuck 1", "Time spent"]), "%s" % layers)
+	_check(layers == PackedStringArray(["Deaths 2", "Stuck 1", "Time spent 0:15"]), "%s" % layers)
 	_check(map.call("layer_on", "deaths") and map.call("layer_on", "stuck"), "Deaths, stuck show")
 	_check(not map.call("layer_on", "time"), "Time spent waits for its toggle")
+	_check(card.call("time_text") == "", "Where the time went shows with its layer")
 	card.call("show_layer", "time", true)
 	_check(map.call("layer_on", "time") and map.call("layer_cells", "time") == 2, "Time shows")
+	_check(card.call("time_text") == "Most time: Lever Room 0:15", card.call("time_text"))
 	card.call("show_layer", "deaths", false)
 	_check(not map.call("layer_on", "deaths"), "A layer turns off")
 	var rows: Array[Control] = card.call("item_rows")
 	_check(rows.size() == 4, "The first four findings show")
+	# A low finding says what was found on its one line, not only its kind.
+	var low: Button = rows[1].find_children("", "Button", true, false)[0]
+	_check(low.text == 'Text doesn\'t fit: "Settings" is cut off · 0:06', low.text)
 	var more := _button(card, "Show all 6")
 	_check(more != null, "The rest are one click away")
 	more.pressed.emit()

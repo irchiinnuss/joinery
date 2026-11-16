@@ -381,12 +381,12 @@ func _states(light: bool, width: int) -> void:
 	settings.set("_pending_policy", {"keep": 1, "max_mb": 1024})
 	settings.call("_policy_checked", {"pruned": 3, "freed_bytes": 120_000_000})
 	await _frames()
-	(settings as ScrollContainer).scroll_vertical = 100000
+	(settings as ScrollContainer).scroll_vertical = 0
 	await _shot("settings-policy", light, width, chat)
 	(settings.get("_policy_picker") as OptionButton).select(3)
 	settings.call("_choose_policy", 3)
 	await _frames()
-	(settings as ScrollContainer).scroll_vertical = 100000
+	(settings as ScrollContainer).scroll_vertical = 0
 	await _shot("settings-policy-custom", light, width, chat)
 	settings.call("_close_policy")
 	# Under Advanced: the Reviewer agent and Complex models in Blender.
@@ -519,38 +519,16 @@ func _playtest(light: bool, width: int, chat: Control) -> void:
 	event["elapsed"] = 42.0
 	tasks.call("on_playtest", event)
 	await _shot("playtest", light, width, chat)
-	var items: Array = [
-		{
-			"severity": "high",
-			"title": "Softlock",
-			"detail": "The player couldn't move for 15 s while the bot held movement keys.",
-			"where": "res://game/player/player.gd:88",
-			"t": 65.0,
-			"seed": 4821,
-			"repro": "Run `joinery playtest --project . --seed 4821 --seconds 120`.",
-			"shot": _thumbnail(),
-		},
-		{
-			"severity": "medium",
-			"title": "Frame hitches",
-			"detail": "3 frames took far longer than usual (worst 310 ms; typical 2.10 ms).",
-			"t": 4.0,
-			"seed": 4821,
-		},
-		{
-			"severity": "note",
-			"title": "Balance",
-			"detail": "The bot died or respawned 9 times in 2:00 without finishing.",
-			"seed": 4821,
-		},
-	]
+	var items: Array = fixture.call("items", _thumbnail())
 	event["state"] = "done"
 	event["report"] = {
-		"counts": {"critical": 0, "high": 1, "medium": 1, "low": 0, "note": 1},
+		"counts": {"critical": 0, "high": 1, "medium": 1, "low": 1, "note": 1},
 		"items": items,
-		"seed": 4821,
+		# As JSON brings it: a float, shown as a whole number.
+		"seed": 662040.0,
 		"played_seconds": 120.0,
 		"coverage": fixture.call("coverage"),
+		"reach": fixture.call("reach"),
 	}
 	tasks.call("on_playtest", event)
 	var card: Control = tasks.get("playtest")

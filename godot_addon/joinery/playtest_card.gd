@@ -4,11 +4,14 @@ extends PanelContainer
 ## bot plays it reads "Playing… 0:42" with the run's length and its own Stop; once the run
 ## is over it shows what was found at a glance: one count per severity, then each finding
 ## as a row that opens to its detail, the place in the code, the seed and a screenshot,
-## with "Fix this" to put a ready request in the composer. Under the counts, how much of the
-## level the bot reached ("Explored 34% of the level") over a top-down map with the places
-## nobody reached marked (playtest_map.gd). Under the map, one toggle per heat layer from the
-## last few playtests (joinery/playtest_heat.py): Deaths, Stuck and Time spent paint on the same
-## map. The playtester's written report goes to the transcript (sidebar_tasks.gd), not here.
+## with "Fix this" to put a ready request in the composer. A medium, low or note finding
+## names what it is on its one line ("Warning: 20 ObjectDB instances were leaked at exit"),
+## not only its kind. Under the counts, how much of the level the bot reached ("Explored 34%
+## of the level") over a top-down map of the level: its rooms by name, the start, the places
+## the run was asked to reach and the places nobody reached (playtest_map.gd). Under the map,
+## one toggle per heat layer from the last few playtests (joinery/playtest_heat.py): Deaths,
+## Stuck and Time spent paint on the same map; time spent says how long, and where most of it
+## went. The playtester's written report goes to the transcript (sidebar_tasks.gd), not here.
 
 signal stop_pressed
 signal close_pressed
@@ -23,6 +26,11 @@ const STYLE := preload("sidebar_style.gd")
 const INDICATOR := preload("activity_indicator.gd")
 const MAP := preload("playtest_map.gd")
 const SEVERITIES: Array[String] = ["critical", "high", "medium", "low", "note"]
+## Severities whose row leads with the finding's kind ("Softlock · 0:05"); the rest lead with
+## what was found, on one line.
+const HEADLINED: Array[String] = ["critical", "high"]
+## Areas named in the time-spent line.
+const TIME_AREAS := 3
 ## Severity -> status dot state: bugs in the danger colour, the rest quiet.
 const DOTS := {
 	"critical": "attention",
@@ -69,8 +77,12 @@ var _map: Control
 var _layers: HFlowContainer
 var _layer_buttons: Dictionary = {}
 var _runs_text: Label
-## The legend's "not reached" square: it follows the map's unreached tone.
+## The legend's "not reached" square and words: they follow the map's unreached tone, and
+## show only when some floor was not reached.
 var _missed_key: ColorRect
+var _missed_words: Label
+## Where the time went, by area: shown while the time layer is on.
+var _time_text: Label
 var _seconds := 0.0
 
 
@@ -159,9 +171,9 @@ func _init(identifier := "") -> void:
 	_missed_key = _swatch("danger", MAP.MISSED_ALPHA)
 	_missed_key.theme_changed.connect(_sync_key)
 	legend.add_child(_missed_key)
-	var key := UI.label("not reached", "JoineryCaption")
-	key.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	legend.add_child(key)
+	_missed_words = UI.label("not reached", "JoineryCaption")
+	_missed_words.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	legend.add_child(_missed_words)
 	_map = MAP.new()
 	_coverage.add_child(_map)
 	# The layer toggles and "last N playtests" flow onto a second line in a narrow sidebar.
@@ -183,17 +195,26 @@ func _init(identifier := "") -> void:
 	_runs_text.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_runs_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_runs_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	# Whole, on a line of its own when the toggles leave no room.
+	_runs_text.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
 	_layers.add_child(_runs_text)
+	_time_text = UI.label("", "JoineryCaption", true)
+	_time_text.accessibility_name = "Where the time went"
+	_time_text.hide()
+	_coverage.add_child(_time_text)
 	_items = VBoxContainer.new()
 	_items.theme_type_variation = "JoineryTight"
 	_items.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# What was found reads first; the map of where the bot went follows it.
 	_body.add_child(_items)
+	_body.move_child(_items, 0)
 	_more = UI.quiet_link("")
 	UI.bind_height(_more, "xs")
 	STYLE.hug_left(_more)
 	_more.pressed.connect(_show_all)
 	_more.hide()
-	column.add_child(_more)
+	_body.add_child(_more)
+	_body.move_child(_more, 1)
 
 
 ## The host's playtest event: {state, elapsed, seconds, report, message}.
@@ -220,7 +241,7 @@ func apply(event: Dictionary) -> void:
 				(
 					"Nothing went wrong in %s of play." % _clock(_played())
 					if found == 0
-					else "Played %s, seed %s." % [_clock(_played()), str(report.get("seed", ""))]
+					else "Played %s, seed %s." % [_clock(_played()), seed_text(report.get("seed"))]
 				)
 			)
 			UI_MOTION.pulse(self)
@@ -262,7 +283,7 @@ func coverage_text() -> String:
 	return _coverage_text.text if _coverage.visible else ""
 
 
-## The heat toggles as shown ("Deaths 4", "Stuck 1", "Time spent"); [] without a heatmap.
+## The heat toggles as shown ("Deaths 4", "Stuck 1", "Time spent 2:40"); [] without a heatmap.
 func layer_words() -> PackedStringArray:
 	var words := PackedStringArray()
 	if not _layers.visible:
@@ -289,6 +310,37 @@ func count_words() -> PackedStringArray:
 		if label != null:
 			words.append(label.text)
 	return words
+
+
+## Whether the "not reached" key shows (some floor was not reached).
+func missed_key_shown() -> bool:
+	return _missed_words.visible
+
+
+## The time-spent line as shown ("" when hidden): "Most time: Ore Yard 1:42, Gatehouse 0:31".
+func time_text() -> String:
+	return _time_text.text if _time_text.visible else ""
+
+
+## A seed as the run used it: a whole number ("662040"), whatever JSON made of it.
+static func seed_text(value: Variant) -> String:
+	if value is float or value is int:
+		return str(int(value))
+	return str(value) if value != null else ""
+
+
+## What a finding's row says on its one line: "Softlock · 0:05" for a serious one; for the
+## rest the kind and what was found ("Warning: 20 ObjectDB instances were leaked at exit").
+static func row_text(item: Dictionary) -> String:
+	var title := str(item.get("title", "Finding"))
+	var detail := str(item.get("detail", "")).strip_edges()
+	var text := title
+	if not str(item.get("severity", "low")) in HEADLINED and not detail.is_empty():
+		var first := detail.split("\n", false)[0] if detail.contains("\n") else detail
+		text = "%s: %s" % [title, first.trim_suffix(".")]
+	if item.get("t") != null:
+		text += " · " + _clock(float(item["t"]))
+	return text
 
 
 ## The request "Fix this" pre-fills for [param item].
@@ -357,9 +409,46 @@ func _show_coverage(coverage: Dictionary) -> void:
 		% [int(coverage.get("visited", 0)), int(coverage.get("navigable", 0))]
 	)
 	_map.call("set_coverage", coverage)
+	_map.call("set_marks", _reach_marks(coverage))
+	var missed := int((_map.call("counts") as Array)[1]) > 0
+	_missed_key.visible = missed
+	_missed_words.visible = missed
 	_show_heat(report.get("heatmap", {}) as Dictionary)
 	_coverage.show()
 	UI_MOTION.fade_in(_coverage)
+
+
+## The places the run was asked to reach, on the map's grid: [{name, at, reached}].
+func _reach_marks(coverage: Dictionary) -> Array:
+	var marks: Array = []
+	var origin: Variant = coverage.get("origin")
+	var cell := float(coverage.get("cell", 0.0))
+	if not origin is Array or (origin as Array).size() != 2 or cell <= 0.0:
+		return marks
+	for place: Variant in report.get("reach", []):
+		if not place is Dictionary or not (place as Dictionary).get("at") is Array:
+			continue
+		var at: Array = (place as Dictionary)["at"]
+		if at.size() != 2:
+			continue
+		var name := str((place as Dictionary).get("node", ""))
+		if name.is_empty():
+			name = str((place as Dictionary).get("target", ""))
+		(
+			marks
+			. append(
+				{
+					"name": name,
+					"at":
+					[
+						(float(at[0]) - float(origin[0])) / cell,
+						(float(at[1]) - float(origin[1])) / cell,
+					],
+					"reached": bool((place as Dictionary).get("reached", false)),
+				}
+			)
+		)
+	return marks
 
 
 ## The recent runs' heat on the map: a toggle per layer that has anything to show.
@@ -371,9 +460,9 @@ func _show_heat(heat: Dictionary) -> void:
 		var cells := int(_map.call("layer_cells", layer))
 		toggle.visible = cells > 0
 		any = any or toggle.visible
-		if layer != "time":
-			var total := int(_map.call("layer_total", layer))
-			toggle.text = "%s %d" % [str(LAYERS[layer][0]), total]
+		var total := float(_map.call("layer_total", layer))
+		var amount := _clock(total) if layer == "time" else str(int(total))
+		toggle.text = "%s %s" % [str(LAYERS[layer][0]), amount]
 		toggle.set_pressed_no_signal(cells > 0 and layer != "time")
 		_map.call("set_layer", layer, toggle.button_pressed)
 	var runs := int(heat.get("runs", 0))
@@ -382,7 +471,18 @@ func _show_heat(heat: Dictionary) -> void:
 	)
 	_runs_text.tooltip_text = "Deaths, stuck points and time spent, added up over these runs"
 	_layers.visible = any
+	_sync_time()
 	_sync_key()
+
+
+## Where the time went while the time layer is on: the areas it was spent in, most first.
+func _sync_time() -> void:
+	var on := bool(_map.call("layer_on", "time")) and int(_map.call("layer_cells", "time")) > 0
+	var parts := PackedStringArray()
+	for entry: Array in (_map.call("time_by_area") as Array).slice(0, TIME_AREAS):
+		parts.append("%s %s" % [MAP.spaced(str(entry[0])), _clock(float(entry[1]))])
+	_time_text.text = "Most time: " + ", ".join(parts) if not parts.is_empty() else ""
+	_time_text.visible = on and not parts.is_empty()
 
 
 ## The "not reached" square in the tone the map draws it in now.
@@ -409,6 +509,7 @@ func _layer_toggle(layer: String) -> Button:
 	toggle.toggled.connect(
 		func(on: bool) -> void:
 			_map.call("set_layer", layer, on)
+			_sync_time()
 			_sync_key()
 	)
 	toggle.hide()
@@ -448,9 +549,7 @@ func _item_row(item: Dictionary) -> VBoxContainer:
 	row.add_child(head)
 	# Glyph and colour, so severity reads without colour too.
 	head.add_child(BLOCKS.severity_glyph(str(item.get("severity", "low"))))
-	var title := str(item.get("title", "Finding"))
-	if item.get("t") != null:
-		title += " · " + _clock(float(item["t"]))
+	var title := row_text(item)
 	var toggle := UI.disclosure(title)
 	toggle.accessibility_name = "%s, %s" % [title, str(item.get("severity", ""))]
 	toggle.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -465,7 +564,7 @@ func _item_row(item: Dictionary) -> VBoxContainer:
 	var meta := PackedStringArray()
 	if not str(item.get("where", "")).is_empty():
 		meta.append(str(item["where"]))
-	meta.append("seed %s" % str(item.get("seed", "")))
+	meta.append("seed %s" % seed_text(item.get("seed", report.get("seed"))))
 	body.add_child(UI.label(" · ".join(meta), "JoineryNumeric", true))
 	var picture := _thumbnail(str(item.get("shot", "")))
 	if picture != null:

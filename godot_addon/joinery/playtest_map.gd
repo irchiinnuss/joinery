@@ -1,9 +1,12 @@
 @tool
 extends Control
 ## The playtest's coverage map, top-down: the level's floor as the bot mapped it, the parts
-## the player stood on in a quiet tone and the parts nobody reached in the danger colour, with
-## a small ring where the run started. Drawn from the report's grid in the theme's colours, so
-## it reads in light and dark; the same map is saved as a picture for agents (coverage.png).
+## the player stood on in a quiet tone and the parts nobody reached in the danger colour.
+## It reads as the level: the floor fills the card's width (empty margins cropped), each named
+## area (a blockout's rooms) carries its name, the run's start is a ring marked "Start" and
+## each place the run was asked to reach is a diamond with its name, filled once reached.
+## Drawn from the report's grid in the theme's colours, so it reads in light and dark; the
+## same map is saved as a picture for agents (coverage.png).
 ##
 ## Heat layers from the last few playtests (joinery/playtest_heat.py) paint on the same map:
 ## time spent as an accent wash (stronger where the bot stood longer), deaths as filled dots
@@ -12,9 +15,9 @@ extends Control
 ## reads first.
 
 const UI_THEME := preload("ui_theme.gd")
-## Widest the map draws, in theme units, and tallest.
-const WIDTH_UNITS := 240.0
-const HEIGHT_UNITS := 96.0
+## Width the map assumes before it is laid out, and the tallest it draws, in theme units.
+const WIDTH_UNITS := 320.0
+const HEIGHT_UNITS := 180.0
 ## How strong the unreached cells are: marked, without drowning the map in alarm.
 const MISSED_ALPHA := 0.72
 ## The heat layers, in drawing order.
@@ -23,11 +26,19 @@ const LAYERS: Array[String] = ["time", "deaths", "stuck"]
 const HEAT_MISSED_ALPHA := 0.22
 ## Time spent: the faintest and strongest wash.
 const TIME_ALPHA := Vector2(0.18, 0.85)
+## Cells of floor kept round the cropped map.
+const MARGIN := 1
 
 var _grid: PackedStringArray = PackedStringArray()
 var _cols := 0
 var _rows := 0
 var _start := Vector2i(-1, -1)
+## The part of the grid drawn (cells): the floor and the marks, a cell round them.
+var _view := Rect2i()
+## Named areas: {name, rect: Rect2 in cells}.
+var _areas: Array[Dictionary] = []
+## Places to reach: {name, at: Vector2 in cells, reached}.
+var _marks: Array[Dictionary] = []
 ## Layer -> {Vector2i: value}.
 var _heat: Dictionary = {}
 var _on: Dictionary = {}
@@ -40,7 +51,7 @@ func _init() -> void:
 	accessibility_name = "Map of the level: reached and not reached"
 
 
-## Show [param coverage] (the report's "coverage": {grid, cols, rows, start, percent}).
+## Show [param coverage] (the report's "coverage": {grid, cols, rows, start, percent, areas}).
 func set_coverage(coverage: Dictionary) -> void:
 	_grid = PackedStringArray()
 	for line: Variant in coverage.get("grid", []):
@@ -52,8 +63,81 @@ func set_coverage(coverage: Dictionary) -> void:
 	var start: Variant = coverage.get("start", [-1, -1])
 	if start is Array and (start as Array).size() == 2:
 		_start = Vector2i(int(start[0]), int(start[1]))
+	_areas.clear()
+	for area: Variant in coverage.get("areas", []):
+		var rect: Variant = (area as Dictionary).get("rect") if area is Dictionary else null
+		if rect is Array and (rect as Array).size() == 4:
+			var box := Rect2(float(rect[0]), float(rect[1]), float(rect[2]), float(rect[3]))
+			_areas.append({"name": str((area as Dictionary).get("name", "")), "rect": box})
+	_crop()
 	_fit()
 	queue_redraw()
+
+
+## Places the run was asked to reach: [{name, at: [col, row] (cells, fractions kept), reached}].
+func set_marks(marks: Array) -> void:
+	_marks.clear()
+	for mark: Variant in marks:
+		if not mark is Dictionary:
+			continue
+		var at: Variant = (mark as Dictionary).get("at")
+		if at is Array and (at as Array).size() == 2:
+			(
+				_marks
+				. append(
+					{
+						"name": str((mark as Dictionary).get("name", "")),
+						"at": Vector2(float(at[0]), float(at[1])),
+						"reached": bool((mark as Dictionary).get("reached", false)),
+					}
+				)
+			)
+	_crop()
+	_fit()
+	queue_redraw()
+
+
+## The names on the map, as drawn: areas, then "Start", then the places to reach.
+func label_words() -> PackedStringArray:
+	var words := PackedStringArray()
+	for area: Dictionary in _areas:
+		words.append(spaced(str(area["name"])))
+	if _start_shown():
+		words.append("Start")
+	for mark: Dictionary in _marks:
+		words.append(spaced(str(mark["name"])))
+	return words
+
+
+## Seconds spent in each named area by the time layer, most first: [[name, seconds]].
+func time_by_area() -> Array:
+	var spent := {}
+	var cells: Dictionary = _heat.get("time", {})
+	for at: Vector2i in cells:
+		var name := _area_at(Vector2(at) + Vector2(0.5, 0.5))
+		if not name.is_empty():
+			spent[name] = float(spent.get(name, 0.0)) + float(cells[at])
+	var order: Array = []
+	for name: String in spent:
+		order.append([name, spent[name]])
+	order.sort_custom(func(a: Array, b: Array) -> bool: return float(a[1]) > float(b[1]))
+	return order
+
+
+## "OreYard" -> "Ore Yard", "ore_yard" -> "ore yard": a node name as words.
+static func spaced(node_name: String) -> String:
+	var words := ""
+	for index: int in node_name.length():
+		var letter := node_name[index]
+		if letter == "_" or letter == "-":
+			words += " "
+			continue
+		var upper := letter != letter.to_lower()
+		if index > 0 and upper and node_name[index - 1] == node_name[index - 1].to_lower():
+			if node_name[index - 1] not in ["_", "-", " "]:
+				words += " "
+		words += letter
+	return words
 
 
 ## Heat over recent runs ([code]joinery playtest --heatmap --json[/code]): each layer a list of
@@ -113,16 +197,60 @@ func _notification(what: int) -> void:
 		_fit()
 		queue_redraw()
 	elif what == NOTIFICATION_RESIZED:
+		_fit()
 		queue_redraw()
 
 
+## The drawn part of the grid: every floor cell, the start and the marks, a cell round them.
+func _crop() -> void:
+	var low := Vector2i(_cols, _rows)
+	var high := Vector2i(-1, -1)
+	for row: int in _rows:
+		var line := _grid[row]
+		for col: int in line.length():
+			if line[col] != " ":
+				low = Vector2i(mini(low.x, col), mini(low.y, row))
+				high = Vector2i(maxi(high.x, col), maxi(high.y, row))
+	var extra: Array[Vector2i] = []
+	if _start_shown():
+		extra.append(_start)
+	for mark: Dictionary in _marks:
+		extra.append(Vector2i((mark["at"] as Vector2).floor()))
+	for at: Vector2i in extra:
+		if at.x >= 0 and at.y >= 0 and at.x < _cols and at.y < _rows:
+			low = Vector2i(mini(low.x, at.x), mini(low.y, at.y))
+			high = Vector2i(maxi(high.x, at.x), maxi(high.y, at.y))
+	if high.x < 0:
+		_view = Rect2i(0, 0, _cols, _rows)
+		return
+	low = Vector2i(maxi(low.x - MARGIN, 0), maxi(low.y - MARGIN, 0))
+	high = Vector2i(mini(high.x + MARGIN, _cols - 1), mini(high.y + MARGIN, _rows - 1))
+	_view = Rect2i(low, high - low + Vector2i.ONE)
+
+
+func _start_shown() -> bool:
+	return _start.x >= 0 and _start.y >= 0 and _start.x < _cols and _start.y < _rows
+
+
+## As tall as the cropped floor at the width the card gives it, up to HEIGHT_UNITS.
 func _fit() -> void:
-	if _cols == 0 or _rows == 0 or not is_inside_tree():
+	if _view.size.x <= 0 or _view.size.y <= 0 or not is_inside_tree():
 		custom_minimum_size = Vector2.ZERO
 		return
 	var unit := UI_THEME.unit(self)
-	var side := minf(WIDTH_UNITS * unit / _cols, HEIGHT_UNITS * unit / _rows)
-	custom_minimum_size = Vector2(0, ceilf(side * _rows))
+	var width := size.x if size.x > 1.0 else WIDTH_UNITS * unit
+	var side := minf(width / _view.size.x, HEIGHT_UNITS * unit / _view.size.y)
+	var height := ceilf(side * _view.size.y)
+	if not is_equal_approx(custom_minimum_size.y, height):
+		custom_minimum_size = Vector2(0, height)
+
+
+## Pixels a cell takes now, and where the cropped grid's corner is drawn (centred across).
+func _layout() -> Array:
+	var unit := UI_THEME.unit(self)
+	var side := minf(size.x / _view.size.x, minf(size.y, HEIGHT_UNITS * unit) / _view.size.y)
+	var offset := Vector2(maxf((size.x - side * _view.size.x) / 2.0, 0.0), 0.0)
+	return [side, offset]
 
 
 ## Whether a heat layer with anything on it shows.
@@ -134,12 +262,12 @@ func heat_shown() -> bool:
 
 
 func _draw() -> void:
-	if _cols == 0 or _rows == 0:
+	if _view.size.x <= 0 or _view.size.y <= 0:
 		return
 	var unit := UI_THEME.unit(self)
-	var side := minf(
-		minf(size.x, WIDTH_UNITS * unit) / _cols, minf(size.y, HEIGHT_UNITS * unit) / _rows
-	)
+	var laid := _layout()
+	var side := float(laid[0])
+	var offset: Vector2 = laid[1]
 	if side <= 0.0:
 		return
 	var heat := heat_shown()
@@ -152,35 +280,121 @@ func _draw() -> void:
 		missed = UI_THEME.color(self, "text_faint")
 		missed.a = HEAT_MISSED_ALPHA
 	var gap := 1.0 if side >= 4.0 else 0.0
-	for row: int in _rows:
+	for row: int in range(_view.position.y, _view.end.y):
 		var line := _grid[row]
-		for col: int in line.length():
+		for col: int in range(_view.position.x, mini(_view.end.x, line.length())):
 			var mark := line[col]
 			if mark == " ":
 				continue
-			var box := Rect2(col * side, row * side, side - gap, side - gap)
+			var box := Rect2(_point(Vector2(col, row), side, offset), Vector2.ONE * (side - gap))
 			draw_rect(box, missed if mark == "." else reached)
 	if layer_on("time"):
-		_draw_time(side, gap)
+		_draw_time(side, offset, gap)
 	if layer_on("deaths"):
-		_draw_marks("deaths", side, unit)
+		_draw_marks("deaths", side, offset, unit)
 	if layer_on("stuck"):
-		_draw_marks("stuck", side, unit)
-	if _start.x >= 0 and _start.y >= 0 and _start.x < _cols and _start.y < _rows:
-		var centre := (Vector2(_start) + Vector2(0.5, 0.5)) * side
+		_draw_marks("stuck", side, offset, unit)
+	var taken: Array[Rect2] = []
+	if _start_shown():
+		var centre := _point(Vector2(_start) + Vector2(0.5, 0.5), side, offset)
+		var radius := maxf(side * 0.7, 4.0 * unit)
+		draw_circle(centre, radius + maxf(1.0, unit), UI_THEME.color(self, "surface"), true)
 		draw_arc(
-			centre,
-			maxf(side * 0.45, 3.0),
-			0.0,
-			TAU,
-			24,
-			UI_THEME.color(self, "text"),
-			maxf(1.0, unit * 1.5),
-			true
+			centre, radius, 0.0, TAU, 24, UI_THEME.color(self, "text"), maxf(1.5, unit * 2.0), true
 		)
+		_label("Start", centre + Vector2(0, radius + unit), side, taken, "text", true)
+		taken.append(Rect2(centre - Vector2.ONE * radius, Vector2.ONE * radius * 2.0))
+	for mark: Dictionary in _marks:
+		var centre := _point(mark["at"] as Vector2, side, offset)
+		var radius := maxf(side * 0.8, 5.0 * unit)
+		_diamond(centre, radius, bool(mark["reached"]), unit)
+		_label(
+			spaced(str(mark["name"])), centre + Vector2(0, radius + unit), side, taken, "text", true
+		)
+		taken.append(Rect2(centre - Vector2.ONE * radius, Vector2.ONE * radius * 2.0))
+	# Area names last, biggest first, where they don't cover a mark or another name.
+	var order := _areas.duplicate()
+	order.sort_custom(
+		func(a: Dictionary, b: Dictionary) -> bool:
+			return (a["rect"] as Rect2).get_area() > (b["rect"] as Rect2).get_area()
+	)
+	for area: Dictionary in order:
+		var rect: Rect2 = area["rect"]
+		var centre := _point(rect.get_center(), side, offset)
+		_label(spaced(str(area["name"])), centre, side, taken, "text_muted", false)
 
 
-func _draw_time(side: float, gap: float) -> void:
+func _point(cell: Vector2, side: float, offset: Vector2) -> Vector2:
+	return offset + (cell - Vector2(_view.position)) * side
+
+
+## A name on the map with a halo in the card's colour, so it reads over the floor and the
+## heat. [param below]: [param at] is the top centre (under a mark), else the centre. Skipped
+## when it would cover something already drawn or run off the map.
+func _label(
+	words: String, at: Vector2, side: float, taken: Array[Rect2], role: String, below: bool
+) -> void:
+	if words.is_empty():
+		return
+	var font := UI_THEME.medium_font(self) if below else UI_THEME.text_font(self)
+	var font_size := UI_THEME.font_size(self, "caption")
+	var extent := font.get_string_size(words, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size)
+	var corner := at - Vector2(extent.x / 2.0, 0.0 if below else extent.y / 2.0)
+	var box := Rect2(corner, extent)
+	if box.position.x < 0.0 or box.end.x > size.x or box.position.y < 0.0 or box.end.y > size.y:
+		if not below:
+			return
+		box.position.x = clampf(box.position.x, 0.0, maxf(size.x - extent.x, 0.0))
+		box.position.y = clampf(box.position.y, 0.0, maxf(size.y - extent.y, 0.0))
+	for other: Rect2 in taken:
+		if other.intersects(box.grow(maxf(side * 0.25, 1.0))):
+			return
+	taken.append(box)
+	var baseline := box.position + Vector2(0.0, font.get_ascent(font_size))
+	var halo := UI_THEME.color(self, "surface")
+	halo.a = 0.85
+	var outline := maxi(2, roundi(UI_THEME.unit(self) * 4.0))
+	draw_string_outline(
+		font, baseline, words, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, outline, halo
+	)
+	draw_string(
+		font, baseline, words, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, UI_THEME.color(self, role)
+	)
+
+
+## A place to reach: a diamond in the accent colour, filled once the run got there.
+func _diamond(centre: Vector2, radius: float, filled: bool, unit: float) -> void:
+	var points := PackedVector2Array(
+		[
+			centre + Vector2(0, -radius),
+			centre + Vector2(radius, 0),
+			centre + Vector2(0, radius),
+			centre + Vector2(-radius, 0),
+		]
+	)
+	var ink := UI_THEME.color(self, "accent")
+	var halo := UI_THEME.color(self, "surface")
+	var width := maxf(1.5, unit * 2.0)
+	var ring := points.duplicate()
+	ring.append(points[0])
+	draw_polyline(ring, halo, width + maxf(2.0, unit * 2.0), true)
+	draw_colored_polygon(points, ink if filled else halo)
+	draw_polyline(ring, ink, width, true)
+
+
+## The smallest named area holding [param cell] (cells, fractions kept), or "".
+func _area_at(cell: Vector2) -> String:
+	var best := ""
+	var smallest := INF
+	for area: Dictionary in _areas:
+		var rect: Rect2 = area["rect"]
+		if rect.has_point(cell) and rect.get_area() < smallest:
+			best = str(area["name"])
+			smallest = rect.get_area()
+	return best
+
+
+func _draw_time(side: float, offset: Vector2, gap: float) -> void:
 	var cells: Dictionary = _heat.get("time", {})
 	var most := 0.0
 	for value: Variant in cells.values():
@@ -189,14 +403,16 @@ func _draw_time(side: float, gap: float) -> void:
 		return
 	var ink := UI_THEME.color(self, "accent")
 	for at: Vector2i in cells:
+		if not _view.has_point(at):
+			continue
 		# Square root: a few long waits don't wash out everywhere else.
 		var share := sqrt(float(cells[at]) / most)
 		ink.a = lerpf(TIME_ALPHA.x, TIME_ALPHA.y, share)
-		draw_rect(Rect2(at.x * side, at.y * side, side - gap, side - gap), ink)
+		draw_rect(Rect2(_point(Vector2(at), side, offset), Vector2.ONE * (side - gap)), ink)
 
 
 ## Deaths: filled dots. Stuck: open rings. Bigger where it happened more often.
-func _draw_marks(layer: String, side: float, unit: float) -> void:
+func _draw_marks(layer: String, side: float, offset: Vector2, unit: float) -> void:
 	var cells: Dictionary = _heat.get(layer, {})
 	var most := 1.0
 	for value: Variant in cells.values():
@@ -206,7 +422,7 @@ func _draw_marks(layer: String, side: float, unit: float) -> void:
 	var ink := UI_THEME.color(self, "danger" if layer == "deaths" else "text")
 	var halo := UI_THEME.color(self, "surface")
 	for at: Vector2i in cells:
-		var centre := (Vector2(at) + Vector2(0.5, 0.5)) * side
+		var centre := _point(Vector2(at) + Vector2(0.5, 0.5), side, offset)
 		var radius := lerpf(smallest, largest, sqrt(float(cells[at]) / most))
 		if layer == "deaths":
 			# A thin halo keeps a dot apart from the wash under it.
