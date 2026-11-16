@@ -21,6 +21,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from joinery import short_results
+
 #: Where the full results are kept, under the project.
 RESULTS = ".joinery/results"
 #: Results kept; the oldest go first.
@@ -168,7 +170,11 @@ def store(project: Path, tool: str, value: Any) -> str:
 def compact(project: Path, tool: str, value: Any, budget: int = BUDGET) -> Any:
     """The result an agent gets: ``value`` itself when small, else a summary with a
     ``details`` entry naming its reference and what was left out."""
-    short, cuts = summarise(value, budget)
+    # The short form of a familiar shape first (joinery.short_results), then the
+    # even cut down to the budget.
+    trimmed, trims = short_results.shorten(value)
+    short, cuts = summarise(trimmed, budget)
+    cuts = trims + cuts
     if not cuts:
         return value
     ref = store(project, tool, value)
