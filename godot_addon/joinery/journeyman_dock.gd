@@ -62,6 +62,7 @@ const OTHER_HINT := "Waits for the other chat…"
 const PERSONA := "Journeyman"
 const DISCARDED := "Discarded"
 const BRIEF := preload("res://addons/joinery/sidebar_brief.gd")
+const FILE_OPEN := preload("res://addons/joinery/sidebar_file_open.gd")
 ## Minimum dock width in font sizes: in Joinery's layout, the whole visible sidebar.
 const MIN_EM := 26
 ## The same below the Inspector (classic layout): a wider shared column crowds a laptop screen.
@@ -417,6 +418,7 @@ func _start_request(entry: String, targets: Array) -> void:
 	card.connect(
 		"gate_describe_requested", func() -> void: fill_composer("Here's how my game should look: ")
 	)
+	card.connect("file_opened", func(path: String) -> void: FILE_OPEN.open(path, self))
 	_send_request(card)
 
 

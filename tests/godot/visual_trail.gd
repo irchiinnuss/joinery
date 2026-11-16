@@ -6,6 +6,7 @@ extends RefCounted
 ## grouped by folder).
 ## [param suite] is visual_sidebar_test.gd, whose `_build`, `_shot` and `_thumbnail` these use;
 ## the screens are taken on a sidebar of their own, with [param beside]'s hidden meanwhile.
+## A line naming a project file shows its name as a link ("trail-link", and in the open record).
 
 
 static func shots(suite: Variant, light: bool, width: int, beside: Control) -> void:
@@ -21,14 +22,18 @@ static func shots(suite: Variant, light: bool, width: int, beside: Control) -> v
 	var card: Control = chat.get("_transcript").call("current_card")
 	chat.set_chat_busy(true)
 	var render: String = suite._thumbnail()
+	# A project file the trail names: its name is a link.
+	var door := FileAccess.open("res://door.gd", FileAccess.WRITE)
+	door.store_string("extends Node\n")
+	door.close()
 	for event: Dictionary in [
 		{
 			"text": "The door's size lives in door.blend, so I'll widen it in Blender first.",
 			"note": "thought",
 			"state": "done",
 		},
-		{"id": "a", "text": "Reading level.gd"},
-		{"id": "a", "text": "Reading level.gd", "state": "done"},
+		{"id": "a", "text": "Reading door.gd", "path": "res://door.gd"},
+		{"id": "a", "text": "Reading door.gd", "state": "done"},
 		{"id": "b", "text": "Searching for DoorFrame"},
 		{"id": "b", "text": "Searching for DoorFrame", "state": "done"},
 		{"id": "c", "text": "Modelling the door in Blender: transform parts, 1.2 scale x"},
@@ -39,6 +44,7 @@ static func shots(suite: Variant, light: bool, width: int, beside: Control) -> v
 			"file": "level.gd",
 			"added": 12,
 			"removed": 3,
+			"path": "res://game/level.gd",
 		},
 		{"id": "d", "text": "Editing level.gd", "state": "done"},
 		{"id": "e", "text": "Handing the change over"},
@@ -50,6 +56,10 @@ static func shots(suite: Variant, light: bool, width: int, beside: Control) -> v
 	]:
 		event["kind"] = "trail"
 		chat.call("add_trail", event)
+		if event.get("id") == "d" and not event.has("state"):
+			# The file a line names is a link, on the live line too.
+			card.call("set_elapsed", 19)
+			await suite._shot("trail-link", light, width, chat)
 	card.call("set_elapsed", 23)
 	await suite._shot("trail", light, width, chat)
 	var run := {
@@ -94,6 +104,7 @@ static func shots(suite: Variant, light: bool, width: int, beside: Control) -> v
 	host.queue_free()
 	await suite._frames(2)
 	behind.show()
+	DirAccess.remove_absolute(ProjectSettings.globalize_path("res://door.gd"))
 
 
 ## A sound made in SuperCollider waits for review: the card's calm note names it with its tool,

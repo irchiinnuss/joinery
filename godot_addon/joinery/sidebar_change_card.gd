@@ -60,6 +60,8 @@ signal review_placing(row: Control)
 signal gate_review_requested
 ## "Describe my own" on the art gate.
 signal gate_describe_requested
+## A file named on the work trail was pressed ([param path] is res://).
+signal file_opened(path: String)
 
 const UI_THEME := preload("ui_theme.gd")
 const UI_MOTION := preload("ui_motion.gd")
@@ -254,6 +256,7 @@ func _init(text := "", context: Array = []) -> void:
 	_failure.add_child(_retry)
 	_failure.hide()
 	_steps = TRAIL.new()
+	_steps.file_opened.connect(func(path: String) -> void: file_opened.emit(path))
 	_steps.hide()
 	_progress.add_child(_steps)
 	_done_list = VBoxContainer.new()

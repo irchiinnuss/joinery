@@ -60,6 +60,7 @@ SIDEBAR_STATES = (
     "commands",
     "sending",
     "working",
+    "trail-link",
     "trail",
     "trail-tests",
     "trail-done",

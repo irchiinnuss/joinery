@@ -679,6 +679,10 @@ static func _describe(control: Control) -> String:
 static func _target(control: Control) -> String:
 	if control.mouse_filter == Control.MOUSE_FILTER_IGNORE:
 		return ""
+	# A link inside a line of words keeps the line's height (WCAG 2.5.8's inline exception):
+	# a file named on the work trail (sidebar_trail_link.gd).
+	if control.has_meta("joinery_inline_link"):
+		return ""
 	if control is ScrollBar:
 		return ""
 	var interactive := false

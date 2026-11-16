@@ -15,12 +15,20 @@ extends VBoxContainer
 ## The whole record is kept: when the card's fold is opened ([method show_all]), every line
 ## shows, newest first, each with its tick or its error, an edit's +/− line count, a picture
 ## that landed and a test run's results.
+##
+## A line that names a project file shows its name as a link (sidebar_trail_link.gd), on the
+## live line and in the opened record alike; pressing it emits [signal file_opened] with the
+## res:// path, and the sidebar opens it where it belongs (sidebar_file_open.gd).
+
+## A file named on a line was pressed ([param path] is res://).
+signal file_opened(path: String)
 
 const UI_THEME := preload("ui_theme.gd")
 const UI_MOTION := preload("ui_motion.gd")
 const UI := preload("ui_components.gd")
 const STYLE := preload("sidebar_style.gd")
 const RESULTS := preload("sidebar_trail_results.gd")
+const LINK := preload("sidebar_trail_link.gd")
 ## How a line ends -> [icon, tint role].
 const ENDS := {
 	"success": ["success", "success"],
@@ -92,7 +100,9 @@ func add_line(text: String, detail := "") -> void:
 
 
 ## The host's trail event: {id, text, state: running|done|failed, note: tool|thought, file,
-## added, removed, picture}.
+## added, removed, picture, path}. [code]path[/code] is the res:// file the line names: a
+## link when the file is in the project, or when the call edits it (a change not yet accepted
+## has it only in review).
 func add_call(event: Dictionary) -> void:
 	var text := str(event.get("text", "")).strip_edges()
 	if str(event.get("note", "")) == "thought":
@@ -117,6 +127,11 @@ func add_call(event: Dictionary) -> void:
 			int(event.get("added", 0)),
 			int(event.get("removed", 0))
 		)
+		var path := str(event.get("path", ""))
+		var edits := not str(event.get("file", "")).is_empty()
+		if path.begins_with("res://") and (edits or FileAccess.file_exists(path)):
+			row.set_meta("path", path)
+			LINK.render(_words(row), path, file_opened.emit)
 	if state in ["done", "failed"]:
 		_end(row, "success" if state == "done" else "error")
 		_show_picture(row, str(event.get("picture", "")))
@@ -214,6 +229,17 @@ func live_line() -> HBoxContainer:
 	return _live.get_node("Line") as HBoxContainer if _live.visible else null
 
 
+## The link on the live line, else on the newest line that has one; null when none shows.
+func link() -> Button:
+	if _live.visible:
+		return LINK.link_of(_live_words())
+	for row: Node in _rows():
+		var found := LINK.link_of(_words(row))
+		if found != null:
+			return found
+	return null
+
+
 ## The words on show: the live line, or every line newest first when opened.
 func texts() -> PackedStringArray:
 	var shown := PackedStringArray()
@@ -266,6 +292,7 @@ func end_gate(row: Control, text: String) -> void:
 	row.set_meta("kind", "step")
 	_end(row, "success")
 	_words(row).text = text
+	LINK.render(_words(row), "", file_opened.emit)
 	_sync_live()
 
 
@@ -362,6 +389,10 @@ func _sync_live() -> void:
 	_sync_size(step)
 	words.text = said
 	words.tooltip_text = said
+	if step != null and step.has_meta("path"):
+		LINK.render(words, str(step.get_meta("path")), file_opened.emit)
+	else:
+		LINK.clear(words)
 	var note_label := _live.get_node("Under/Note") as Label
 	note_label.text = under
 	note_label.tooltip_text = under
@@ -373,7 +404,7 @@ func _sync_live() -> void:
 		UI_MOTION.fade_in(_live)
 		return
 	if was[0] != step or str(was[1]) != said:
-		UI_MOTION.fade_in(words)
+		UI_MOTION.fade_in(words if words.visible else LINK.shown(words))
 	if under_row.visible and str(was[2]) != under:
 		UI_MOTION.fade_in(under_row)
 
@@ -573,6 +604,7 @@ func _end(row: Control, kind: String) -> void:
 	var words := _words(row)
 	words.text = past_tense(words.text) if kind == "success" else settled(words.text)
 	words.tooltip_text = words.text if words.tooltip_text.is_empty() else words.tooltip_text
+	LINK.render(words, "", file_opened.emit)
 	# The progress under a finished call has said its piece; a picture and results stay.
 	(row.find_child("Note", true, false) as Control).hide()
 	var keeps := (
