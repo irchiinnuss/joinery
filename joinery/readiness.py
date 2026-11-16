@@ -397,35 +397,19 @@ class DockerHost:
 
         Raises `ImageUnknown` when Docker couldn't say (a busy daemon, a
         timeout): asked twice and cross-checked with `docker image ls`, so a
-        hiccup is never reported as a missing image.
+        hiccup is never reported as a missing image. Docker Desktop sometimes
+        answers "No such image" for a moment while the image is listed: that
+        answer is cross-checked too, and a listed image is asked for by its id.
         """
         reason = ""
         for attempt in range(2):
             if attempt:
                 time.sleep(IMAGE_RETRY_SECONDS)
-            try:
-                done = subprocess.run(
-                    [
-                        "docker",
-                        "image",
-                        "inspect",
-                        "--format",
-                        "{{.Id}}\t{{.Created}}\t{{json .Config.Labels}}",
-                        name,
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=15,
-                    check=False,
-                )
-            except (OSError, subprocess.SubprocessError) as exc:
-                reason = str(exc) or type(exc).__name__
-                continue
-            if done.returncode == 0:
-                return _parse_image(done.stdout)
-            reason = _first_line(done.stderr) or f"exit code {done.returncode}"
-            if _NO_SUCH_IMAGE.search(done.stderr):
-                return None
+            found, reason = self._inspect(name)
+            if found is not None:
+                return found
+            if _NO_SUCH_IMAGE.search(reason):
+                break
         try:
             listed = subprocess.run(
                 ["docker", "image", "ls", "--quiet", name],
@@ -436,9 +420,39 @@ class DockerHost:
             )
         except (OSError, subprocess.SubprocessError) as exc:
             raise ImageUnknown(reason or str(exc)) from None
-        if listed.returncode == 0 and not listed.stdout.strip():
+        ids = listed.stdout.split() if listed.returncode == 0 else []
+        if listed.returncode == 0 and not ids:
             return None
+        if ids:
+            found, again = self._inspect(ids[0])
+            if found is not None:
+                return found
+            reason = again or reason
         raise ImageUnknown(reason)
+
+    @staticmethod
+    def _inspect(name: str) -> tuple[Image | None, str]:
+        """`docker image inspect` of [name]: the image, else why not."""
+        try:
+            done = subprocess.run(
+                [
+                    "docker",
+                    "image",
+                    "inspect",
+                    "--format",
+                    "{{.Id}}\t{{.Created}}\t{{json .Config.Labels}}",
+                    name,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            return None, str(exc) or type(exc).__name__
+        if done.returncode == 0:
+            return _parse_image(done.stdout), ""
+        return None, _first_line(done.stderr) or f"exit code {done.returncode}"
 
     def run(
         self, image: str, argv: Sequence[str], entrypoint: str, timeout: int

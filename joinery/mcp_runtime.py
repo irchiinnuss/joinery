@@ -323,11 +323,40 @@ async def _image_state(image: str) -> tuple[int, bool]:
     return int(code), bool(code) and any(sign in text for sign in _NO_IMAGE)
 
 
+async def _listed_id(image: str) -> str:
+    """The id `docker image ls` lists for [image], "" when none (or no answer)."""
+    try:
+        listing = await asyncio.create_subprocess_exec(
+            "docker",
+            "image",
+            "ls",
+            "--quiet",
+            image,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+    except OSError:
+        return ""
+    try:
+        out, _err = await asyncio.wait_for(listing.communicate(), 10)
+    except TimeoutError:
+        listing.kill()
+        await listing.wait()
+        return ""
+    if listing.returncode or not isinstance(out, bytes):
+        return ""
+    ids = out.decode(errors="replace").split()
+    return ids[0] if ids else ""
+
+
 async def image_ready(image: str) -> bool:
     """Whether [image] is there, asking again with backoff while Docker is busy.
 
-    Docker saying the image is missing twice in a row is final; anything else (no
-    answer, a timeout, a daemon error) is asked again after 1, 2, 4 and 8 s."""
+    Docker saying the image is missing twice in a row is final only once
+    `docker image ls` agrees: Docker Desktop sometimes answers "No such image"
+    for a moment while it lists the image, and then the listed id is asked for
+    instead. Anything else (no answer, a timeout, a daemon error) is asked again
+    after 1, 2, 4 and 8 s."""
     missing = 0
     for delay in (*IMAGE_RETRY_DELAYS, None):
         code, absent = await _image_state(image)
@@ -335,7 +364,12 @@ async def image_ready(image: str) -> bool:
             return True
         missing = missing + 1 if absent else 0
         if missing >= 2 or delay is None:
-            return False
+            listed = await _listed_id(image)
+            if listed and (await _image_state(listed))[0] == 0:
+                return True
+            if not listed or delay is None:
+                return False
+            missing = 0
         await asyncio.sleep(delay)
     return False
 

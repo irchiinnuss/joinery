@@ -333,3 +333,32 @@ def test_a_busy_docker_is_asked_again_with_backoff(
     slept.clear()
     assert asyncio.run(mcp_runtime.image_ready("worker")) is False
     assert slept == list(mcp_runtime.IMAGE_RETRY_DELAYS)
+
+
+def test_a_passing_no_such_image_is_cross_checked_with_the_listing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Docker Desktop answers "No such image" while its listing shows the image:
+    the listed id is asked for, and the tool is ready, not missing."""
+    answers = {"worker": (1, True), "sha256:abc": (0, False)}
+    asked: list[str] = []
+
+    async def state(image: str) -> tuple[int, bool]:
+        asked.append(image)
+        return answers[image]
+
+    listed = {"id": "sha256:abc"}
+
+    async def listing(_image: str) -> str:
+        return listed["id"]
+
+    monkeypatch.setattr(mcp_runtime, "_image_state", state)
+    monkeypatch.setattr(mcp_runtime, "_listed_id", listing)
+    monkeypatch.setattr(mcp_runtime.asyncio, "sleep", AsyncMock())
+    assert asyncio.run(mcp_runtime.image_ready("worker")) is True
+    assert asked == ["worker", "worker", "sha256:abc"]
+    # Not listed either: really missing, at once.
+    listed["id"] = ""
+    asked.clear()
+    assert asyncio.run(mcp_runtime.image_ready("worker")) is False
+    assert asked == ["worker", "worker"]

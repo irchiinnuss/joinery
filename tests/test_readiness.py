@@ -488,10 +488,27 @@ def test_docker_host_asks_twice_and_cross_checks_before_saying_missing(
     # The listing answers: nothing by that name, so it really is missing.
     _docker(monkeypatch, [daemon, daemon, (0, "", "")])
     assert readiness.DockerHost().image("joinery-creative-worker") is None
-    # Docker's own "No such image" is an answer at once.
-    calls = _docker(monkeypatch, [(1, "", "Error: No such image: joinery-x")])
+    # Docker's own "No such image" is cross-checked once with the listing.
+    no_such = (1, "", "Error: No such image: joinery-x")
+    calls = _docker(monkeypatch, [no_such, (0, "", "")])
     assert readiness.DockerHost().image("joinery-x") is None
-    assert len(calls) == 1
+    assert [call[:3] for call in calls] == [
+        ["docker", "image", "inspect"],
+        ["docker", "image", "ls"],
+    ]
+    # Docker Desktop's passing "No such image" while it lists the image: the
+    # image is asked for by its id, and found.
+    labels = json.dumps({readiness.SETUP_LABEL: "abc"})
+    calls = _docker(
+        monkeypatch,
+        [no_such, (0, "sha256:1\n", ""), (0, f"sha256:1\t2026\t{labels}\n", "")],
+    )
+    assert readiness.DockerHost().image("joinery-x") == Image("sha256:1", "2026", "abc")
+    assert calls[-1][-1] == "sha256:1"
+    # Listed but still not answering: unknown, never missing.
+    _docker(monkeypatch, [no_such, (0, "sha256:1\n", ""), no_such])
+    with pytest.raises(readiness.ImageUnknown):
+        readiness.DockerHost().image("joinery-x")
     # A hiccup, then the image.
     labels = json.dumps({readiness.SETUP_LABEL: "abc"})
     _docker(monkeypatch, [daemon, (0, f"sha256:1\t2026\t{labels}\n", "")])
