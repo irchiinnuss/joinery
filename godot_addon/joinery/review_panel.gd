@@ -70,6 +70,10 @@ const BUTTON_EM := 6.0
 const STAGE_SHARE := 0.5
 const STAGE_MIN := 2.0
 const STAGE_MAX := 10.0
+## The most of the window's height the stage asks for side by side: a wide panel in a short
+## window would otherwise ask for more than the window has and push the editor's bottom edge,
+## with Accept and Discard, out of sight. Dragging the panel taller still gives it more.
+const STAGE_WINDOW := 0.5
 ## Opacity of a disabled Discard: it keeps its fill and shape, only dimmed.
 const DISABLED_ALPHA := 0.5
 
@@ -136,6 +140,7 @@ func _init() -> void:
 func _ready() -> void:
 	UI_THEME.watch(self)
 	_queue_sizes()
+	get_viewport().size_changed.connect(_size_stage)
 
 
 func _notification(what: int) -> void:
@@ -798,7 +803,8 @@ func _apply_sizes() -> void:
 	_size_stage()
 
 
-## The stage grows with the panel's width (see STAGE_SHARE). Stacked, the panel asks only for
+## The stage grows with the panel's width (see STAGE_SHARE), up to STAGE_WINDOW of the
+## window's height. Stacked, the panel asks only for
 ## the least stage and the rail's own minimum (its actions), so a short panel (a 1024 × 768
 ## editor's bottom panel) never pushes Accept and Discard out of sight; the layout gives the
 ## stage every bit of height the rail doesn't need.
@@ -806,7 +812,10 @@ func _size_stage() -> void:
 	if _stage_area == null or not is_inside_tree():
 		return
 	var large := float(UI_THEME.control_h(self, "lg"))
-	var tall := floorf(clampf(size.x * STAGE_SHARE, large * STAGE_MIN, large * STAGE_MAX))
+	var most := minf(large * STAGE_MAX, get_viewport().get_visible_rect().size.y * STAGE_WINDOW)
+	var tall := floorf(
+		clampf(size.x * STAGE_SHARE, large * STAGE_MIN, maxf(most, large * STAGE_MIN))
+	)
 	if _body.narrow:
 		var rail := _rail.get_combined_minimum_size().y
 		tall = floorf(large * STAGE_MIN + rail + UI_THEME.space(self, 4))
