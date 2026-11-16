@@ -158,11 +158,15 @@ def test_a_stage_import_gets_more_time_under_emulation(
 def test_a_worker_error_elsewhere_cancels_the_other_runs(tmp_path: Path) -> None:
     started: list[str] = []
     cancelled: list[str] = []
+    slow_running = asyncio.Event()
 
     async def run(_root: Path, script: str) -> Result:
         started.append(script)
         if script == "bad":
+            # Fail only once the other run is under way, whatever order they start in.
+            await asyncio.wait_for(slow_running.wait(), 5)
             raise RuntimeError("Docker isn't running")
+        slow_running.set()
         try:
             await asyncio.sleep(10)
         except asyncio.CancelledError:

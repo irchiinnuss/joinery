@@ -77,6 +77,12 @@ class Fake:
         self.runs.append((where, script))
         self.active += 1
         self.most = max(self.most, self.active)
+        # Stay "running" until a second run overlaps (or 2 s pass), so a slow
+        # machine still shows whether runs go side by side.
+        for _ in range(100):
+            if self.most > 1:
+                break
+            await asyncio.sleep(0.02)
         await asyncio.sleep(0.02)
         self.active -= 1
         if script in self.failing.get(where, set()):
