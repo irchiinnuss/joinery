@@ -7,10 +7,15 @@ extends PanelContainer
 ## the "done when" items are checked after the change passes Joinery's checks: each row turns
 ## to Pass, Fail or Inconclusive with its evidence under it, and the header says "2 of 3 done".
 ## A Fail goes back to Journeyman once ("Fixing what didn't pass…") before the change opens.
+##
+## The chevron in the header minimises the card to its one line ("To-do · 3 of 7 done") and
+## opens it again; the sidebar (sidebar_todo.gd) remembers which way each chat left it.
 
 signal go_pressed(line: Dictionary)
 signal cancel_pressed
 signal close_pressed
+## The user minimised the card ([param on]) or opened it again.
+signal minimised_changed(on: bool)
 
 const UI_THEME := preload("ui_theme.gd")
 const UI_MOTION := preload("ui_motion.gd")
@@ -37,12 +42,19 @@ const LOOKS := {
 var todo_id := ""
 ## waiting, going, checking, fixing, checked, cancelled or dropped.
 var state := ""
+## Only the header line shows ("To-do · 3 of 7 done").
+var minimised := false
 var title_label: Label
+## Minimise or open the card.
+var fold: Button
 var close: Button
 var go: Button
 var cancel: Button
 var _dots: Control
 var _status: TextureRect
+var _line: HBoxContainer
+## Everything under the header line but the step line: steps, done when, Go / Cancel.
+var _body: VBoxContainer
 var _step: Label
 var _steps: VBoxContainer
 var _done_title: Label
@@ -58,7 +70,7 @@ func _init(identifier := "") -> void:
 	todo_id = identifier
 	name = "Todo"
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	accessibility_name = "To do"
+	accessibility_name = "To-do"
 	STYLE.on_theme_overrides(
 		self,
 		func() -> void:
@@ -78,10 +90,16 @@ func _init(identifier := "") -> void:
 	var head := HBoxContainer.new()
 	head.theme_type_variation = "JoineryRowTight"
 	top.add_child(head)
-	title_label = STYLE.card_title("To do")
+	title_label = STYLE.card_title("To-do")
 	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	head.add_child(title_label)
+	fold = UI.icon_button("disclosure_open", "Minimise the to-do")
+	fold.name = "Fold"
+	fold.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	fold.pressed.connect(func() -> void: set_minimised(not minimised, true))
+	UI_MOTION.press_feedback(fold)
+	head.add_child(fold)
 	close = UI.icon_button("close", "Dismiss the to-do")
 	close.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	close.pressed.connect(func() -> void: close_pressed.emit())
@@ -89,6 +107,7 @@ func _init(identifier := "") -> void:
 	close.hide()
 	head.add_child(close)
 	var line := HBoxContainer.new()
+	_line = line
 	line.theme_type_variation = "JoineryRowTight"
 	UI.bind_height(line, "xs", false)
 	top.add_child(line)
@@ -102,13 +121,16 @@ func _init(identifier := "") -> void:
 	_step.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_step.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	line.add_child(_step)
+	_body = VBoxContainer.new()
+	_body.theme_type_variation = "JoineryStack"
+	column.add_child(_body)
 	_steps = VBoxContainer.new()
 	_steps.theme_type_variation = "JoineryTight"
 	_steps.accessibility_name = "Steps"
-	column.add_child(_steps)
+	_body.add_child(_steps)
 	var done := VBoxContainer.new()
 	done.theme_type_variation = "JoineryTight"
-	column.add_child(done)
+	_body.add_child(done)
 	_done_title = UI.label("Done when", "JoineryCaption")
 	done.add_child(_done_title)
 	_done = VBoxContainer.new()
@@ -117,7 +139,7 @@ func _init(identifier := "") -> void:
 	done.add_child(_done)
 	_footer = HBoxContainer.new()
 	_footer.theme_type_variation = "JoineryRow"
-	column.add_child(_footer)
+	_body.add_child(_footer)
 	go = UI.primary("Go")
 	go.accessibility_name = "Go: start the work"
 	UI.bind_height(go, "sm")
@@ -178,6 +200,48 @@ func apply(event: Dictionary) -> void:
 	if state == "waiting":
 		go.disabled = steps().is_empty()
 		cancel.disabled = false
+	_sync_title()
+
+
+## Show only the header line ("To-do · 3 of 7 done"), or the whole card again; [param animate]
+## reveals the opened card from the top. Says so through [signal minimised_changed] when the
+## user did it ([param animate]).
+func set_minimised(on: bool, animate := false) -> void:
+	var changed := on != minimised
+	minimised = on
+	_line.visible = not on
+	_body.visible = not on
+	UI.bind_icon(fold, "disclosure_closed" if on else "disclosure_open")
+	fold.tooltip_text = "Show the to-do" if on else "Minimise the to-do"
+	fold.accessibility_name = fold.tooltip_text
+	_sync_title()
+	if animate and not on:
+		UI_MOTION.reveal(_body)
+		UI_MOTION.fade_in(_line)
+	if changed and animate:
+		minimised_changed.emit(on)
+
+
+## [done, total]: the steps count as done once the work is checked, the "done when" items as
+## each one passes.
+func progress() -> Array[int]:
+	var steps_done := _step_texts.size() if state in ["checking", "fixing", "checked"] else 0
+	var passed := 0
+	for id: String in _order:
+		var result: Variant = (_items[id] as Dictionary).get("result")
+		if result is Dictionary and str((result as Dictionary).get("status", "")) == "pass":
+			passed += 1
+	return [steps_done + passed, _step_texts.size() + _order.size()]
+
+
+func _sync_title() -> void:
+	if not minimised:
+		title_label.text = "To-do"
+		title_label.tooltip_text = ""
+		return
+	var counts := progress()
+	title_label.text = "To-do · %d of %d done" % [counts[0], counts[1]]
+	title_label.tooltip_text = _step.text
 
 
 ## Still waiting for Go, or working.

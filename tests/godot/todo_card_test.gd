@@ -169,6 +169,21 @@ func _run() -> void:
 	_check(card.find_children("Evidence", "Label", true, false).size() == 3, "Evidence shows")
 	_check((card.get("close") as Button).visible, "It can be dismissed")
 
+	# Minimised to one line, and opened again; the chat remembers which.
+	backend.set("chat_id", "chat-a")
+	(card.get("fold") as Button).pressed.emit()
+	_check(card.get("minimised"), "The chevron minimises it")
+	var title: Label = card.get("title_label")
+	_check(title.text == "To-do · 3 of 5 done", "One line: %s" % title.text)
+	_check(not (card.get("_body") as Control).visible, "Only the header line shows")
+	var todo_list: Script = load("res://addons/joinery/sidebar_todo.gd")
+	_check(todo_list.call("minimised", "chat-a"), "The chat remembers it minimised")
+	_check(not todo_list.call("minimised", "chat-b"), "Another chat doesn't")
+	(card.get("fold") as Button).pressed.emit()
+	_check(not card.get("minimised") and title.text == "To-do", "Opened again: %s" % title.text)
+	_check(not todo_list.call("minimised", "chat-a"), "And remembered open")
+	(card.get("fold") as Button).pressed.emit()
+
 	# The review shows the same results under what changed.
 	var summary: Control = load("res://addons/joinery/review_summary.gd").new()
 	dock.add_child(summary)
@@ -189,6 +204,8 @@ func _run() -> void:
 	event = {"kind": "todo", "todo_id": "t2", "state": "waiting", "steps": STEPS, "done_when": []}
 	backend.call("_handle", event)
 	card = tasks.get("todo_card")
+	_check(card.get("minimised"), "A new to-do in the same chat comes minimised")
+	(card.get("fold") as Button).pressed.emit()
 	_check(not (card.get("_done_title") as Control).visible, "No done-when items, no heading")
 	(card.get("cancel") as Button).pressed.emit()
 	_check(str(_sent(job, "todo_cancel").get("todo_id", "")) == "t2", "Cancel drops it")

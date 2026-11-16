@@ -1,7 +1,8 @@
 extends RefCounted
 ## The visual suite's to-do screens (ADR 0060): a request's steps and "done when" items waiting
-## for Go, then the items checked. [param suite] is visual_sidebar_test.gd, whose `_shot` these
-## use; the sidebar's review shows the same results (visual_review.gd).
+## for Go, then the items checked, then the card minimised to its one line. [param suite] is
+## visual_sidebar_test.gd, whose `_shot` these use; the sidebar's review shows the same results
+## (visual_review.gd).
 
 const STEPS := [
 	"Put a lever beside the vault gate",
@@ -64,6 +65,9 @@ static func shots(suite: Variant, light: bool, width: int, chat: Control) -> voi
 	)
 	await suite._shot("todo-checked", light, width, chat)
 	var card: Control = tasks.get("todo_card")
+	# Minimised to its one line.
+	card.call("set_minimised", true)
+	await suite._shot("todo-minimised", light, width, chat)
 	card.free()
 	tasks.set("todo_card", null)
 	tasks.hide()

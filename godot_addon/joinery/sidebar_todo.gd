@@ -5,10 +5,16 @@ extends Node
 ## (todo_card.gd) in with the agents at work and move it on: waiting for Go, working,
 ## checking the "done when" items, and their results. Go sends the to-do as the user left it
 ## as a request of its own ("Go"), so it has its change card and review like any other;
-## Cancel drops it.
+## Cancel drops it. Minimised to its one line, the card stays that way for that chat
+## (remembered in the project's editor metadata), and opens again as the user left it.
 
 const CARD := preload("todo_card.gd")
 const UI_MOTION := preload("ui_motion.gd")
+## Project metadata key: {chat_id: true} for each chat whose to-do the user minimised.
+const MINIMISED_KEY := "todo_minimised"
+
+## Where the minimised chats live outside the editor (tests, the visual suite).
+static var _minimised_here := {}
 
 ## The sidebar (journeyman_dock.gd) this serves.
 var dock: Control
@@ -60,6 +66,8 @@ func _replace(id: String) -> void:
 	card.connect("go_pressed", _go)
 	card.connect("cancel_pressed", _cancel)
 	card.connect("close_pressed", close)
+	card.connect("minimised_changed", func(on: bool) -> void: remember(_chat(), on))
+	card.call("set_minimised", minimised(_chat()))
 	(tasks as Node).add_child(card)
 	tasks.set("todo_card", card)
 	(tasks as Control).show()
@@ -98,3 +106,36 @@ func close() -> void:
 			leaving.queue_free()
 			tasks.call("sync_visible")
 	)
+
+
+## Whether the user left [param chat_id]'s to-do minimised.
+static func minimised(chat_id: String) -> bool:
+	return bool(_store().get(chat_id, false))
+
+
+## Remember that [param chat_id]'s to-do is minimised ([param on]) or open.
+static func remember(chat_id: String, on: bool) -> void:
+	var chats := _store().duplicate()
+	if on:
+		chats[chat_id] = true
+	else:
+		chats.erase(chat_id)
+	if Engine.is_editor_hint():
+		EditorInterface.get_editor_settings().set_project_metadata("joinery", MINIMISED_KEY, chats)
+	else:
+		_minimised_here = chats
+
+
+static func _store() -> Dictionary:
+	if Engine.is_editor_hint():
+		var saved: Variant = EditorInterface.get_editor_settings().get_project_metadata(
+			"joinery", MINIMISED_KEY, {}
+		)
+		return saved if saved is Dictionary else {}
+	return _minimised_here
+
+
+## The open chat ("" before the host names one).
+func _chat() -> String:
+	var id: Variant = _bridge.get("chat_id") if _bridge != null else null
+	return str(id) if id != null else ""

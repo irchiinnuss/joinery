@@ -74,6 +74,7 @@ SIDEBAR_STATES = (
     "playtest-heat",
     "todo",
     "todo-checked",
+    "todo-minimised",
     "match",
     "match-fixing",
     "access",
