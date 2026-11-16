@@ -140,10 +140,17 @@ func attach(plugin: EditorPlugin, rail: Control) -> void:
 		func(_exist: bool) -> void: reapply.call_deferred(), CONNECT_ONE_SHOT
 	)
 	# A first launch has no saved layout and its scan may report no change, so neither
-	# hook fires after Godot's default layout reopens the docks: check a few times while
-	# the editor settles, unless the user has opened a panel meanwhile.
-	for delay: float in [0.5, 1.5, 3.0]:
-		get_tree().create_timer(delay).timeout.connect(
+	# hook fires after Godot's default layout reopens the docks, and a slow machine gets
+	# there late. Apply again when the first scan ends, and once a second while the editor
+	# settles (up to 15 s), unless the user has opened a panel meanwhile.
+	EditorInterface.get_resource_filesystem().filesystem_changed.connect(
+		func() -> void:
+			if not _touched:
+				reapply.call_deferred(),
+		CONNECT_ONE_SHOT
+	)
+	for delay: int in range(1, 16):
+		get_tree().create_timer(float(delay)).timeout.connect(
 			func() -> void:
 				if not _touched:
 					reapply()
