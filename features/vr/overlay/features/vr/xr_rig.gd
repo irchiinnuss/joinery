@@ -79,7 +79,8 @@ func carry(player: Node3D) -> void:
 ## Stops carrying the player, as when a headset session ends: its own physics,
 ## look input and camera come back, and the rig no longer moves it.
 func put_down() -> void:
-	if body == null:
+	if not is_instance_valid(body):
+		body = null
 		return
 	body.set_physics_process(true)
 	body.set_process_unhandled_input(true)
