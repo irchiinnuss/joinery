@@ -499,16 +499,13 @@ func _plan() -> Array:
 			closed.append(node)
 	if not closed.is_empty():
 		return [_by_distance(closed)[0], "door"]
-	if place != null and _free(place):
-		# The grid joins nothing on the way to it: straight there.
-		return [place, "exit" if place in exits else "reach"]
-	return _fallback(exits, open_keys)
+	return _fallback(exits, open_keys, place)
 
 
 ## [node, kind] when the grid joins the player to nothing on the way: fallen below the exit
 ## (a pit), a hazard the grid joins sends the player back to the last checkpoint, where the
-## way on is; else the nearest key, then the exit, straight.
-func _fallback(finals: Array[Node], open_keys: Array[Node]) -> Array:
+## way on is; else the nearest key, then the place to reach, then the exit, straight.
+func _fallback(finals: Array[Node], open_keys: Array[Node], place: Node = null) -> Array:
 	var fallen := false
 	for node: Node in finals:
 		fallen = fallen or (node as Node3D).global_position.y > _at().y + 1.5
@@ -519,9 +516,14 @@ func _fallback(finals: Array[Node], open_keys: Array[Node]) -> Array:
 			hazards.append(node)
 	if not hazards.is_empty():
 		return [_by_distance(hazards)[0], "back to a checkpoint"]
-	for node: Node in _by_distance(open_keys) + _by_distance(finals):
+	for node: Node in _by_distance(open_keys):
 		if _free(node):
-			return [node, "key" if node in open_keys else "exit"]
+			return [node, "key"]
+	if place != null and _free(place):
+		return [place, "exit" if place in finals else "reach"]
+	for node: Node in _by_distance(finals):
+		if _free(node):
+			return [node, "exit"]
 	return [null, ""]
 
 
