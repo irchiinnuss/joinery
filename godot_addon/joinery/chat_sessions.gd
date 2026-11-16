@@ -623,17 +623,15 @@ func _on_chat_changed(event: Dictionary) -> void:
 				_kept.erase(id)
 		if is_instance_valid(_bridge):
 			_bridge.set("chat_id", _current_id)
-		if not str(event.get("message", "")).is_empty():
-			turn.call("add_notice", str(event.get("message", "")), "info")
-		return
-	_current_id = chat_id
-	if not viewing:
-		shown_id = chat_id
+	else:
+		_current_id = chat_id
+		if not viewing:
+			shown_id = chat_id
 	# Only a chat that continues from a summary is worth a notice: the agent starts
 	# fresh. A new or resumed chat is what the user expects.
 	var message := str(event.get("message", ""))
 	if str(event.get("mode", "")) == "summary" and not message.is_empty():
-		_transcript.call("add_notice", message, "info")
+		turn.call("add_notice", message, "info")
 
 
 func _project() -> String:

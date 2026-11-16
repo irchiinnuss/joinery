@@ -114,7 +114,9 @@ func _while_working(chat: Control, backend: Node, sessions: Node) -> void:
 	_check(not composer.get("_busy"), "The new chat has Send, not the other chat's Stop")
 	var waits: String = chat.get("OTHER_WAIT")
 	var placeholder := str(composer.get("prompt").placeholder_text)
-	_check(placeholder.begins_with(waits), "The message box says it would wait: " + placeholder)
+	_check(
+		placeholder == chat.get("OTHER_HINT"), "The message box says it would wait: " + placeholder
+	)
 	chat.append_agent_text("Rain falls on the pier.", true)
 	_check(
 		str(running.call("get_parsed_text")).contains("Rain falls on the pier."),

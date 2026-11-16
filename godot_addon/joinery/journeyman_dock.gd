@@ -55,8 +55,10 @@ const SUGGESTIONS := preload("res://addons/joinery/sidebar_suggestions.gd")
 const OPENER := preload("res://addons/joinery/review_opener.gd")
 const REVIEW_PATH := "res://addons/joinery/review_panel.gd"
 const REVIEW_WAIT := "Next message…"
-## While another chat is working, a message sent here waits for it.
+## While another chat is working, a message sent here waits for it: the queue's heading, and
+## the message box's shorter hint.
 const OTHER_WAIT := "Sends when the other chat finishes"
+const OTHER_HINT := "Waits for the other chat…"
 const PERSONA := "Journeyman"
 const DISCARDED := "Discarded"
 const BRIEF := preload("res://addons/joinery/sidebar_brief.gd")
@@ -631,7 +633,7 @@ func _sync() -> void:
 ## While Send would queue, the message box says so.
 func _waiting_placeholder() -> String:
 	if _parked() and _occupied():
-		return OTHER_WAIT + "…"
+		return OTHER_HINT
 	if _review_pending:
 		return REVIEW_WAIT
 	return REVIEW_WAIT if _occupied() and connection_state == "connected" else ""
