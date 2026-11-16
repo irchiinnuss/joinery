@@ -34,7 +34,7 @@ var progress := ""
 var open := false
 var editable := false
 var mark: Mark
-## A Label, or a borderless LineEdit while editable.
+## A Label, or a borderless TextEdit that wraps like it while editable (Enter leaves it).
 var title: Control
 var chevron: Button
 var remove: Button
@@ -110,17 +110,16 @@ func _init(text := "", more := "", can_edit := false, from := 0) -> void:
 	_title_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_top.add_child(_title_box)
 	if editable:
-		var field := LineEdit.new()
+		var field := TextEdit.new()
 		field.name = "Words"
 		field.text = text
-		field.flat = true
 		field.placeholder_text = "What to do"
+		field.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
+		field.scroll_fit_content_height = true
 		field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		field.max_length = 80
-		UI.bind_height(field, "sm")
-		field.text_submitted.connect(func(_text: String) -> void: _commit())
 		field.focus_exited.connect(_commit)
 		field.gui_input.connect(_on_title_key)
+		field.text_changed.connect(_keep_one_line)
 		title = field
 	else:
 		var words := UI.label(text, "", true)
@@ -163,6 +162,8 @@ func _init(text := "", more := "", can_edit := false, from := 0) -> void:
 		detail = words
 	_detail_box.add_child(detail)
 	_detail_box.visible = false
+	if title is TextEdit:
+		STYLE.on_theme_overrides(title, _flatten)
 	STYLE.on_theme_overrides(self, _fit)
 	_top.sort_children.connect(_align)
 	sync_view()
@@ -170,8 +171,8 @@ func _init(text := "", more := "", can_edit := false, from := 0) -> void:
 
 ## The step's title as it stands.
 func title_text() -> String:
-	if title is LineEdit:
-		return (title as LineEdit).text.strip_edges()
+	if title is TextEdit:
+		return (title as TextEdit).text.strip_edges()
 	return (title as Label).text
 
 
@@ -207,8 +208,8 @@ func set_progress(value: String) -> void:
 
 ## Put the title back as it was last left (a repeat the card refused).
 func undo_title() -> void:
-	if title is LineEdit:
-		(title as LineEdit).text = _committed_text
+	if title is TextEdit:
+		(title as TextEdit).text = _committed_text
 
 
 ## The title as it was last left.
@@ -217,8 +218,13 @@ func committed_title() -> String:
 
 
 func focus_title() -> void:
-	if title is LineEdit:
-		(title as LineEdit).grab_focus()
+	if title is TextEdit:
+		(title as TextEdit).grab_focus()
+
+
+## The edited title is left: says so through [signal committed] when it changed.
+func commit() -> void:
+	_commit()
 
 
 func _commit() -> void:
@@ -232,11 +238,25 @@ func _commit() -> void:
 
 func _on_title_key(event: InputEvent) -> void:
 	var key := event as InputEventKey
-	if key == null or not key.pressed or not key.alt_pressed:
+	if key == null or not key.pressed:
 		return
-	if key.keycode in [KEY_UP, KEY_DOWN]:
+	if key.keycode in [KEY_ENTER, KEY_KP_ENTER]:
+		# A title is one line: Enter leaves it.
+		title.accept_event()
+		title.release_focus()
+		_commit()
+	elif key.alt_pressed and key.keycode in [KEY_UP, KEY_DOWN]:
 		move_requested.emit(self, -1 if key.keycode == KEY_UP else 1)
 		title.accept_event()
+
+
+## A pasted title loses its line breaks, and stops at 80 characters.
+func _keep_one_line() -> void:
+	var field := title as TextEdit
+	var flat := " ".join(field.text.split("\n", false)).left(80)
+	if flat != field.text:
+		field.text = flat
+		field.set_caret_column(flat.length())
 
 
 func _on_title_click(event: InputEvent) -> void:
@@ -244,6 +264,21 @@ func _on_title_click(event: InputEvent) -> void:
 	if click != null and click.pressed and click.button_index == MOUSE_BUTTON_LEFT:
 		if not detail_text().is_empty():
 			set_open(not open, true)
+
+
+## The title field draws no box until it has focus, like a flat LineEdit, with a LineEdit's
+## insets so its words sit where a field's do.
+func _flatten() -> void:
+	var field := title as TextEdit
+	var source := field.get_theme_stylebox("normal", "LineEdit")
+	var flat := StyleBoxEmpty.new()
+	for side: int in [SIDE_TOP, SIDE_BOTTOM]:
+		flat.set_content_margin(side, source.get_content_margin(side) if source != null else 4.0)
+	# Narrow sides, so the words start about where a read-only title's do.
+	for side: int in [SIDE_LEFT, SIDE_RIGHT]:
+		flat.set_content_margin(side, float(UI_THEME.space(field, 1)))
+	field.add_theme_stylebox_override("normal", flat)
+	field.add_theme_stylebox_override("read_only", flat)
 
 
 ## Every part of the row on the title's first line: the circle and the buttons are one line
@@ -265,16 +300,20 @@ func _align() -> void:
 	for part: Control in [chevron, remove]:
 		if part != null and part.visible:
 			line_h = maxf(line_h, part.get_combined_minimum_size().y)
-	if title is LineEdit:
-		line_h = maxf(line_h, title.get_combined_minimum_size().y)
 	if mark.custom_minimum_size.y != line_h:
 		mark.custom_minimum_size.y = line_h
 	var lift := 0
-	if title is Label:
-		var font := title.get_theme_font("font")
+	var font := title.get_theme_font("font")
+	if font != null:
 		# The capitals' middle on the line's middle (capitals stand about 0.7 of the ascent).
 		var ascent := font.get_ascent(title.get_theme_font_size("font_size"))
 		var inset := title.get_theme_stylebox("normal").get_margin(SIDE_TOP)
+		if title is TextEdit:
+			var spacing := (
+				(title as TextEdit).get_line_height()
+				- font.get_height(title.get_theme_font_size("font_size"))
+			)
+			inset += spacing / 2.0
 		lift = maxi(0, roundi(line_h / 2.0 - ascent * 0.65 - inset))
 	if _title_box.get_theme_constant("margin_top") != lift:
 		_title_box.add_theme_constant_override("margin_top", lift)
@@ -297,7 +336,7 @@ func sync_view() -> void:
 	title.accessibility_name = (
 		"Step %d: %s%s" % [number, words, (", " + said) if not said.is_empty() else ""]
 	)
-	title.tooltip_text = words if title is LineEdit else ""
+	title.tooltip_text = ""
 	detail.accessibility_name = "Detail of step %d" % number
 	if is_inside_tree():
 		_ink()

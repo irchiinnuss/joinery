@@ -52,6 +52,15 @@ func _sent(job: RefCounted, kind: String) -> Dictionary:
 	return {}
 
 
+## The card's fields to edit in place: the steps' titles and the done-when items.
+func _fields(card: Node) -> Array[Node]:
+	var found: Array[Node] = []
+	for words: Node in card.find_children("Words", "", true, false):
+		if words is LineEdit or words is TextEdit:
+			found.append(words)
+	return found
+
+
 func _results() -> Array:
 	return [
 		{
@@ -114,7 +123,7 @@ func _run() -> void:
 	_check((card.call("done_rows") as Array).size() == 4, "Its done-when items")
 	_check((card.get("go") as Button).is_visible_in_tree(), "Go is there")
 	_check(card.call("step_text") == "Edit anything, then press Go.", card.call("step_text"))
-	var fields := card.find_children("Words", "LineEdit", true, false)
+	var fields := _fields(card)
 	_check(fields.size() == 7, "Every line edits in place: %d" % fields.size())
 
 	# Each step's detail waits behind its chevron, and edits in place there too.
@@ -129,29 +138,29 @@ func _run() -> void:
 	# A step is added at the end; one that says what step 3 says is refused.
 	var added: Control = card.call("add_step")
 	_check(added != null and (card.call("step_rows") as Array).size() == 4, "Add a step")
-	(added.get("title") as LineEdit).text = "put the KEY in the vault."
-	(added.get("title") as LineEdit).text_submitted.emit("")
+	(added.get("title") as TextEdit).text = "put the KEY in the vault."
+	added.call("commit")
 	await process_frame
 	_check((card.call("step_rows") as Array).size() == 3, "The repeat is refused")
 	_check(card.call("step_text") == "Step 3 already says that.", card.call("step_text"))
 	added = card.call("add_step")
-	(added.get("title") as LineEdit).text = "Hide a spare key"
-	(added.get("title") as LineEdit).text_submitted.emit("")
+	(added.get("title") as TextEdit).text = "Hide a spare key"
+	added.call("commit")
 	# Alt+Up moves it above step 3.
 	var up := InputEventKey.new()
 	up.pressed = true
 	up.alt_pressed = true
 	up.keycode = KEY_UP
-	(added.get("title") as LineEdit).gui_input.emit(up)
+	(added.get("title") as TextEdit).gui_input.emit(up)
 	_check(
 		card.call("steps") == PackedStringArray([STEPS[0], STEPS[1], "Hide a spare key", STEPS[2]]),
 		"Moved up: %s" % card.call("steps")
 	)
-	var named := str((added.get("title") as LineEdit).accessibility_name)
+	var named := str((added.get("title") as TextEdit).accessibility_name)
 	_check(named.begins_with("Step 3:"), "Renumbered: %s" % named)
 
 	# The user rewords the first step, removes the second and the look item, presses Go.
-	(fields[0] as LineEdit).text = "Put a lever by the gate"
+	fields[0].set("text", "Put a lever by the gate")
 	var removes: Array[Button] = card.call("remove_buttons")
 	_check(removes.size() == 8, "Every line has its remove: %d" % removes.size())
 	removes[1].pressed.emit()
@@ -208,7 +217,7 @@ func _run() -> void:
 		"done_when": [DONE[0], DONE[1], DONE[2]],
 	}
 	backend.call("_handle", event)
-	_check(card.find_children("Words", "LineEdit", true, false).is_empty(), "Read-only now")
+	_check(_fields(card).is_empty(), "Read-only now")
 	_check(not (card.get("go") as Button).is_visible_in_tree(), "No Go while working")
 	_check(card.call("step_text") == "Working through the steps…", card.call("step_text"))
 
