@@ -91,6 +91,7 @@ func _run() -> void:
 	backend.call("_handle", {"kind": "connection", "state": "connected", "parallel": 3})
 	backend.set("_job", job)
 	dock.call("set_chat_state", "connected", "")
+	backend.set("chat_id", "chat-a")
 	dock.prompt_submitted.connect(
 		func(text: String, targets: Array) -> void: backend.call("submit", text, targets)
 	)
@@ -108,6 +109,7 @@ func _run() -> void:
 	backend.call("_handle", event)
 	var card: Control = tasks.get("todo_card")
 	_check(card != null and card.is_visible_in_tree(), "The to-do card shows")
+	_check(not card.get("minimised"), "A new to-do opens expanded, to read and edit")
 	_check(card.call("steps") == PackedStringArray(STEPS), "Its steps: %s" % card.call("steps"))
 	_check((card.call("done_rows") as Array).size() == 4, "Its done-when items")
 	_check((card.get("go") as Button).is_visible_in_tree(), "Go is there")
@@ -187,6 +189,9 @@ func _run() -> void:
 		ids.append(str((item as Dictionary)["id"]))
 	_check(ids == ["d1", "d2", "d3"], "And the done-when items as left: %s" % [ids])
 	_check(_sent(job, "prompt").is_empty(), "Not as a plain prompt")
+	var todo_list: Script = load("res://addons/joinery/sidebar_todo.gd")
+	_check(card.get("minimised"), "Go minimises it to its one line")
+	_check(todo_list.call("minimised", "chat-a", "t1"), "And the chat remembers that")
 
 	# Working: the list is read-only; then the items are checked.
 	var titles: Array = []
@@ -218,13 +223,14 @@ func _run() -> void:
 	_check(rows[0].get("progress") == "done" and rows[1].get("progress") == "started", "Moved on")
 	_check((card.call("step_rows") as Array)[0] == rows[0], "In place: the rows are the same")
 	_check(card.call("progress") == [1, count + 3], "1 done: %s" % [card.call("progress")])
-	card.call("set_minimised", true)
 	var live: Control = card.get("live")
-	_check(live.visible, "Minimised while working: the live light is on")
+	_check(card.get("minimised") and live.visible, "Minimised while working: the live light")
 	var line: String = (card.get("title_label") as Label).text
 	_check(line == "To-do · 1 of %d done" % (count + 3), "Counts as it goes: %s" % line)
-	card.call("set_minimised", false)
-	_check(not live.visible, "Open, the step line says it instead")
+	# Opened by hand: the step line says it instead, and the chat remembers it open.
+	(card.get("fold") as Button).pressed.emit()
+	_check(not card.get("minimised") and not live.visible, "Open, the step line says it instead")
+	_check(not todo_list.call("minimised", "chat-a", "t1"), "Remembered open")
 	# Steps that need nothing first run at once as tasks (run_steps = "together").
 	backend.call("_handle", {"kind": "todo", "todo_id": "t1", "state": "steps", "together": [1, 3]})
 	_check(card.call("step_text") == "Making steps 1 and 3 at once…", card.call("step_text"))
@@ -257,20 +263,22 @@ func _run() -> void:
 	_check((card.get("close") as Button).visible, "It can be dismissed")
 
 	# Minimised to one line, and opened again; the chat remembers which.
-	backend.set("chat_id", "chat-a")
 	(card.get("fold") as Button).pressed.emit()
 	_check(card.get("minimised"), "The chevron minimises it")
 	var title: Label = card.get("title_label")
 	_check(title.text == "To-do · 4 of 6 done", "One line: %s" % title.text)
 	_check(not live.visible, "Finished: no live light on the line")
 	_check(not (card.get("_body") as Control).visible, "Only the header line shows")
-	var todo_list: Script = load("res://addons/joinery/sidebar_todo.gd")
-	_check(todo_list.call("minimised", "chat-a"), "The chat remembers it minimised")
-	_check(not todo_list.call("minimised", "chat-b"), "Another chat doesn't")
+	_check(todo_list.call("minimised", "chat-a", "t1"), "The chat remembers it minimised")
+	_check(not todo_list.call("minimised", "chat-b", "t1"), "Another chat doesn't")
 	(card.get("fold") as Button).pressed.emit()
 	_check(not card.get("minimised") and title.text == "To-do", "Opened again: %s" % title.text)
-	_check(not todo_list.call("minimised", "chat-a"), "And remembered open")
+	_check(not todo_list.call("minimised", "chat-a", "t1"), "And remembered open")
 	(card.get("fold") as Button).pressed.emit()
+	# Shown again (the chat reopened), the same to-do keeps the way the user left it.
+	tasks.get_node("TodoList").call("_replace", "t1")
+	card = tasks.get("todo_card")
+	_check(card.get("minimised"), "The same to-do comes back minimised")
 
 	# The review shows the same results under what changed.
 	var summary: Control = load("res://addons/joinery/review_summary.gd").new()
@@ -292,8 +300,7 @@ func _run() -> void:
 	event = {"kind": "todo", "todo_id": "t2", "state": "waiting", "steps": STEPS, "done_when": []}
 	backend.call("_handle", event)
 	card = tasks.get("todo_card")
-	_check(card.get("minimised"), "A new to-do in the same chat comes minimised")
-	(card.get("fold") as Button).pressed.emit()
+	_check(not card.get("minimised"), "A new to-do in the same chat opens expanded again")
 	_check(not (card.get("_done_title") as Control).visible, "No done-when items, no heading")
 	(card.get("cancel") as Button).pressed.emit()
 	_check(str(_sent(job, "todo_cancel").get("todo_id", "")) == "t2", "Cancel drops it")

@@ -5,12 +5,15 @@ extends Node
 ## (todo_card.gd) in with the agents at work and move it on: waiting for Go, working,
 ## checking the "done when" items, and their results. Go sends the to-do as the user left it
 ## as a request of its own ("Go"), so it has its change card and review like any other;
-## Cancel drops it. Minimised to its one line, the card stays that way for that chat
-## (remembered in the project's editor metadata), and opens again as the user left it.
+## Cancel drops it. A newly proposed to-do opens expanded, for the user to read and edit; Go
+## minimises it to its one line (with its live light while the work runs). The user can open
+## or minimise it by hand; that choice is remembered for the chat's to-do (in the project's
+## editor metadata) and holds when the card is shown again, until the next to-do, which opens
+## expanded again.
 
 const CARD := preload("todo_card.gd")
 const UI_MOTION := preload("ui_motion.gd")
-## Project metadata key: {chat_id: true} for each chat whose to-do the user minimised.
+## Project metadata key: {chat_id: todo_id} for each chat whose to-do is minimised.
 const MINIMISED_KEY := "todo_minimised"
 
 ## Where the minimised chats live outside the editor (tests, the visual suite).
@@ -66,8 +69,9 @@ func _replace(id: String) -> void:
 	card.connect("go_pressed", _go)
 	card.connect("cancel_pressed", _cancel)
 	card.connect("close_pressed", close)
-	card.connect("minimised_changed", func(on: bool) -> void: remember(_chat(), on))
-	card.call("set_minimised", minimised(_chat()))
+	card.connect("minimised_changed", func(on: bool) -> void: remember(_chat(), id, on))
+	# A new to-do opens expanded; one shown again keeps the way it was left.
+	card.call("set_minimised", minimised(_chat(), id))
 	(tasks as Node).add_child(card)
 	tasks.set("todo_card", card)
 	(tasks as Control).show()
@@ -86,6 +90,9 @@ func _go(line: Dictionary) -> void:
 		return
 	_bridge.call("hold_line", line)
 	dock.call("_start_request", "Go", [])
+	# Go: the list gives way to its one line while the work runs.
+	card.call("set_minimised", true)
+	remember(_chat(), str(card.get("todo_id")), true)
 
 
 func _cancel() -> void:
@@ -108,16 +115,16 @@ func close() -> void:
 	)
 
 
-## Whether the user left [param chat_id]'s to-do minimised.
-static func minimised(chat_id: String) -> bool:
-	return bool(_store().get(chat_id, false))
+## Whether [param chat_id]'s to-do [param todo_id] was left minimised (a different to-do: no).
+static func minimised(chat_id: String, todo_id: String) -> bool:
+	return str(_store().get(chat_id, "")) == todo_id and not todo_id.is_empty()
 
 
-## Remember that [param chat_id]'s to-do is minimised ([param on]) or open.
-static func remember(chat_id: String, on: bool) -> void:
+## Remember that [param chat_id]'s to-do [param todo_id] is minimised ([param on]) or open.
+static func remember(chat_id: String, todo_id: String, on: bool) -> void:
 	var chats := _store().duplicate()
 	if on:
-		chats[chat_id] = true
+		chats[chat_id] = todo_id
 	else:
 		chats.erase(chat_id)
 	if Engine.is_editor_hint():
