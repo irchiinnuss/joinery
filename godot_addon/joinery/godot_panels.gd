@@ -54,6 +54,8 @@ var _close: Button
 var _shortcut := Shortcut.new()
 var _menu: EditorContextMenuPlugin
 var _rail: Control
+## True once the user opened a panel, so the start-up passes leave their choice alone.
+var _touched := false
 ## What the rail last showed (marks and shown panels), to update it only on a change.
 var _state: Array = []
 var _since_mark := 0.0
@@ -137,6 +139,15 @@ func attach(plugin: EditorPlugin, rail: Control) -> void:
 	EditorInterface.get_resource_filesystem().sources_changed.connect(
 		func(_exist: bool) -> void: reapply.call_deferred(), CONNECT_ONE_SHOT
 	)
+	# A first launch has no saved layout and its scan may report no change, so neither
+	# hook fires after Godot's default layout reopens the docks: check a few times while
+	# the editor settles, unless the user has opened a panel meanwhile.
+	for delay: float in [0.5, 1.5, 3.0]:
+		get_tree().create_timer(delay).timeout.connect(
+			func() -> void:
+				if not _touched:
+					reapply()
+		)
 	add_inspect_menu(plugin)
 	plugin.call("add_command", "Show or Hide Scene and Inspector", toggle_column)
 	_rail = rail
@@ -240,6 +251,7 @@ func show_panel(id: String) -> void:
 	var dock := _dock(id)
 	if dock == null:
 		return
+	_touched = true
 	if _bottom != null and dock.get_parent() == _bottom:
 		_bottom.current_tab = _bottom.get_tab_idx_from_control(dock)
 	else:
