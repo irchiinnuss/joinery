@@ -7,8 +7,11 @@ rig scene, grabs and throws with a hand, and drives the VR comfort settings
 page. Without `--vr-simulate` the game must be on the desktop with a notice;
 with it, the rig is carried on the player and walks, snaps, teleports,
 points, grabs, opens and clicks the headset menu panel, and (with save-load)
-keeps its turn in a save. Real headsets were not available here: everything
-that needs one is behind the OpenXR interface Godot itself provides.
+keeps its turn in a save. On the desktop it also hands the autoload an XR
+interface started elsewhere (as a WebXR session is) and takes it back: VR
+mode, panel and rig, then the desktop with the player's own controls. Real
+headsets were not available here: everything that needs one is behind the
+OpenXR interface Godot itself provides.
 """
 
 from __future__ import annotations
@@ -47,6 +50,8 @@ RIG_ACTIONS = (
     "primary", "grip", "grip_click", "trigger", "trigger_click",
     "menu_button", "by_button", "aim_pose", "haptic",
 )
+#: Classes that exist only in engines built with the OpenXR module.
+OPENXR_ONLY = re.compile(r"\bOpenXR[A-Z]\w*")
 _ERROR = re.compile(r"^(SCRIPT ERROR|ERROR:|USER SCRIPT ERROR|USER ERROR)", re.MULTILINE)
 
 
@@ -92,6 +97,35 @@ def test_action_map_is_a_plain_godot_resource() -> None:
     profiles = re.findall(r'^interaction_profile_path = "([^"]+)"$', text, re.MULTILINE)
     assert "/interaction_profiles/khr/generic_controller" in profiles
     assert "/interaction_profiles/oculus/touch_controller" in profiles
+
+
+def _code_only(text: str) -> str:
+    """GDScript or scene text without its comments and string literals."""
+    text = re.sub(r'"(?:[^"\\\n]|\\.)*"|\'(?:[^\'\\\n]|\\.)*\'', '""', text)
+    return re.sub(r"#[^\n]*", "", text)
+
+
+def test_game_scripts_name_no_openxr_only_class() -> None:
+    """Web export templates have no OpenXR module: a script that names one of
+    its classes does not load there, and an autoload that does not load takes
+    every script that refers to it down with it. The action map resource is
+    read by the OpenXR module alone, so it may use them."""
+    found: list[str] = []
+    for script in sorted(blueprints.FEATURES_DIR.glob("*/overlay/**/*")):
+        rel = script.relative_to(blueprints.FEATURES_DIR).as_posix()
+        if script.suffix not in (".gd", ".tscn") or "/overlay/tests/" in rel:
+            continue
+        for name in OPENXR_ONLY.findall(_code_only(script.read_text(encoding="utf-8"))):
+            found.append(f"{rel}: {name}")
+    assert found == []
+
+
+def test_the_openxr_check_sees_a_class_name_but_not_prose() -> None:
+    assert OPENXR_ONLY.findall(_code_only("var x: OpenXRInterface = i as OpenXRInterface")) == [
+        "OpenXRInterface", "OpenXRInterface",
+    ]
+    prose = '# No OpenXRInterface here\nvar i := XRServer.find_interface("OpenXR")\n'
+    assert OPENXR_ONLY.findall(_code_only(prose)) == []
 
 
 def test_vr_passes_catalogue_checks() -> None:
