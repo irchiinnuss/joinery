@@ -378,19 +378,23 @@ async def _run_all(
     passed: Callable[[Result], bool],
     seconds: int,
     done: Callable[[int, int], None] | None = None,
+    started: Callable[[str], None] | None = None,
+    finished: Callable[[str, Outcome], None] | None = None,
 ) -> dict[str, Outcome]:
     """Run each test; one that times out runs once more before it counts (unless a
     script error stopped it: that hangs again), and a time-out is that test's
     result alone: the others still count."""
     gate = asyncio.Semaphore(PARALLEL)
     names = list(scripts)
-    finished = [0]
+    count = [0]
 
     async def one(script: str) -> tuple[str, Outcome]:
         pair = await judged(script)
-        finished[0] += 1
+        count[0] += 1
         if done is not None:
-            done(finished[0], len(names))
+            done(count[0], len(names))
+        if finished is not None:
+            finished(*pair)
         return pair
 
     async def judged(script: str) -> tuple[str, Outcome]:
@@ -401,6 +405,8 @@ async def _run_all(
             tries += 1
             try:
                 async with gate:
+                    if started is not None:
+                        started(script)
                     got = await run(root, script)
             except TimeoutError as stopped:
                 printed = str(getattr(stopped, "output", "") or "")
@@ -444,6 +450,8 @@ async def judge(
     prepare: Importer | None = None,
     seconds: int = 120,
     done: Callable[[int, int], None] | None = None,
+    started: Callable[[str], None] | None = None,
+    finished: Callable[[str, Outcome], None] | None = None,
 ) -> Verdict:
     """Run ``scripts`` on ``stage`` and judge each failure against ``original``.
 
@@ -451,7 +459,10 @@ async def judge(
     test; ``passed`` reads its result. ``baseline`` makes a runnable copy of the
     project as it was (None when it can't) and ``prepare`` imports it, only when
     a failing test has no cached result from before the change. ``seconds`` is
-    each run's time limit, said in a time-out's result.
+    each run's time limit, said in a time-out's result. ``started`` and
+    ``finished`` hear of each test of the change as it starts and ends (one whose
+    result was cached ends at once); the runs of the project as it was are not
+    told.
     """
     cache = Cache(project)
     verdict = Verdict()
@@ -463,10 +474,12 @@ async def judge(
         if hit is not None:
             results[script] = hit
             verdict.cached.append(script)
+            if finished is not None:
+                finished(script, hit)
     fresh = [s for s in scripts if s not in results]
     if fresh:
         for script, outcome in (
-            await _run_all(stage, fresh, run, passed, seconds, done)
+            await _run_all(stage, fresh, run, passed, seconds, done, started, finished)
         ).items():
             results[script] = outcome
             cache.put(keys[script], outcome)

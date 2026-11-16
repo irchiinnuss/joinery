@@ -394,6 +394,8 @@ class ProjectGateway:
         self.runtime_root_script = False
         self._call_lock = asyncio.Lock()
         self.progress: Callable[[str], None] = lambda _text: None
+        #: A test run as it goes ({"kind": "tests"}, joinery.test_progress).
+        self.tests_report: Callable[[dict[str, Any]], None] | None = None
         #: Long phases running now: [label, started, detail], innermost last.
         self._ticks: list[list[Any]] = []
         self._ticker: asyncio.Task[None] | None = None
@@ -1045,7 +1047,9 @@ class ProjectGateway:
         except OSError:
             return None
 
-    def _scene_after(self, scene: str, path: Path, before: str) -> CallToolResult | None:
+    def _scene_after(
+        self, scene: str, path: Path, before: str
+    ) -> CallToolResult | None:
         """Put the scene back, and refuse the call, when saving it dropped a script
         or an instance the headless Godot could not load (scene_guard)."""
         try:

@@ -507,6 +507,7 @@ class Crew:
             task.role, task.error, task.step = "debugger", error, "Reading the error…"
         holder.append(task)
         lane.progress = lambda text: self._progress(task, text)
+        lane.tests_report = lambda event: self.emit({**event, "task_id": task.id})
         live = self._live
         if live is not None and not group:
             # Once the main request is idle, a task may change the scene on screen.

@@ -49,7 +49,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from joinery import auto_accept
+from joinery import auto_accept, test_progress
 from joinery.catalog import ROOT
 
 #: The host events a run reports; the rest are the sidebar's own bookkeeping.
@@ -61,6 +61,7 @@ EVENTS = frozenset(
         "step",
         "tool_activity",
         "trail",
+        "tests",
         "progress",
         "check_problems",
         "usage",
@@ -726,9 +727,15 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 def printer(as_json: bool) -> Callable[[dict[str, Any]], None]:
     """Each event as a JSON line, or a few plain lines for a person."""
 
+    seen: set[str] = set()
+
     def show(event: dict[str, Any]) -> None:
         if as_json:
             print(json.dumps(event), flush=True)
+            return
+        if event.get("kind") == "tests":
+            for line in test_progress.lines(event, seen):
+                print(line, flush=True)
             return
         line = describe(event)
         if line:

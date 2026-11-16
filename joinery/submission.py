@@ -14,8 +14,8 @@ import re
 import secrets
 import shutil
 import tomllib
-from collections.abc import Awaitable, Callable
-from contextlib import AbstractContextManager, nullcontext
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
@@ -42,6 +42,7 @@ from joinery.lockfile import check_assets
 from joinery.policy import load_denylist
 from joinery.puzzle import check as puzzle_check
 from joinery.runner import Result
+from joinery.test_progress import TestRun
 from joinery.transactions import (
     DIRECTORY,
     FileTransaction,
@@ -539,6 +540,7 @@ async def validate(
         failing=found.already_failing,
         current=not importing and godot,
         note=getattr(gateway, "progress_detail", None),
+        report=getattr(gateway, "tests_report", None),
     )
     return found
 
@@ -559,6 +561,7 @@ async def checks(
     failing: list[str] | None = None,
     current: bool = False,
     note: Callable[[str], None] | None = None,
+    report: Callable[[dict[str, Any]], None] | None = None,
 ) -> list[Problem]:
     """The art bible's measured rules beside Godot's import check, the project's tests,
     its recorded replays and its kept saves.
@@ -634,6 +637,7 @@ async def checks(
                 info=info,
                 failing=failing,
                 note=note,
+                report=report,
             )
         if replays_on:
             found += await run_replays(tx, imported=godot or testing, timed=timed)
@@ -780,6 +784,16 @@ def _checks_setting(project: Path, name: str) -> int | None:
     return None
 
 
+@contextmanager
+def _ending(run: TestRun | None) -> Iterator[None]:
+    """The test run's summary once its tests are done, or stopped."""
+    try:
+        yield
+    finally:
+        if run is not None:
+            run.end()
+
+
 def _emulated() -> bool:
     """The linux/amd64 worker runs emulated on this (arm64) host."""
     return platform.machine().lower() in {"arm64", "aarch64"}
@@ -794,6 +808,7 @@ async def run_scene_tests(
     info: list[str] | None = None,
     failing: list[str] | None = None,
     note: Callable[[str], None] | None = None,
+    report: Callable[[dict[str, Any]], None] | None = None,
 ) -> list[Problem]:
     """Run each SceneTree test headless (``godot -s``), several at once; one that
     exits non-zero, prints a ``FAIL`` line or a script error, or never quits fails.
@@ -802,6 +817,8 @@ async def run_scene_tests(
     now is a problem. One that failed before too goes in ``info`` as already
     failing. Results are cached by the content of the files each test can load
     (``joinery.scene_tests``), so a test the change can't affect never runs again.
+    ``report`` hears the run as it goes (``joinery.test_progress``): the test
+    running now, each result and the summary.
     """
 
     seconds = scene_test_seconds(tx.project if tx is not None else stage)
@@ -848,7 +865,11 @@ async def run_scene_tests(
             return
         worker_ready(got)
 
-    with timed("review_scene_tests") if timed is not None else nullcontext():
+    told = TestRun("Running the scene tests", scripts, report) if report else None
+    with (
+        timed("review_scene_tests") if timed is not None else nullcontext(),
+        _ending(told),
+    ):
         verdict = await scene_cache.judge(
             project=tx.project if tx is not None else None,
             stage=stage,
@@ -861,6 +882,12 @@ async def run_scene_tests(
             prepare=prepare,
             seconds=seconds,
             done=(lambda ran, of: note(f"{ran} of {of}")) if note else None,
+            started=told.started if told else None,
+            finished=(
+                (lambda script, got: told.finished(script, got.passed, got.output))
+                if told
+                else None
+            ),
         )
     if verdict.already and info is not None:
         info.append(scene_cache.already_note(verdict.already))

@@ -282,11 +282,14 @@ class ChatRecorder:
                 else {"type": "notice", "text": text, "level": level}
             )
             self._save(lambda: chats.append(self.project, self.chat_id, entry))
-        elif kind in {"progress", "trail"}:
-            # Each step on the work trail as it starts, so a reopened chat shows it.
+        elif kind in {"progress", "trail", "tests"}:
+            # Each step on the work trail as it starts, so a reopened chat shows it;
+            # a test run by its summary once it is done.
             if kind == "trail" and event.get("state", "running") != "running":
                 return
-            text = str(event.get("text", "")).strip()
+            if kind == "tests" and not event.get("done"):
+                return
+            text = str(event.get("summary" if kind == "tests" else "text", "")).strip()
             if text and text not in self._steps:
                 self._steps.append(text)
                 self._save(

@@ -287,6 +287,7 @@ async def _serve(
     gateway.on_kept = emit
     editor_calls: dict[str, asyncio.Future[dict[str, Any]]] = {}
     gateway.progress = lambda text: emit({"kind": "progress", "text": text})
+    gateway.tests_report = emit
     controller = TurnController(gateway, emit, agent_id)
     session_start = time.time()
 
