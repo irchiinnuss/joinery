@@ -433,6 +433,9 @@ class TurnController:
         self._sent_back: tuple[metrics.Clock, str] | None = None
         #: Prechecks this turn (they are not submit attempts).
         self.prechecks = 0
+        #: The last complete precheck's result and the stage it checked, so an
+        #: unchanged stage gets that answer again rather than the same checks.
+        self._precheck_last: tuple[Any, dict[str, Any]] | None = None
         #: The request's to-do (ADR 0060): its steps and the done-when items checked after
         #: the change passes; None for a request without one.
         self.todo: done_when.Todo | None = None
@@ -516,6 +519,7 @@ class TurnController:
         self._peer = self._peer_print = None
         self._sent_back = None
         self.prechecks = 0
+        self._precheck_last = None
         self._unplaced_said = set()
         self.request = request
         self.requests = [*self.requests, request.strip()[:160]][-10:]
@@ -1354,6 +1358,12 @@ class TurnController:
                 "attempts_left": max(MAX_SUBMITS - self.attempts, 0),
                 "next": NEXT_NOTHING,
             }
+        printed = self._fingerprint()
+        last = self._precheck_last
+        if last is not None and printed is not None and last[0] == printed:
+            repeated = dict(last[1])
+            repeated["notes"] = [*repeated.get("notes", []), PRECHECK_REPEATED]
+            return repeated
         self.prechecks += 1
         notes: list[str] = []
         with self.gateway.span(
@@ -1395,12 +1405,16 @@ class TurnController:
                     Problem("art_gate", str(checked.gate["message"]), fixable=False)
                 ]
             elif problems:
-                status, after = "problems", NEXT_PRECHECK_FIX
+                unfinished = any(
+                    p.check == "checks" and not p.fixable for p in problems
+                )
+                status = "problems"
+                after = NEXT_PRECHECK_UNFINISHED if unfinished else NEXT_PRECHECK_FIX
             else:
                 status, after = "clean", NEXT_PRECHECK_CLEAN
             attrs[metrics.OUTCOME] = status
         self._record_findings("precheck", problems, False)
-        return {
+        result = {
             "status": status,
             "changes": changes,
             "problems": [problem.as_dict() for problem in problems],
@@ -1411,6 +1425,12 @@ class TurnController:
             "attempts_left": max(MAX_SUBMITS - self.attempts, 0),
             "next": after,
         }
+        # A precheck the time cut short is not kept: the next one carries on.
+        complete = after is not NEXT_PRECHECK_UNFINISHED
+        self._precheck_last = (
+            (printed, result) if complete and printed is not None else None
+        )
+        return result
 
     async def _peer_review(
         self, summary: str, found: list[dict[str, str]], skipped: list[str]
