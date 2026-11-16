@@ -315,6 +315,7 @@ def test_the_host_records_a_new_chat_with_its_handle(
     )
     (started,) = chat_events(events)
     assert started["mode"] == "new"
+    assert started["message"] == chats.NEW_NOTE
     meta, entries = chats.read(project, started["chat_id"])
     assert meta["title"] == "Make the door wider"
     assert meta["provider"] == "codex" and meta["handle"] == "thread-1"
@@ -338,7 +339,7 @@ def test_a_saved_chat_resumes_in_the_providers_session(
         "kind": "chat",
         "chat_id": chat_id,
         "mode": "resumed",
-        "message": "",
+        "message": chats.RESUMED_NOTE,
     }
     bridge = FakeBridge.instances[-1]
     assert bridge.resumed == ["thread-1"] and bridge.prompts == ["Darker"]

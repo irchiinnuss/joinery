@@ -242,6 +242,21 @@ func _run() -> void:
 	)
 	var notices: PackedStringArray = transcript.call("notice_texts")
 	_check(notices.has("Continued with a summary; the agent starts fresh."), "%s" % [notices])
+	# A resumed chat is what the user expects: its message is for logs, not a notice.
+	(
+		backend
+		. call(
+			"_handle",
+			{
+				"kind": "chat",
+				"chat_id": OLDER,
+				"mode": "resumed",
+				"message": "Continued this chat; the agent remembers it.",
+			}
+		)
+	)
+	notices = transcript.call("notice_texts")
+	_check(not notices.has("Continued this chat; the agent remembers it."), "%s" % [notices])
 
 	# While Journeyman works the chat can't change under it.
 	chat.set_chat_busy(true)

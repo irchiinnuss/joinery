@@ -47,6 +47,10 @@ TITLE_CHARS = 80
 SUMMARY_TURNS = 8
 #: What the sidebar says when a chat continues without the provider's own session.
 SUMMARY_NOTE = "Continued with a summary; the agent starts fresh."
+#: What it says when a chat continues in the provider's own session.
+RESUMED_NOTE = "Continued this chat; the agent remembers it."
+#: What it says when a request starts a new chat.
+NEW_NOTE = "Started a new chat."
 #: What it says when a rewound chat continues.
 REWOUND_NOTE = "Rewound; the agent starts fresh from a summary of the chat so far."
 _ID = re.compile(r"^[0-9]{8}-[0-9]{6}-[0-9a-f]{6}$")

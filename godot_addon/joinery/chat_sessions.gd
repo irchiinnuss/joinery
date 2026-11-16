@@ -479,8 +479,10 @@ func _on_chat_changed(event: Dictionary) -> void:
 	_current_id = chat_id
 	if not viewing:
 		shown_id = chat_id
+	# Only a chat that continues from a summary is worth a notice: the agent starts
+	# fresh. A new or resumed chat is what the user expects.
 	var message := str(event.get("message", ""))
-	if not message.is_empty():
+	if str(event.get("mode", "")) == "summary" and not message.is_empty():
 		_transcript.call("add_notice", message, "info")
 
 

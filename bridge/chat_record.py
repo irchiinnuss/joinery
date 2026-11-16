@@ -128,7 +128,7 @@ class ChatRecorder:
             "mode": mode,
             "message": (chats.REWOUND_NOTE if rewound else chats.SUMMARY_NOTE)
             if mode == "summary"
-            else "",
+            else chats.RESUMED_NOTE,
         }
 
     def begin(
@@ -144,7 +144,12 @@ class ChatRecorder:
                     self.project, text, self.provider, self.profile
                 )
                 self._epoch = 0
-                event = {"kind": "chat", "chat_id": self.chat_id, "mode": "new"}
+                event = {
+                    "kind": "chat",
+                    "chat_id": self.chat_id,
+                    "mode": "new",
+                    "message": chats.NEW_NOTE,
+                }
             except (OSError, ValueError):
                 self._broken = True
         targets = data.get("targets", [])
