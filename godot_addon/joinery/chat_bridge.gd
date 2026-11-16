@@ -7,6 +7,9 @@ signal status_changed(state: String, detail: String)
 signal busy_changed(busy: bool)
 signal message_received(text: String)
 signal message_delta(text: String, new_message: bool)
+## A line of Journeyman's work trail (bridge/trail.py): {id, text, state: running|done|failed,
+## note: tool|thought, file, added, removed, picture}. The same for every agent.
+signal trail_event(event: Dictionary)
 signal completed(ok: bool)
 signal editor_action(event: Dictionary)
 ## Journeyman's change passed Joinery's checks and is open for review: {transaction_id,
@@ -557,6 +560,8 @@ func _handle(event: Dictionary) -> void:
 			message_received.emit(str(event.get("text", "")))
 		"progress":
 			status_changed.emit("working", str(event.get("text", "")))
+		"trail":
+			trail_event.emit(event)
 		"execution":
 			_model_name = str(event.get("name", event.get("model", "")))
 			execution_changed.emit(event)

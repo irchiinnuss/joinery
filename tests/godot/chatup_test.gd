@@ -230,7 +230,10 @@ func _run_revert_and_gate() -> void:
 	_check(held.gate_text() == "Agree the look first", "The gate card says what to agree first")
 	var waiting: Control = held.find_child("GateStep", true, false)
 	_check(
-		waiting != null and (waiting.get_child(1) as Label).text == "Waiting for the look",
+		(
+			waiting != null
+			and (waiting.find_child("Words", true, false) as Label).text == "Waiting for the look"
+		),
 		"The current step waits for the look"
 	)
 	_check(
@@ -254,7 +257,7 @@ func _run_revert_and_gate() -> void:
 	)
 	_check(held.state == "sending" and not held._gate.visible, "The card resumes in place")
 	_check(
-		(waiting.get_child(1) as Label).text == "Look approved",
+		(waiting.find_child("Words", true, false) as Label).text == "Look approved",
 		"The step says the look is approved"
 	)
 	_check(chat._transcript.caption_text() == "Look approved", "Approval is confirmed")

@@ -71,6 +71,11 @@ var bridge: Object:
 		if bridge != null and bridge.has_signal("playtest_event"):
 			if not bridge.is_connected("playtest_event", on_playtest):
 				bridge.connect("playtest_event", on_playtest)
+		# Journeyman's work trail goes to its request's card.
+		if bridge != null and bridge.has_signal("trail_event") and dock != null:
+			var trail := Callable(dock, "add_trail")
+			if not bridge.is_connected("trail_event", trail):
+				bridge.connect("trail_event", trail)
 		if variants != null:
 			variants.call("follow", bridge)
 		if todo != null:
@@ -241,6 +246,12 @@ func on_event(event: Dictionary) -> void:
 		"progress":
 			var each := card(id)
 			if each != null:
+				each.call("set_step", str(event.get("text", "")))
+		"trail":
+			# A task's call as it starts is its live line, as on Journeyman's own card.
+			var each := card(id)
+			var starting := str(event.get("state", "")) == "running"
+			if each != null and starting and str(event.get("note", "")) != "thought":
 				each.call("set_step", str(event.get("text", "")))
 	_sync()
 

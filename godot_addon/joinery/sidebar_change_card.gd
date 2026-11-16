@@ -30,9 +30,10 @@ extends VBoxContainer
 ## A turn keeps one rhythm: the bubble, the progress (status line and steps), the thumbnail and
 ## the error are SPACE.3 apart (JoineryStack); rows inside the progress stay SPACE.1 apart.
 ##
-## While the turn works only its latest step shows, under the status line's timer: each new
-## step replaces the one before (one live activity line, not a growing list). Opening the
-## folded line shows them all.
+## While the turn works its trail shows under the status line (sidebar_trail.gd): each tool
+## call as a short line as it happens, newest first, the agent's short thoughts between them,
+## an edit's +/− line count and a picture that landed. Only the newest live line pulses.
+## Opening the folded line shows the whole trail.
 ##
 ## When the turn ends the steps fold away behind the reply's timing line ("Completed in 1:12"),
 ## which the transcript moves into the card's status line ([method adopt_timing]); opening it
@@ -70,39 +71,13 @@ const REVIEW_ROW := preload("sidebar_review_row.gd")
 const ART_GATE := preload("sidebar_art_gate.gd")
 const DEPARTURES := preload("sidebar_departures.gd")
 const UNPLAYED := preload("sidebar_unplayed.gd")
+const TRAIL := preload("sidebar_trail.gd")
 ## Apps recognised in step text; the card shows each one it sees once.
 const APPS := ["Blender", "Krita", "GIMP", "Material Maker", "Surge XT", "SuperCollider", "Godot"]
 ## Shown instead of Revert once the change's restore data is gone.
 const TOO_OLD := "Too old to revert"
 ## Step lines that only say the assistant is busy; the footer shows these, not the card.
 const GENERIC_STEPS := ["Thinking…", "Preparing your request…", "Sending…"]
-## Step verbs whose past tense is not "-ed".
-const IRREGULAR := {
-	"beginning": "began",
-	"bringing": "brought",
-	"building": "built",
-	"choosing": "chose",
-	"cutting": "cut",
-	"drawing": "drew",
-	"finding": "found",
-	"getting": "got",
-	"giving": "gave",
-	"holding": "held",
-	"keeping": "kept",
-	"laying": "laid",
-	"leaving": "left",
-	"making": "made",
-	"putting": "put",
-	"reading": "read",
-	"running": "ran",
-	"seeing": "saw",
-	"sending": "sent",
-	"setting": "set",
-	"splitting": "split",
-	"taking": "took",
-	"thinking": "thought",
-	"writing": "wrote",
-}
 ## Outcome kind -> [icon, tint role]. "auto" is a change Joinery kept without asking
 ## (`[agents] auto_accept`): a quiet line, "Accepted automatically", with Undo.
 const OUTCOMES := {
@@ -140,7 +115,8 @@ var _failure_text: Label
 var _retry: Button
 var _reason := ""
 var _retry_allowed := true
-var _steps: VBoxContainer
+## The work trail: steps, tool calls and thoughts, newest first.
+var _steps: TRAIL
 ## Each part of the request and what was done about it, ticked (set_done).
 var _done_list: VBoxContainer
 var _departures: DEPARTURES
@@ -159,7 +135,7 @@ var _too_old: Label
 var _revertible := true
 var _gate: ART_GATE
 ## The "Waiting for the look" step while the gate holds the request.
-var _gate_step: HBoxContainer
+var _gate_step: Control
 var _error: Label
 var _summary: Button
 ## "✓" leading the status line once the work is done.
@@ -277,8 +253,7 @@ func _init(text := "", context: Array = []) -> void:
 	UI.bind_height(_retry, "xs")
 	_failure.add_child(_retry)
 	_failure.hide()
-	_steps = VBoxContainer.new()
-	_steps.theme_type_variation = "JoineryTight"
+	_steps = TRAIL.new()
 	_steps.hide()
 	_progress.add_child(_steps)
 	_done_list = VBoxContainer.new()
@@ -399,59 +374,58 @@ func set_sending() -> void:
 func add_step(text: String, detail := "") -> void:
 	set_sent()
 	var line := text.strip_edges()
+	_note_apps(line)
+	_sync_activity()
+	if line.is_empty() or line == _last_step or line in GENERIC_STEPS:
+		return
+	_last_step = line
+	# While a tool call runs, its progress is the quiet line under it.
+	if detail.is_empty() and _steps.on_progress(line):
+		_sync_activity()
+		return
+	_steps.add_line(line, detail)
+	_show_all_steps(false)
+	_steps.show()
+	_sync_activity()
+
+
+## A line of the work trail from the host: {id, text, state, note, file, added, removed,
+## picture} (bridge/trail.py). Apps it names join the status line.
+func add_trail(event: Dictionary) -> void:
+	if state in ["sending", "failed"]:
+		set_sent()
+	_note_apps(str(event.get("text", "")))
+	_steps.add_call(event)
+	if _fold.visible or _summary != null:
+		_sync_activity()
+		return
+	_show_all_steps(false)
+	_steps.visible = _steps.get_child_count() > 0
+	_sync_activity()
+
+
+func _note_apps(line: String) -> void:
 	for app: String in APPS:
 		if line.contains(app) and not _seen_apps.has(app):
 			_seen_apps.append(app)
 			_apps.add_child(_app_badge(app))
 			_apps.show()
-	_sync_activity()
-	if line.is_empty() or line == _last_step or line in GENERIC_STEPS:
-		return
-	_last_step = line
-	_tick_current("success")
-	var row := _row(_steps)
-	var cell := CenterContainer.new()
-	cell.set_meta("step_cell", true)
-	STYLE.on_theme(
-		cell,
-		func() -> void:
-			var side := float(UI_THEME.space(cell, 4))
-			cell.custom_minimum_size = Vector2(side, side)
-	)
-	cell.add_child(UI.status_dot("working"))
-	row.add_child(cell)
-	var label := UI.label(line, "JoineryCaption")
-	label.tooltip_text = detail if not detail.is_empty() else line
-	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	label.mouse_filter = Control.MOUSE_FILTER_PASS
-	row.add_child(label)
-	_show_all_steps(false)
-	_steps.show()
-	_sync_activity()
-	UI_MOTION.stagger([row])
 
 
-## All the steps ([param all], when the folded line is opened), or only the latest one.
+## The whole trail ([param all], when the folded line is opened), or the newest lines.
 func _show_all_steps(all: bool) -> void:
-	var count := _steps.get_child_count()
-	for index: int in count:
-		(_steps.get_child(index) as Control).visible = all or index == count - 1
+	_steps.show_all(all)
 
 
-## The steps on show, for tests.
+## The trail's lines on show, newest first, for tests.
 func visible_steps() -> PackedStringArray:
-	var shown := PackedStringArray()
-	for row: Node in _steps.get_children():
-		if (row as Control).visible and _steps.visible:
-			# Its dot, then its words (the live one may also carry the clock).
-			shown.append(str((row.get_child(1) as Label).text))
-	return shown
+	return _steps.texts() if _steps.visible else PackedStringArray()
 
 
-## True while [param text] is the live step on this card, so nothing else needs to repeat it.
+## True while [param text] is the live line on this card (or the progress under it), so
+## nothing else needs to repeat it.
 func shows_step(text: String) -> bool:
-	return state == "working" and _steps.visible and text.strip_edges() == _last_step
+	return state == "working" and _steps.visible and _steps.shows(text.strip_edges())
 
 
 ## Take the reply's timing line ([param summary], a disclosure button) and its [param details]:
@@ -539,7 +513,7 @@ func set_ready(media: Array = [], review: Object = null) -> void:
 
 ## The run is done: its steps fold into "5 steps · 0:14 ›" on the status line.
 func _fold_steps() -> void:
-	var count := _steps.get_child_count()
+	var count := _steps.step_count()
 	if count == 0 or _summary != null:
 		return
 	var words := "%d step%s" % [count, "" if count == 1 else "s"]
@@ -750,23 +724,8 @@ func show_art_gate(_app := "", look: Dictionary = {}) -> void:
 		_column.add_child(_gate)
 	_gate.show_look(look)
 	if _gate_step == null:
-		_gate_step = _row(_steps)
-		_gate_step.name = "GateStep"
-		_gate_step.set_meta("gate_step", true)
-		var cell := CenterContainer.new()
-		STYLE.on_theme(
-			cell,
-			func() -> void:
-				var side := float(UI_THEME.space(cell, 4))
-				cell.custom_minimum_size = Vector2(side, side)
-		)
-		cell.add_child(UI.status_dot("working"))
-		_gate_step.add_child(cell)
-		var label := UI.label("Waiting for the look", "JoineryCaption")
-		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		_gate_step.add_child(label)
+		_gate_step = _steps.add_gate("Waiting for the look")
 		_steps.show()
-		UI_MOTION.breathe(_gate_step)
 	_column.move_child(_gate, _column.get_child_count() - 1)
 	_gate.show()
 	UI_MOTION.fade_in(_gate)
@@ -788,15 +747,7 @@ func _look_approved() -> void:
 	if _gate != null and _gate.visible:
 		UI_MOTION.exit(_gate, null, Callable(), false)
 	if _gate_step != null:
-		UI_MOTION.stop(_gate_step)
-		_gate_step.modulate.a = 1.0
-		_gate_step.remove_meta("gate_step")
-		var cell := _gate_step.get_child(0)
-		for dot: Node in cell.get_children():
-			cell.remove_child(dot)
-			dot.queue_free()
-		cell.add_child(_icon("success", "success"))
-		(_gate_step.get_child(1) as Label).text = "Look approved"
+		_steps.end_gate(_gate_step, "Look approved")
 		_gate_step = null
 
 
@@ -881,7 +832,7 @@ func _sync_activity() -> void:
 ## While Journeyman works, the clock rides at the end of the live step's line; before the first
 ## step, and once the steps fold, it is back on the status line.
 func _place_timer() -> void:
-	var live := _steps.get_child(-1) as Control if _steps.get_child_count() > 0 else null
+	var live := _steps.live_line()
 	var inline := live != null and _steps.visible and not _fold.visible
 	var target: Node = live if inline else _status
 	if _timer.get_parent() == target:
@@ -900,54 +851,12 @@ static func _any_visible(parent: Node) -> bool:
 
 
 func _tick_current(kind: String) -> void:
-	if _steps.get_child_count() == 0:
-		return
-	var row := _steps.get_child(-1)
-	if row.has_meta("gate_step"):
-		return
-	var cell := row.get_child(0) as CenterContainer
-	if cell == null or cell.get_child_count() == 0 or not cell.get_child(0) is UI.StatusDot:
-		return
-	var dot := cell.get_child(0)
-	cell.remove_child(dot)
-	dot.queue_free()
-	var spec: Array = OUTCOMES.get(kind, OUTCOMES["success"])
-	cell.add_child(_icon(spec[0], spec[1]))
-	# A finished step reads as done: past tense on success, never a trailing ellipsis.
-	var label := row.get_child(1) as Label
-	if label != null:
-		label.text = past_tense(label.text) if kind == "success" else _settled(label.text)
-		label.tooltip_text = label.text
+	_steps.settle(kind)
 
 
-## "Exporting the model…" -> "Exported the model". Lines that don't start with a verb in
-## "-ing" only lose their trailing ellipsis.
+## "Exporting the model…" -> "Exported the model" (sidebar_trail.gd).
 static func past_tense(text: String) -> String:
-	var line := _settled(text)
-	var space := line.find(" ")
-	var word := line if space < 0 else line.substr(0, space)
-	var lower := word.to_lower()
-	var stem := lower.trim_suffix("ing")
-	if stem == lower or stem.length() < 2 or not RegEx.create_from_string("[aeiouy]").search(stem):
-		return line
-	var done: String = IRREGULAR.get(lower, "")
-	if done.is_empty():
-		if stem.ends_with("y") and not "aeiou".contains(stem[-2]):
-			done = stem.left(-1) + "ied"
-		elif stem.ends_with("e"):
-			done = stem + "d"
-		else:
-			done = stem + "ed"
-	if word[0] != lower[0]:
-		done = done[0].to_upper() + done.substr(1)
-	return done + line.substr(word.length())
-
-
-static func _settled(text: String) -> String:
-	var line := text.strip_edges()
-	for tail: String in ["…", "..."]:
-		line = line.trim_suffix(tail)
-	return line.strip_edges()
+	return TRAIL.past_tense(text)
 
 
 func _icon(icon_name: String, role: String) -> TextureRect:

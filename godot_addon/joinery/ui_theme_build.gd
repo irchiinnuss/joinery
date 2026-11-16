@@ -153,6 +153,9 @@ static func _text_types(t: Theme, c: Dictionary, m: Dictionary, context: Node) -
 		"JoineryError": [size, c["danger"], null],
 		"JoineryMuted": [size, c["text_muted"], null],
 		"JoineryNumeric": [caption, c["text_muted"], UI_THEME.numeric_font(context)],
+		# An edit's lines added and removed ("+12 −3") on the work trail.
+		"JoineryAddedNumeric": [caption, c["success"], UI_THEME.numeric_font(context)],
+		"JoineryRemovedNumeric": [caption, c["danger"], UI_THEME.numeric_font(context)],
 		"JoinerySection": [caption, c["text_muted"], semibold],
 		"JoineryMono": [size, c["text"], UI_THEME.mono_font(context)],
 	}

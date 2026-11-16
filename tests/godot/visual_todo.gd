@@ -2,8 +2,9 @@ extends RefCounted
 ## The visual suite's to-do screens (ADR 0060): a request's steps and "done when" items waiting
 ## for Go, then the items checked, then the card minimised to its one line. [param suite] is
 ## visual_sidebar_test.gd, whose `_shot` these use; the sidebar's review shows the same results
-## (visual_review.gd).
+## (visual_review.gd). The work trail's screens follow (visual_trail.gd).
 
+const TRAIL := preload("visual_trail.gd")
 const STEPS := [
 	"Put a lever beside the vault gate",
 	"Open the gate when the lever is pulled",
@@ -71,3 +72,4 @@ static func shots(suite: Variant, light: bool, width: int, chat: Control) -> voi
 	card.free()
 	tasks.set("todo_card", null)
 	tasks.hide()
+	await TRAIL.shots(suite, light, width, chat)
