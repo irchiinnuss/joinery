@@ -1,0 +1,82 @@
+# Request size: before and after the request-size cuts
+
+Source: 17 Claude Code transcripts in `/Users/ninjacornix/.claude/projects/-Users-ninjacornix-ironworks3` (29 turns). Context per model call, summed (cache reads included); fresh start = 23 k prefix + 750 digest tokens (its ceiling). Light: tokens moved to the light model, not saved.
+
+| Session | Turn | Kind | Calls | First k (before → all) | before M | fresh M | resume M | split M | trim M | all M |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 18c3f123 | You are Joinery's reviewer. Another agent made the | reviewer | 3 | 86 → 86 | 0.26 | 0.26 | 0.26 | 0.26 | 0.26 | 0.26 |
+| 9b12e17e | You are Joinery's reviewer. Another agent made the | reviewer | 3 | 86 → 86 | 0.27 | 0.27 | 0.27 | 0.27 | 0.27 | 0.27 |
+| 3640d04d | …cutscenes, saves beyond what the feature provides. | fresh | 5 | 23 → 23 | 0.16 | 0.16 | 0.16 | 0.16 | 0.16 | 0.16 |
+| 3640d04d | …he exit switch. Leave the art bible alone for now. | continued | 8 | 39 → 39 | 0.37 | 0.37 | 0.37 | 0.37 | 0.37 | 0.37 |
+| 367a7027 | You are Joinery's reviewer. Another agent made the | reviewer | 8 | 90 → 90 | 0.80 | 0.80 | 0.80 | 0.80 | 0.80 | 0.80 |
+| db7810d8 | …ps and enemies will go. Replace the starter level. | fresh | 15 | 22 → 22 | 0.93 | 0.93 | 0.93 | 0.65 | 0.92 | 0.65 |
+| db7810d8 | Joinery checked the change you left and it did not | continuation | 25 | 104 → 25 | 3.11 | 1.15 | 3.11 | 2.23 | 3.10 | 1.06 |
+| db7810d8 | …e-load checks to the new level and save version 2. | follow_up | 25 | 150 → 28 | 4.53 | 2.56 | 4.53 | 1.50 | 4.46 | 1.47 |
+| c57f71cb | You are Joinery's reviewer. Another agent made the | reviewer | 6 | 90 → 90 | 0.57 | 0.57 | 0.57 | 0.57 | 0.57 | 0.57 |
+| 8ef416ae | …alth hits 0 and restarting at the last checkpoint. | fresh | 13 | 22 → 22 | 0.66 | 0.66 | 0.66 | 0.46 | 0.66 | 0.45 |
+| 8ef416ae | …ady). Go ahead and make the changes you described. | follow_up | 7 | 68 → 39 | 0.61 | 0.61 | 0.61 | 0.40 | 0.61 | 0.40 |
+| 1775b7ff | …f left click to E so it doesn't clash with firing. | fresh | 24 | 22 → 22 | 1.92 | 1.92 | 1.92 | 1.22 | 1.90 | 1.20 |
+| 1775b7ff | … in the game now (attack on left click, use on E). | continued | 17 | 127 → 24 | 2.84 | 1.08 | 2.84 | 1.11 | 2.79 | 0.84 |
+| 16cc4104 | …udges at the existing Drudge markers in the level. | fresh | 29 | 22 → 22 | 2.30 | 2.30 | 2.30 | 1.83 | 2.28 | 1.81 |
+| 16cc4104 | …existing Wisp markers (Ore Yard and the catwalks). | continued | 13 | 129 → 24 | 2.01 | 0.65 | 2.01 | 0.82 | 1.98 | 0.56 |
+| afd810ec | You are Joinery's reviewer. Another agent made the | reviewer | 5 | 94 → 94 | 0.50 | 0.50 | 0.50 | 0.50 | 0.50 | 0.50 |
+| f7e1ecfc | … 1 texture tile per 2 m so the pixels stay chunky. | fresh | 27 | 23 → 23 | 3.00 | 3.00 | 3.00 | 3.00 | 2.98 | 2.98 |
+| 7c981d5d | …score, with a short HUD message when you grab one. | fresh | 28 | 23 → 23 | 2.38 | 2.38 | 2.38 | 1.68 | 2.34 | 1.65 |
+| 7c981d5d | …hows time, kills and whether you found the secret. | continued | 4 | 152 → 24 | 0.49 | 0.11 | 0.49 | 0.40 | 0.48 | 0.11 |
+| 7c981d5d | …hows time, kills and whether you found the secret. | continued | 21 | 179 → 50 | 4.31 | 1.74 | 4.31 | 1.77 | 4.21 | 1.16 |
+| 7c981d5d | …lease finish the progression change and submit it. | resume | 8 | 271 → 24 | 2.23 | 1.20 | 0.25 | 0.88 | 2.18 | 0.25 |
+| ae2b2fe4 | You are Joinery's reviewer. Another agent made the | reviewer | 8 | 92 → 92 | 0.82 | 0.82 | 0.82 | 0.82 | 0.82 | 0.82 |
+| 4715b8f3 | You are Joinery's reviewer. Another agent made the | reviewer | 6 | 87 → 87 | 0.55 | 0.55 | 0.55 | 0.55 | 0.55 | 0.55 |
+| 5da7ba97 | …nd. Also a low furnace-hum ambience for the level. | fresh | 21 | 23 → 23 | 1.39 | 1.39 | 1.39 | 0.86 | 1.38 | 0.86 |
+| 5da7ba97 | Joinery checked the change you left and it did not | continuation | 3 | 109 → 25 | 0.34 | 0.08 | 0.34 | 0.23 | 0.33 | 0.08 |
+| 5da7ba97 | …ry on: render the sounds, hook them up and submit. | resume | 21 | 113 → 30 | 3.54 | 1.78 | 1.65 | 2.81 | 3.52 | 1.78 |
+| 5da7ba97 | …op, with a music volume that follows the settings. | continued | 15 | 207 → 24 | 3.55 | 0.81 | 2.21 | 1.54 | 3.52 | 0.65 |
+| a630598f | You are Joinery's reviewer. Another agent made the | reviewer | 8 | 91 → 91 | 0.82 | 0.82 | 0.82 | 0.82 | 0.82 | 0.82 |
+| 14a9e5ab | …the same style, working with mouse and controller. | fresh | 30 | 23 → 23 | 2.75 | 2.75 | 2.75 | 1.87 | 2.73 | 1.86 |
+| **all** | | | | | **47.99** | **32.21** | **42.78** | **30.36** | **47.48** | **24.93** |
+
+| Cut | Total M | Saved M | Saved % | Largest turn M |
+|---|---|---|---|---|
+| before | 47.99 | 0.00 | 0% | 4.53 |
+| fresh | 32.21 | 15.78 | 33% | 3.00 |
+| resume | 42.78 | 5.21 | 11% | 4.53 |
+| split | 30.36 | 17.63 | 37% | 3.00 |
+| trim | 47.48 | 0.51 | 1% | 4.46 |
+| all | 24.93 | 23.06 | 48% | 2.98 |
+
+Light model (routine fixes after checks, with `light_model` set): 1.06 M of the remaining 24.93 M move off the main model.
+
+## Reading it
+
+Generated by `uv run python evals/request_size.py --out evals/results/request-size.md`
+from Ironworks run 3 (the 0.7.0 baseline, 48.1 M in the run report; 47.99 M here, the
+agent and reviewer contexts without output). No agent was run. Each recorded model
+call is replayed as it was (same calls, same reads); a cut only takes out of its
+context what the cut would not have sent.
+
+- **fresh** (a new request in a big session starts from the digest; a fix after
+  failed checks in a big session starts from the digest and the staged files):
+  47.99 → 32.21 M (−33%). The continued requests that started at 127-207 k now start
+  at 24 k: Rivet Driver 2.84 → 1.08 M, Spark Wisp 2.01 → 0.65 M, Music 3.55 → 0.81 M.
+  The blockout's fix after failed tests 3.11 → 1.15 M.
+- **resume** (a turn that carries on a stopped one starts from the digest):
+  −5.21 M. The keycards "please finish" turn 2.23 → 0.25 M, the SFX "Docker is running
+  again, carry on" turn 3.54 → 1.65 M.
+- **split** (a blockout or a to-do of 3+ steps is built in a fresh session from the
+  plan): −17.63 M (−37%). The blockout: 0.93 + 3.11 + 4.53 = 8.57 M → 0.65 + 2.23 + 1.50 M.
+  Optimistic: the build may read again a little of what the planning read.
+- **trim** (short forms of check reports, operations, blockouts, setup): −0.51 M.
+  precheck results 55 k → 25 k characters, submit 26 k → 13 k, project-tool results
+  331 k → 276 k. Small, because the even cut to 6 k characters already applied; the
+  biggest results left are the agent's own shell reads (527 k characters), which
+  Joinery does not see.
+- **light**: tokens are the same; 1.06 M of fix work (routine checks only) moves to
+  the light model when `[agents] light_model` is set.
+- **all**: 47.99 → 24.93 M (−48%). The largest turn is 2.98 M (Krita textures, a
+  fresh request). The blockout, its fix and the follow-up: 8.57 → 3.18 M (plus its
+  reviewer, 0.80 M, unchanged). Goal: full build 25-30 M, no request over 4 M.
+
+The digest is counted at its 750-token ceiling; the real one is usually shorter.
+Follow-ups the user marks (`joinery run --chat`, "Yes, go ahead") keep their session
+when it finished well, as before; they shrink here only through what the cuts took
+out of that session earlier.
