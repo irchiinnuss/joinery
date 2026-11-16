@@ -1182,6 +1182,14 @@ puts the game in VR (headset view, menu panel, the rig on the player), and
 `VR.release_interface(why)` when it ends gives the player their desktop
 controls and camera back.
 
+A few things to know for WebXR. The hands read the stick as `thumbstick` when
+there is no OpenXR action map, and no "No VR headset found" notice shows in a web
+build, where the player has not had a chance to enter VR yet (`VR.desktop_notice
+= false` turns it off anywhere). Godot frees the session's textures before it
+sends `session_ended`, so call `VR.release_interface()` from the XRSession's own
+`end` event on the page, which runs first; from `session_ended` the window stays
+black.
+
 ### References and design documents
 
 Your own pictures and design documents can come with a new game, or be added

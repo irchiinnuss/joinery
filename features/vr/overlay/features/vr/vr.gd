@@ -57,12 +57,18 @@ var mode: StringName = DESKTOP
 ## Godot's OpenXR interface (null when the engine has none), or the interface
 ## handed over with adopt_interface() until release_interface().
 var interface: XRInterface = null
+## Whether the game says once that it found no headset and plays on the desktop. A
+## project that offers its own way into VR can turn it off.
+var desktop_notice: bool = true
 ## The rig carried on the local player, or null.
 var rig: Node3D = null
 ## Why the game is on the desktop ("" in VR).
 var reason: String = ""
 
 var _noticed: bool = false
+## The root viewport's object picking before XR, put back on the desktop: Godot cannot
+## pick physics objects in stereo and turns it off with a warning.
+var _picking_before: bool = true
 var _panel: Node3D = null
 var _pending_yaw: Variant = null
 
@@ -117,6 +123,11 @@ func adopt_interface(started: XRInterface) -> void:
 	if level != null:
 		var player: Node3D = Game.local_player() as Node3D
 		attach_rig(player if player != null else level as Node3D)
+	# A session started from a menu ("Enter VR" in the pause menu) sends no
+	# menu_opened: put the panel in front of the player once the headset's pose has
+	# reached the rig's camera, a frame later.
+	if Menus.is_open():
+		get_tree().process_frame.connect(_place_panel, CONNECT_ONE_SHOT)
 
 
 ## Leaves XR after a session that was started elsewhere has ended: back to the
@@ -167,10 +178,20 @@ func _switch(to: StringName, why: String) -> void:
 	var was_xr: bool = mode == XR
 	mode = to
 	reason = why
-	if mode == XR:
-		get_viewport().use_xr = true
-	elif was_xr:
-		get_viewport().use_xr = false
+	var viewport: Viewport = get_viewport()
+	if mode == XR and not was_xr:
+		_picking_before = viewport.physics_object_picking
+		viewport.physics_object_picking = false
+		viewport.use_xr = true
+	elif mode != XR and was_xr:
+		viewport.use_xr = false
+		viewport.physics_object_picking = _picking_before
+		# Leaving XR keeps the headset's per-eye size and two views on the root viewport,
+		# which the 2D pass and the copy to the screen cannot draw: setting the window's
+		# content scale size again sizes it to the window anew.
+		var window: Window = get_window()
+		if window != null:
+			window.content_scale_size = window.content_scale_size
 	if is_active() and _panel == null:
 		_panel = MenuPanel.new()
 		_panel.name = "MenuPanel"
@@ -192,7 +213,11 @@ func _match_refresh_rate() -> void:
 
 
 func _notice() -> void:
-	if _noticed or is_active():
+	if _noticed or is_active() or not desktop_notice:
+		return
+	# A web build can still enter VR through WebXR, and a browser starts a session only
+	# from the player's own click: nobody can be in VR yet, so no notice.
+	if XRServer.find_interface("WebXR") != null:
 		return
 	_noticed = true
 	if QUIET_ARG in OS.get_cmdline_user_args():
@@ -206,6 +231,10 @@ func _notice() -> void:
 
 func _on_menu_opened(_menu: Control) -> void:
 	_notice()
+	_place_panel()
+
+
+func _place_panel() -> void:
 	if _panel != null:
 		_panel.call(&"show_in_front", rig)
 

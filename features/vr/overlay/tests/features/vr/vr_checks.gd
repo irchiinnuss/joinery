@@ -202,10 +202,35 @@ func _check_rig_scene() -> void:
 			vignette != null and vignette.material_override is ShaderMaterial,
 			"the vignette is a shader"
 		)
+	await _check_stick_names(rig)
 	rig.queue_free()
 	await h.physics_frames(1)
 	if camera_before != null and is_instance_valid(camera_before):
 		camera_before.current = true
+
+
+## OpenXR reports the stick under the action map's `primary`; WebXR has no action map
+## and calls it `thumbstick`. The hand reads either.
+func _check_stick_names(rig: Node3D) -> void:
+	var hand: XRController3D = rig.get_node_or_null(^"LeftHand") as XRController3D
+	if hand == null or bool(hand.call(&"is_simulated")):
+		return
+	var tracker := XRPositionalTracker.new()
+	tracker.name = &"left_hand"
+	tracker.type = XRServer.TRACKER_CONTROLLER
+	XRServer.add_tracker(tracker)
+	await h.process_frames(1)
+	tracker.set_input(&"thumbstick", Vector2(0.0, 0.75))
+	h.expect(
+		hand.call(&"stick") == Vector2(0.0, 0.75),
+		"a WebXR stick (thumbstick) moves the hand's stick"
+	)
+	tracker.set_input(&"primary", Vector2(0.5, 0.0))
+	h.expect(
+		hand.call(&"stick") == Vector2(0.5, 0.0), "the OpenXR action map's primary comes first"
+	)
+	XRServer.remove_tracker(tracker)
+	await h.process_frames(1)
 
 
 func _check_hand_grab() -> void:
@@ -358,8 +383,13 @@ func _check_adopt_and_release() -> void:
 	VR.release_interface("nothing to release")
 	h.expect(h.fire_count(changes) == 0, "releasing with nothing adopted does nothing")
 	h.expect(VR.mode == VR.DESKTOP and VR.reason == desktop_reason, "and keeps the reason")
+	var picking: bool = tree.root.physics_object_picking
 	var started: XRInterface = StartedElsewhere.new()
 	VR.adopt_interface(started)
+	h.expect(
+		not tree.root.physics_object_picking,
+		"object picking is off in stereo, so Godot never warns"
+	)
 	h.expect(VR.mode == VR.XR, "an interface started elsewhere puts the game in XR")
 	h.expect(VR.interface == started and VR.reason.is_empty(), "and is the interface in use")
 	h.expect(tree.root.use_xr, "the game renders to it")
@@ -381,6 +411,7 @@ func _check_adopt_and_release() -> void:
 	h.expect(VR.mode == VR.DESKTOP, "releasing it returns to the desktop")
 	h.expect(VR.reason == "the session ended", "and records why")
 	h.expect(VR.interface == null and not tree.root.use_xr, "the window renders again")
+	h.expect(tree.root.physics_object_picking == picking, "and picks objects as it did before")
 	h.expect(VR.panel() == null and VR.rig == null, "without the panel or the rig")
 	h.expect(h.fire_count(changes) == 2, "mode_changed fires once on releasing")
 	VR.release_interface("released twice")
@@ -401,6 +432,26 @@ func _check_adopt_and_release() -> void:
 	await h.hold(&"move_forward", 30)
 	await h.physics_frames(10)
 	h.expect(player.global_position.distance_to(start) > 0.3, "the desktop controls play again")
+	await _check_adopt_with_menu_open(started)
+
+
+## "Enter VR" in the pause menu: the session starts with a menu open, so no menu_opened
+## follows, and the panel still has to stand in front of the player.
+func _check_adopt_with_menu_open(started: XRInterface) -> void:
+	Menus.open_pause()
+	await h.process_frames(2)
+	VR.adopt_interface(started)
+	await h.process_frames(3)
+	var panel: Node3D = VR.panel()
+	var camera: Node3D = null if VR.rig == null else VR.rig.get_node_or_null(^"XRCamera3D")
+	h.expect(panel != null and camera != null, "adopting with a menu open makes the panel")
+	if panel != null and camera != null:
+		var flat: Vector3 = panel.global_position - camera.global_position
+		flat.y = 0.0
+		h.expect_near(flat.length(), 1.5, 0.1, "and stands it in front of the player at once")
+	VR.release_interface("the session ended")
+	Menus.close_all()
+	await h.process_frames(2)
 
 
 # --- the simulated rig -------------------------------------------------------

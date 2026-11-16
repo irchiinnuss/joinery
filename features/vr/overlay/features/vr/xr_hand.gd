@@ -97,7 +97,14 @@ func is_simulated() -> bool:
 func stick() -> Vector2:
 	if _simulated:
 		return _sim_stick
-	return get_vector2(&"primary")
+	# `primary` comes from the OpenXR action map; Godot's WebXR interface has no action
+	# map and names a controller's stick `thumbstick` (a touchpad `touchpad`).
+	var value: Vector2 = get_vector2(&"primary")
+	if value == Vector2.ZERO:
+		value = get_vector2(&"thumbstick")
+	if value == Vector2.ZERO:
+		value = get_vector2(&"touchpad")
+	return value
 
 
 func grip_down() -> bool:
