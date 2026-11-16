@@ -28,6 +28,7 @@ from joinery import (
 )
 from joinery.blockout import stage as blockout_stage
 from joinery.debugging import diagnosis_from
+from joinery.errors import DONT_REPEAT, said
 from joinery.gateway import ProjectGateway
 from joinery.mcp_runtime import PolicyStop
 from joinery.peer_review import notes_from
@@ -328,6 +329,7 @@ class GatewayRPC:
         task = asyncio.current_task()
         if task is not None:
             self.tasks.add(task)
+        method: Any = "call"
         try:
             line = await asyncio.wait_for(reader.readline(), timeout=30)
             request = json.loads(line)
@@ -715,7 +717,7 @@ class GatewayRPC:
             RuntimeError,
             TimeoutError,
         ) as exc:
-            response = {"ok": False, "error": str(exc)}
+            response = {"ok": False, "error": said(exc, f"Joinery's {method}")}
         except asyncio.CancelledError:
             writer.close()
             with contextlib.suppress(OSError):
@@ -742,6 +744,30 @@ class GatewayRPC:
         if not self.inspection_only and not self.worker:
             await self.gateway.close()
         shutil.rmtree(self.directory, ignore_errors=True)
+
+
+#: How long a tool waits for the gateway's answer. The checks behind precheck and
+#: submit keep within ``submission.CHECK_SECONDS`` so they answer before this.
+RPC_SECONDS = 900
+#: Methods that run Joinery's checks: a time-out says so, and not to repeat them.
+CHECK_METHODS = frozenset({"precheck", "submit"})
+
+
+def no_answer(method: str, seconds: int) -> str:
+    """What the agent is told when the gateway gave no answer in time."""
+    if method in CHECK_METHODS:
+        return (
+            f"Joinery's {method} gave no answer within {seconds} s: its checks (Godot's "
+            "import and the project's tests in the offline worker) were still running "
+            "in the editor and may still be. " + DONT_REPEAT + " A second call waits "
+            "for the first to finish. Tell the user the checks are taking too long; "
+            "tests that already passed are cached, so a later submit_for_review "
+            "carries on from where these stopped."
+        )
+    return (
+        f"Joinery's {method} gave no answer within {seconds} s; it may still be "
+        "running in the editor. Don't repeat the same call unchanged."
+    )
 
 
 async def rpc(path: Path, method: str, params: dict[str, Any]) -> dict[str, Any]:
@@ -772,9 +798,22 @@ async def rpc(path: Path, method: str, params: dict[str, Any]) -> dict[str, Any]
     try:
         writer.write((json.dumps(payload) + "\n").encode())
         await writer.drain()
-        data = json.loads(await asyncio.wait_for(reader.readline(), timeout=900))
+        try:
+            line = await asyncio.wait_for(reader.readline(), timeout=RPC_SECONDS)
+        except TimeoutError:
+            raise RuntimeError(no_answer(method, RPC_SECONDS)) from None
+        if not line:
+            raise RuntimeError(
+                f"Joinery's {method} closed without an answer: the editor's project "
+                "gateway stopped or restarted while it ran. Check that the editor is "
+                "still open before calling it again."
+            )
+        data = json.loads(line)
         if not data["ok"]:
-            raise RuntimeError(data["error"])
+            raise RuntimeError(
+                str(data.get("error") or "").strip()
+                or f"Joinery's {method} failed without saying why."
+            )
         result: dict[str, Any] = data["result"]
         return result
     finally:

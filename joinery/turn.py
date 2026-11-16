@@ -29,6 +29,7 @@ from joinery import (
     reasons,
 )
 from joinery.claims import LEAD_BUSY, MAIN, live_refusal
+from joinery.errors import error_text
 from joinery.peer_review import PeerReview, Reviewer, ReviewPlan, request_for
 from joinery.reasons import Reason
 from joinery.routing import change_risk
@@ -130,14 +131,6 @@ class ContextMeter:
         """Near the window's end. An unknown window never triggers; the provider's own
         compaction stays the backstop there."""
         return self.window > 0 and self.used >= COMPACT_AT * self.window
-
-
-def error_text(error: BaseException) -> str:
-    """An error as words that are never blank: its type, then its message when it
-    has one (``str(TimeoutError())`` is empty)."""
-    message = str(error).strip()
-    name = type(error).__name__
-    return f"{name}: {message}" if message else name
 
 
 @dataclass
@@ -308,8 +301,19 @@ NEXT_PRECHECK_ART = (
     "and tell the user (/art)."
 )
 NEXT_PRECHECK_ERROR = (
-    "Joinery could not run its checks; nothing in the change can fix that. Call "
-    "submit_for_review when the change is complete."
+    "Joinery could not run its checks; nothing in the change can fix that. Don't "
+    "call precheck again unchanged. Call submit_for_review when the change is "
+    "complete."
+)
+NEXT_PRECHECK_UNFINISHED = (
+    "Some of Joinery's checks ran out of time; the problem names them and is not "
+    "something in your change to fix. Fix any other problems listed, then call "
+    "submit_for_review; don't call precheck again unchanged."
+)
+#: Said with a precheck's result when nothing changed since the last one.
+PRECHECK_REPEATED = (
+    "Nothing changed since your last precheck, so this is its result again; the "
+    "checks were not run a second time."
 )
 NEXT_DONE_WHEN = (
     "Joinery played and checked your change against the to-do's done-when items and "
