@@ -99,7 +99,7 @@ step, since apt keeps what it already downloaded. Without that the build fails
 roughly every time on Apple Silicon. Emulated Blender is slow, so interactive
 work belongs on the host via live mode. Godot alone does have a Linux arm64
 build, so the checks (import and tests) run in a separate Godot-only worker
-built for the host (ADR 0090).
+built for the host (ADR 0091).
 
 The image carries the creative tools, not Joinery's Python environment. Running
 the MCP servers inside it, which is where they have to run to be genuinely

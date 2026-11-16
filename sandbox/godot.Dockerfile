@@ -4,7 +4,7 @@
 # Godot publishes a Linux arm64 build, so unlike the shared tool images (amd64
 # because Blender, Material Maker and Surge XT have no Linux arm64 build) this
 # one is built for the host: on Apple Silicon the checks run natively instead of
-# emulated (docs/adr/0090). It carries no Blender, so a project whose Godot
+# emulated (docs/adr/0091). It carries no Blender, so a project whose Godot
 # imports .blend files keeps checking in the creative worker.
 #
 # The same guarantees as every worker: the download is hash-checked against

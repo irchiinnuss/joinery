@@ -5,7 +5,7 @@ Godot publishes a Linux arm64 build, so the Godot check worker
 the host's own architecture and runs natively on Apple Silicon. Blender,
 Material Maker and Surge XT publish no Linux arm64 build, so the shared tool
 images that carry them (the runtime and every worker built on it) stay
-linux/amd64 and run emulated on an arm64 host (docs/adr/0090).
+linux/amd64 and run emulated on an arm64 host (docs/adr/0091).
 
 A run asks for the platform of the image actually present, so an image built
 before this, or on another machine, still runs as what it is; only a build
