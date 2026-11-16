@@ -209,6 +209,8 @@ EDITOR_SCREENS = (
     "setup",
     "art-review",
 )
+# The window sizes visual_layouts_test.gd lays the editor out at, in logical pixels.
+LAYOUT_SIZES = ((1024, 600), (1280, 720), (1366, 768), (1920, 1080))
 STARTUP_SCREENS = (
     "agent-connect",
     "agent-signin",
@@ -462,6 +464,71 @@ def sidebar(capture: Path, logs: Path) -> Harness:
 def editor(theme: str, capture: Path, logs: Path) -> Harness:
     harness = Harness(f"editor-{theme}")
     harness.expected = [f"editor-{name}-{theme}.png" for name in EDITOR_SCREENS]
+    helpers = [
+        "ui_checks.gd",
+        "visual_animation.gd",
+        "visual_sound.gd",
+        "visual_review.gd",
+        "visual_share.gd",
+        "visual_tour.gd",
+        "visual_team.gd",
+        "visual_panels.gd",
+    ]
+    testbed_editor(
+        harness,
+        theme,
+        "visual_editor_test.gd",
+        helpers,
+        "visual editor: ok",
+        capture,
+        logs,
+    )
+    return harness
+
+
+def layout_names() -> list[str]:
+    """visual_layouts_test.gd's combinations, in the order it captures them."""
+    names = []
+    for width, height in LAYOUT_SIZES:
+        for column in (False, True):
+            for files in (False, True):
+                for sidebar in ("nosidebar", "sidebar", "wide"):
+                    for review in (False, True):
+                        parts = ["layout", f"{width}x{height}"]
+                        parts += ["scene"] if column else []
+                        parts += ["files"] if files else []
+                        parts.append(sidebar)
+                        parts += ["review"] if review else []
+                        names.append("-".join(parts))
+    return names
+
+
+def layouts(capture: Path, logs: Path) -> Harness:
+    """Every column, sidebar and bottom panel combination at three window sizes, in one theme."""
+    harness = Harness("layouts")
+    harness.expected = [f"{name}.png" for name in layout_names()]
+    testbed_editor(
+        harness,
+        "dark",
+        "visual_layouts_test.gd",
+        ["ui_checks.gd"],
+        "visual layouts: ok",
+        capture,
+        logs,
+    )
+    return harness
+
+
+def testbed_editor(
+    harness: Harness,
+    theme: str,
+    script: str,
+    helpers: list[str],
+    marker: str,
+    capture: Path,
+    logs: Path,
+) -> None:
+    """Run `script` as an editor plugin in a disposable copy of the testbed."""
     with scratch_folder("joinery-visual-editor-") as directory:
         temporary = Path(directory)
         project = temporary / "project"
@@ -474,15 +541,9 @@ def editor(theme: str, capture: Path, logs: Path) -> Harness:
         shutil.copytree(ROOT / "godot_addon/joinery", project / "addons/joinery")
         check = project / "addons/visual_check"
         check.mkdir()
-        shutil.copyfile(TESTS / "visual_editor_test.gd", check / "test.gd")
-        shutil.copyfile(TESTS / "ui_checks.gd", check / "ui_checks.gd")
-        shutil.copyfile(TESTS / "visual_animation.gd", check / "visual_animation.gd")
-        shutil.copyfile(TESTS / "visual_sound.gd", check / "visual_sound.gd")
-        shutil.copyfile(TESTS / "visual_review.gd", check / "visual_review.gd")
-        shutil.copyfile(TESTS / "visual_share.gd", check / "visual_share.gd")
-        shutil.copyfile(TESTS / "visual_tour.gd", check / "visual_tour.gd")
-        shutil.copyfile(TESTS / "visual_team.gd", check / "visual_team.gd")
-        shutil.copyfile(TESTS / "visual_panels.gd", check / "visual_panels.gd")
+        shutil.copyfile(TESTS / script, check / "test.gd")
+        for helper in helpers:
+            shutil.copyfile(TESTS / helper, check / helper)
         (check / "plugin.cfg").write_text(
             '[plugin]\nname="Visual check"\ndescription="Test"\nauthor="Joinery"\n'
             'version="1"\nscript="test.gd"\n'
@@ -516,10 +577,9 @@ def editor(theme: str, capture: Path, logs: Path) -> Harness:
             base + ["--editor", "res://visual.tscn"] + rendering(env),
             env,
             logs,
-            marker="visual editor: ok",
+            marker=marker,
             timeout=300,
         )
-    return harness
 
 
 def classic_view(theme: str, capture: Path, logs: Path) -> Harness:
@@ -581,6 +641,7 @@ def plan(args: argparse.Namespace) -> list[tuple[str, Callable[[Path, Path], Har
     jobs.append(("sidebar", sidebar))
     for theme in args.themes:
         jobs.append((f"editor-{theme}", partial(editor, theme)))
+    jobs.append(("layouts", layouts))
     for theme in args.themes:
         jobs.append((f"classic-view-{theme}", partial(classic_view, theme)))
     if not args.skip_legacy:

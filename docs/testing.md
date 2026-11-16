@@ -145,6 +145,14 @@ Screens:
   with a review open, image and audio reviews on After and on Before, the Tools
   workspace (all, Blender, SuperCollider), every tool readiness state on the rail,
   the bottom panel, Focus mode, Project apps and the art direction page.
+- `layout-*` (`--only layouts`, dark only, about two minutes): the whole editor at
+  1024×600 (its smallest window), 1280×720, 1366×768 and 1920×1080 logical px, in
+  every combination of the Scene and Inspector column, the Files column, the
+  sidebar (hidden, its own width, dragged wide) and the Review panel, with the
+  sidebar's change card and the review's details expanded. Only the overflow check
+  runs, on interactive controls: each must stay inside its parent and the window.
+  In each size the Play menu and the sidebar's menus must open inside the window
+  (`visual_layouts_test.gd`).
 - `classic-view-*`: the editor, the Layout setting, its restart note and the
   switch dialog, in Joinery's layout and in Godot's classic one
   (`run_classic_view_test.py`).
