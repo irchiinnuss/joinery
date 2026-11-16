@@ -537,6 +537,12 @@ def commit_paths(project: Path, paths: Sequence[str], message: str) -> str:
     return _head(project)
 
 
+def tracked_under(project: Path, folder: str) -> list[str]:
+    """The files git tracks under ``folder`` (project-relative, ``/``-separated)."""
+    out = _git(project, "ls-files", "-z", "--", to_git_path(folder)).stdout
+    return _split_z(out)
+
+
 def generated_beside(project: Path, paths: Sequence[str]) -> list[str]:
     """Godot's own files beside ``paths`` that are on disk: an asset's import
     record (``x.png.import``) and a script's or shader's id (``x.gd.uid``)."""

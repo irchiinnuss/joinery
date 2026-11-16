@@ -297,9 +297,12 @@ def update_addon(project: Path) -> dict[str, str]:
         for uid in (ROOT / "godot_addon/joinery").glob("*.gd.uid")
     )
     if target.is_dir() and addon_version(target) == version and uids_present:
+        before = _gate_texts(project)
         refresh_managed_gates(project)
-        enable_plugin(project)
-        return {"version": version, "state": "current"}
+        plugin = enable_plugin(project)
+        current = {"version": version, "state": "current"}
+        current.update(_commit_addon(project, before, plugin))
+        return current
     backups = project / ".joinery/addon-backups"
     backups.mkdir(parents=True, exist_ok=True)
     staging = Path(
@@ -331,17 +334,72 @@ def update_addon(project: Path) -> dict[str, str]:
         (project / ".joinery/addon-version.json").write_text(
             json.dumps({"version": version}) + "\n"
         )
+        before = _gate_texts(project)
         refresh_managed_gates(project)
-        enable_plugin(project)
+        plugin = enable_plugin(project)
     finally:
         if staging.exists():
             shutil.rmtree(staging)
     done = {"version": version, "state": "updated", "backup": str(backup)}
+    done.update(_commit_addon(project, before, plugin))
     if backup.exists():
         # An existing game whose add-on was just refreshed: its Joinery-owned
         # game files get the same update, as one change the user reviews.
         done.update(_offer_core(project))
     return done
+
+
+#: The agents' settings files whose Joinery gate an add-on update refreshes.
+_GATE_FILES = (".claude/settings.json", ".codex/hooks.json", ".gemini/settings.json")
+#: The Timeline entry an add-on update makes.
+ADDON_COMMIT = "Update Joinery add-on to {version}"
+
+
+def _gate_texts(project: Path) -> dict[str, bytes]:
+    return {
+        name: (project / name).read_bytes()
+        for name in _GATE_FILES
+        if (project / name).is_file()
+    }
+
+
+def _commit_addon(
+    project: Path, gates_before: dict[str, bytes], plugin_enabled: bool
+) -> dict[str, str]:
+    """Put the add-on update in the Timeline as one entry, so the game's repository
+    is never left with loose add-on files. Only the add-on's own files, the gates
+    it refreshed and project.godot when it turned the plug-in on: anything else the
+    user changed stays as it was. Nothing when the project keeps no timeline or
+    switched automatic entries off, or when nothing changed."""
+    from joinery import __version__, timeline
+
+    try:
+        if timeline.state(project)["state"] != "ready" or not timeline.auto_commit(
+            project
+        ):
+            return {}
+        target = project / "addons/joinery"
+        paths = {
+            path.relative_to(project).as_posix()
+            for path in target.rglob("*")
+            if path.is_file()
+        }
+        # Files an older add-on had that this one doesn't: their deletion too.
+        paths.update(timeline.tracked_under(project, "addons/joinery"))
+        paths.update(
+            name
+            for name in _GATE_FILES
+            if (project / name).is_file()
+            and gates_before.get(name) != (project / name).read_bytes()
+        )
+        if plugin_enabled:
+            paths.add("project.godot")
+        commit = timeline.commit_paths(
+            project, sorted(paths), ADDON_COMMIT.format(version=__version__)
+        )
+    except (OSError, ValueError) as error:
+        return {"timeline_error": str(error) or type(error).__name__}
+    return {"commit": commit} if commit else {}
 
 
 def _offer_core(project: Path) -> dict[str, str]:

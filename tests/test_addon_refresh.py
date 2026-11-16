@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
 
-from joinery import addon_refresh
+from joinery import __version__, addon_refresh, bootstrap, timeline
 from joinery.bootstrap import update_addon
 
 
@@ -143,3 +144,44 @@ def test_the_addon_ships_the_files_godot_would_generate() -> None:
         if not Path(f"{p}.import").is_file()
     ]
     assert not missing, missing
+
+
+@pytest.mark.skipif(timeline.git_executable() is None, reason="git is not installed")
+def test_an_update_is_one_timeline_entry_and_leaves_nothing_loose(
+    project: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    home = tmp_path_factory.mktemp("git-home")
+    (home / "gitconfig").write_text("[init]\n\tdefaultBranch = main\n")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(home / "gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("HOME", str(home))
+
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", *args], cwd=project, capture_output=True, text=True, check=True
+        ).stdout
+
+    git("init", "-q")
+    update_addon(project)
+    timeline.start(project)
+    entries = len(git("log", "--format=%s").splitlines())
+    # An older add-on, with a file this one no longer has; the user's own edit.
+    (project / "addons/joinery/plugin.gd").write_text("# an older add-on\n")
+    (project / "addons/joinery/gone.gd").write_text("# removed since\n")
+    git("add", "-A")
+    git("commit", "-q", "-m", "Older add-on")
+    (project / "main.gd").write_text("extends Node\n")
+    done = update_addon(project)
+    assert done["state"] == "updated" and done["commit"]
+    log = git("log", "--format=%s").splitlines()
+    assert len(log) == entries + 2
+    assert log[0] == bootstrap.ADDON_COMMIT.format(version=__version__)
+    # Nothing of the add-on is left loose; the user's file is untouched.
+    assert git("status", "--porcelain", "--", "addons") == ""
+    assert "main.gd" in git("status", "--porcelain")
+    assert "addons/joinery/gone.gd" in git("show", "--name-only", "--format=", "HEAD")
+    # Already current: no new entry.
+    assert "commit" not in update_addon(project)
+    assert len(git("log", "--format=%s").splitlines()) == entries + 2
