@@ -70,6 +70,17 @@ const ALLOWED := [
 		"reason": "Joinery's Select a node hint: it shares the Inspector's container (see below)",
 	},
 	{
+		"kind": "contrast",
+		"class": "Label",
+		"text": "res://*",
+		"inside": "QuickOpenResultContainer",
+		"reason":
+		(
+			"Stock Godot Quick Open picker, from the rail's Scenes icon and /open: a result's "
+			+ "folder is drawn in the editor's faint colour, beside its full-contrast name"
+		),
+	},
+	{
 		"kind": "overflow",
 		"class": "Button",
 		"text": "",
@@ -128,13 +139,26 @@ static func run(
 		var bounds := window
 		if bounds.size == Vector2.ZERO:
 			bounds = (root as Node).get_viewport().get_visible_rect()
-		_walk(screen, root, root, bounds, Rect2(-1e7, -1e7, 2e7, 2e7), findings)
+		_walk(screen, root, root, bounds, _ancestor_clip(root as Node), findings)
 	_frame = null
 	_frame_viewport = null
 	for line: String in findings:
 		print(line)
 	print("UI-CHECKED %s %d" % [screen, findings.size()])
 	return findings
+
+
+## What the root's own clipping ancestors leave in view: a root inside a scroll column (the
+## rail) is judged by the part the column shows, as its children are.
+static func _ancestor_clip(root: Node) -> Rect2:
+	var clip := Rect2(-1e7, -1e7, 2e7, 2e7)
+	var node := root.get_parent()
+	while node != null and not node is Window:
+		var control := node as Control
+		if control != null and (control.clip_contents or control is ScrollContainer):
+			clip = clip.intersection(control.get_global_rect())
+		node = node.get_parent()
+	return clip
 
 
 static func _walk(
@@ -207,10 +231,21 @@ static func _allowed(kind: String, control: Control) -> bool:
 	elif control is Label:
 		text = (control as Label).text
 	for entry: Dictionary in ALLOWED:
-		if entry["kind"] == kind and control.is_class(entry["class"]) and entry["text"] == text:
+		if (
+			entry["kind"] == kind
+			and control.is_class(entry["class"])
+			and _same(entry["text"], text)
+		):
 			if not entry.has("inside") or _inside(control, str(entry["inside"])):
 				return true
 	return false
+
+
+## [param text] is [param wanted], or starts with it when it ends in "*" ("res://*").
+static func _same(wanted: String, text: String) -> bool:
+	if wanted.ends_with("*"):
+		return text.begins_with(wanted.trim_suffix("*"))
+	return wanted == text
 
 
 static func _inside(control: Control, type: String) -> bool:
