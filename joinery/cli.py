@@ -731,6 +731,10 @@ def _transaction_decision(project: Path, identifier: str, accept: bool) -> int:
             # Another change accepted since this one was staged moved the lock:
             # bring it up to date, as the editor does, rather than refuse.
             refresh_review(tx)
+            from joinery import submission
+
+            # A change a run kept before its checks ran: its scripts compile first.
+            submission.accept_checks(tx)
             changes = tx.accept()
             steps = game_setup.after_accept(tx.project, game_setup.follow_up(tx))
             import_cache.after_accept(

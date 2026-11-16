@@ -539,6 +539,8 @@ def transactions(
                 "reviewer": tx.reviewer,
                 # Kept without the user's Accept (joinery.auto_accept).
                 "auto_accepted": tx.auto_accepted,
+                # Kept by a run that stopped before its checks: Accept compiles it.
+                "unchecked": tx.unchecked,
                 # What it said beside "Accepted automatically" (auto_accept.shown_notes).
                 "auto_notes": tx.auto_notes,
                 # What the agent guessed and where it departed from the request.

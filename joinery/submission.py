@@ -891,6 +891,98 @@ async def run_scene_tests(
     ]
 
 
+#: A script Godot could not compile ("Compile Error: Identifier not found: Game").
+_SCRIPT_ERROR = re.compile(r"(?:Parse|Compile) Error: (.+)$", re.MULTILINE)
+#: Why a change kept before its checks ran can't be accepted yet.
+UNCOMPILED = (
+    "This change stopped before Joinery checked it, and {count} doesn't compile:\n"
+    "{lines}\nContinue the chat so Journeyman fixes it (the change carries on "
+    "there), or discard it."
+)
+UNCHECKABLE = (
+    "This change stopped before Joinery checked it, and its scripts couldn't be "
+    "checked now ({reason}). Start Docker and accept it again, or continue the "
+    "chat so Journeyman finishes and checks it."
+)
+
+
+def _scripts_of(tx: FileTransaction) -> list[str]:
+    return [
+        change["path"]
+        for change in tx.changes
+        if change["path"].endswith(".gd")
+        and change["after"]
+        and change["after"] != DIRECTORY
+    ]
+
+
+async def compile_check(tx: FileTransaction) -> list[Problem]:
+    """Compile each script a change kept unchecked (``FileTransaction.unchecked``)
+    made or edited, the way Godot runs it, before the change may be accepted.
+
+    The stage is imported first, so the project's classes (and the change's new
+    ones) are known. A SceneTree test compiles as ``-s`` runs it, so a test that
+    names an autoload fails here as it would in its own run; in any other script
+    an autoload's name is fine (the game adds them before it loads it). Raises
+    RuntimeError when the offline worker can't run."""
+    scripts = _scripts_of(tx)
+    if not scripts:
+        return []
+    got = await worker_run(list(IMPORT_ARGV), tx.stage, import_seconds(tx.project))
+    worker_ready(got)
+    names = set(autoloads(tx.stage))
+    problems: list[Problem] = []
+    for script in scripts:
+        got = await worker_run(
+            ["godot", "--headless", "--path", "/work", "--check-only", "-s",
+             "res://" + script],
+            tx.stage,
+            OFFLINE_SECONDS,
+        )  # fmt: skip
+        worker_ready(got)
+        test = is_scene_tree_test(tx.stage / script)
+        errors = [
+            line.strip()
+            for line in _SCRIPT_ERROR.findall(got.output)
+            if test
+            or (found := _UNKNOWN_NAME.search(line)) is None
+            or found.group(1) not in names
+        ]
+        if errors:
+            hint = autoload_hint(tx.stage, got.output) if test else ""
+            problems.append(
+                Problem(
+                    "tests" if test else "scripts",
+                    f"res://{script}: " + "; ".join(dict.fromkeys(errors[:3])) + hint,
+                    [script],
+                )
+            )
+    return problems
+
+
+def accept_checks(tx: FileTransaction) -> None:
+    """Before the user's Accept of a change kept unchecked: its scripts compile, or
+    the accept is refused (ValueError) in words the user can act on. Once they
+    compile the change is marked checked, so this runs once."""
+    if not tx.unchecked:
+        return
+    try:
+        problems = asyncio.run(compile_check(tx))
+    except (RuntimeError, OSError, TimeoutError, WorkerTimeout) as error:
+        raise ValueError(
+            UNCHECKABLE.format(reason=str(error) or type(error).__name__)
+        ) from None
+    if problems:
+        count = (
+            f"res://{problems[0].paths[0]}"
+            if len(problems) == 1
+            else f"{len(problems)} scripts"
+        )
+        lines = "\n".join("- " + p.message[:600] for p in problems[:5])
+        raise ValueError(UNCOMPILED.format(count=count, lines=lines))
+    tx.mark_checked()
+
+
 def autoloads(stage: Path) -> list[str]:
     """The names of the project's autoloads (``[autoload]`` in project.godot)."""
     try:

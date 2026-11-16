@@ -471,6 +471,12 @@ class FileTransaction:
     def held(self) -> bool:
         return (self.directory / HELD).is_file()
 
+    def mark_checked(self) -> None:
+        """Its scripts compiled after all (``submission.compile_check``)."""
+        if self.unchecked:
+            self.unchecked = False
+            self._record()
+
     def reopen(self) -> None:
         """Take a change waiting for review back to staging, so the chat that made
         it carries on in it instead of beginning a second change for the same
