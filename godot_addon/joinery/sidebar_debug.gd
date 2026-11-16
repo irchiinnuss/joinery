@@ -23,6 +23,9 @@ const LOG_CHARS := 8000
 const LOG_PATH := "user://logs/godot.log"
 const NO_ERROR := "No error to debug yet. Run the game, or say what goes wrong after /debug."
 const ERRORS_CARD := preload("errors_card.gd")
+const FILE_SETTLE := preload("file_settle.gd")
+## Seconds an error naming a file still being imported is held before it is checked again.
+const HOLD := 1.0
 const UI_MOTION := preload("ui_motion.gd")
 ## Characters of new console text sent at once; a flood keeps its newest part.
 const SEND_CHARS := 60000
@@ -56,6 +59,9 @@ var _log_read := -1
 var _listening: Object
 ## Fix tasks' events that came before the Errors card did.
 var _early: Array[Dictionary] = []
+## Errors that name a file still being imported (file_settle.gd): {"text", "paths", "since"}.
+## Once imports settle, those whose files now load are dropped, the rest are reported.
+var _held: Array[Dictionary] = []
 
 
 static func attach(sidebar: Control, list: Object) -> Node:
@@ -79,6 +85,7 @@ func _process(delta: float) -> void:
 		return
 	_wait = POLL
 	poll()
+	release_held()
 
 
 ## Hear the host's console error list ([param bridge]'s errors_event).
@@ -130,19 +137,54 @@ func _game_log_since() -> String:
 	return file.get_buffer(length - from).get_string_from_utf8()
 
 
-## New Output text: remember its errors for /debug, and send it to the host to group.
+## New Output text: remember its errors for /debug, and send it to the host to group. An
+## error naming a file that is still being imported (a change's new model, say) is held until
+## the import ends: it is never a game error when the file then loads.
 func take_output(added: String) -> void:
 	var found := ""
+	var kept := PackedStringArray()
+	var held: Dictionary = {}
 	for raw: String in added.split("\n", false):
 		_context.append(raw)
 		var line := raw.strip_edges()
-		if _regex.search(line) != null and not line.contains("addons/joinery"):
+		var error := _regex.search(line) != null
+		if not held.is_empty() and not error and raw.begins_with(" "):
+			# An error's own "at:" lines stay with it.
+			held["text"] += "\n" + raw
+			continue
+		held = {}
+		var noise: Array[String] = []
+		if error:
+			noise = FILE_SETTLE.import_noise(line)
+		if not noise.is_empty():
+			held = {"text": raw, "paths": noise, "since": Time.get_ticks_msec()}
+			_held.append(held)
+			continue
+		kept.append(raw)
+		if error and not line.contains("addons/joinery"):
 			found = line
 	if _context.size() > CONTEXT_LINES:
 		_context = _context.slice(_context.size() - CONTEXT_LINES)
-	_report("output", added)
+	if not kept.is_empty():
+		_report("output", "\n".join(kept) + "\n")
 	if not found.is_empty():
 		_last_error = found
+
+
+## Held import errors, once imports settle: dropped when their files load now, otherwise
+## reported as they were.
+func release_held() -> void:
+	if _held.is_empty() or FILE_SETTLE.settling():
+		return
+	var now := Time.get_ticks_msec()
+	var waiting: Array[Dictionary] = []
+	for held: Dictionary in _held:
+		if now - int(held["since"]) < HOLD * 1000.0:
+			waiting.append(held)
+		elif not FILE_SETTLE.loads(held["paths"]):
+			_report("output", str(held["text"]) + "\n")
+			_last_error = str(held["text"]).split("\n")[0].strip_edges()
+	_held = waiting
 
 
 func _report(source: String, text: String) -> void:

@@ -9,10 +9,36 @@ extends RefCounted
 ## filesystem_changed instead, which the editor emits once those imports are done.
 
 const TIMEOUT_MSEC := 60000
+## Milliseconds after a scan ends that errors naming its files still count as import noise.
+const WINDOW_MSEC := 10000
+const IMPORTED := "res://.godot/imported/"
+## Files Godot loads as they are, never through an import.
+const NATIVE := [
+	"tscn", "scn", "tres", "res", "gd", "cs", "gdshader", "gdshaderinc", "gdextension", "json"
+]
+
+## Files a change just wrote or a revert restored: res:// path -> until when (msec) an error
+## naming one is import noise, not a game error. Read by the console error feed.
+static var recent := {}
+## Scans still running.
+static var _busy := 0
+static var _paths := RegEx.create_from_string("res://[^\\s'\"(),]+")
 
 
 ## Scans the project and returns once the editor has indexed and imported what it found.
-static func scan() -> void:
+## [param paths] (res:// paths) are the files that landed: errors naming them while they are
+## imported are held back from the console error feed ([method import_noise]).
+static func scan(paths: Array[String] = []) -> void:
+	_busy += 1
+	for path: String in paths:
+		recent[path] = Time.get_ticks_msec() + TIMEOUT_MSEC + WINDOW_MSEC
+	await _scan()
+	_busy -= 1
+	for path: String in paths:
+		recent[path] = Time.get_ticks_msec() + WINDOW_MSEC
+
+
+static func _scan() -> void:
 	var tree := Engine.get_main_loop() as SceneTree
 	var files := EditorInterface.get_resource_filesystem()
 	var deadline := Time.get_ticks_msec() + TIMEOUT_MSEC
@@ -43,10 +69,9 @@ static func loadable(scene: String) -> bool:
 	if missing.is_empty():
 		return true
 	var files := EditorInterface.get_resource_filesystem()
-	var importable := ResourceLoader.get_recognized_extensions_for_type("Resource")
 	var pending := PackedStringArray()
 	for path: String in missing:
-		if FileAccess.file_exists(path) and importable.has(path.get_extension().to_lower()):
+		if FileAccess.file_exists(path) and _importable(path):
 			pending.append(path)
 	if pending.is_empty() or files.is_importing():
 		return false
@@ -116,6 +141,68 @@ static func reload_open(scenes: Array[String]) -> Array[String]:
 		else:
 			EditorInterface.reload_scene_from_path(path)
 	return kept
+
+
+## True while files are still being scanned or imported, or were within the last moments.
+static func settling() -> bool:
+	var now := Time.get_ticks_msec()
+	for path: String in recent.keys():
+		if int(recent[path]) < now:
+			recent.erase(path)
+	if _busy > 0 or not recent.is_empty():
+		return true
+	if not Engine.is_editor_hint():
+		return false
+	var files := EditorInterface.get_resource_filesystem()
+	return files.is_scanning() or files.is_importing()
+
+
+## The files an error line names that are still being imported: an imported copy under
+## .godot/imported, a file a change just wrote, or one the editor has not imported yet. Empty
+## when the error is not import noise.
+static func import_noise(line: String) -> Array[String]:
+	var found: Array[String] = []
+	for hit: RegExMatch in _paths.search_all(line):
+		var path := hit.get_string().rstrip(".:")
+		var place := path.rfind(":")
+		if place > "res://".length() and path.substr(place + 1).is_valid_int():
+			path = path.left(place)
+		if found.has(path):
+			continue
+		if path.begins_with(IMPORTED) or recent.has(path) or _unimported(path):
+			found.append(path)
+	return found
+
+
+## True when every one of [param paths] loads now (an imported copy exists, a scene's
+## dependencies resolve).
+static func loads(paths: Array[String]) -> bool:
+	for path: String in paths:
+		if path.begins_with(IMPORTED):
+			if not FileAccess.file_exists(path):
+				return false
+		elif not ResourceLoader.exists(path) or _unimported(path):
+			return false
+		elif path.get_extension() in ["tscn", "scn"] and not missing_dependencies(path).is_empty():
+			return false
+	return true
+
+
+static func _unimported(path: String) -> bool:
+	return (
+		FileAccess.file_exists(path)
+		and not FileAccess.file_exists(path + ".import")
+		and _importable(path)
+	)
+
+
+## A file the editor imports (a model, image, sound), not one Godot loads as it is.
+static func _importable(path: String) -> bool:
+	var extension := path.get_extension().to_lower()
+	return (
+		extension not in NATIVE
+		and ResourceLoader.get_recognized_extensions_for_type("Resource").has(extension)
+	)
 
 
 static func _idle(tree: SceneTree, files: EditorFileSystem, deadline: int) -> void:
