@@ -14,6 +14,7 @@ signal try_ways
 
 const UI_THEME := preload("ui_theme.gd")
 const UI := preload("ui_components.gd")
+const POPUP_FIT := preload("popup_fit.gd")
 const MODES := ["auto", "fast", "thorough"]
 const MODE_NAMES := ["Auto", "Fast", "Thorough"]
 const MODE_HINTS := ["Adapts to your request", "Favours short replies", "Favours complex work"]
@@ -44,6 +45,7 @@ func _init() -> void:
 	_model_menu = PopupMenu.new()
 	_model_menu.id_pressed.connect(_on_model)
 	get_popup().id_pressed.connect(_on_mode)
+	POPUP_FIT.menu(self)
 	_rebuild()
 
 

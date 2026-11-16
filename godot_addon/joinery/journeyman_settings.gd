@@ -14,6 +14,7 @@ signal closed
 const UI_THEME := preload("ui_theme.gd")
 const UI_MOTION := preload("ui_motion.gd")
 const UI := preload("ui_components.gd")
+const POPUP_FIT := preload("popup_fit.gd")
 const COMMAND_SCRIPT := preload("command_job.gd")
 const INDICATOR_SCRIPT := preload("activity_indicator.gd")
 const STYLE := preload("sidebar_style.gd")
@@ -637,6 +638,7 @@ func _build_history_menu() -> MenuButton:
 	_history_button.tooltip_text = "Space used by restore data for past changes"
 	UI.bind_height(_history_button, "md")
 	UI_MOTION.press_feedback(_history_button)
+	POPUP_FIT.menu(_history_button)
 	var menu := _history_button.get_popup()
 	menu.add_item("Compact history", 0)
 	menu.set_item_tooltip(0, COMPACT_TIP)

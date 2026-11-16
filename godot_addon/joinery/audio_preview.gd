@@ -10,6 +10,7 @@ extends VBoxContainer
 
 const UI_THEME := preload("ui_theme.gd")
 const UI_COMPONENTS := preload("ui_components.gd")
+const POPUP_FIT := preload("popup_fit.gd")
 const UI_MOTION := preload("ui_motion.gd")
 const TIMELINE_SCRIPT := preload("audio_timeline.gd")
 const SPEEDS := [0.5, 0.75, 1.0, 1.25, 1.5, 2.0]
@@ -173,6 +174,7 @@ func _build_transport() -> void:
 	speed.focus_mode = Control.FOCUS_ALL
 	speed.tooltip_text = "Playback speed (pitch follows speed)"
 	speed.accessibility_name = "Playback speed"
+	POPUP_FIT.menu(speed)
 	UI_COMPONENTS.bind_height(speed, "md")
 	for rate: float in SPEEDS:
 		speed.get_popup().add_item(_rate_text(rate))

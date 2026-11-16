@@ -18,6 +18,7 @@ extends RefCounted
 ## (`joinery chats branch`) and opens it as the open chat; the original stays as it was.
 
 const UI := preload("ui_components.gd")
+const POPUP_FIT := preload("popup_fit.gd")
 const UI_THEME := preload("ui_theme.gd")
 const UI_MOTION := preload("ui_motion.gd")
 const STYLE := preload("sidebar_style.gd")
@@ -93,6 +94,7 @@ func offer(card: Control) -> void:
 	popup.add_item("Edit and resend from here", EDIT)
 	popup.add_item("Branch from here", BRANCH)
 	popup.id_pressed.connect(choose.bind(card))
+	POPUP_FIT.menu(button)
 	card.set_meta(MENU_META, button)
 	card.mouse_entered.connect(_reveal.bind(card, true))
 	card.mouse_exited.connect(_reveal.bind(card, false))

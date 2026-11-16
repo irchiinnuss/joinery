@@ -18,6 +18,7 @@ signal part_selected(target: Dictionary)
 const CHIP := preload("target_chip.gd")
 const UI_THEME := preload("ui_theme.gd")
 const UI := preload("ui_components.gd")
+const POPUP_FIT := preload("popup_fit.gd")
 const UI_MOTION := preload("ui_motion.gd")
 const SPEEDS := [0.25, 0.5, 1.0, 1.5, 2.0]
 const MODES := ["loop", "ping_pong", "once"]
@@ -520,6 +521,7 @@ func _menu(name: String, items: Array) -> MenuButton:
 	menu.flat = false
 	menu.focus_mode = Control.FOCUS_ALL
 	menu.accessibility_name = name
+	POPUP_FIT.menu(menu)
 	UI.bind_height(menu, "md")
 	for item: Variant in items:
 		menu.get_popup().add_item(str(item))
