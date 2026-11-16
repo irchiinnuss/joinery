@@ -121,6 +121,8 @@ var _outcome_note: Label
 var _outcome_role := "success"
 var _empty: VBoxContainer
 var _sizes_queued := false
+## How much less the stage asks for, so the panel's foot stays inside its window (_fit).
+var _cut := 0.0
 
 
 func _init() -> void:
@@ -143,7 +145,7 @@ func _init() -> void:
 func _ready() -> void:
 	UI_THEME.watch(self)
 	_queue_sizes()
-	get_viewport().size_changed.connect(_size_stage)
+	get_viewport().size_changed.connect(_refit)
 
 
 func _notification(what: int) -> void:
@@ -152,6 +154,12 @@ func _notification(what: int) -> void:
 		_tint_outcome()
 	elif what == NOTIFICATION_RESIZED:
 		_size_stage()
+	elif what == NOTIFICATION_VISIBILITY_CHANGED:
+		_refit()
+
+
+func _process(_delta: float) -> void:
+	_fit()
 
 
 ## Called by UI_THEME.watch after a live re-theme.
@@ -842,5 +850,34 @@ func _size_stage() -> void:
 	if _body.narrow:
 		var rail := _rail.get_combined_minimum_size().y
 		tall = floorf(large * STAGE_MIN + rail + UI_THEME.space(self, 4))
+	_cut = minf(_cut, tall)
+	tall -= _cut
 	if not is_equal_approx(_body.custom_minimum_size.y, tall):
 		_body.custom_minimum_size.y = tall
+
+
+## Look again from the full stage: the window or the panel's place changed.
+func _refit() -> void:
+	_cut = 0.0
+	_size_stage()
+	set_process(is_visible_in_tree())
+
+
+## Keep the panel's foot, with Accept and Discard, inside its window. The rest of the editor
+## has least heights of its own (the script editor's is larger than the 3D view's), so in a
+## short window the stage's least height can push the editor past the window's bottom edge;
+## the stage then asks for that much less, and the rail's middle scrolls instead.
+func _fit() -> void:
+	if _stage_area == null or not is_visible_in_tree():
+		return
+	# The editor's columns hold the panel: when their least height is more than the window has,
+	# they reach past its bottom edge, the panel with them.
+	var foot := get_global_rect().end.y
+	var holder := get_parent() as Control
+	while holder != null:
+		foot = maxf(foot, holder.get_global_rect().end.y)
+		holder = holder.get_parent() as Control
+	var over := foot - get_viewport().get_visible_rect().end.y
+	if over > 0.5 and _body.custom_minimum_size.y > 0.0:
+		_cut += ceilf(over)
+		_size_stage()
