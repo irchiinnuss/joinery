@@ -218,3 +218,30 @@ def test_the_bot_shoots_the_guard_takes_the_key_and_walks_out(tmp_path: Path) ->
     again = _play(project, scene, tmp_path / "second")["fight"]
     assert again["trail"] == fight["trail"], (again["trail"], fight["trail"])
     assert again["finished_t"] == fight["finished_t"]
+
+
+@needs_godot
+def test_a_place_to_reach_is_a_stop_on_the_way_not_the_exit(tmp_path: Path) -> None:
+    project, scene = _arena(tmp_path)
+    report = playtest.run(
+        playtest.Options(
+            project=project,
+            seconds=45,
+            seed=4242,
+            scene=scene,
+            out=tmp_path / "reach",
+            reach=["VaultKey"],
+        )
+    )
+    assert report["status"] == "played", report
+    fight = report["fight"]
+    assert [r["reached"] for r in report["reach"]] == [True], report["reach"]
+    order = [g["kind"] for g in fight["goals"]]
+    assert "reach" in order and order.index("reach") < order.index("door"), order
+    # The key was a stop: the bot walked on through the door and out of the exit.
+    assert fight["finished"] and fight["reached_exit"], fight
+    assert not any(
+        g["goal"] == "VaultKey" and g["kind"] == "exit" for g in fight["goals"]
+    )
+    softlocks = [i for i in report["items"] if i["kind"] == "softlock"]
+    assert softlocks == [], softlocks

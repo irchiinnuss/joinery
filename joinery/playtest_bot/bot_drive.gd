@@ -271,6 +271,12 @@ func _map(frame: int) -> void:
 	cover.call(&"visit", _where(_player), frame)
 
 
+## The nearest node a --reach word names that the player hasn't reached yet, or null (the
+## fight heads for it before the exit).
+func next_reach_target() -> Node:
+	return _reach_target()
+
+
 ## The nearest node a --reach word names that the player hasn't reached yet, or null.
 func _reach_target() -> Node:
 	var best: Node = null

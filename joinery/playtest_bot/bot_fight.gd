@@ -3,8 +3,9 @@ extends RefCounted
 ## finishable by a bot that never shoots back. With this mode on the bot turns the view to
 ## an enemy it can see, fires the game's attack action with the gun in its hands, switches
 ## guns when one runs dry, backs off and finds health when hurt, picks up ammo when short,
-## and otherwise follows the level's goals: each key before the door it opens, then the exit
-## (or the places named with --reach), along the coverage grid (bot_cover.gd).
+## and otherwise follows the level's goals: the places named with --reach first (stops on the
+## way, never the end), each key before the door it opens, then the exit, along the coverage
+## grid (bot_cover.gd).
 ##
 ## It plays through the input map only (move, look, attack, jump, interact, weapon_next), so
 ## a recorded run replays, and every choice comes from its own generator seeded from the
@@ -468,13 +469,20 @@ func _pick_goal() -> Node:
 	return _goal
 
 
-## [node, kind]: the next step toward the end of the level.
+## [node, kind]: the next step toward the end of the level. A --reach place not reached yet
+## is a stop on the way: the bot goes there first when it can (kind "reach"), takes keys and
+## doors when it can't yet, and heads for the level's exit only once no place is left to reach
+## (or nothing else is). The exit stays the exit: reaching a place never counts as finishing.
 func _plan() -> Array:
 	var held := _held_keys()
-	var finals := _finals()
-	for node: Node in _by_distance(finals):
-		if _reachable(node):
-			return [node, "exit"]
+	var exits := _exits()
+	var place := _reach_place()
+	if place != null and _reachable(place):
+		return [place, "exit" if place in exits else "reach"]
+	if place == null:
+		for node: Node in _by_distance(exits):
+			if _reachable(node):
+				return [node, "exit"]
 	# Keys not taken yet: the nearest the grid joins to the player first.
 	var open_keys: Array[Node] = []
 	for node: Node in tree.get_nodes_in_group(&"key"):
@@ -491,7 +499,10 @@ func _plan() -> Array:
 			closed.append(node)
 	if not closed.is_empty():
 		return [_by_distance(closed)[0], "door"]
-	return _fallback(finals, open_keys)
+	if place != null and _free(place):
+		# The grid joins nothing on the way to it: straight there.
+		return [place, "exit" if place in exits else "reach"]
+	return _fallback(exits, open_keys)
 
 
 ## [node, kind] when the grid joins the player to nothing on the way: fallen below the exit
@@ -514,20 +525,9 @@ func _fallback(finals: Array[Node], open_keys: Array[Node]) -> Array:
 	return [null, ""]
 
 
-## The --reach places not reached yet, else the level's exits.
-func _finals() -> Array[Node]:
+## The level's exits: the `exit` group's markers, else the `goal` group's.
+func _exits() -> Array[Node]:
 	var found: Array[Node] = []
-	var words: PackedStringArray = drive.get(&"reach")
-	if not words.is_empty() and tree.current_scene != null:
-		for node: Node in tree.current_scene.find_children("*", "Node3D", true, false):
-			if node == _player:
-				continue
-			for word: String in words:
-				if _names(String(node.name), word):
-					found.append(node)
-					break
-		if not found.is_empty():
-			return found
 	for group: StringName in [&"exit", &"goal"]:
 		for node: Node in tree.get_nodes_in_group(group):
 			if node is Node3D and node.is_inside_tree():
@@ -537,10 +537,12 @@ func _finals() -> Array[Node]:
 	return found
 
 
-func _names(node_name: String, word: String) -> bool:
-	if drive.has_method(&"reach_matches"):
-		return bool(drive.call(&"reach_matches", node_name, word))
-	return node_name.to_lower() == word
+## The nearest --reach place the player hasn't got to yet (the drive keeps the score), or null.
+func _reach_place() -> Node:
+	if not drive.has_method(&"next_reach_target"):
+		return null
+	var place: Variant = drive.call(&"next_reach_target")
+	return place as Node if place is Node3D else null
 
 
 ## Keys the player holds in this level: the level's `keys` (a blockout level's), else the
@@ -611,6 +613,9 @@ func _by_distance(nodes: Array[Node]) -> Array[Node]:
 ## Walk to the goal; once there, use it (an exit switch) or count it (a key, a door).
 func _go_to(goal: Node) -> void:
 	var where := (goal as Node3D).global_position
+	if _goal_kind == "reach":
+		# A room or zone: its middle, where the drive counts it reached.
+		where = drive.call(&"_aim", goal)
 	var distance := _flat(where)
 	var key := String(goal.name)
 	if not _closest.has(key) or distance < float(_closest[key]):
