@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import io
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +41,7 @@ say({"type": "result", "subtype": "success", "is_error": False})
 """
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="the stub is a shell script")
 def test_claude_activity_follows_what_each_call_really_did(tmp_path: Path) -> None:
     import asyncio
     import stat

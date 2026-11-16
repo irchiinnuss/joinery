@@ -16,6 +16,7 @@ from bridge.claude_session import (
 )
 from bridge.models import Selection, route
 from bridge.protocol import Prompt
+from joinery.wiring import decoded
 
 
 def test_the_configured_alias_is_the_default() -> None:
@@ -115,7 +116,8 @@ def test_a_session_skips_the_users_own_settings_but_signs_in_as_before(
     assert settings["apiKeyHelper"] == "~/bin/key" and settings["model"] == "opus"
     assert "enabledPlugins" not in settings
     # Only Joinery's gate among the hooks: the user's own don't reach the session.
-    assert "joinery" in json.dumps(settings["hooks"])
+    # On Windows the gate is an encoded PowerShell command; decoded, it reads the same.
+    assert "joinery" in decoded(json.dumps(settings["hooks"]))
     assert '"Bash"' not in json.dumps(settings["hooks"])
     # An older CLI without the flag runs as before.
     old = launch_args(monkeypatch, prompt)

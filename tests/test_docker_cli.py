@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,8 @@ RESTART = "Docker isn't responding — restart Docker Desktop"
 @pytest.fixture
 def hung_docker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A `docker` on PATH that never answers, as a stuck Docker Desktop."""
+    if sys.platform == "win32":
+        pytest.skip("the stub is a shell script")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     docker = bin_dir / "docker"
