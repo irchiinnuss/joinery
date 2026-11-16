@@ -77,6 +77,38 @@ def test_a_run_tells_the_test_now_each_result_and_a_summary() -> None:
     assert every.summary() == "1 check passed"
 
 
+def test_tests_the_checks_time_cut_short_are_named_not_failed() -> None:
+    events: list[dict[str, Any]] = []
+    scripts = [
+        "tests/test_mower_starts.gd",
+        "tests/test_hose_reaches_flowerbed.gd",
+        "tests/test_gate_opens.gd",
+        "tests/test_steam.gd",
+    ]
+    run = TestRun("Running the scene tests", scripts, events.append)
+    run.finished(scripts[0], True)
+    run.finished(scripts[1], False, "FAIL: the hose is too short")
+    run.finished(
+        scripts[2], False, "was still running after 90 s when the check's time", True
+    )
+    run.finished(scripts[3], False, "did not start: the check's time ran out", True)
+    run.end()
+    results = events[-1]["results"]
+    assert results[2]["unfinished"] and not results[2]["passed"]
+    assert results[2]["reason"] == "stopped, the check's time ran out"
+    assert results[3]["reason"] == "not started, the check's time ran out"
+    assert "unfinished" not in results[1]
+    assert events[-1]["summary"] == (
+        "4 checks: 1 passed; 1 failed — hose reaches flowerbed; "
+        "2 not run in time — gate opens, steam"
+    )
+    printed = test_progress.lines(events[-1], set())
+    assert "    – gate opens — stopped, the check's time ran out" in printed
+    only = TestRun("x", scripts[:1], events.append)
+    only.finished(scripts[0], False, "did not start", True)
+    assert only.summary() == "1 check: 0 passed, 1 not run in time — mower starts"
+
+
 def test_joinery_run_prints_each_result_once_and_the_summary(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

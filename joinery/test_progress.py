@@ -76,7 +76,9 @@ def _clip(text: str) -> str:
 class TestRun:
     """One run of a change's tests, told to ``emit`` as {"kind": "tests"} events:
     the run's ``id``, its ``label``, the test running ``now`` in words, ``total``,
-    ``results`` so far ({name, area, passed, reason}), ``done`` and its ``summary``."""
+    ``results`` so far ({name, area, passed, reason, and unfinished when so}), ``done`` and its
+    ``summary``. An ``unfinished`` test is one the check's time stopped or never
+    started: neither passed nor failed."""
 
     __test__ = False  # not a pytest class
 
@@ -100,16 +102,27 @@ class TestRun:
             self.running.append(script)
         self._send()
 
-    def finished(self, script: str, passed: bool, output: str = "") -> None:
-        """``script`` ended; a failure says why in one line."""
+    def finished(
+        self, script: str, passed: bool, output: str = "", unfinished: bool = False
+    ) -> None:
+        """``script`` ended; a failure says why in one line. ``unfinished``: the
+        check's time ran out before it did (or before it started)."""
         if script in self.running:
             self.running.remove(script)
+        if unfinished:
+            why = "stopped, the check's time ran out"
+            if "did not start" in output:
+                why = "not started, the check's time ran out"
+        else:
+            why = "" if passed else reason(output)
         self.results[script] = {
             "name": title(script),
             "area": area(script),
-            "passed": passed,
-            "reason": "" if passed else reason(output),
+            "passed": passed and not unfinished,
+            "reason": why,
         }
+        if unfinished:
+            self.results[script]["unfinished"] = True
         self._send()
 
     def end(self) -> None:
@@ -120,20 +133,24 @@ class TestRun:
 
     def summary(self) -> str:
         """ "14 checks: 13 passed, 1 failed — hose reaches flowerbed"; "3 checks
-        passed"; "1 check passed"."""
+        passed"; "1 check passed"; "14 checks: 12 passed, 2 not run in time —
+        mower starts on lawn, hose reaches flowerbed"."""
         results = [self.results[s] for s in self.order if s in self.results]
         count = len(results)
         noun = "check" if count == 1 else "checks"
-        failed = [r["name"] for r in results if not r["passed"]]
-        if not failed:
+        cut = [r["name"] for r in results if r.get("unfinished")]
+        failed = [
+            r["name"] for r in results if not r["passed"] and not r.get("unfinished")
+        ]
+        if not failed and not cut:
             return f"{count} {noun} passed" if count else "No checks ran"
-        names = ", ".join(failed[:2]) + (
-            f" and {len(failed) - 2} more" if len(failed) > 2 else ""
-        )
-        return (
-            f"{count} {noun}: {count - len(failed)} passed, "
-            f"{len(failed)} failed — {names}"
-        )
+        parts = [f"{count - len(failed) - len(cut)} passed"]
+        if failed:
+            parts.append(f"{len(failed)} failed — {_names(failed)}")
+        if cut:
+            parts.append(f"{len(cut)} not run in time — {_names(cut)}")
+        # A "; " between parts once names follow more than the last one.
+        return f"{count} {noun}: " + ("; " if cut and failed else ", ").join(parts)
 
     def event(self) -> dict[str, Any]:
         now = title(self.running[-1]) if self.running else ""
@@ -154,6 +171,12 @@ class TestRun:
             self.emit(self.event())
 
 
+def _names(names: list[str]) -> str:
+    return ", ".join(names[:2]) + (
+        f" and {len(names) - 2} more" if len(names) > 2 else ""
+    )
+
+
 def lines(event: dict[str, Any], seen: set[str]) -> list[str]:
     """A tests event as ``joinery run`` prints it: nothing while a test runs, each
     result once as it lands, the summary at the end. ``seen`` holds the results
@@ -167,6 +190,9 @@ def lines(event: dict[str, Any], seen: set[str]) -> list[str]:
         seen.add(key)
         if result.get("passed"):
             out.append(f"    ✓ {where}{result.get('name', '')}")
+        elif result.get("unfinished"):
+            why = result.get("reason") or "not run in time"
+            out.append(f"    – {where}{result.get('name', '')} — {why}")
         else:
             why = result.get("reason") or "failed"
             out.append(f"    ✗ {where}{result.get('name', '')} — {why}")

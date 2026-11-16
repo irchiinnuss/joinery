@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 from mcp.server.mcpserver.exceptions import ToolError
 
-from joinery import gateway_rpc
+from joinery import gateway_rpc, submission
 from joinery.errors import said
 from joinery.gateway_rpc import GatewayRPC, rpc
 from servers.errors import tool_errors
@@ -116,3 +116,12 @@ def test_the_gateway_never_answers_with_a_blank_error(
 
     text = asyncio.run(go())
     assert text.strip() and "timed out" in text and "precheck" in text
+
+
+def test_a_check_budget_is_kept_below_the_tools_wait(tmp_path: Path) -> None:
+    assert submission.CHECK_SECONDS_MAX < gateway_rpc.RPC_SECONDS
+    assert submission.check_seconds(tmp_path) == submission.CHECK_SECONDS
+    (tmp_path / "joinery.toml").write_text("[checks]\ncheck_seconds = 5000\n")
+    assert submission.check_seconds(tmp_path) == submission.CHECK_SECONDS_MAX
+    (tmp_path / "joinery.toml").write_text("[checks]\ncheck_seconds = 300\n")
+    assert submission.check_seconds(tmp_path) == 300

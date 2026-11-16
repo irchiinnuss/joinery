@@ -25,6 +25,7 @@ import os
 import re
 import secrets
 import shutil
+import time
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -90,6 +91,8 @@ _UID_HEAD = re.compile(
 _CLASS = re.compile(r"^[ \t]*class_name[ \t]+(\w+)", re.MULTILINE)
 _WORD = re.compile(r"\b[A-Z]\w*\b")
 _FAIL_TAIL = 2000
+#: A test is not started with less than this many seconds left of the check.
+MIN_LEFT = 5
 
 #: path -> ((size, mtime_ns), sha256), so an unchanged file is hashed once.
 _hashes: dict[str, tuple[tuple[int, int], str]] = {}
@@ -254,6 +257,9 @@ class Outcome:
     #: The time limit it ran under, for a time-out: a cached time-out answers
     #: only a run with the same or a shorter limit.
     seconds: int = 0
+    #: The check ran out of time before it finished (or started): no result,
+    #: so it is never cached and never judged.
+    unfinished: bool = False
 
 
 @dataclass
@@ -270,6 +276,9 @@ class Verdict:
     ran: list[str] = field(default_factory=list)
     #: Tests whose run now timed out (twice), broken or already failing.
     timed_out: list[str] = field(default_factory=list)
+    #: Tests the check ran out of time for: script -> what happened (stopped
+    #: while running, or never started). Neither a pass nor a failure.
+    unfinished: dict[str, str] = field(default_factory=dict)
 
 
 class Cache:
@@ -371,6 +380,17 @@ def timeout_text(
     return f"{said}\nIts last output:\n{tail}" if tail else said
 
 
+def unfinished_text(budget: float, ran_for: float) -> str:
+    """What a test the check ran out of time for says: stopped part way, or
+    never started."""
+    if ran_for > 0:
+        return (
+            f"was still running after {ran_for:.0f} s when the check's time "
+            f"({budget:g} s) ran out, so it was stopped without a result"
+        )
+    return f"did not start: the check's time ({budget:g} s) ran out first"
+
+
 async def _run_all(
     root: Path,
     scripts: Iterable[str],
@@ -380,13 +400,25 @@ async def _run_all(
     done: Callable[[int, int], None] | None = None,
     started: Callable[[str], None] | None = None,
     finished: Callable[[str, Outcome], None] | None = None,
+    deadline: float | None = None,
+    budget: float = 0,
 ) -> dict[str, Outcome]:
     """Run each test; one that times out runs once more before it counts (unless a
     script error stopped it: that hangs again), and a time-out is that test's
-    result alone: the others still count."""
+    result alone: the others still count.
+
+    ``deadline`` (``time.monotonic()``) ends the whole run: a test still running
+    then is stopped, and one not started yet is not started; both come back
+    ``unfinished``, never as a failure. ``budget`` is the check's time, said."""
     gate = asyncio.Semaphore(PARALLEL)
     names = list(scripts)
     count = [0]
+
+    def left() -> float:
+        return float("inf") if deadline is None else deadline - time.monotonic()
+
+    def cut(ran_for: float) -> Outcome:
+        return Outcome(False, unfinished_text(budget, ran_for), unfinished=True)
 
     async def one(script: str) -> tuple[str, Outcome]:
         pair = await judged(script)
@@ -402,12 +434,32 @@ async def _run_all(
         tries = 0
         stalled = 0.0
         while tries < 2:
+            if tries and left() < MIN_LEFT:
+                break  # no time for a second try: the first time-out stands
             tries += 1
             try:
                 async with gate:
+                    if left() < MIN_LEFT:
+                        return script, cut(0)
                     if started is not None:
                         started(script)
-                    got = await run(root, script)
+                    began = time.monotonic()
+                    running = asyncio.ensure_future(run(root, script))
+                    try:
+                        finished_in, _ = await asyncio.wait(
+                            {running},
+                            timeout=None if deadline is None else max(left(), 0),
+                        )
+                    except BaseException:
+                        running.cancel()
+                        await asyncio.gather(running, return_exceptions=True)
+                        raise
+                    if running not in finished_in:
+                        # Cancelling the run kills its worker (run_offline).
+                        running.cancel()
+                        await asyncio.gather(running, return_exceptions=True)
+                        return script, cut(time.monotonic() - began)
+                    got = running.result()
             except TimeoutError as stopped:
                 printed = str(getattr(stopped, "output", "") or "")
                 if isinstance(stopped, WorkerStalled):
@@ -452,6 +504,8 @@ async def judge(
     done: Callable[[int, int], None] | None = None,
     started: Callable[[str], None] | None = None,
     finished: Callable[[str, Outcome], None] | None = None,
+    deadline: float | None = None,
+    budget: float = 0,
 ) -> Verdict:
     """Run ``scripts`` on ``stage`` and judge each failure against ``original``.
 
@@ -461,8 +515,11 @@ async def judge(
     a failing test has no cached result from before the change. ``seconds`` is
     each run's time limit, said in a time-out's result. ``started`` and
     ``finished`` hear of each test of the change as it starts and ends (one whose
-    result was cached ends at once); the runs of the project as it was are not
-    told.
+    result was cached ends at once, one the check's time cut short or never
+    started ends ``unfinished``); the runs of the project as it was are not told.
+    ``deadline`` (``time.monotonic()``) bounds the whole judgement, ``budget``
+    seconds long: tests it cuts short are ``unfinished``, not cached and not
+    judged, and the baseline is run only with time left.
     """
     cache = Cache(project)
     verdict = Verdict()
@@ -479,12 +536,28 @@ async def judge(
     fresh = [s for s in scripts if s not in results]
     if fresh:
         for script, outcome in (
-            await _run_all(stage, fresh, run, passed, seconds, done, started, finished)
+            await _run_all(
+                stage,
+                fresh,
+                run,
+                passed,
+                seconds,
+                done,
+                started=started,
+                finished=finished,
+                deadline=deadline,
+                budget=budget,
+            )
         ).items():
             results[script] = outcome
+            if outcome.unfinished:
+                verdict.unfinished[script] = outcome.output
+                continue
             cache.put(keys[script], outcome)
             verdict.ran.append(script)
-    failing = [s for s in scripts if not results[s].passed]
+    failing = [
+        s for s in scripts if not results[s].passed and not results[s].unfinished
+    ]
     before: dict[str, Outcome] = {}
     if failing and original is not None:
         then = Tree(original)
@@ -498,16 +571,26 @@ async def judge(
                 before[script] = hit
             else:
                 unknown[script] = key
-        if unknown and baseline is not None:
+        time_left = deadline is None or deadline - time.monotonic() >= MIN_LEFT
+        if unknown and baseline is not None and time_left:
             copy = await baseline()
             if copy is not None:
                 try:
                     if prepare is not None:
                         await prepare(copy)
                     ran = await _run_all(
-                        copy, list(unknown), run, passed, seconds, done
+                        copy,
+                        list(unknown),
+                        run,
+                        passed,
+                        seconds,
+                        done,
+                        deadline=deadline,
+                        budget=budget,
                     )
                     for script, outcome in ran.items():
+                        if outcome.unfinished:
+                            continue  # no "before": judged as the change's
                         before[script] = outcome
                         cache.put(unknown[script], outcome)
                 finally:

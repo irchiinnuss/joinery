@@ -13,6 +13,7 @@ import platform
 import re
 import secrets
 import shutil
+import time
 import tomllib
 from collections.abc import Awaitable, Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager, nullcontext
@@ -129,6 +130,13 @@ SCENE_TESTS_MAX = 20
 SCENE_TEST_SECONDS = 120
 #: The worker is linux/amd64; on an arm64 host it runs emulated, several times slower.
 EMULATED_FACTOR = 2
+#: The whole of one check (precheck or submit): Godot's import, then the tests.
+#: The agent's tool waits at most ``gateway_rpc.RPC_SECONDS`` (900) for the
+#: answer, so the checks stop in time to give one: tests still running then are
+#: stopped and named, never left to run past an answer nobody reads.
+CHECK_SECONDS = 720
+#: ``[checks] check_seconds`` may lower or raise it, never past this.
+CHECK_SECONDS_MAX = 840
 #: A SceneTree test that printed a script error and then nothing new for this long
 #: (natively; scaled like the limit) is stopped then, not at its limit.
 SCENE_TEST_STALL_SECONDS = 10
@@ -578,6 +586,9 @@ async def checks(
     def timed(phase: str) -> AbstractContextManager[None]:
         return span(phase) if span is not None else nullcontext()
 
+    budget = check_seconds(tx.project)
+    deadline = time.monotonic() + budget
+
     async def measured() -> list[Problem]:
         if not rules:
             return []
@@ -638,6 +649,8 @@ async def checks(
                 failing=failing,
                 note=note,
                 report=report,
+                deadline=deadline,
+                budget=budget,
             )
         if replays_on:
             found += await run_replays(tx, imported=godot or testing, timed=timed)
@@ -761,6 +774,30 @@ async def run_tests(
     ]
 
 
+def check_seconds(project: Path) -> int:
+    """How long one check may take in all: ``[checks] check_seconds`` when the
+    project sets it, otherwise ``CHECK_SECONDS``; never past ``CHECK_SECONDS_MAX``,
+    so the answer reaches the agent before its tool call gives up."""
+    setting = _checks_setting(project, "check_seconds")
+    return min(setting or CHECK_SECONDS, CHECK_SECONDS_MAX)
+
+
+def unfinished_problem(unfinished: dict[str, str], budget: float) -> Problem:
+    """Tests the check ran out of time for, by name: not the change's failure and
+    nothing the agent fixes in it, so said once, plainly, with what to do."""
+    lines = [f"res://{script} {said}." for script, said in unfinished.items()]
+    text = (
+        f"Joinery's checks ran out of time ({budget:g} s) before every SceneTree "
+        "test finished, so these have no result:\n"
+        + "\n".join(lines)
+        + "\nThis is not a failure of your change. Don't run the same check again "
+        "unchanged: tests that finished are cached, so the next check carries on "
+        "with only these. If a test always runs this long, it is too slow for the "
+        "checks: make it quit sooner, or tell the user."
+    )
+    return Problem("checks", text, list(unfinished), fixable=False)
+
+
 def scene_test_seconds(project: Path) -> int:
     """Each SceneTree test's time limit: ``[checks] scene_test_seconds`` when the
     project sets it, otherwise the native limit, scaled up when the worker runs
@@ -809,6 +846,8 @@ async def run_scene_tests(
     failing: list[str] | None = None,
     note: Callable[[str], None] | None = None,
     report: Callable[[dict[str, Any]], None] | None = None,
+    deadline: float | None = None,
+    budget: float = 0,
 ) -> list[Problem]:
     """Run each SceneTree test headless (``godot -s``), several at once; one that
     exits non-zero, prints a ``FAIL`` line or a script error, or never quits fails.
@@ -818,7 +857,10 @@ async def run_scene_tests(
     failing. Results are cached by the content of the files each test can load
     (``joinery.scene_tests``), so a test the change can't affect never runs again.
     ``report`` hears the run as it goes (``joinery.test_progress``): the test
-    running now, each result and the summary.
+    running now, each result and the summary, which names the tests the check's
+    time cut short. ``deadline`` (``time.monotonic()``) ends the tests in time for
+    the check to answer: those it cuts short are one problem naming them
+    (``unfinished_problem``).
     """
 
     seconds = scene_test_seconds(tx.project if tx is not None else stage)
@@ -884,16 +926,23 @@ async def run_scene_tests(
             done=(lambda ran, of: note(f"{ran} of {of}")) if note else None,
             started=told.started if told else None,
             finished=(
-                (lambda script, got: told.finished(script, got.passed, got.output))
+                (
+                    lambda script, got: told.finished(
+                        script, got.passed, got.output, got.unfinished
+                    )
+                )
                 if told
                 else None
             ),
+            deadline=deadline,
+            budget=budget,
         )
     if verdict.already and info is not None:
         info.append(scene_cache.already_note(verdict.already))
     if failing is not None:
         failing.extend(verdict.already)
-    return [
+    cut = [unfinished_problem(verdict.unfinished, budget)] if verdict.unfinished else []
+    return cut + [
         Problem(
             "tests",
             f"The test res://{script} "
