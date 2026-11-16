@@ -28,7 +28,14 @@ def main() -> int:
         help="One real Codex inference in an isolated scene",
     )
     args = parser.parse_args()
-    for empty in (False, True):
+    # The level open, no scene open, and a fresh editor for the accepted-import order.
+    for mode in ("existing", "empty", "import"):
+        empty = mode == "empty"
+        script, passed = (
+            ("accept_import_editor_test.gd", "editor accept import: ok")
+            if mode == "import"
+            else ("scene_edit_editor_test.gd", "editor scene edits: ok")
+        )
         with scratch_folder("joinery-scene-edit-") as directory:
             temporary = Path(directory)
             project = temporary / "scene-project"
@@ -36,9 +43,7 @@ def main() -> int:
             shutil.copytree(ROOT / "godot_addon/joinery", project / "addons/joinery")
             addon = project / "addons/edit_check"
             addon.mkdir()
-            shutil.copyfile(
-                ROOT / "tests/godot/scene_edit_editor_test.gd", addon / "test.gd"
-            )
+            shutil.copyfile(ROOT / "tests/godot" / script, addon / "test.gd")
             (addon / "plugin.cfg").write_text(
                 '[plugin]\nname="Edit Check"\ndescription="Test"\nauthor="Joinery"\nversion="1"\nscript="test.gd"\n'
             )
@@ -70,7 +75,9 @@ def main() -> int:
                 JOINERY_AGENT="codex",
                 JOINERY_EMPTY_SCENE="1" if empty else "0",
                 JOINERY_SCENE_EDIT_LIVE="1" if args.live and empty else "0",
-                JOINERY_SCENE_EDIT_LIVE_CRUD="1" if args.live and not empty else "0",
+                JOINERY_SCENE_EDIT_LIVE_CRUD="1"
+                if args.live and mode == "existing"
+                else "0",
                 JOINERY_STARTUP_PROMPT="create box 1 by 1 matre"
                 if args.live and empty
                 else "",
@@ -115,7 +122,7 @@ def main() -> int:
                 return 1
             if (
                 result.returncode
-                or "editor scene edits: ok" not in result.stdout
+                or passed not in result.stdout
                 or "SCRIPT ERROR" in result.stderr
                 or "ERROR:" in result.stderr
             ):
