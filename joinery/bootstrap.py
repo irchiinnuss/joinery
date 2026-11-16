@@ -21,12 +21,14 @@ from joinery import (
     references,
     team,
     tool_refresh,
+    worker_platform,
 )
 from joinery.catalog import ROOT, load_catalog, load_project_tools, selection_ids
 from joinery.platform_support import bash_script_argv, editor_running
 from joinery.server_install import install
 from joinery.transactions import FileTransaction, atomic_json
 from joinery.wiring import _args, _command_str, _opencode_plugin, runs_gate_for
+from joinery.worker_platform import GODOT_WORKER, NATIVE_CAPABLE, build_platform
 
 #: Each worker built for a tool that has one, after the shared images.
 TOOL_WORKERS = {"blender": "blender", "inkscape": "inkscape", "audacity": "audacity"}
@@ -47,8 +49,11 @@ def _current(tag: str, revision: str) -> bool:
     """True when the image is there and was built from today's sources.
 
     An image from before per-image revisions counts only when the whole
-    sandbox is unchanged since it was built.
+    sandbox is unchanged since it was built. One built for another platform
+    than this host builds it for is not current.
     """
+    if worker_platform.present(tag) not in {None, build_platform(tag)}:
+        return False
     try:
         done = docker_cli.run(
             ["docker", "image", "inspect", "--format", "{{json .Config.Labels}}", tag],
@@ -78,18 +83,105 @@ def _outdated(wanted: list[str], revision: str) -> list[str]:
     return rebuilt
 
 
+def sandbox_versions(root: Path | None = None) -> dict[str, str]:
+    """The pins in sandbox/versions.env, by name."""
+    text = ((root or ROOT) / "sandbox/versions.env").read_text(encoding="utf-8")
+    found: dict[str, str] = {}
+    for line in text.splitlines():
+        name, equals, value = line.partition("=")
+        if equals and re.fullmatch(r"[A-Z0-9_]+", name.strip()):
+            found[name.strip()] = value.strip()
+    return found
+
+
+def _build_args(tag: str) -> list[str]:
+    """The build arguments an image needs from versions.env and the host."""
+    if tag != GODOT_WORKER:
+        return []
+    pins = sandbox_versions()
+    return [
+        "--build-arg",
+        f"JOINERY_PLATFORM={build_platform(tag)}",
+        "--build-arg",
+        f"GODOT_VERSION={pins['GODOT_VERSION']}",
+        "--build-arg",
+        f"GODOT_CHANNEL={pins['GODOT_CHANNEL']}",
+    ]
+
+
+def _image_id(tag: str) -> str:
+    """The local image's ID, "" when it is not there."""
+    try:
+        done = docker_cli.run(
+            ["docker", "image", "inspect", "--format", "{{.Id}}", tag],
+            capture_output=True,
+            text=True,
+        )
+    except docker_cli.DockerNotResponding:
+        return ""
+    return str(done.stdout).strip() if done.returncode == 0 else ""
+
+
+def _works(tag: str) -> bool:
+    """The just-built worker starts offline and its Godot answers."""
+    try:
+        done = docker_cli.run(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--network",
+                "none",
+                "--platform",
+                build_platform(tag),
+                tag,
+                "godot",
+                "--headless",
+                "--version",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except docker_cli.DockerNotResponding:
+        return False
+    return done.returncode == 0 and "stable" in str(done.stdout)
+
+
+def _replace_old(tag: str, old: str) -> str:
+    """Remove the image ``tag`` named before it was rebuilt for this host's own
+    platform (an amd64 Godot worker on Apple Silicon), once the new one is
+    verified to work. Only that one Joinery image, never by force: one a
+    container still uses stays. Returns the removed image's ID ("" for none)."""
+    new = _image_id(tag)
+    if not old or not new or new == old or not _works(tag):
+        return ""
+    try:
+        done = docker_cli.run(
+            ["docker", "image", "rm", old], capture_output=True, text=True
+        )
+    except docker_cli.DockerNotResponding:
+        return ""
+    return old if done.returncode == 0 else ""
+
+
 def _docker_build(
     tag: str, dockerfile: str, revision: str, progress: tool_refresh.Progress
 ) -> None:
-    """Build one worker image, stamped with the revisions it came from."""
+    """Build one worker image, stamped with the revisions it came from. A Godot
+    worker built for another platform than this host's is replaced: the old
+    image goes once the new one runs (``_replace_old``)."""
     progress.begin(tag)
+    present = worker_platform.present(tag) if tag in NATIVE_CAPABLE else None
+    old = _image_id(tag) if present not in {None, build_platform(tag)} else ""
     tool_refresh.run(
         [
             "docker",
             "build",
             "--progress=plain",
             "--platform",
-            "linux/amd64",
+            build_platform(tag),
+            *_build_args(tag),
             *_labels(tag, revision),
             "-t",
             tag,
@@ -102,6 +194,9 @@ def _docker_build(
         timeout=3600,
         what=tool_refresh.IMAGE_WORDS.get(tag, tag),
     )
+    if old:
+        worker_platform.forget()
+        _replace_old(tag, old)
 
 
 def _build_runtime(revision: str, progress: tool_refresh.Progress) -> None:
@@ -125,7 +220,7 @@ def _build_runtime(revision: str, progress: tool_refresh.Progress) -> None:
             "build",
             "--progress=plain",
             "--platform",
-            "linux/amd64",
+            build_platform(RUNTIME),
             *_labels(RUNTIME, revision),
             "-t",
             RUNTIME,
@@ -190,7 +285,9 @@ def _setup(project: Path, emit: tool_refresh.Emit | None) -> dict[str, Any]:
         for tool in selected
         if tool in TOOL_WORKERS and load_catalog().get(tool).mcp is not None
     ]
-    shared = [RUNTIME, "joinery-mcp-worker", "joinery-creative-worker"]
+    # The Godot check worker last: it needs none of the others, and the checks
+    # fall back to the creative worker until it is there.
+    shared = [RUNTIME, "joinery-mcp-worker", "joinery-creative-worker", GODOT_WORKER]
     build = _outdated([*shared, *workers], revision)
     progress = tool_refresh.Progress(len(build), emit, first=first)
     ready = []
@@ -235,6 +332,7 @@ def _setup(project: Path, emit: tool_refresh.Emit | None) -> dict[str, Any]:
         progress.finish("failed", error=str(exc))
         raise
     finally:
+        worker_platform.forget()
         readiness.clear_setup()
         # The last answer describes the tools before this refresh: never show it again.
         readiness.expire_snapshot()

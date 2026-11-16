@@ -40,6 +40,7 @@ IMAGE_WORDS = {
     "joinery-blender-worker": "Blender",
     "joinery-inkscape-worker": "Inkscape",
     "joinery-audacity-worker": "Audacity",
+    "joinery-godot-worker": "Godot's checks",
 }
 #: BuildKit's plain progress: "#7 [3/9] RUN apt-get …" (stage names may precede).
 _STEP = re.compile(r"^#\d+ \[(?:[^\]]*? )?(\d+)/(\d+)\]")
@@ -340,7 +341,10 @@ def join(
         time.sleep(poll)
     final = read_state()
     if final.get("pid") != holder:
-        return {"state": "failed", "error": "The other refresh stopped before it began."}
+        return {
+            "state": "failed",
+            "error": "The other refresh stopped before it began.",
+        }
     if final.get("state") == "running":
         return {"state": "failed", "error": "The other refresh stopped unexpectedly."}
     return final

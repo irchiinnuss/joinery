@@ -289,11 +289,16 @@ WORKER_IMAGES: dict[str, tuple[str, str]] = {
     "joinery-blender-worker": ("blender.Dockerfile", "joinery-mcp-worker"),
     "joinery-inkscape-worker": ("inkscape.Dockerfile", "joinery-creative-worker"),
     "joinery-audacity-worker": ("audacity.Dockerfile", "joinery-mcp-worker"),
+    # Godot alone, for the checks; built for the host (joinery.worker_platform).
+    "joinery-godot-worker": ("godot.Dockerfile", ""),
 }
 #: The label with an image's own revision.
 IMAGE_LABEL = "org.joinery.image-rev"
 #: Files a build reads besides its Dockerfile and the files it copies in.
-_BUILD_FILES = {"joinery-sandbox-runtime": ("build.sh", "versions.env")}
+_BUILD_FILES = {
+    "joinery-sandbox-runtime": ("build.sh", "versions.env"),
+    "joinery-godot-worker": ("versions.env",),
+}
 _COPY = re.compile(r"^\s*(?:COPY|ADD)\s+(.*)$", re.IGNORECASE | re.MULTILINE)
 
 
