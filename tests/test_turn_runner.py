@@ -394,6 +394,33 @@ def test_a_routine_fix_runs_light_and_escalates_to_the_main_model(
     assert host.kinds().count("file_preview") == 1
 
 
+def test_a_fix_in_a_big_session_starts_fresh_with_the_staged_change(
+    host: Host,
+) -> None:
+    async def agent(bridge: Any) -> AsyncIterator[Any]:
+        host.stage({"scenes/ashtray.tscn": SCENE})
+        assert host.gateway is not None and host.gateway.turn is not None
+        host.gateway.turn.meter.update(150_000, 200_000)
+        yield Done(ok=True)
+
+    async def fixed(bridge: Any) -> AsyncIterator[Any]:
+        assert host.gateway is not None and host.gateway.turn is not None
+        tx = host.gateway.transaction
+        assert tx is not None
+        (tx.stage / "art/models").mkdir(parents=True)
+        (tx.stage / "art/models/ashtray.glb").write_text("glTF")
+        await host.gateway.turn.submit("An ashtray with its model", "agent")
+        yield Done(ok=True)
+
+    host.run(agent, fixed)
+    assert host.log.count("new_session") == 1
+    sent = host.prompts[1].text
+    assert "The request was: Make an ashtray" in sent
+    assert "- scenes/ashtray.tscn (new)" in sent
+    assert "Joinery checked the change you left" in sent
+    assert host.kinds().count("file_preview") == 1
+
+
 def test_a_big_request_is_planned_then_built_in_a_fresh_session(
     host: Host,
 ) -> None:

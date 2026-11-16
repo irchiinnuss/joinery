@@ -30,7 +30,7 @@ from bridge.protocol import (
     Usage,
 )
 from joinery import done_when, metrics, request_digest
-from joinery.fallback import is_quota, provider_error
+from joinery.fallback import is_quota, provider_error, staged_lines
 from joinery.headless import LEFT_CHANGE, PROVIDER_ERROR
 from joinery.routing import routing_settings, step_model
 from joinery.timing import TurnTiming
@@ -566,6 +566,39 @@ async def _together(
     return await stream(controller, bridge, lead, emit, timing, 1)
 
 
+async def _fresh_fix(
+    controller: TurnController,
+    bridge: AgentBridge,
+    fix: Prompt,
+    emit: Emit,
+    request: str,
+) -> Prompt:
+    """The fix after Joinery's checks, in a fresh session when the turn's session
+    has grown past ``[agents] fresh_at`` (ADR 0090): the digest, the request, the
+    change staged so far and the problems, instead of the whole turn again. The
+    staged change is the gateway's, so nothing of it is lost."""
+    project = getattr(controller.gateway, "project", None)
+    fresh = getattr(bridge, "new_session", None)
+    tx = getattr(controller.gateway, "transaction", None)
+    if fresh is None or not isinstance(project, Path) or tx is None:
+        return fix
+    limit = request_digest.fresh_at(project)
+    if limit <= 0 or controller.meter.used < limit:
+        return fix
+    try:
+        changes = list(tx.diff() if tx.state == "staging" else tx.changes)
+    except (OSError, ValueError):
+        return fix
+    await fresh()
+    controller.meter.reset()
+    emit(Usage().model_dump())
+    digest = ""
+    with contextlib.suppress(OSError, ValueError):
+        digest = request_digest.build(project)
+    parts = [digest, f"The request was: {request}", staged_lines(changes), fix.text]
+    return fix.model_copy(update={"text": "\n\n".join(p for p in parts if p)})
+
+
 async def _build(
     controller: TurnController,
     bridge: AgentBridge,
@@ -704,7 +737,13 @@ async def _run_turn(
         # gets one chance in this turn to fix it.
         asked += 1
         timing.trace.attributes[metrics.CONTINUATIONS] = asked
-        fix = continuation(prompt, result)
+        fix = await _fresh_fix(
+            controller,
+            bridge,
+            continuation(prompt, result),
+            emit,
+            request or prompt.text,
+        )
         light = "" if escalated else fix_model(controller, result)
         if light:
             # A routine fix (tests, imports, references) on the light model; if
