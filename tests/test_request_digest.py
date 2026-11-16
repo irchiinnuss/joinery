@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from pathlib import Path
 
 import pytest
 
+from bridge.chat_record import ChatRecorder
 from joinery import chats, request_digest
 from joinery.transactions import FileTransaction
 
@@ -101,3 +103,95 @@ def test_it_fits_its_limit(project: Path) -> None:
 def test_nothing_known_gives_nothing(tmp_path: Path) -> None:
     (tmp_path / "project.godot").write_text("config_version=5\n")
     assert request_digest.build(tmp_path) == ""
+
+
+# --- When a request starts fresh (bridge.chat_record) ----------------------------------
+
+
+class FakeSessions:
+    def __init__(self) -> None:
+        self.handle = "h1"
+        self.resumed: list[str] = []
+        self.new = 0
+
+    async def resume(self, handle: str) -> bool:
+        self.resumed.append(handle)
+        return True
+
+    async def new_session(self) -> None:
+        self.new += 1
+
+
+def one_turn(
+    recorder: ChatRecorder, sessions: FakeSessions, text: str, outcome: str = "done"
+) -> str:
+    sent, _ = recorder.begin({"text": text}, ())
+    recorder.observe({"kind": "message", "text": "Made it."})
+    recorder.observe({"kind": "timing", "outcome": outcome, "total_ms": 5})
+    recorder.observe({"kind": "done"})
+    recorder.finish(sessions, 120_000)
+    return sent
+
+
+def test_a_new_chat_starts_from_the_digest(project: Path) -> None:
+    recorder, sessions = ChatRecorder(project, "claude"), FakeSessions()
+    assert asyncio.run(recorder.switch("", sessions)) is None
+    sent = one_turn(recorder, sessions, "Add a crate")
+    assert sent.startswith(request_digest.HEAD) and sent.endswith("Add a crate")
+    meta, _ = chats.read(project, recorder.chat_id)
+    assert meta["context"] == "120000"
+
+
+def test_a_big_session_starts_fresh_for_the_next_request(project: Path) -> None:
+    recorder, sessions = ChatRecorder(project, "claude"), FakeSessions()
+    one_turn(recorder, sessions, "Add a crate")
+    chat_id = recorder.chat_id
+    event = asyncio.run(recorder.switch(chat_id, sessions, context=120_000))
+    assert event == {"kind": "chat", "chat_id": chat_id, "mode": "fresh", "message": ""}
+    assert sessions.new == 1
+    sent = one_turn(recorder, sessions, "Now a barrel")
+    assert "The user asked: Add a crate" in sent and sent.endswith("Now a barrel")
+
+
+def test_a_small_session_or_a_follow_up_goes_on(project: Path) -> None:
+    recorder, sessions = ChatRecorder(project, "claude"), FakeSessions()
+    one_turn(recorder, sessions, "Add a crate")
+    chat_id = recorder.chat_id
+    assert asyncio.run(recorder.switch(chat_id, sessions, context=20_000)) is None
+    follow = recorder.switch(chat_id, sessions, follow_up=True, context=120_000)
+    assert asyncio.run(follow) is None
+    assert sessions.new == 0
+
+
+def test_a_stopped_turn_is_carried_on_from_the_digest(project: Path) -> None:
+    recorder, sessions = ChatRecorder(project, "claude"), FakeSessions()
+    one_turn(recorder, sessions, "Keycards", outcome="stopped")
+    event = asyncio.run(
+        recorder.switch(recorder.chat_id, sessions, follow_up=True, context=120_000)
+    )
+    assert event is not None and event["mode"] == "fresh"
+    sent = one_turn(recorder, sessions, "Please finish")
+    assert "The last turn stopped before it finished (stopped)" in sent
+
+
+def test_a_reopened_big_chat_resumes_only_as_a_follow_up(project: Path) -> None:
+    first, sessions = ChatRecorder(project, "claude"), FakeSessions()
+    one_turn(first, sessions, "Add a crate")
+    chat_id = first.chat_id
+    again = ChatRecorder(project, "claude")
+    event = asyncio.run(again.switch(chat_id, sessions, follow_up=True))
+    assert event is not None and event["mode"] == "resumed"
+    later = ChatRecorder(project, "claude")
+    event = asyncio.run(later.switch(chat_id, sessions))
+    assert event is not None and event["mode"] == "fresh"
+    assert sessions.resumed == ["h1"]
+
+
+def test_fresh_at_zero_keeps_every_session(project: Path) -> None:
+    (project / "joinery.toml").write_text("[agents]\nfresh_at = 0\n")
+    assert request_digest.fresh_at(project) == 0
+    recorder, sessions = ChatRecorder(project, "claude"), FakeSessions()
+    sent = one_turn(recorder, sessions, "Add a crate")
+    assert sent == "Add a crate"
+    big = recorder.switch(recorder.chat_id, sessions, context=10**6)
+    assert asyncio.run(big) is None

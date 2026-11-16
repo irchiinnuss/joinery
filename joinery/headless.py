@@ -587,7 +587,10 @@ def prompt_message(request: str, pin: Pin, chat_id: str = "") -> dict[str, Any]:
         "selection": selection,
     }
     if chat_id:
+        # Naming the chat marks a follow-up: its session goes on unless the last
+        # turn stopped (then the digest carries it on, joinery.request_digest).
         message["chat_id"] = chat_id
+        message["follow_up"] = True
     return message
 
 
@@ -686,7 +689,9 @@ def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) ->
     parser.add_argument(
         "--chat",
         default="",
-        help="continue an earlier chat: its id (joinery chats list) or 'last'",
+        help="a follow-up that needs an earlier chat's conversation: its id (joinery "
+        "chats list) or 'last'. Without it a request starts fresh from a short "
+        "digest of the project, which costs far less",
     )
     parser.add_argument(
         "--go",

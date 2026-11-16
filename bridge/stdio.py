@@ -36,7 +36,7 @@ from bridge.instructions import expand_command
 from bridge.match_runner import MatchRun
 from bridge.models import Selection
 from bridge.playtester import Playtester, gameplay_change
-from bridge.protocol import Done, EditorAction, Message, Prompt
+from bridge.protocol import Done, EditorAction, Message, Prompt, Usage
 from bridge.provider_switch import ProviderSwitch
 from bridge.reviewer import Debugger, ReviewAgent
 from bridge.sound_pass import SoundPassRun
@@ -460,10 +460,19 @@ async def _serve(
             # finishes before the sidebar's chat is opened.
             await settle_compaction(controller)
             # The sidebar names the chat ("" for a new one); without one, the same chat.
-            if "chat_id" in data:
-                switched = await recorder.switch(str(data["chat_id"]), bridge)
-                if switched is not None:
-                    emit(switched)
+            # A request in a big session starts fresh from a digest (ADR 0090); Go on a
+            # to-do is the build step of a plan, never a follow-up of the planning.
+            switched = await recorder.switch(
+                str(data.get("chat_id", recorder.chat_id)),
+                bridge,
+                follow_up=bool(data.get("follow_up")) and "todo" not in data,
+                context=controller.meter.used,
+            )
+            if switched is not None:
+                emit(switched)
+                if switched.get("mode") == "fresh":
+                    controller.meter.reset()
+                    emit(Usage().model_dump())
             text, started = recorder.begin(data, attachments)
             if started is not None:
                 emit(started)
@@ -568,7 +577,7 @@ async def _serve(
                 emit(timing.save(project, outcome))
             except (OSError, ValueError, UnicodeError):
                 emit(timing.report(outcome))
-            recorder.finish(bridge)
+            recorder.finish(bridge, controller.meter.used)
 
     try:
         bridge = Bridge(agent_id)

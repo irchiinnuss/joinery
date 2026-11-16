@@ -15,6 +15,7 @@ the first prompt, built from Joinery's own records. Nothing here changes the pro
 from __future__ import annotations
 
 import contextlib
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -234,3 +235,64 @@ def build(
 
 def _join(sections: list[list[str]]) -> str:
     return "\n".join([HEAD, *(line for section in sections for line in section)])
+
+
+def for_new_chat(project: Path) -> str:
+    """The digest a new chat's first request carries: what changed since the
+    project's most recent chat last ran, and the rest of the digest."""
+    from joinery import chats
+
+    since = 0.0
+    with contextlib.suppress(OSError, ValueError, KeyError, IndexError):
+        latest = chats.listing(project)[:1]
+        if latest:
+            since = chats.turn_ended(chats.read(project, str(latest[0]["id"]))[0])
+    return build(project, since=since)
+
+
+# --- When a request starts fresh ------------------------------------------------------
+
+#: ``[agents] fresh_at``: a session whose context holds at least this many tokens
+#: is not continued for a new request; the request starts fresh from the digest.
+#: 0 always continues (the behaviour before digests).
+FRESH_AT = 60_000
+
+
+def fresh_at(project: Path) -> int:
+    """``[agents] fresh_at`` from joinery.toml (read each time), or ``FRESH_AT``."""
+    try:
+        raw = tomllib.loads((project / "joinery.toml").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return FRESH_AT
+    agents = raw.get("agents", {})
+    value = agents.get("fresh_at", FRESH_AT) if isinstance(agents, dict) else FRESH_AT
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return FRESH_AT
+    return value
+
+
+def starts_fresh(context: int, limit: int, *, follow_up: bool, stalled: bool) -> bool:
+    """Whether a request starts a fresh session instead of continuing one whose
+    context holds ``context`` tokens.
+
+    A small session is continued: replaying it costs less than the digest saves. A
+    big one starts fresh from the digest, unless the user marked the request a
+    follow-up (``joinery run --chat``) of a turn that finished. A turn that stopped
+    (a stalled worker, a usage limit, an idle stop) is never replayed at size: the
+    next request carries on from the digest, which says what that turn left."""
+    if limit <= 0 or context < limit:
+        return False
+    return stalled or not follow_up
+
+
+def last_outcome(entries: list[dict[str, Any]]) -> str:
+    """How the chat's last turn ended ("" when unknown or it has none)."""
+    from joinery import chats
+
+    found = chats.turns(entries)
+    return str(found[-1]["outcome"]) if found else ""
+
+
+def is_stalled(outcome: str) -> bool:
+    """A turn that ended without finishing: stopped, failed or cancelled."""
+    return outcome not in {"", "done"}

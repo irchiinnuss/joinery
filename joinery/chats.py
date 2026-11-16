@@ -232,8 +232,18 @@ def _trim(path: Path) -> None:
 
 def update(project: Path, chat_id: str, **fields: str) -> dict[str, Any]:
     """Change the chat line's title, provider, profile, model, handle or last activity
-    (``updated``, and ``turn_end``: when its last turn ended, seconds since the epoch)."""
-    allowed = {"title", "provider", "profile", "model", "handle", "updated", "turn_end"}
+    (``updated``, and ``turn_end``: when its last turn ended, seconds since the epoch;
+    ``context``: the provider session's context then, in tokens)."""
+    allowed = {
+        "title",
+        "provider",
+        "profile",
+        "model",
+        "handle",
+        "updated",
+        "turn_end",
+        "context",
+    }
     if not set(fields) <= allowed:
         raise ValueError("Only a chat's title and session can change.")
     path = path_for(project, chat_id)

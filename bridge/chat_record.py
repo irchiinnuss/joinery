@@ -5,7 +5,10 @@ The sidebar names the chat each prompt belongs to ("" for a new one). Before the
 when it is the same provider and connection that saved it and the provider still has
 it; otherwise a fresh session starts and the first prompt carries a compact summary of
 the old chat; a resumed session's first prompt carries a digest of what changed in the
-project since its last turn instead (chats.since_digest). A chat rewound or branched from the sidebar (joinery.chats, ADR 0080)
+project since its last turn instead (chats.since_digest). A session grown big is not
+continued for a new request: the request starts a fresh session whose first prompt
+carries a short digest (joinery.request_digest), unless it is a follow-up of a turn
+that finished; a turn that stopped is always carried on from the digest. A chat rewound or branched from the sidebar (joinery.chats, ADR 0080)
 always continues in a fresh session from its summary: a rewound chat's ``epoch``
 changed, and a branch has no provider handle. Everything the host then shows the
 sidebar is recorded as it goes.
@@ -20,7 +23,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
 
-from joinery import chats
+from joinery import chats, request_digest
 from joinery.session_summary import FileSummaryStore, SessionSummary
 
 #: Task states worth a line in the saved chat.
@@ -63,10 +66,23 @@ class ChatRecorder:
         self._groups: dict[str, str] = {}
         #: The open chat's rewind count when it was opened.
         self._epoch = 0
+        #: How the open chat's last turn ended ("done", "failed", "stopped"…).
+        self._outcome = ""
 
-    async def switch(self, chat_id: str, sessions: Sessions) -> dict[str, Any] | None:
+    async def switch(
+        self,
+        chat_id: str,
+        sessions: Sessions,
+        *,
+        follow_up: bool = False,
+        context: int = 0,
+    ) -> dict[str, Any] | None:
         """Open [chat_id] before a prompt ("" starts a new chat). Returns the event that
-        tells the sidebar how it continued, or None when nothing changed."""
+        tells the sidebar how it continued, or None when nothing changed.
+
+        ``context`` is how many tokens the open provider session holds now; a big one
+        is not continued for a new request unless it is a ``follow_up`` (the digest,
+        joinery.request_digest)."""
         if chat_id == self.chat_id and not chat_id and not self._used:
             return None
         try:
@@ -76,6 +92,13 @@ class ChatRecorder:
         epoch = int((meta or {}).get("epoch", 0) or 0)
         rewound = chat_id == self.chat_id and meta is not None
         if rewound and epoch == self._epoch:
+            if self._used and request_digest.starts_fresh(
+                context,
+                request_digest.fresh_at(self.project),
+                follow_up=follow_up,
+                stalled=request_digest.is_stalled(self._outcome),
+            ):
+                return await self._fresh(chat_id, sessions)
             return None
         if meta is None:
             # A new chat, or one that is gone: the provider starts over.
@@ -90,6 +113,9 @@ class ChatRecorder:
             and str(meta.get("profile", "")) == self.profile
         )
         handle = str(meta.get("handle", ""))
+        if not rewound and same and handle and self._too_big(meta, follow_up):
+            # The saved session is big: this request starts fresh from the digest.
+            return await self._fresh(chat_id, sessions, meta)
         if not rewound and same and handle and await sessions.resume(handle):
             mode = "resumed"
             # The session remembers the talk, not what the user decided or edited
@@ -131,6 +157,59 @@ class ChatRecorder:
             else chats.RESUMED_NOTE,
         }
 
+    def _too_big(self, meta: dict[str, Any], follow_up: bool) -> bool:
+        """A saved chat whose session is too big to resume for this request."""
+        try:
+            context = int(float(meta.get("context") or 0))
+        except (TypeError, ValueError):
+            context = 0
+        outcome = ""
+        if context:
+            with contextlib.suppress(OSError, ValueError):
+                outcome = request_digest.last_outcome(
+                    chats.read(self.project, str(meta.get("id", "")))[1]
+                )
+        return request_digest.starts_fresh(
+            context,
+            request_digest.fresh_at(self.project),
+            follow_up=follow_up,
+            stalled=request_digest.is_stalled(outcome),
+        )
+
+    async def _fresh(
+        self,
+        chat_id: str,
+        sessions: Sessions,
+        meta: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Go on with [chat_id] in a fresh provider session whose first prompt carries
+        the digest (joinery.request_digest), not the old conversation."""
+        if self._used:
+            await sessions.new_session()
+        digest = ""
+        with contextlib.suppress(OSError, ValueError):
+            saved, entries = chats.read(self.project, chat_id)
+            # A reopened chat also hears what changed since its last turn; an open
+            # one's own turns already say it.
+            since = chats.turn_ended(saved) if meta is not None else 0.0
+            digest = request_digest.build(
+                self.project, chat=(saved, entries), since=since
+            )
+        self._prime = digest
+        self.chat_id = chat_id
+        self._epoch = int((meta or {}).get("epoch", self._epoch) or 0)
+        self._used = False
+        self._broken = False
+        self._outcome = ""
+        self._save(
+            lambda: chats.append(
+                self.project,
+                chat_id,
+                {"type": "session", "provider": self.provider, "mode": "fresh"},
+            )
+        )
+        return {"kind": "chat", "chat_id": chat_id, "mode": "fresh", "message": ""}
+
     def begin(
         self, data: dict[str, Any], attachments: tuple[str, ...]
     ) -> tuple[str, dict[str, Any] | None]:
@@ -139,6 +218,10 @@ class ChatRecorder:
         text = str(data.get("text", ""))
         event: dict[str, Any] | None = None
         if not self.chat_id:
+            if not self._prime and request_digest.fresh_at(self.project) > 0:
+                # A new chat starts from Joinery's record of the project.
+                with contextlib.suppress(OSError, ValueError):
+                    self._prime = request_digest.for_new_chat(self.project)
             try:
                 self.chat_id = chats.create(
                     self.project, text, self.provider, self.profile
@@ -250,6 +333,7 @@ class ChatRecorder:
             self._prime = ""
         elif kind == "timing":
             self._flush()
+            self._outcome = str(event.get("outcome", ""))
             turn: dict[str, Any] = {
                 "type": "turn",
                 "outcome": str(event.get("outcome", "")),
@@ -322,8 +406,9 @@ class ChatRecorder:
             }
         self._save(lambda: chats.append(self.project, self.chat_id, entry))
 
-    def finish(self, sessions: Sessions) -> None:
-        """After a turn: remember the provider's handle so the chat can be resumed."""
+    def finish(self, sessions: Sessions, context: int = 0) -> None:
+        """After a turn: remember the provider's handle so the chat can be resumed,
+        and how big its session is (``context`` tokens) to judge whether to."""
         self._flush()
         if not self.chat_id or self._broken:
             return
@@ -333,6 +418,8 @@ class ChatRecorder:
             "updated": chats.now(),
             "turn_end": f"{time.time():.3f}",
         }
+        if context > 0:
+            fields["context"] = str(context)
         if self._model:
             fields["model"] = self._model
         self._save(lambda: chats.update(self.project, self.chat_id, **fields))
