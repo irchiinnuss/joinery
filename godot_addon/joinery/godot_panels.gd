@@ -110,7 +110,7 @@ func apply(base: Control, settings: EditorSettings) -> void:
 ## Open the side docks the preference names, close the rest and collapse the bottom panel.
 ## Again whenever the editor loads a saved layout (EditorPlugin._set_window_layout), which
 ## reopens the docks it lists.
-func reapply() -> void:
+func reapply(bottom := true) -> void:
 	if _base == null:
 		return
 	var wanted: PackedStringArray = (
@@ -123,7 +123,7 @@ func reapply() -> void:
 		var dock := _dock(id)
 		if dock != null and not _is_open(dock):
 			dock.call("open")
-	if _bottom != null:
+	if bottom and _bottom != null:
 		_bottom.set_meta(ONE_TAB, true)
 		_bottom.current_tab = -1
 		_on_bottom_changed(-1)
@@ -142,18 +142,19 @@ func attach(plugin: EditorPlugin, rail: Control) -> void:
 	# A first launch has no saved layout and its scan may report no change, so neither
 	# hook fires after Godot's default layout reopens the docks, and a slow machine gets
 	# there late. Apply again when the first scan ends, and once a second while the editor
-	# settles (up to 15 s), unless the user has opened a panel meanwhile.
+	# settles (up to 15 s), unless the user has opened a panel meanwhile. These passes only
+	# close side docks: the bottom panel may already hold an opening review.
 	EditorInterface.get_resource_filesystem().filesystem_changed.connect(
 		func() -> void:
 			if not _touched:
-				reapply.call_deferred(),
+				reapply.call_deferred(false),
 		CONNECT_ONE_SHOT
 	)
 	for delay: int in range(1, 16):
 		get_tree().create_timer(float(delay)).timeout.connect(
 			func() -> void:
 				if not _touched:
-					reapply()
+					reapply(false)
 		)
 	add_inspect_menu(plugin)
 	plugin.call("add_command", "Show or Hide Scene and Inspector", toggle_column)
