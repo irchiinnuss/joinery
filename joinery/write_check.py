@@ -43,6 +43,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Protocol
 
 from joinery.worker_identity import docker_owner_args
+from joinery.worker_platform import platform_for
 
 #: The files a write is checked for.
 SCRIPTS = frozenset({".gd"})
@@ -277,7 +278,7 @@ class Sandbox:
             "--rm",
             *docker_owner_args(),
             "--platform",
-            "linux/amd64",
+            await asyncio.to_thread(platform_for, IMAGE),
             "--network",
             "none",
             "--name",

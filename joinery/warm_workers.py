@@ -17,7 +17,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from joinery import docker_cli, warm_blender
+from joinery import docker_cli, warm_blender, worker_platform
 from joinery.runner import Result
 from joinery.worker_identity import docker_owner_args
 
@@ -104,6 +104,7 @@ async def execute(
             # started container. The supervisor independently owns this label.
             _containers[key] = name
             try:
+                runs_as = await asyncio.to_thread(worker_platform.platform_for, image)
                 ready = await _command(
                     [
                         "docker",
@@ -111,7 +112,7 @@ async def execute(
                         "-d",
                         *docker_owner_args(),
                         "--platform",
-                        "linux/amd64",
+                        runs_as,
                         "--network",
                         "none",
                         "--name",

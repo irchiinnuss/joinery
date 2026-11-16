@@ -33,6 +33,7 @@ from typing import Protocol
 
 from joinery import docker_cli
 from joinery.worker_identity import docker_owner_args
+from joinery.worker_platform import platform_for
 
 SANDBOX_IMAGE = "joinery-creative-worker"
 #: Where the project is mounted inside the container.
@@ -123,7 +124,7 @@ class SandboxRunner:
             "--rm",
             *docker_owner_args(),
             "--platform",
-            "linux/amd64",
+            platform_for(self.image),
             "--network",
             "none",
             "--label",
@@ -199,7 +200,7 @@ class WorkerPool:
                     str(cidfile),
                     *docker_owner_args(),
                     "--platform",
-                    "linux/amd64",
+                    platform_for(image),
                     "--network",
                     "none",
                     "--label",

@@ -70,6 +70,7 @@ from joinery.tools.base import (
     ToolModule,
     WorkerExec,
 )
+from joinery.worker_platform import platform_for
 
 State = Literal[
     "ready", "downloading", "needs_docker", "needs_image", "needs_licence", "broken"
@@ -462,7 +463,7 @@ class DockerHost:
             "run",
             "--rm",
             "--platform",
-            "linux/amd64",
+            platform_for(image),
             "--network",
             "none",
         ]

@@ -13,3 +13,10 @@ def _as_the_user(monkeypatch: pytest.MonkeyPatch) -> None:
     agent sets its variables itself (joinery.agents.running_agent)."""
     for name in (*JOINERY_AGENT_ENV, *(n for a in AGENTS for n in a.shell_env)):
         monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _no_local_images(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tests never ask the local Docker which worker images it has: a worker
+    runs as the platform it would be built as (joinery.worker_platform)."""
+    monkeypatch.setattr("joinery.worker_platform.present", lambda _image: None)

@@ -23,6 +23,7 @@ from joinery.mcp_runtime import MCPConnection, Readiness, ServerSpec
 from joinery.platform_support import npm_argv, private_file
 from joinery.policy import command_violation, load_denylist
 from joinery.tools.base import McpProbe
+from joinery.worker_platform import platform_for
 
 
 class ReinstallRequired(ValueError):
@@ -239,7 +240,7 @@ def _worker_files(image: str, directory: str, names: tuple[str, ...]) -> bytes:
         done = subprocess.run(
             [
                 "docker", "run", "--rm", "--pull", "never",
-                "--platform", "linux/amd64", "--network", "none",
+                "--platform", platform_for(image), "--network", "none",
                 "--entrypoint", "tar", image,
                 "-C", directory, "-cf", "-", *names,
             ],

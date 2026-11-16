@@ -8,6 +8,7 @@ from pathlib import Path
 from joinery.mcp_runtime import ServerSpec
 from joinery.server_install import installation
 from joinery.worker_identity import docker_owner_args
+from joinery.worker_platform import platform_for
 
 WORKER_IMAGE = "joinery-mcp-worker"
 
@@ -51,7 +52,7 @@ def godot_worker(project: Path, readonly: bool = False) -> ServerSpec:
             *docker_owner_args(),
             "-i",
             "--platform",
-            "linux/amd64",
+            platform_for(WORKER_IMAGE),
             "--network",
             "none",
             "--name",
@@ -94,7 +95,7 @@ def blender_worker(project: Path) -> ServerSpec:
             *docker_owner_args(),
             "-i",
             "--platform",
-            "linux/amd64",
+            platform_for("joinery-blender-worker"),
             "--network",
             "none",
             "--name",
@@ -175,7 +176,7 @@ def supercollider_worker(project: Path) -> ServerSpec:
             *docker_owner_args(),
             "-i",
             "--platform",
-            "linux/amd64",
+            platform_for(WORKER_IMAGE),
             "--network",
             "none",
             "--name",
@@ -229,7 +230,7 @@ def inkscape_worker(project: Path, readonly: bool = False) -> ServerSpec:
             *docker_owner_args(),
             "-i",
             "--platform",
-            "linux/amd64",
+            platform_for("joinery-inkscape-worker"),
             "--network",
             "none",
             "--name",
@@ -278,7 +279,7 @@ def audacity_worker(project: Path, readonly: bool = False) -> ServerSpec:
             *docker_owner_args(),
             "-i",
             "--platform",
-            "linux/amd64",
+            platform_for("joinery-audacity-worker"),
             "--network",
             "none",
             "--name",

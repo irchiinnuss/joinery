@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from joinery import docker_cli, tools
+from joinery import docker_cli, tools, worker_platform
 from joinery.catalog import load_catalog, load_project_tools, selection_ids
 from joinery.locking import write_lock
 from joinery.mcp_runtime import validate_arguments
@@ -151,13 +151,14 @@ async def run_offline(
         return await execute(argv, project, timeout, readonly, image)
     name = "joinery-mcp-" + uuid.uuid4().hex
     start = asyncio.get_running_loop().time()
+    runs_as = await asyncio.to_thread(worker_platform.platform_for, image)
     process = await asyncio.create_subprocess_exec(
         "docker",
         "run",
         "--rm",
         *docker_owner_args(),
         "--platform",
-        "linux/amd64",
+        runs_as,
         "--network",
         "none",
         "--name",
