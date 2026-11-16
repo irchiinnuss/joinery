@@ -23,12 +23,12 @@ from joinery.headless import describe as headless_line
     [
         ("Read", {"file_path": "/p/game/level.gd"}, "Reading level.gd"),
         ("read_file", {"absolute_path": "/p/game/level.gd"}, "Reading level.gd"),
-        ("Grep", {"pattern": "Spawn"}, "Searching for Spawn"),
+        ("Grep", {"pattern": "Spawn"}, "Searching the code for Spawn"),
         ("mcp__joinery__search_project", {"pattern": "Spawn"}, "Searching for Spawn"),
         ("Glob", {"pattern": "**/*.tscn"}, "Looking through **/*.tscn"),
         ("Edit", {"file_path": "game/player.gd"}, "Editing player.gd"),
         ("Write", {"file_path": "game/new.gd", "content": "x"}, "Writing new.gd"),
-        ("Bash", {"command": "rg 'Spawn' game"}, "Searching for Spawn"),
+        ("Bash", {"command": "rg 'Spawn' game"}, "Searching the code for Spawn"),
         ("Bash", {"command": "uv run pytest -q"}, "Running the tests"),
         (
             "shell",
@@ -50,6 +50,70 @@ from joinery.headless import describe as headless_line
 )
 def test_each_call_reads_as_a_short_line(name: str, arguments: Any, line: str) -> None:
     assert trail.describe(name, arguments) == line
+
+
+@pytest.mark.parametrize(
+    ("command", "line"),
+    [
+        (
+            'cd /Users/me/joinery; grep -rln "recordNRT" .',
+            "Searching the code for recordNRT",
+        ),
+        (
+            'cd /Users/me/yard-day; grep -n "name\\|spawn_at" scripts/level.gd',
+            "Searching the code for name or spawn_at",
+        ),
+        (
+            "cd /Users/me/game && rg -n -e Spawn -g '*.gd'",
+            "Searching the code for Spawn",
+        ),
+        ("git grep -n Spawn", "Searching the code for Spawn"),
+        ('grep "x" f 2>/dev/null || true', "Searching the code for x"),
+        ("ls", "Listing files"),
+        ("ls -la /Users/me/game/scripts", "Listing files in scripts"),
+        ('find . -name "*.gd"', "Finding *.gd files"),
+        ("cat /Users/me/game/level.gd", "Reading level.gd"),
+        ("sed -n 1,40p /Users/me/game/level.gd", "Reading level.gd"),
+        ("head -50 /Users/me/game/b.gd | grep foo", "Reading b.gd"),
+        ("sed -i 's/a/b/' /Users/me/game/level.gd", "Editing level.gd"),
+        ("git log --oneline -5", "Looking at the history"),
+        ("rtk git status", "Checking what changed"),
+        ("git diff HEAD~1", "Looking at the changes"),
+        ("uv run pytest -q", "Running the tests"),
+        ("cd /x && uv run python tests/godot/run_widget_tests.py", "Running the tests"),
+        ("FOO=1 uv run ruff check .", "Checking the code"),
+        ("python3 -m mypy joinery", "Checking the code"),
+        ('python3 -c "print(1)"', "Running a Python snippet"),
+        ("python3 /Users/me/tools/bake.py", "Running bake.py"),
+        ("timeout 60 /opt/godot.macos.editor --headless", "Running Godot"),
+        (["bash", "-lc", "cd /a && rg -n Spawn game"], "Searching the code for Spawn"),
+        ("bash -lc 'cat /Users/me/game/level.gd'", "Reading level.gd"),
+        ("echo hi", "Running a command"),
+        ("make build", "Running a command"),
+        ("", "Running a command"),
+    ],
+)
+def test_a_shell_command_reads_as_what_it_is_for(command: Any, line: str) -> None:
+    said = trail.command_line(command)
+    assert said == line
+    assert "/Users" not in said and "/opt" not in said
+
+
+def test_a_search_that_finds_nothing_is_done_not_failed() -> None:
+    calls = trail.Calls()
+    calls.start("g", "Bash", {"command": 'cd /p; grep -rn "recordNRT" .'})
+    ended = calls.end("g", False, [{"type": "text", "text": "Exit code 1"}])
+    assert ended is not None and ended.state == "done"
+    calls.start("t", "Grep", {"pattern": "Nope"})
+    ended = calls.end("t", False, "No matches found")
+    assert ended is not None and ended.state == "done"
+    # A search that really broke, and any other command that failed, still fail.
+    calls.start("b", "Bash", {"command": "grep -rn x missing/"})
+    ended = calls.end("b", False, "grep: missing/: No such file or directory")
+    assert ended is not None and ended.state == "failed"
+    calls.start("r", "Bash", {"command": "uv run pytest"})
+    ended = calls.end("r", False, "Exit code 1")
+    assert ended is not None and ended.state == "failed"
 
 
 def test_a_tool_in_an_app_says_what_it_makes_and_where() -> None:
@@ -137,7 +201,7 @@ def test_codex_items_join_the_trail() -> None:
     command = codex_trail(
         calls, {"id": "1", "type": "commandExecution", "command": "ls"}
     )
-    assert command is not None and command.text == "Looking through files"
+    assert command is not None and command.text == "Listing files"
     change = {
         "id": "2",
         "type": "fileChange",

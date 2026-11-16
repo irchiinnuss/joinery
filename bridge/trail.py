@@ -1,7 +1,7 @@
 """The work trail: each tool call an agent makes, as one short line a person reads.
 
 While Journeyman works, the sidebar and ``joinery run`` show what it is doing as it
-happens ("Reading level.gd", "Searching for Spawn", "Modelling the mug in Blender:
+happens ("Reading level.gd", "Searching the code for Spawn", "Modelling the mug in Blender:
 bevel, 2 segments"), with the agent's short thinking between the steps and a cheap
 preview where one exists: the file and its +/− line count for an edit, a picture when
 a render or texture lands.
@@ -18,6 +18,7 @@ import re
 from pathlib import PurePosixPath
 from typing import Any
 
+from bridge import shell_words
 from bridge.protocol import Trail
 
 #: The longest line the trail shows; the rest goes behind an ellipsis.
@@ -147,14 +148,19 @@ class Calls:
 
     def __init__(self) -> None:
         self._open: dict[str, Trail] = {}
+        #: Calls that search, whose exit code 1 only means nothing matched.
+        self._searches: set[str] = set()
         self._count = 0
 
     def start(self, call_id: str, name: str, arguments: object = None) -> Trail:
         """A call the agent ``name``d with ``arguments`` has started."""
         file, added, removed = edit_size(name, arguments)
-        return self.start_line(
+        event = self.start_line(
             call_id, describe(name, arguments), file=file, added=added, removed=removed
         )
+        if searches(name, arguments):
+            self._searches.add(event.id)
+        return event
 
     def start_line(
         self,
@@ -181,8 +187,13 @@ class Calls:
     def end(self, call_id: str, ok: bool = True, result: object = None) -> Trail | None:
         """The call ``call_id`` ended; None for a call never reported started."""
         started = self._open.pop(call_id, None)
+        searched = call_id in self._searches
+        self._searches.discard(call_id)
         if started is None:
             return None
+        if not ok and searched and shell_words.nothing_found(result):
+            # A search that found nothing did its job: no matches is an answer.
+            ok = True
         return started.model_copy(
             update={"state": "done" if ok else "failed", "picture": picture(result)}
         )
@@ -193,7 +204,19 @@ class Calls:
             call.model_copy(update={"state": "done"}) for call in self._open.values()
         ]
         self._open.clear()
+        self._searches.clear()
         return ended
+
+
+def searches(name: str, arguments: object = None) -> bool:
+    """True when the call ``name`` searches (a grep tool, or a shell grep/rg/find)."""
+    args = arguments if isinstance(arguments, dict) else {}
+    key = tool_name(name).lower()
+    if key in SEARCHES:
+        return True
+    if key in SHELLS:
+        return shell_words.searches(args.get("command") or args.get("cmd") or "")
+    return False
 
 
 def thinking(text: str) -> Trail | None:
@@ -264,7 +287,11 @@ def describe(name: str, arguments: object = None) -> str:
         return short(f"Reading {file_name(path)}" if path else "Reading a file")
     if key in SEARCHES:
         pattern = args.get("pattern") or args.get("query") or args.get("regex")
-        return short(f"Searching for {pattern}" if pattern else "Searching the project")
+        return short(
+            f"Searching the code for {shell_words.pattern_words(str(pattern))}"
+            if pattern
+            else "Searching the code"
+        )
     if key in LISTS:
         where = args.get("pattern") or args.get("path") or args.get("dir_path")
         return short(f"Looking through {where}" if where else "Looking through files")
@@ -315,34 +342,8 @@ def app_line(server: str, tool: str, arguments: dict[str, Any]) -> str:
 
 
 def command_line(command: object) -> str:
-    """A shell command as a line: what it runs, in words where Joinery knows it."""
-    if isinstance(command, list):
-        parts = [str(part) for part in command]
-        wraps = len(parts) == 3 and parts[1] in {"-c", "-lc"}
-        command = parts[2] if wraps else " ".join(parts)
-    text = str(command)
-    text = " ".join(text.split())
-    # A shell wrapper ("bash -lc '…'") runs what it quotes.
-    wrapped = re.match(r"^(?:/bin/)?(?:ba|z)?sh\s+-l?c\s+(['\"])(.*)\1$", text)
-    if wrapped:
-        text = wrapped.group(2)
-    lowered = text.lower()
-    if lowered.startswith(("rg ", "grep ")):
-        found = re.search(r"(['\"])(.+?)\1", text)
-        return short(
-            f"Searching for {found.group(2)}" if found else "Searching the project"
-        )
-    if lowered.startswith(("cat ", "head ", "tail ", "sed -n")):
-        return short(f"Reading {file_name(text.split()[-1])}")
-    if lowered.startswith(("ls", "find ")):
-        return "Looking through files"
-    if re.search(r"\b(pytest|gut|unittest|test)\b", lowered):
-        return "Running the tests"
-    if lowered.startswith("git "):
-        return short(
-            "Looking at the history" if " log" in lowered else f"Running {text}"
-        )
-    return short(f"Running {text}" if text else "Running a command")
+    """A shell command as a line: what it is for, in words (bridge.shell_words)."""
+    return shell_words.command_line(command)
 
 
 def thought(text: str) -> str:

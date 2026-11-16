@@ -81,8 +81,8 @@ def acp_trail(calls: trail.Calls, update: dict[str, Any]) -> Trail:
     if kind == "search" and args:
         return calls.start(identifier, "grep", args)
     if kind == "execute":
-        return calls.start_line(
-            identifier, trail.command_line(args.get("command") or title)
+        return calls.start(
+            identifier, "shell", {"command": args.get("command") or title}
         )
     if kind == "fetch" and args:
         return calls.start(identifier, "web_fetch", args)
