@@ -54,11 +54,10 @@ const TASKS_SCRIPT := preload("res://addons/joinery/sidebar_tasks.gd")
 const SUGGESTIONS := preload("res://addons/joinery/sidebar_suggestions.gd")
 const OPENER := preload("res://addons/joinery/review_opener.gd")
 const REVIEW_PATH := "res://addons/joinery/review_panel.gd"
-const ART_DIALOG := preload("res://addons/joinery/art_review_dialog.gd")
 const REVIEW_WAIT := "Next message…"
 const PERSONA := "Journeyman"
 const DISCARDED := "Discarded"
-const BRIEF_PATH := "res://design/brief.md"
+const BRIEF := preload("res://addons/joinery/sidebar_brief.gd")
 ## Minimum dock width in font sizes: in Joinery's layout, the whole visible sidebar.
 const MIN_EM := 26
 ## The same below the Inspector (classic layout): a wider shared column crowds a laptop screen.
@@ -71,8 +70,8 @@ var min_em := MIN_EM
 var connection_state := "connecting"
 ## The latest art review ({text, sha256, approved, version, references, suggestions}).
 var art_review_event: Dictionary = {}
-## Look versions already brought to the new layout (upgrade_bible), by sha256.
-var _upgraded := {}
+## "/brief" and the look's layout upgrade (sidebar_brief.gd).
+var _brief: BRIEF
 var _content: VBoxContainer
 var _header: HEADER_SCRIPT
 var _transcript: HISTORY_SCRIPT
@@ -181,9 +180,8 @@ func _ready() -> void:
 	_slash.feature_applied.connect(_on_feature_applied)
 	_slash.readiness_changed.connect(_on_readiness)
 	_slash.revertible_changed.connect(_on_revertible)
-	_slash.bible_upgraded.connect(_on_bible_upgraded)
-	_slash.brief_status_ready.connect(_on_brief_status)
 	add_child(_slash)
+	_brief = BRIEF.new(self, _slash)
 	_review = _make_review()
 	_suggestions = SUGGESTIONS.new(self)
 	_opener = OPENER.new()
@@ -508,7 +506,7 @@ func _on_slash_requested(command: String) -> void:
 		"/art":
 			art_review_requested.emit()
 		"/brief":
-			_open_brief()
+			_brief.open()
 		"/models":
 			models_refresh_requested.emit()
 		"/focus":
@@ -534,56 +532,10 @@ func _on_reverted(transaction_id: String, ok: bool, message: String) -> void:
 		change_reverted.emit(transaction_id)
 
 
-## "/brief": the game brief, read-only. Without one, offer to write it from the setup answers.
-func _open_brief() -> void:
-	if not FileAccess.file_exists(BRIEF_PATH):
-		var row: Array[Control] = []
-		var write := func() -> void:
-			_transcript.remove_offer(row[0])
-			_slash.write_brief()
-		row.append(
-			_transcript.add_offer(
-				"This project has no game brief yet.", [["Write the brief", write]]
-			)
-		)
-		return
-	var text := FileAccess.get_file_as_string(BRIEF_PATH)
-	ART_DIALOG.show_document(self, "Game brief", text, "Change the game brief: ")
-	var page := _brief_page()
-	if page != null:
-		if not page.is_connected("status_check_requested", _slash.brief_status):
-			page.connect("status_check_requested", _slash.brief_status)
-		# The marks come from what is already known; Check now gathers fresh evidence.
-		_slash.brief_status(false)
-
-
-## The sidebar's page when it shows the brief's features, else null.
-func _brief_page() -> Control:
-	var page: Variant = get_meta("joinery_art_page") if has_meta("joinery_art_page") else null
-	if page is Control and (page as Control).has_method("show_feature_status"):
-		return page
-	return null
-
-
-func _on_brief_status(report: Dictionary) -> void:
-	var page := _brief_page()
-	if page != null and page.visible:
-		page.call("show_feature_status", report)
-
-
 ## Bring a draft of the look in the first layout to the new one without asking (the art page
 ## does this on open). Tried once per version; a failure leaves the draft as it is.
 func upgrade_bible(version := "") -> void:
-	version = version if not version.is_empty() else str(art_review_event.get("sha256", ""))
-	if not _upgraded.has(version):
-		_upgraded[version] = true
-		_slash.upgrade_bible()
-
-
-func _on_bible_upgraded(ok: bool, _message: String) -> void:
-	var page: Variant = get_meta("joinery_art_page") if has_meta("joinery_art_page") else null
-	if ok and page is Control and (page as Control).visible:
-		art_review_requested.emit()
+	_brief.upgrade(version if not version.is_empty() else str(art_review_event.get("sha256", "")))
 
 
 func _on_feature_planned(plan: Dictionary) -> void:
