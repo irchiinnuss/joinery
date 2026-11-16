@@ -340,6 +340,27 @@ its own.
   card puts the steps back in order, one after another. `joinery metrics`
   shows how each request's steps ran.
 
+### Keeping requests lean
+
+Each model call re-sends the whole session, so a long chat costs more with
+every request. Joinery keeps it short (ADR 0090), the same for every agent:
+
+- A new request in a session that has grown past `[agents] fresh_at` tokens
+  (default 60000; `0` keeps every session) starts a fresh session from a short
+  digest: the game in one line, the chat's last turns, the changes waiting for
+  review and what changed since. A small session simply goes on.
+  `joinery run --chat` marks a follow-up, which keeps its session.
+- A turn that stopped (Docker, a usage limit, no progress) is carried on from
+  the digest, never by replaying it.
+- A big request (a blockout, or a to-do of three steps or more) is planned
+  first, then built in a fresh session from the plan. `[agents]
+  split_requests = "never"` builds it where it was planned.
+- With `[agents] light_model` set, a fix after checks that only code or
+  settings fail, and a to-do step that is a small edit, run on the light model;
+  a light fix that fails again goes back to the main model.
+- `uv run python evals/request_size.py` measures what this saves on a recorded
+  run.
+
 ### When you're away
 
 Make it match, the accessibility and performance fixes and the design check's
