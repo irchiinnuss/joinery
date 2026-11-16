@@ -956,10 +956,15 @@ func _saved_chats(light: bool, width: int) -> void:
 	)
 	_check(sessions.call("current_id") == "20261110-090000-aaaaaa", "The latest chat is back")
 	await _shot("chat-restored", light, width, chat)
+	var chats: GDScript = load(
+		get_script().resource_path.get_base_dir().path_join("visual_chats.gd")
+	)
+	var header: Rect2 = chats.header_rect(chat)
 	sessions.call("open_list")
 	var page: Node = sessions.get("page")
 	page.call("row_for", "20261110-090000-aaaaaa").call("set_pointed", true)  # Open, pointed at.
 	await _shot("chats", light, width, chat)
+	await chats.aligned(self, chat, header)
 	var row: Node = page.call("row_for", "20261107-090000-bbbbbb")
 	row.call("begin_rename")
 	await _shot("chats-rename", light, width, chat)
@@ -973,6 +978,7 @@ func _saved_chats(light: bool, width: int) -> void:
 		get_script().resource_path.get_base_dir().path_join("visual_rewind.gd")
 	)
 	await rewind.shots(self, light, width, chat)
+	await chats.working(self, light, width, chat)
 	host.queue_free()
 	await _frames(2)
 	var folder := ProjectSettings.globalize_path("res://.joinery/chats")
