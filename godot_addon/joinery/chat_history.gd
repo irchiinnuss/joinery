@@ -21,6 +21,9 @@ extends ScrollContainer
 ## ([method add_plan]) is a card that changes nothing until the user presses Apply.
 ## Messages queued while Journeyman works wait in [member queue] (sidebar_queue.gd), after
 ## the last turn, and stay at the end as the conversation grows.
+## New output (a streaming reply, the work trail, a card) keeps the end in view only while the
+## user is at or near the bottom; scrolled up, they stay put and a calm "New" pill offers the
+## way down (chat_follow.gd). Sending a message always follows.
 ## A reply's right-click menu has "Remember this" (chat_remember.gd).
 
 signal example_chosen(text: String)
@@ -39,6 +42,7 @@ const QUEUE := preload("sidebar_queue.gd")
 const INDICATOR := preload("activity_indicator.gd")
 const REMEMBER := preload("chat_remember.gd")
 const EMPTY := preload("sidebar_empty.gd")
+const FOLLOW := preload("chat_follow.gd")
 const NOTICES := preload("chat_notices.gd")
 const NO_AGENT := "No agent connected"
 ## Notice kind -> [icon ("" for none), tint role].
@@ -60,7 +64,8 @@ var _cards: Array[Control] = []
 var _log := PackedStringArray()
 var _last_notice := ""
 var _dirty := false
-var _follow := true
+## Keeps the end in view while the user is at the bottom (chat_follow.gd).
+var _follower := FOLLOW.new()
 var _bold := RegEx.new()
 var _text_scale := 1.0
 var _show_timings := true
@@ -88,7 +93,7 @@ func _ready() -> void:
 	queue = QUEUE.new()
 	queue.added.connect(_on_queue_added)
 	_body.add_child(queue)
-	get_v_scroll_bar().value_changed.connect(_on_scroll)
+	_follower.watch(self)
 	UI_MOTION.rubber_band(self)
 	STYLE.on_theme_overrides(self, _apply_fade)
 	STYLE.scroll_in_gutter(self)
@@ -130,8 +135,8 @@ func _apply_fade() -> void:
 ## When the view gets shorter (a banner opened above it), keep the newest message in sight.
 func _on_resized() -> void:
 	_empty.fit(size.y)
-	if _follow:
-		_scroll_end.call_deferred()
+	if _follower.following:
+		_follower.to_end()
 
 
 func _build_empty() -> void:
@@ -157,11 +162,6 @@ func set_connection(state: String) -> void:
 ## What the empty chat starts from: the message [param targets] in the open [param scene].
 func set_start_context(targets: Array, scene := "") -> void:
 	_empty.set_context(targets, scene)
-
-
-func _on_scroll(value: float) -> void:
-	var bar := get_v_scroll_bar()
-	_follow = value >= bar.max_value - bar.page - UI_THEME.space(self, 6)
 
 
 ## A message. "You" starts a new turn with a change card; anyone else is a reply.
@@ -258,7 +258,7 @@ func add_request(text: String, targets: Array = []) -> Control:
 		)
 	)
 	_last_notice = ""
-	_follow = true
+	_follower.follow()
 	_dirty = true
 	return card
 
@@ -301,7 +301,6 @@ func add_notice(text: String, kind := "info") -> void:
 	row.accessibility_name = "Status: " + text
 	if kind == "divider":
 		_inset(_current_turn()).add_child(NOTICES.divider(text))
-		_follow = true
 		_dirty = true
 		return
 	var spec: Array = NOTICE_ICONS.get(kind, NOTICE_ICONS["info"])
@@ -319,7 +318,6 @@ func add_notice(text: String, kind := "info") -> void:
 		NOTICES.expandable(row, label, lines[0], lines[1])
 	_inset(_current_turn()).add_child(row)
 	UI_MOTION.fade_in(row)
-	_follow = true
 	_dirty = true
 
 
@@ -330,7 +328,6 @@ func add_decision(text: String, kind: String, card: Control) -> void:
 		if text + kind != _last_notice:
 			_log.append("Joinery  " + text)
 		_last_notice = text + kind
-		_follow = true
 		_dirty = true
 		return
 	add_notice(text, kind)
@@ -462,7 +459,7 @@ func clear() -> void:
 	_turn = null
 	_last_notice = ""
 	_empty.show()
-	_follow = true
+	_follower.follow()
 
 
 func _hide_empty() -> void:
@@ -490,7 +487,7 @@ func _on_queue_added(card: Control) -> void:
 	_hide_empty()
 	for pair: Array in card.scalables():
 		_scale(pair[0], pair[1])
-	_follow = true
+	_follower.follow()
 	_dirty = true
 
 
@@ -585,12 +582,8 @@ func _process(_delta: float) -> void:
 			var label: RichTextLabel = record["label"]
 			label.text = _format(str(record["text"]))
 			record["dirty"] = false
-	if _follow:
-		_scroll_end.call_deferred()
-
-
-func _scroll_end() -> void:
-	scroll_vertical = int(get_v_scroll_bar().max_value)
+	if _follower.following:
+		_follower.to_end()
 
 
 # --- Transient caption ---------------------------------------------------------------------------
@@ -613,8 +606,8 @@ func show_caption(text: String, seconds := 3.0, action := "", callback := Callab
 	_place_caption()
 	_body.move_child(_caption_room, -1)
 	_caption_room.custom_minimum_size.y = _caption.size.y + UI_THEME.space(self, 2)
-	if _follow:
-		_scroll_end.call_deferred()
+	if _follower.following:
+		_follower.to_end()
 	if not _caption.visible:
 		UI_MOTION.fade_in(_caption)
 	if is_inside_tree():
@@ -733,7 +726,6 @@ func add_offer(text: String, actions: Array = []) -> Control:
 	_inset(_current_turn()).add_child(row)
 	_log.append("Joinery  " + text)
 	UI_MOTION.fade_in(row)
-	_follow = true
 	_dirty = true
 	return row
 
@@ -768,7 +760,6 @@ func add_plan(plan: Dictionary, title: String) -> FeaturePlan:
 	_log.append("Joinery  " + title)
 	UI_MOTION.fade_in(card)
 	_last_notice = ""
-	_follow = true
 	_dirty = true
 	return card
 
