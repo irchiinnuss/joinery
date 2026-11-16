@@ -105,7 +105,8 @@ func panel() -> Node3D:
 ## for example): the game renders to it, the menu panel is made, the rig is
 ## carried on the local player when a level is running, and `mode_changed`
 ## fires once. Whoever started the session keeps it. Handing over the
-## interface already in use does nothing.
+## interface already in use does nothing. The rig is on the player when this
+## returns, so a caller that has a menu open closes it afterwards.
 func adopt_interface(started: XRInterface) -> void:
 	if started == null or (mode == XR and interface == started):
 		return
@@ -121,7 +122,9 @@ func adopt_interface(started: XRInterface) -> void:
 ## Leaves XR after a session that was started elsewhere has ended: back to the
 ## desktop with the player's own controls and camera, no rig and no menu
 ## panel, and `mode_changed` fires once. `why` becomes `reason`. Does nothing
-## when the game is not in XR.
+## when the game is not in XR. It turns the viewport's `use_xr` off; a caller
+## that has to do that sooner (WebXR, while the session's textures still
+## exist) does it first, and this then finds it off.
 func release_interface(why: String = "") -> void:
 	if mode != XR:
 		return
