@@ -643,10 +643,7 @@ func _sync() -> void:
 	if not command.is_empty():
 		_footer.set_mode("command", command)
 	elif _busy:
-		# A step live on the card is the one indicator; the footer only covers the rest.
-		var card := _card()
-		var shown: bool = card != null and card.shows_step(_progress)
-		_footer.set_mode("idle" if shown else "busy", _progress)
+		_footer.set_mode("idle")  # The work shows in the chat only; the composer keeps Stop.
 	elif _review_pending:
 		_footer.set_mode("idle" if _card() != null and _card().review_row().visible else "review")
 	else:

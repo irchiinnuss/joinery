@@ -1,9 +1,10 @@
 @tool
 extends MarginContainer
-## The status line above the composer. Hidden when idle (it never says "Ready"). While
-## Journeyman works: activity dots and what it is doing. While a change waits: "Waiting for
-## your review" with "Show review". While a check runs: "Running /doctor…". Short notes are
-## not shown here: they are the transcript's transient caption (chat_history.show_caption).
+## The status line in the composer. Hidden when idle (it never says "Ready") and while
+## Journeyman works: what it is doing shows only in the chat, on the request's live line
+## (sidebar_trail.gd). While a change waits: "Waiting for your review" with "Show review".
+## While a check runs: "Running /doctor…". Short notes are not shown here: they are the
+## transcript's transient caption (chat_history.show_caption).
 
 signal review_requested
 
@@ -11,7 +12,7 @@ const UI_MOTION := preload("ui_motion.gd")
 const UI := preload("ui_components.gd")
 const INDICATOR := preload("activity_indicator.gd")
 
-## What the footer shows: "idle", "busy", "review" or "command".
+## What the footer shows: "idle", "review" or "command".
 var mode := "idle"
 var _indicator: Control
 var _text: Label
@@ -42,8 +43,8 @@ func text() -> String:
 	return _text.text if visible else ""
 
 
-## Switch to [param state] ("idle", "busy", "review", "command"); [param detail] is the busy
-## progress or the running command.
+## Switch to [param state] ("idle", "review", "command"); [param detail] is the running
+## command.
 func set_mode(state: String, detail := "") -> void:
 	mode = state
 	_detail = detail
@@ -53,10 +54,7 @@ func set_mode(state: String, detail := "") -> void:
 func _refresh() -> void:
 	var line := ""
 	var working := false
-	if mode == "busy":
-		line = _detail if not _detail.is_empty() else "Thinking…"
-		working = true
-	elif mode == "command":
+	if mode == "command":
 		line = "Running %s…" % _detail
 		working = true
 	elif mode == "review":
