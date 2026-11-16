@@ -36,6 +36,8 @@ const DIRS: Array[Vector2i] = [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), 
 const WALL_LIFTS: Array[float] = [0.7, 1.5]
 ## Pixels a cell takes in the map picture, at most and at least.
 const MAP_WIDTH := 320
+## Named areas of the level kept for the map (rooms, zones), at most.
+const MAX_AREAS := 48
 
 ## "3d", "topdown" or "side" once built ("" before).
 var mode: String = ""
@@ -51,6 +53,8 @@ var visited: PackedInt32Array = PackedInt32Array()
 var dwell: PackedInt32Array = PackedInt32Array()
 var start: Vector2i = Vector2i(-1, -1)
 var built: bool = false
+## The level's named areas on the ground plane: {name: Rect2} (world units).
+var areas: Dictionary = {}
 
 var _tree: SceneTree
 var _floor: PackedFloat32Array = PackedFloat32Array()
@@ -135,6 +139,7 @@ func build(player: Node, style: String) -> void:
 	_last_cell = -1
 	_passed.clear()
 	start = _cell_of(at)
+	areas = _find_areas(player) if is_3d else {}
 	_map(player)
 	for item: int in floors.size():
 		var index := _index(_cell_of(floors[item]))
@@ -342,6 +347,7 @@ func summary() -> Dictionary:
 		"percent": snappedf(100.0 * seen / maxf(open, 1.0), 0.1),
 		"grid": lines,
 		"dwell": spent,
+		"areas": _area_cells(),
 	}
 
 
@@ -374,6 +380,62 @@ func save_map(path: String) -> bool:
 			Color.WHITE
 		)
 	return image.save_png(path) == OK
+
+
+## The named areas as [{name, rect: [col, row, cols, rows]}] in cells (fractions kept), for
+## the map's labels.
+func _area_cells() -> Array:
+	var found: Array = []
+	for name: String in areas:
+		var rect: Rect2 = areas[name]
+		var at := (rect.position - origin) / cell
+		var span := rect.size / cell
+		var cells := [at.x, at.y, span.x, span.y].map(
+			func(v: float) -> float: return snappedf(v, 0.01)
+		)
+		found.append({"name": name, "rect": cells})
+	return found
+
+
+## The level's rooms and zones by name: nodes in the `area` or `room` group, else the children
+## of a `Rooms` or `Areas` node (a blockout's rooms). Each is the ground extent of its floor
+## (a `Floor` child) or of everything it draws.
+func _find_areas(player: Node) -> Dictionary:
+	var found := {}
+	var scene := _tree.current_scene
+	if scene == null:
+		return found
+	var nodes: Array[Node] = []
+	for group: StringName in [&"area", &"room"]:
+		for node: Node in _tree.get_nodes_in_group(group):
+			if node is Node3D and scene.is_ancestor_of(node) and not node in nodes:
+				nodes.append(node)
+	if nodes.is_empty():
+		for holder: Node in scene.find_children("*", "Node3D", true, false):
+			if String(holder.name) in ["Rooms", "Areas"]:
+				nodes.append_array(holder.get_children())
+	for node: Node in nodes:
+		if found.size() >= MAX_AREAS or node == player or not node is Node3D:
+			continue
+		var floor_node := node.get_node_or_null(^"Floor")
+		var extent: Variant = _drawn_extent(floor_node if floor_node != null else node)
+		if extent is Rect2 and (extent as Rect2).has_area():
+			found[String(node.name)] = extent
+	return found
+
+
+## The ground-plane extent of what [param node] and its descendants draw, or null.
+static func _drawn_extent(node: Node) -> Variant:
+	var total: Variant = null
+	var parts: Array[Node] = [node]
+	parts.append_array(node.find_children("*", "VisualInstance3D", true, false))
+	for part: Node in parts:
+		if not part is VisualInstance3D:
+			continue
+		var box := (part as Node3D).global_transform * (part as VisualInstance3D).get_aabb()
+		var flat := Rect2(box.position.x, box.position.z, box.size.x, box.size.z)
+		total = flat if total == null else (total as Rect2).merge(flat)
+	return total
 
 
 # --- The grid ------------------------------------------------------------------------------

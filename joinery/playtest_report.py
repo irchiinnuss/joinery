@@ -79,7 +79,9 @@ _TITLES = {
     "joinery": "Joinery bug",
 }
 #: What a Joinery bug's item adds: it is never the game's to fix.
-JOINERY_DETAIL = " (in Joinery's own playtest code, not your game; report it to Joinery)"
+JOINERY_DETAIL = (
+    " (in Joinery's own playtest code, not your game; report it to Joinery)"
+)
 
 
 def console_entries(output: str) -> list[dict[str, Any]]:
@@ -301,7 +303,9 @@ def coverage_summary(raw: dict[str, Any], options: dict[str, Any]) -> dict[str, 
 
     ``unreached`` lists the biggest groups of navigable cells nobody stood in (up to five),
     each with its size in cells and its centre in world units on the ground plane (x, z in
-    3D; x, y in 2D), so an agent can say where they are. ``map`` names the picture, which
+    3D; x, y in 2D), so an agent can say where they are, and the named area it lies in
+    when the level has rooms. ``areas`` are those rooms, ``{name, rect: [col, row, cols,
+    rows]}`` in cells, for the map's labels. ``map`` names the picture, which
     ``joinery.playtest`` fills in with the run's folder.
     """
     grid = raw.get("grid")
@@ -333,19 +337,22 @@ def coverage_summary(raw: dict[str, Any], options: dict[str, Any]) -> dict[str, 
                         stack.append((nx, ny))
             groups.append(group)
     groups.sort(key=lambda g: (-len(g), min(g)))
+    areas = _areas(raw.get("areas"))
     unreached = []
     for group in groups[:5]:
         mx = sum(x for x, _ in group) / len(group)
         my = sum(y for _, y in group) / len(group)
-        unreached.append(
-            {
-                "cells": len(group),
-                "at": [
-                    round(float(origin[0]) + (mx + 0.5) * cell, 1),
-                    round(float(origin[1]) + (my + 0.5) * cell, 1),
-                ],
-            }
-        )
+        place: dict[str, Any] = {
+            "cells": len(group),
+            "at": [
+                round(float(origin[0]) + (mx + 0.5) * cell, 1),
+                round(float(origin[1]) + (my + 0.5) * cell, 1),
+            ],
+        }
+        area = area_at(areas, mx + 0.5, my + 0.5)
+        if area:
+            place["area"] = area
+        unreached.append(place)
     return {
         "mode": str(raw.get("mode", "")),
         "cell": cell,
@@ -358,8 +365,37 @@ def coverage_summary(raw: dict[str, Any], options: dict[str, Any]) -> dict[str, 
         "percent": float(raw.get("percent", 0) or 0),
         "grid": rows,
         "unreached": unreached,
+        "areas": areas,
         "map": "",
     }
+
+
+def _areas(raw: Any) -> list[dict[str, Any]]:
+    """The bot's named areas, kept only when well formed."""
+    found: list[dict[str, Any]] = []
+    for area in raw if isinstance(raw, list) else []:
+        if not isinstance(area, dict):
+            continue
+        rect = area.get("rect")
+        if (
+            isinstance(rect, list)
+            and len(rect) == 4
+            and all(isinstance(v, int | float) for v in rect)
+            and str(area.get("name", ""))
+        ):
+            found.append({"name": str(area["name"]), "rect": [float(v) for v in rect]})
+    return found
+
+
+def area_at(areas: list[dict[str, Any]], col: float, row: float) -> str:
+    """The smallest named area holding grid point (col, row), or ""."""
+    best = ""
+    smallest = float("inf")
+    for area in areas:
+        x, y, w, h = area["rect"]
+        if x <= col <= x + w and y <= row <= y + h and w * h < smallest:
+            best, smallest = str(area["name"]), w * h
+    return best
 
 
 def coverage_note(coverage: dict[str, Any], played: float) -> dict[str, Any] | None:
@@ -368,8 +404,11 @@ def coverage_note(coverage: dict[str, Any], played: float) -> dict[str, Any] | N
         return None
     where = ""
     if coverage["unreached"]:
-        x, y = coverage["unreached"][0]["at"]
+        biggest = coverage["unreached"][0]
+        x, y = biggest["at"]
         where = f"; the biggest unreached area is around ({x:g}, {y:g})"
+        if biggest.get("area"):
+            where += f", in {biggest['area']}"
     return {
         "kind": "coverage",
         "detail": (
@@ -433,13 +472,19 @@ def build(
                 "t": played,
             }
         )
-    for entry in _merge_logs((bot or {}).get("log", []), console_entries(output), fps, output):
+    for entry in _merge_logs(
+        (bot or {}).get("log", []), console_entries(output), fps, output
+    ):
         count = int(entry["count"])
         detail = entry["message"] + (f" (×{count})" if count > 1 else "")
         kind = entry["kind"] if entry["kind"] in _KIND_SEVERITY else "error"
         where = str(entry.get("where", "") or "")
         if console_errors.triage(entry["message"], where) == console_errors.JOINERY:
-            kind, where, detail = "joinery", joinery_where(where), detail + JOINERY_DETAIL
+            kind, where, detail = (
+                "joinery",
+                joinery_where(where),
+                detail + JOINERY_DETAIL,
+            )
         raw.append(
             {
                 "kind": kind,
@@ -524,7 +569,9 @@ def joinery_where(where: str) -> str:
     for marker in ("joinery/playtest_bot/", "addons/joinery/"):
         at = text.find(marker)
         if at >= 0:
-            prefix = "res://" if marker.startswith("addons") and "res://" in text else ""
+            prefix = (
+                "res://" if marker.startswith("addons") and "res://" in text else ""
+            )
             return prefix + text[at:]
     return text
 

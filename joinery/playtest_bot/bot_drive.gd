@@ -395,6 +395,10 @@ func _find_reach_nodes() -> void:
 			entry["found"] = true
 			if str(entry["node"]).is_empty():
 				entry["node"] = String(found[0].name)
+			# Where it is on the ground plane (x, z in 3D; x, y in 2D), for the map.
+			var spot: Vector3 = reach_place(found[0])["spot"]
+			var flat := Vector2(spot.x, spot.z) if found[0] is Node3D else Vector2(spot.x, spot.y)
+			entry["at"] = [snappedf(flat.x, 0.01), snappedf(flat.y, 0.01)]
 
 
 ## The player stands within [param node]'s shapes or meshes (a room, a zone, a door).

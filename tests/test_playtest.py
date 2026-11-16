@@ -417,6 +417,24 @@ def test_coverage_names_the_biggest_unreached_areas_and_where_they_are() -> None
     assert coverage["unreached"][2]["at"] == [-3.0, -3.0]
 
 
+def test_the_level_s_rooms_name_where_the_unreached_floor_is() -> None:
+    rooms = [
+        {"name": "Yard", "rect": [0.0, 0.0, 6.0, 4.0]},
+        {"name": "Office", "rect": [2.0, 0.0, 2.0, 2.0]},
+        {"name": "broken", "rect": [1, 2]},
+    ]
+    report = playtest_report.build(
+        _bot(coverage=_coverage(areas=rooms)), "", 0, options=OPTIONS
+    )
+    coverage = report["coverage"]
+    # Kept for the map's labels when well formed; the smallest room holding a place names it.
+    assert [area["name"] for area in coverage["areas"]] == ["Yard", "Office"]
+    assert coverage["unreached"][0]["area"] == "Office"
+    assert coverage["unreached"][2]["area"] == "Yard"
+    notes = [item for item in report["items"] if item["kind"] == "coverage"]
+    assert "around (2, -8), in Office" in notes[0]["detail"]
+
+
 def test_a_long_run_that_saw_little_of_the_level_gets_a_note() -> None:
     report = playtest_report.build(_bot(coverage=_coverage()), "", 0, options=OPTIONS)
     notes = [item for item in report["items"] if item["kind"] == "coverage"]
