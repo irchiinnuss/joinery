@@ -19,6 +19,7 @@ from joinery import (
     played,
     readiness,
     references,
+    source_folders,
     team,
     tool_refresh,
     worker_platform,
@@ -382,6 +383,7 @@ def update_addon(project: Path) -> dict[str, str]:
     """Call with the project editor closed; stage first, keep a local backup."""
     if not (project / "project.godot").is_file():
         raise ValueError("Expected a Godot project.")
+    source_folders.hide_state(project)
     target = project / "addons/joinery"
     # Without the addon no editor can be running it (a brand-new project), so skip
     # the process check, which is slow on Windows.

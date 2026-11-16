@@ -21,6 +21,8 @@ from pathlib import Path, PurePosixPath
 
 #: Godot's "don't import or parse this folder" marker.
 MARKER = ".gdignore"
+#: Joinery's own state in a project (backups, stages, chats, caches): never the game's.
+STATE = ".joinery"
 #: Source-only folders, project-relative. Godot skips subfolders of an ignored one.
 SOURCE_ONLY = ("recipes", "art/sources", "art/reference", "audio/sources")
 #: Game files whose ``res://`` paths load other files.
@@ -95,6 +97,27 @@ def mark(root: Path, *, create: bool = False) -> tuple[list[str], dict[str, list
         (path / MARKER).write_text("")
         written.append(f"{folder}/{MARKER}")
     return written, held
+
+
+def hide_state(project: Path) -> None:
+    """Give Joinery's own folder (``.joinery/``) a ``.gdignore``.
+
+    Godot's file system skips hidden folders, but its GDScript language server
+    lists every ``.gd`` under the project unless a ``.gdignore`` stops it. Without
+    the marker the editor parses the backups and stages kept there (a change's
+    ``original/`` files, old add-on copies) and reports each ``class_name`` twice
+    ("Class "Player" hides a global script class"). Called whenever Joinery makes
+    or updates a project, starts a change, and checks the add-on as the editor opens.
+    """
+    folder = project / STATE
+    marker = folder / MARKER
+    if marker.exists() or not (project / "project.godot").is_file():
+        return
+    try:
+        folder.mkdir(exist_ok=True)
+        marker.write_text("")
+    except OSError:
+        pass  # A read-only project: nothing Joinery writes there either.
 
 
 def missing(root: Path) -> list[str]:

@@ -42,3 +42,27 @@ def test_source_folder_and_ignored_folder(tmp_path: Path) -> None:
         "art/sources"
     )
     assert source_folders.ignored_folder(tmp_path, "art/models/a.glb") == ""
+
+
+def test_joinerys_own_folder_is_hidden_from_godots_language_server(
+    tmp_path: Path,
+) -> None:
+    from joinery import addon_refresh
+    from joinery.transactions import FileTransaction
+
+    (tmp_path / "project.godot").write_text("config_version=5\n")
+    (tmp_path / "player.gd").write_text("class_name Player\nextends Node\n")
+    marker = tmp_path / ".joinery/.gdignore"
+    # A change keeps copies of the game's scripts in .joinery/: Godot must not
+    # take them for the project's classes.
+    FileTransaction(tmp_path).begin("Faster player")
+    assert marker.is_file()
+    # An older project gets it as its editor opens (the add-on check).
+    marker.unlink()
+    addon_refresh.state(tmp_path)
+    assert marker.is_file() and marker.read_text() == ""
+    # Not a Godot project: nothing is written.
+    elsewhere = tmp_path / "notes"
+    elsewhere.mkdir()
+    source_folders.hide_state(elsewhere)
+    assert not (elsewhere / ".joinery").exists()

@@ -37,6 +37,7 @@ from typing import Any, BinaryIO, Self
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from joinery.platform_support import lock_file, unlock_file
+from joinery.source_folders import hide_state
 
 EXCLUDED = {".git", ".godot", ".joinery", "__pycache__", ".pytest_cache", ".venv"}
 DIRECTORY = "directory"
@@ -340,6 +341,9 @@ class FileTransaction:
     def begin(self, summary: str) -> None:
         if self.directory.exists():
             raise ValueError("Transaction already exists.")
+        # The stage and the backups are copies of the game's scripts: Godot's
+        # language server must not take them for the project's own classes.
+        hide_state(self.project)
         self.directory.mkdir(parents=True, mode=0o700)
         try:
             clone_tree(self.project, self.stage)

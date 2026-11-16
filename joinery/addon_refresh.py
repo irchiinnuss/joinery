@@ -47,7 +47,11 @@ def state(project: Path) -> dict[str, Any]:
     the sidebar can say why the add-on is still old.
     """
     from joinery.bootstrap import addon_version
+    from joinery.source_folders import hide_state
 
+    # Asked as the editor opens: an older project gets its .joinery/.gdignore now,
+    # before the editor's language server reads the backups kept there.
+    hide_state(project)
     target = project / "addons/joinery"
     available = addon_version(_source())
     if not target.is_dir():
