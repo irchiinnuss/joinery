@@ -49,6 +49,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from joinery import auto_accept
 from joinery.catalog import ROOT
 
 #: The host events a run reports; the rest are the sidebar's own bookkeeping.
@@ -350,6 +351,9 @@ def _note_kept(outcome: Outcome, event: dict[str, Any]) -> None:
     outcome.note = str(event.get("note", ""))
     outcome.state = "review"
     outcome.kept = True
+    if auto_accept.UNCHECKED not in outcome.auto_accept_held:
+        # Never accepted by itself: it waits for its checks and the user.
+        outcome.auto_accept_held.append(auto_accept.UNCHECKED)
 
 
 async def _follow(

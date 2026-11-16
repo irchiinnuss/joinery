@@ -1584,6 +1584,17 @@ class TurnController:
         self.review_open = True
         if preview is not None:
             self.emit(preview)
+        project = getattr(self.gateway, "project", None)
+        if self.auto_accepts and project is not None and auto_accept.enabled(project):
+            # Why it wasn't kept, like any policy hold (never blank).
+            self.emit(
+                {
+                    "kind": "auto_accept_held",
+                    "reasons": auto_accept.check_reasons(
+                        (p.check, p.message) for p in problems
+                    ),
+                }
+            )
         self._to(TurnState.IN_REVIEW, extra={**self._card_lines(), "held_checks": True})
         self.gateway.start_media(self.emit)
         return self._result(

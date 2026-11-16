@@ -237,6 +237,30 @@ def held(
     return reasons
 
 
+#: Why a change whose checks failed, or could not run, waits.
+FAILED_CHECK = "it failed a check"
+#: Why an unfinished change a stopped run kept waits.
+UNCHECKED = "it stopped before Joinery checked it"
+
+
+def check_reasons(failed: Iterable[tuple[str, str]]) -> list[str]:
+    """Held reasons for a change kept with failed checks: one per check, with the
+    first line of what it said ("it failed a check (tests: player_test failed)").
+    Joinery's own failure to run them reads as itself, never blank."""
+    reasons: list[str] = []
+    for check, message in failed:
+        line = next((t.strip() for t in message.splitlines() if t.strip()), "")
+        if line.startswith("Joinery could not run its checks"):
+            reason = line[:200]
+        else:
+            reason = (
+                f"{FAILED_CHECK} ({check}" + (f": {line[:160]}" if line else "") + ")"
+            )
+        if reason not in reasons:
+            reasons.append(reason)
+    return reasons or [FAILED_CHECK]
+
+
 #: Why a change the agent made differently from the request waits.
 DEPARTED = "differs from your request"
 #: What a kept change says about each thing the agent guessed.

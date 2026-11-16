@@ -15,7 +15,7 @@ from joinery.peer_review import PeerReview, ReviewNote
 from joinery.transactions import FileTransaction
 from joinery.turn import NEXT_AUTO, TurnState
 from tests.test_crew import CrewTest, makes, project, run
-from tests.test_submit_for_review import Session
+from tests.test_submit_for_review import SCENE, Session
 
 __all__ = ["project"]  # the crew tests' project fixture
 
@@ -209,6 +209,31 @@ def test_on_a_bible_change_still_waits_for_the_user(session: Session) -> None:
     held = next(e for e in session.events if e["kind"] == "auto_accept_held")
     assert held["reasons"] == ["it changes the art direction"]
     assert session.kinds()[-2:] == ["file_preview", "in_review"]
+
+
+def test_on_a_change_held_by_failed_checks_says_why(session: Session) -> None:
+    from joinery.turn import MAX_SUBMITS
+
+    auto_accept.set_enabled(session.root, True)
+    session.turn.begin("Make an ashtray")
+    session.stage({"scenes/ashtray.tscn": SCENE})
+
+    async def all_tries() -> list[Any]:
+        return [await session.turn.submit("Ashtray") for _ in range(MAX_SUBMITS)]
+
+    last = session.run(all_tries)[-1]
+    assert last.status == "in_review" and session.state == "review"
+    (held,) = [e for e in session.events if e["kind"] == "auto_accept_held"]
+    (reason,) = held["reasons"]
+    assert reason.startswith("it failed a check (references: Not submitted:")
+
+
+def test_check_reasons_are_never_blank() -> None:
+    assert auto_accept.check_reasons([("tests", "")]) == ["it failed a check (tests)"]
+    assert auto_accept.check_reasons([]) == ["it failed a check"]
+    assert auto_accept.check_reasons(
+        [("checks", "Joinery could not run its checks: TimeoutError: 120 s")]
+    ) == ["Joinery could not run its checks: TimeoutError: 120 s"]
 
 
 def test_on_a_reviewer_warning_waits_when_the_project_holds_warnings(
@@ -563,9 +588,7 @@ def test_a_change_to_joinerys_own_harness_always_waits(tmp_path: Path) -> None:
     paths = ["tests/support/play.gd", "game/level.gd", "res://notes.md"]
     owned = auto_accept.owned_changes(game, paths)
     assert owned == ["tests/support/play.gd"]
-    reasons = auto_accept.held(
-        changes=[{"path": "tests/support/play.gd"}], owned=owned
-    )
+    reasons = auto_accept.held(changes=[{"path": "tests/support/play.gd"}], owned=owned)
     assert reasons == ["a Joinery-owned harness file changed (tests/support/play.gd)"]
     assert "tests/support/play.gd" in auto_accept.owned_note(owned)
     # The game's own files keep the usual rule.

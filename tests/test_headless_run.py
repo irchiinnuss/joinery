@@ -395,3 +395,15 @@ def test_any_agents_error_words_become_the_runs_error(tmp_path: Path) -> None:
     assert other.error_kind == "provider"
     silent = run_host(tmp_path, limited_host())
     assert silent.error == "The turn ended (failed) without saying why."
+
+
+def test_a_kept_unfinished_change_says_why_it_waits() -> None:
+    from joinery import auto_accept
+
+    outcome = headless.Outcome()
+    headless._note_kept(
+        outcome,
+        {"kind": "kept", "transaction_id": "tx3", "summary": "Doors", "note": "Idle"},
+    )
+    assert outcome.state == "review" and outcome.kept
+    assert outcome.auto_accept_held == [auto_accept.UNCHECKED]
