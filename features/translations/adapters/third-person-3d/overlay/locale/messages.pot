@@ -675,6 +675,10 @@ msgstr ""
 msgid "VR comfort"
 msgstr ""
 
+#: res://features/vr/vr.gd
+msgid "the XR session ended"
+msgstr ""
+
 #: res://game/level.gd
 msgid "Camera"
 msgstr ""

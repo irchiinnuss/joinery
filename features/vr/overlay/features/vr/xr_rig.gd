@@ -76,6 +76,21 @@ func carry(player: Node3D) -> void:
 	camera.current = true
 
 
+## Stops carrying the player, as when a headset session ends: its own physics,
+## look input and camera come back, and the rig no longer moves it.
+func put_down() -> void:
+	if not is_instance_valid(body):
+		body = null
+		return
+	body.set_physics_process(true)
+	body.set_process_unhandled_input(true)
+	for node: Node in body.find_children("*", "Camera3D", true, false):
+		if not is_ancestor_of(node):
+			(node as Camera3D).make_current()
+			break
+	body = null
+
+
 ## Which way the rig faces, in radians about +Y.
 func turn() -> float:
 	return global_rotation.y

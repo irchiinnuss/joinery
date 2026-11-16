@@ -684,6 +684,10 @@ msgstr ""
 msgid "VR comfort"
 msgstr ""
 
+#: res://features/vr/vr.gd
+msgid "the XR session ended"
+msgstr ""
+
 #: res://game/level.tscn
 msgid "Press the button, take the cube from the glass case and put it on the table."
 msgstr ""
