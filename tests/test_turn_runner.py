@@ -394,6 +394,34 @@ def test_a_routine_fix_runs_light_and_escalates_to_the_main_model(
     assert host.kinds().count("file_preview") == 1
 
 
+def test_a_big_request_is_planned_then_built_in_a_fresh_session(
+    host: Host,
+) -> None:
+    (host.root / "joinery.toml").write_text(
+        '[tools]\nenabled=["godot"]\n[agents]\ntodo_go = "never"\n'
+    )
+    steps = ["Gatehouse room 16 x 14 m", "Ore yard 36 x 30 m", "Exit switch office"]
+
+    async def plan(bridge: Any) -> AsyncIterator[Any]:
+        assert host.gateway is not None and host.gateway.turn is not None
+        answer = host.gateway.turn.propose_todo({"steps": steps, "done_when": []})
+        assert answer["status"] == "build_next"
+        with pytest.raises(ValueError, match="End your turn now"):
+            host.gateway.turn.admit_mutation()
+        yield Done(ok=True)
+
+    async def build(bridge: Any) -> AsyncIterator[Any]:
+        host.stage({"a.gd": "extends Node\n"})
+        yield Done(ok=True)
+
+    host.run(plan, build)
+    assert host.log.count("new_session") == 1
+    sent = host.prompts[1].text
+    assert "You planned this request in an earlier session" in sent
+    assert "2. Ore yard 36 x 30 m" in sent
+    assert host.kinds().count("file_preview") == 1
+
+
 def test_a_failed_turn_rejects_its_change(host: Host) -> None:
     async def agent(bridge: Any) -> AsyncIterator[Any]:
         host.tx = host.stage({"a.gd": "extends Node\n"})  # type: ignore[attr-defined]

@@ -76,13 +76,14 @@ class ChatRecorder:
         *,
         follow_up: bool = False,
         context: int = 0,
+        build: bool = False,
     ) -> dict[str, Any] | None:
         """Open [chat_id] before a prompt ("" starts a new chat). Returns the event that
         tells the sidebar how it continued, or None when nothing changed.
 
         ``context`` is how many tokens the open provider session holds now; a big one
         is not continued for a new request unless it is a ``follow_up`` (the digest,
-        joinery.request_digest)."""
+        joinery.request_digest). The ``build`` of a planned to-do starts fresh."""
         if chat_id == self.chat_id and not chat_id and not self._used:
             return None
         try:
@@ -97,6 +98,7 @@ class ChatRecorder:
                 request_digest.fresh_at(self.project),
                 follow_up=follow_up,
                 stalled=request_digest.is_stalled(self._outcome),
+                build=build,
             ):
                 return await self._fresh(chat_id, sessions)
             return None

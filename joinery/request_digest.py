@@ -271,7 +271,9 @@ def fresh_at(project: Path) -> int:
     return value
 
 
-def starts_fresh(context: int, limit: int, *, follow_up: bool, stalled: bool) -> bool:
+def starts_fresh(
+    context: int, limit: int, *, follow_up: bool, stalled: bool, build: bool = False
+) -> bool:
     """Whether a request starts a fresh session instead of continuing one whose
     context holds ``context`` tokens.
 
@@ -279,8 +281,13 @@ def starts_fresh(context: int, limit: int, *, follow_up: bool, stalled: bool) ->
     big one starts fresh from the digest, unless the user marked the request a
     follow-up (``joinery run --chat``) of a turn that finished. A turn that stopped
     (a stalled worker, a usage limit, an idle stop) is never replayed at size: the
-    next request carries on from the digest, which says what that turn left."""
-    if limit <= 0 or context < limit:
+    next request carries on from the digest, which says what that turn left. The
+    ``build`` of a planned to-do (Go) always starts fresh: the to-do is the plan."""
+    if limit <= 0:
+        return False
+    if build:
+        return True
+    if context < limit:
         return False
     return stalled or not follow_up
 

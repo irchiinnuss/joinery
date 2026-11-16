@@ -327,6 +327,11 @@ STEPS_RUNNING = (
     "Joinery runs your to-do's independent steps as parallel tasks. End your turn now "
     "without changing anything; you hear back when they are done or one fails."
 )
+#: A big request's plan is done: the build starts in a fresh session (ADR 0090).
+BUILD_NEXT = (
+    "Your plan is saved. End your turn now without changing anything; Joinery starts "
+    "the build from this plan in a fresh session."
+)
 #: The checks a change passed before the reviewer reads it, in plain words.
 PASSED = (
     "Joinery's checks passed: protected files, missing files, asset provenance, "
@@ -434,6 +439,9 @@ class TurnController:
         self.steps_together: list[int] = []
         #: The steps are running as tasks now: the lead's turn takes no turn of its own.
         self.stepping = False
+        #: A big request's to-do is planned: the harness builds it in a fresh session
+        #: once the agent ends this prompt (ADR 0090); nothing may change meanwhile.
+        self.build_next = False
         #: The chat host can run steps as parallel tasks (a task's own turn can't).
         self.runs_steps = False
         #: Times the done-when checks sent the change back this turn.
@@ -486,6 +494,7 @@ class TurnController:
         self.todo = todo
         self.steps_together = []
         self.stepping = False
+        self.build_next = False
         self.check_rounds = 0
         self._done, self._done_print = [], None
         self.turn_id = uuid.uuid4().hex
@@ -546,6 +555,8 @@ class TurnController:
             raise ValueError(WAITING_FOR_GO)
         if self.steps_together or self.stepping:
             raise ValueError(STEPS_RUNNING)
+        if self.build_next:
+            raise ValueError(BUILD_NEXT)
 
     # --- The to-do -----------------------------------------------------------------------
 
@@ -577,11 +588,18 @@ class TurnController:
                 todo, done_when.run_steps_mode(self.gateway.project)
             )
         )
+        split = (
+            not wait
+            and not together
+            and not (self._staged() or self.live_edits)
+            and done_when.splits(todo, done_when.split_mode(self.gateway.project))
+        )
         if wait:
             self.pending_todo = todo
         else:
             self.todo = todo
             self.steps_together = together
+            self.build_next = split
         self.emit(
             {"kind": "todo", **todo.as_dict(), "state": "waiting" if wait else "going"}
         )
@@ -591,6 +609,8 @@ class TurnController:
                 "todo_id": todo.id,
                 "next": "The user sees your to-do and may edit it. " + WAITING_FOR_GO,
             }
+        if split:
+            return {"status": "build_next", "todo_id": todo.id, "next": BUILD_NEXT}
         if together:
             return {
                 "status": "running_steps",

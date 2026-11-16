@@ -163,6 +163,15 @@ def test_a_small_session_or_a_follow_up_goes_on(project: Path) -> None:
     assert sessions.new == 0
 
 
+def test_go_on_a_plan_builds_in_a_fresh_session(project: Path) -> None:
+    recorder, sessions = ChatRecorder(project, "claude"), FakeSessions()
+    one_turn(recorder, sessions, "Block out the Casting Hall")
+    event = asyncio.run(
+        recorder.switch(recorder.chat_id, sessions, context=30_000, build=True)
+    )
+    assert event is not None and event["mode"] == "fresh" and sessions.new == 1
+
+
 def test_a_stopped_turn_is_carried_on_from_the_digest(project: Path) -> None:
     recorder, sessions = ChatRecorder(project, "claude"), FakeSessions()
     one_turn(recorder, sessions, "Keycards", outcome="stopped")

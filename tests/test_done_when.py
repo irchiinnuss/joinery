@@ -559,6 +559,7 @@ def test_a_fail_that_stays_opens_with_its_result_and_never_drops_the_change(
     plays.reports.append(report(False))
     (project / "joinery.toml").write_text(
         '[tools]\nenabled=["godot"]\n[agents]\ntodo_go = "never"\n'
+        'split_requests = "never"\n'
     )
 
     async def go() -> None:
@@ -681,8 +682,11 @@ def test_the_tool_passes_the_todo_through(
     ("toml", "headless", "status"),
     [
         ("", False, "waiting_for_go"),
-        ("", True, "go"),
-        ("[agents]\nauto_accept = true\n", False, "go"),
+        # Three steps: planned here, built in a fresh session (ADR 0090).
+        ("", True, "build_next"),
+        ("[agents]\nauto_accept = true\n", False, "build_next"),
+        ('[agents]\nsplit_requests = "never"\n', True, "go"),
+        ('[agents]\nauto_accept = true\nsplit_requests = "never"\n', False, "go"),
         ('[agents]\nauto_accept = true\ntodo_go = "multi"\n', False, "waiting_for_go"),
         ('[agents]\ntodo_go = "always"\n', True, "waiting_for_go"),
     ],

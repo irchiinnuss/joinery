@@ -466,6 +466,7 @@ async def _serve(
                 str(data.get("chat_id", recorder.chat_id)),
                 bridge,
                 follow_up=bool(data.get("follow_up")) and "todo" not in data,
+                build="todo" in data,
                 context=controller.meter.used,
             )
             if switched is not None:

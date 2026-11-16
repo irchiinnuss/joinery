@@ -50,6 +50,8 @@ SENT_BACK_BY = "joinery.send_back.by"
 SUBMITS = "joinery.submit.attempts"
 SEND_BACKS = "joinery.review.send_backs"
 CONTINUATIONS = "joinery.continuations"
+#: The request was planned, then built in a fresh session (ADR 0090).
+SPLIT = "joinery.request.split"
 USAGE_REPORTED = "joinery.usage.reported"
 PRECHECKS = "joinery.prechecks"
 #: A raw script's language, and the scope rules it was refused for (ADR 0078).

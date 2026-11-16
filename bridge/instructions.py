@@ -213,10 +213,11 @@ BLOCKOUT_GUIDE = (
 #: The request ``/blockout [words]`` stands for; ``{words}`` is what the user added.
 BLOCKOUT_REQUEST = (
     "Build a greybox blockout of the level in the attached sketch with the blockout "
-    "tool: read its rooms, walls, doors and windows, corridors, stairs, platforms, "
-    "spawn and goals, keep its proportions (no measure given: a door is about 1 m, or "
-    "2 tiles in 2D), fix whatever blockout reports, then submit_for_review with its "
-    "facts. {words}"
+    "tool. Plan it first with propose_todo: read its rooms, walls, doors and windows, "
+    "corridors, stairs, platforms, spawn and goals into steps with their sizes and "
+    "connections, keeping its proportions (no measure given: a door is about 1 m, or "
+    "2 tiles in 2D), and a reach item for each goal. Then build it with blockout, fix "
+    "whatever blockout reports, and submit_for_review with its facts. {words}"
 )
 
 
@@ -324,6 +325,9 @@ TODO_GUIDE = (
     "waiting_for_go, end your turn at once without changing anything and without "
     "repeating the list; the user's Go starts the work. If it returns running_steps, "
     "end your turn the same way; Joinery makes those steps and comes back to you. "
+    "If it returns build_next, end your turn the same way; the build starts from "
+    "your to-do in a fresh session, so write each step with the names, sizes and "
+    "files it needs. "
     "Skip it for small, one-step requests. "
 )
 

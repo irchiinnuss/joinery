@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import tomllib
 import uuid
@@ -346,6 +347,36 @@ def step_words(numbers: list[int]) -> str:
     return f"steps {head} and {numbers[-1]}"
 
 
+#: ``[agents] split_requests``: "big" (the default) builds a big request's to-do in a
+#: fresh session after the planning one; "never" builds it where it was planned.
+SPLIT_MODES = ("big", "never")
+#: A to-do of at least this many steps is a big request.
+SPLIT_STEPS = 3
+#: Requests that are big whatever their step count: a level's whole layout.
+_BIG_REQUEST = re.compile(r"\b(blockout|greybox|grey-box|gray-box|block out)\b", re.IGNORECASE)
+
+
+def split_mode(project: Path) -> str:
+    """``[agents] split_requests``: "big" (the default) or "never"."""
+    try:
+        raw = tomllib.loads((project / "joinery.toml").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "big"
+    agents = raw.get("agents", {})
+    value = agents.get("split_requests", "big") if isinstance(agents, dict) else ""
+    return value if value in SPLIT_MODES else "big"
+
+
+def splits(todo: Todo, mode: str) -> bool:
+    """Whether the to-do is built in a step of its own (ADR 0090): a fresh session
+    starts from the plan and a short digest, so the reads and searches of the
+    planning don't ride along on every call of the build. A blockout, or a to-do of
+    ``SPLIT_STEPS`` steps or more."""
+    if mode != "big":
+        return False
+    return len(todo.steps) >= SPLIT_STEPS or bool(_BIG_REQUEST.search(todo.request))
+
+
 def waits_for_go(todo: Todo, mode: str, *, unattended: bool = False) -> bool:
     """Whether the agent waits for the user's Go before changing anything.
     ``unattended``: nobody waits to press Go (the project keeps changes automatically,
@@ -369,6 +400,22 @@ def go_prompt(todo: Todo) -> str:
         "removed items):\n"
         f"Steps:\n{steps}\nDone when:\n{done}\n"
         "Work through the steps now as one change and submit it with submit_for_review. "
+        "Joinery checks each done-when item after the change passes its checks; don't "
+        "propose the to-do again.\n\n"
+        f"The request was: {todo.request}"
+    )
+
+
+def build_prompt(todo: Todo) -> str:
+    """What the build step of a planned request hears (ADR 0090): its own plan, in a
+    fresh session that didn't see the planning."""
+    steps = "\n".join(f"{n}. {step}" for n, step in enumerate(todo.steps, 1))
+    done = "\n".join(f"- {c.text}" for c in todo.done_when) or "- (none)"
+    return (
+        "You planned this request in an earlier session; build it now from the plan. "
+        "Read only what a step needs.\n"
+        f"Steps:\n{steps}\nDone when:\n{done}\n"
+        "Work through the steps as one change and submit it with submit_for_review. "
         "Joinery checks each done-when item after the change passes its checks; don't "
         "propose the to-do again.\n\n"
         f"The request was: {todo.request}"

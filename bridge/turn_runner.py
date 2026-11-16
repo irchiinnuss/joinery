@@ -29,7 +29,7 @@ from bridge.protocol import (
     Trail,
     Usage,
 )
-from joinery import done_when, metrics
+from joinery import done_when, metrics, request_digest
 from joinery.fallback import is_quota, provider_error
 from joinery.headless import LEFT_CHANGE, PROVIDER_ERROR
 from joinery.routing import routing_settings, step_model
@@ -566,6 +566,43 @@ async def _together(
     return await stream(controller, bridge, lead, emit, timing, 1)
 
 
+async def _build(
+    controller: TurnController,
+    bridge: AgentBridge,
+    prompt: Prompt,
+    emit: Emit,
+    timing: TurnTiming,
+) -> bool:
+    """The build step of a planned request: a fresh provider session that starts
+    from a short digest of the project and the plan (the to-do), not from the reads
+    and searches of the planning. Without a way to start a fresh session the build
+    goes on in the same one. Returns the provider's ``Done.ok``."""
+    todo = controller.todo
+    assert todo is not None
+    controller.build_next = False
+    timing.trace.attributes[metrics.SPLIT] = True
+    fresh = getattr(bridge, "new_session", None)
+    digest = ""
+    if fresh is not None:
+        await fresh()
+        controller.meter.reset()
+        emit(Usage().model_dump())
+        project = getattr(controller.gateway, "project", None)
+        if isinstance(project, Path):
+            with contextlib.suppress(OSError, ValueError):
+                digest = request_digest.build(project)
+    controller.gateway.progress("Building from the plan…")
+    text = done_when.build_prompt(todo)
+    build = prompt.model_copy(
+        update={
+            "text": f"{digest}\n\n{text}" if digest else text,
+            # The sketch and other pictures the request came with stay.
+            "primer": "",
+        }
+    )
+    return await stream(controller, bridge, build, emit, timing, 1)
+
+
 async def _carry_on(
     controller: TurnController,
     bridge: AgentBridge,
@@ -640,6 +677,9 @@ async def _run_turn(
             ok, bridge = await _carry_on(
                 controller, bridge, prompt, emit, timing, fallback
             )
+        if controller.build_next and controller.todo is not None:
+            # A big request's plan is done: build it in a fresh session (ADR 0090).
+            ok = await _build(controller, bridge, prompt, emit, timing)
         if controller.steps_together and controller.todo is not None and steps:
             # The agent's to-do ran on without Go: its steps run now, as tasks.
             together, controller.steps_together = controller.steps_together, []
