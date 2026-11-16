@@ -157,3 +157,17 @@ def test_no_baseline_runs_once_the_time_is_gone(
         )
     )
     assert verdict.broken and not made
+
+
+def test_more_tests_than_the_checks_run_are_said(tmp_path: Path) -> None:
+    (tmp_path / "project.godot").write_text("config_version=5\n")
+    (tmp_path / "tests").mkdir()
+    for n in range(submission.SCENE_TESTS_MAX + 2):
+        (tmp_path / f"tests/test_{n:02}.gd").write_text(TEST)
+    run = submission.scene_tree_tests(tmp_path)
+    left = submission.scene_tests_left_out(tmp_path)
+    assert len(run) == submission.SCENE_TESTS_MAX and len(left) == 2
+    assert not set(run) & set(left)
+    note = submission.left_out_note(left)
+    assert f"first {submission.SCENE_TESTS_MAX}" in note
+    assert "res://tests/test_21.gd" in note

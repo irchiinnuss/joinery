@@ -238,6 +238,34 @@ def scene_tree_tests(stage: Path) -> list[str]:
     return found[:SCENE_TESTS_MAX]
 
 
+def scene_tests_left_out(stage: Path) -> list[str]:
+    """SceneTree tests past ``SCENE_TESTS_MAX`` that no check runs."""
+    found: list[str] = []
+    for name in TEST_DIRS:
+        folder = stage / name
+        if folder.is_dir():
+            found += [
+                path.relative_to(stage).as_posix()
+                for path in folder.rglob("*.gd")
+                if path.is_file()
+                and is_scene_tree_test(path)
+                and scene_test_args(stage, path.relative_to(stage).as_posix())
+                is not None
+            ]
+    found.sort(key=lambda rel: (rel.count("/"), rel))
+    return found[SCENE_TESTS_MAX:]
+
+
+def left_out_note(scripts: list[str]) -> str:
+    """The note for tests past the limit: said, never silently skipped."""
+    names = ", ".join("res://" + s for s in scripts[:5])
+    more = f" and {len(scripts) - 5} more" if len(scripts) > 5 else ""
+    return (
+        f"Only the first {SCENE_TESTS_MAX} SceneTree tests run in the checks; "
+        f"these did not: {names}{more}."
+    )
+
+
 def _header(path: Path) -> list[str]:
     """The ``##`` comment lines at the top of a script."""
     try:
@@ -511,6 +539,10 @@ async def validate(
     tests = gut_dirs(tx.stage) if godot else []
     # SceneTree tests run too, with or without GUT: one convention for done-when tests.
     scene_tests = scene_tree_tests(tx.stage) if godot else []
+    if scene_tests and len(scene_tests) >= SCENE_TESTS_MAX:
+        left_out = scene_tests_left_out(tx.stage)
+        if left_out:
+            found.info.append(left_out_note(left_out))
     if godot and not tests and not scene_tests:
         found.skipped.append("tests")
     importing = godot and not gateway.import_current(tx)
