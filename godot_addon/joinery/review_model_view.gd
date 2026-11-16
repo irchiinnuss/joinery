@@ -49,6 +49,8 @@ const FOV := 35.0
 ## Orbit angles shared by both cameras (yaw, pitch) and the zoom factor.
 var orbit := HOME
 var zoom := 1.0
+## How far the view is moved off the models' centre, in world units (right-drag).
+var pan := Vector3.ZERO
 ## Load on a worker thread (tests may load inline).
 var threaded := true
 ## The area whose width this may take (the review's stage). Sizing from it, not from this
@@ -200,6 +202,7 @@ func cameras() -> Array[Camera3D]:
 func reset_view() -> void:
 	orbit = HOME
 	zoom = 1.0
+	pan = Vector3.ZERO
 	_aim()
 
 
@@ -207,6 +210,20 @@ func reset_view() -> void:
 func orbit_by(relative: Vector2) -> void:
 	orbit.x -= relative.x * ORBIT_SPEED
 	orbit.y = clampf(orbit.y - relative.y * ORBIT_SPEED, -1.4, 1.4)
+	_aim()
+
+
+## Move both cameras sideways and up by a drag of [param relative] pixels, so the point
+## under the pointer follows it.
+func pan_by(relative: Vector2) -> void:
+	if _cameras.is_empty() or _views.is_empty() or _views[0].size.y <= 0.0:
+		return
+	var basis := Basis.from_euler(Vector3(orbit.y, orbit.x, 0.0))
+	# The height of the view at the models' distance, in world units per pixel.
+	var per_pixel := 2.0 * _distance() * tan(deg_to_rad(FOV * 0.5)) / _views[0].size.y
+	pan += (basis.x * -relative.x + basis.y * relative.y) * per_pixel
+	var limit := maxf(_bounds.size.length(), 0.1) * 2.0
+	pan = pan.limit_length(limit)
 	_aim()
 
 
@@ -472,15 +489,8 @@ static func _to_scene(node: Node, scene: Node) -> Transform3D:
 func _aim() -> void:
 	if _cameras.is_empty():
 		return
-	var center := _bounds.get_center()
-	var radius := maxf(_bounds.size.length() * 0.5, 0.05)
-	var aspect := 1.0
-	if not _views.is_empty() and _views[0].size.y > 0.0:
-		aspect = _views[0].size.x / _views[0].size.y
-	var half := deg_to_rad(FOV * 0.5)
-	# Far enough for the bounding sphere to fit the narrower of the two angles of view.
-	var reach := minf(half, atan(tan(half) * aspect))
-	var distance := radius / sin(reach) * 1.15 * zoom
+	var center := _bounds.get_center() + pan
+	var distance := _distance()
 	var direction := Basis.from_euler(Vector3(orbit.y, orbit.x, 0.0)) * Vector3.BACK
 	for camera: Camera3D in _cameras:
 		camera.near = maxf(distance * 0.01, 0.001)
@@ -490,6 +500,18 @@ func _aim() -> void:
 			camera.look_at(center, Vector3.UP)
 		else:
 			camera.basis = Basis.looking_at(-direction, Vector3.UP)
+
+
+## How far the cameras stand from what they look at: far enough for the bounding sphere to
+## fit the narrower of the two angles of view, times the zoom.
+func _distance() -> float:
+	var radius := maxf(_bounds.size.length() * 0.5, 0.05)
+	var aspect := 1.0
+	if not _views.is_empty() and _views[0].size.y > 0.0:
+		aspect = _views[0].size.x / _views[0].size.y
+	var half := deg_to_rad(FOV * 0.5)
+	var reach := minf(half, atan(tan(half) * aspect))
+	return radius / sin(reach) * 1.15 * zoom
 
 
 ## The width the views share: the stage's when known, else this control's.
@@ -577,6 +599,11 @@ func _on_input(event: InputEvent) -> void:
 	var motion := event as InputEventMouseMotion
 	if motion != null and motion.button_mask & MOUSE_BUTTON_MASK_LEFT:
 		orbit_by(motion.relative)
+		accept_event()
+		return
+	# Right or middle drag moves the view, as Godot's own viewports do with middle drag.
+	if motion != null and motion.button_mask & (MOUSE_BUTTON_MASK_RIGHT | MOUSE_BUTTON_MASK_MIDDLE):
+		pan_by(motion.relative)
 		accept_event()
 		return
 	var pinch := event as InputEventMagnifyGesture

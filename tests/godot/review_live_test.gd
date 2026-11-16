@@ -1,10 +1,11 @@
 extends SceneTree
 ## A model in review as live 3D (review_media.gd with review_model_view.gd): the renders show
 ## first, then the staged GLB files load at runtime and replace them, side by side with one
-## shared orbit. Drag orbits both, the wheel zooms both, a double-click resets. Nothing is
-## written to the project. A file that does not load keeps the renders; the views are freed
-## when the item changes or the panel hides. An animated GLB plays its action, posed by the
-## shared transport. The GLB files are exported here from small scenes.
+## shared orbit. Drag orbits both, right-drag moves both, the wheel zooms both, a
+## double-click resets. Nothing is written to the project. A file that does not load keeps
+## the renders; the views are freed when the item changes or the panel hides. An animated
+## GLB plays its action, posed by the shared transport. The GLB files are exported here
+## from small scenes.
 
 const MEDIA := preload("res://addons/joinery/review_media.gd")
 const MODEL_VIEW := preload("res://addons/joinery/review_model_view.gd")
@@ -186,13 +187,32 @@ func _check_orbit(live: MODEL_VIEW) -> void:
 	_check(live.zoom < 1.0, "The wheel zooms in")
 	_check(cameras[1].global_transform.is_equal_approx(cameras[0].global_transform), "…both sides")
 	_check(cameras[0].global_position.length() != distance, "The camera moved in")
+	var turned := cameras[0].global_basis
+	var before := cameras[0].global_position
+	var move := InputEventMouseMotion.new()
+	move.relative = Vector2(30.0, -20.0)
+	move.button_mask = MOUSE_BUTTON_MASK_RIGHT
+	live.views()[0].gui_input.emit(move)
+	_check(live.pan != Vector3.ZERO, "A right-drag moves the view")
+	_check(
+		(
+			not cameras[0].global_position.is_equal_approx(before)
+			and cameras[0].global_basis.is_equal_approx(turned)
+		),
+		"…sideways, without turning it"
+	)
+	_check(cameras[1].global_transform.is_equal_approx(cameras[0].global_transform), "…both sides")
 	var twice := InputEventMouseButton.new()
 	twice.button_index = MOUSE_BUTTON_LEFT
 	twice.pressed = true
 	twice.double_click = true
 	live.views()[0].gui_input.emit(twice)
 	_check(
-		cameras[0].global_position.is_equal_approx(start) and is_equal_approx(live.zoom, 1.0),
+		(
+			cameras[0].global_position.is_equal_approx(start)
+			and is_equal_approx(live.zoom, 1.0)
+			and live.pan == Vector3.ZERO
+		),
 		"A double-click resets the view"
 	)
 
