@@ -79,6 +79,7 @@ from joinery.transactions import (
     change_title,
     copy_file,
     inventory,
+    list_transactions,
 )
 from joinery.turn import Problem, scene_route
 from joinery.workers import (
@@ -275,6 +276,26 @@ def result_text(result: CallToolResult) -> str:
     )
 
 
+def waiting_note(tx: FileTransaction) -> str:
+    """What the agent hears when its chat's change waiting for review becomes its
+    stage again (:meth:`ProjectGateway.adopt_waiting`)."""
+    paths = [c["path"] for c in tx.changes]
+    files = ", ".join(paths[:6]) + (
+        f" and {len(paths) - 6} more" if len(paths) > 6 else ""
+    )
+    checked = (
+        " It stopped before Joinery checked it: submitting runs every check."
+        if tx.unchecked
+        else ""
+    )
+    return (
+        f'Your earlier change in this chat, "{tx.summary}", was still waiting for '
+        f"review ({len(paths)} files: {files}). It is your stage again: build on "
+        "it and don't make any of it again. When you submit, it goes to review as "
+        "one change." + checked
+    )
+
+
 #: The note on a change a headless run kept unfinished (it stopped or timed out).
 UNFINISHED_NOTE = (
     "The run stopped before this change was finished; Joinery's import, lint and "
@@ -342,6 +363,8 @@ class ProjectGateway:
         self.keeps_unfinished = False
         #: Told about each change kept that way (the chat host emits it).
         self.on_kept: Callable[[dict[str, Any]], None] | None = None
+        #: The chat this gateway's requests belong to; its changes record it.
+        self.chat_id = ""
         self.claims.register(MAIN, MAIN_TITLE)
         self.editor_context: dict[str, str] = {}
         self._lane_state()
@@ -1046,6 +1069,7 @@ class ProjectGateway:
             # The request is the timeline entry's detail; the change is named when
             # it opens for review (open_review).
             self.transaction.request = self.request_summary
+            self.transaction.chat_id = self._root.chat_id
             self.transaction.begin(self.request_summary[:160] or "Project changes")
             self._synced = self.claims.generation
         elif self._synced < self.claims.generation:
@@ -1054,6 +1078,30 @@ class ProjectGateway:
         if self.transaction.state != "staging":
             raise ValueError("Accept or reject the pending transaction first.")
         return self.transaction
+
+    def adopt_waiting(self) -> FileTransaction | None:
+        """Make this chat's newest change kept waiting for review (a stopped or held
+        headless run's) the stage again, so a follow-up request builds on it rather
+        than beginning a second change for the same work. None when there is none,
+        or a change is staged already."""
+        if self.transaction is not None or not self._root.chat_id or self.is_lane:
+            return None
+        waiting = [
+            tx
+            for tx in list_transactions(self.project)
+            if tx.state == "review" and tx.held and tx.chat_id == self._root.chat_id
+        ]
+        if not waiting:
+            return None
+        tx = max(waiting, key=lambda found: found.created)
+        try:
+            tx.reopen()
+        except (OSError, ValueError):
+            return None
+        self.transaction = tx
+        # Follow changes accepted since it was made, before the agent reads it.
+        self.follow_project(take_theirs=False)
+        return tx
 
     def claim_stage(self, *, strict: bool) -> None:
         """Claim every file this turn's stage changed, hashing the whole stage.
@@ -1776,6 +1824,8 @@ class ProjectGateway:
                 *tx.review_notes,
                 {"severity": "warn", "text": note[:400], "file": ""},
             ]
+            # Its scripts must compile before it can be accepted (accept_checks).
+            tx.unchecked = True
             tx.review()
             tx.hold(self._root.held_by)
         except (OSError, ValueError):

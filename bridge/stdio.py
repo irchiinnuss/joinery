@@ -65,7 +65,7 @@ from joinery.authoring import run_offline
 from joinery.claims import parallel_limit
 from joinery.debugging import debug_request
 from joinery.editor_ops import validate_edit
-from joinery.gateway import ProjectGateway
+from joinery.gateway import ProjectGateway, waiting_note
 from joinery.gateway_rpc import GatewayRPC
 from joinery.routing import routing_settings
 from joinery.timing import TurnTiming
@@ -467,6 +467,20 @@ async def _serve(
             text, started = recorder.begin(data, attachments)
             if started is not None:
                 emit(started)
+            # A run in a chat whose own change still waits for review (it stopped,
+            # or its checks held it) carries on in that change: one change for the
+            # request, never a second one rebuilt from scratch.
+            gateway.chat_id = recorder.chat_id
+            adopted = gateway.adopt_waiting() if gateway.keeps_unfinished else None
+            if adopted is not None:
+                emit(
+                    {
+                        "kind": "progress",
+                        "text": f'Carrying on with "{adopted.summary}"',
+                        "transaction_id": adopted.id,
+                    }
+                )
+                text = waiting_note(adopted) + "\n\n" + text
             # A sidebar command that is a request ("/blockout") reaches the agent in words.
             raw = str(data.get("text", ""))
             if text.endswith(raw) and expand_command(raw) != raw:

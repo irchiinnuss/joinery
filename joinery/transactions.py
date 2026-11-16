@@ -321,6 +321,10 @@ class FileTransaction:
         #: the request and why (submit_for_review's guessed and not_as_asked).
         self.guessed: list[str] = []
         self.not_as_asked: list[str] = []
+        #: The chat whose request made it, so a follow-up in that chat builds on it.
+        self.chat_id = ""
+        #: Kept for review before Joinery's checks ran on it (a run that stopped).
+        self.unchecked = False
 
     @property
     def original(self) -> Path:
@@ -386,6 +390,10 @@ class FileTransaction:
             data["guessed"] = self.guessed
         if self.not_as_asked:
             data["not_as_asked"] = self.not_as_asked
+        if self.chat_id:
+            data["chat_id"] = self.chat_id
+        if self.unchecked:
+            data["unchecked"] = True
         if self.state in PENDING:
             # The full inventory is only needed until the decision.
             data["base"] = self.base
@@ -462,6 +470,19 @@ class FileTransaction:
     @property
     def held(self) -> bool:
         return (self.directory / HELD).is_file()
+
+    def reopen(self) -> None:
+        """Take a change waiting for review back to staging, so the chat that made
+        it carries on in it instead of beginning a second change for the same
+        request. Its review (notes, the reviewer's read) is over: the next submit
+        checks and reviews it again."""
+        if self.state != "review":
+            raise ValueError("Only a change waiting for review can be reopened.")
+        (self.directory / HELD).unlink(missing_ok=True)
+        self.state = "staging"
+        self.review_notes, self.reviewer, self.auto_notes = [], {}, []
+        self.unchecked = False
+        self._record()
 
     def accept(self) -> list[dict[str, str]]:
         if self.state != "review":
@@ -854,6 +875,8 @@ class FileTransaction:
         transaction.not_as_asked = [
             line for line in raw.get("not_as_asked") or [] if isinstance(line, str)
         ]
+        transaction.chat_id = str(raw.get("chat_id") or "")
+        transaction.unchecked = raw.get("unchecked") is True
         # Never accept journal paths outside this project, even after local tampering.
         for path in transaction.base:
             _safe(path)

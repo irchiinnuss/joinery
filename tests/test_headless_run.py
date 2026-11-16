@@ -407,3 +407,60 @@ def test_a_kept_unfinished_change_says_why_it_waits() -> None:
     )
     assert outcome.state == "review" and outcome.kept
     assert outcome.auto_accept_held == [auto_accept.UNCHECKED]
+
+
+def test_a_follow_up_in_the_chat_carries_on_in_its_waiting_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A run that stopped keeps its change for review; the next run in the same chat
+    makes that change its stage again: one change for the request, not two."""
+    from joinery.gateway import waiting_note
+    from joinery.transactions import list_transactions
+
+    (tmp_path / "project.godot").write_text("config_version=5\n")
+    monkeypatch.setattr("joinery.gateway.configured", lambda _: ([], []))
+    test = "tests/test_progression.gd"
+
+    def host(chat_id: str) -> ProjectGateway:
+        gateway = ProjectGateway(tmp_path)
+        gateway.keep_reviews = gateway.keeps_unfinished = True
+        gateway.chat_id = chat_id
+        gateway.request_summary = "Keycards and doors"
+        return gateway
+
+    async def go() -> None:
+        first = host("chat-a")
+        tx = first.staging()
+        assert tx.chat_id == "chat-a"
+        (tx.stage / "tests").mkdir()
+        (tx.stage / test).write_text("extends SceneTree\n")
+        await first.close()  # stopped: kept unfinished
+        kept = FileTransaction.load(tmp_path, tx.id)
+        assert kept.state == "review" and kept.held and kept.unchecked
+        assert kept.chat_id == "chat-a"
+        note = waiting_note(kept)
+        assert test in note and "don't make any of it again" in note
+        assert "submitting runs every check" in note
+        # Another chat's request starts its own change.
+        other = host("chat-b")
+        assert other.adopt_waiting() is None
+        await other.close()
+        follow = host("chat-a")
+        adopted = follow.adopt_waiting()
+        assert adopted is not None and adopted.id == tx.id
+        assert adopted.state == "staging" and not adopted.held
+        assert not adopted.unchecked and adopted.review_notes == []
+        # The follow-up reads and writes the same stage.
+        assert follow.staging() is adopted
+        assert (adopted.stage / test).read_text() == "extends SceneTree\n"
+        (adopted.stage / "game").mkdir()
+        (adopted.stage / "game/doors.gd").write_text("extends Node\n")
+        changes = adopted.review()
+        assert {c["path"] for c in changes} >= {test, "game/doors.gd"}
+        pending = [
+            t for t in list_transactions(tmp_path) if t.state in {"staging", "review"}
+        ]
+        assert [t.id for t in pending] == [tx.id]
+        await follow.close()
+
+    asyncio.run(go())
