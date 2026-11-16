@@ -24,6 +24,7 @@ const REVIEW_CHECKS := preload("res://addons/joinery/review_checks.gd")
 const FLOW_SCRIPT := preload("res://addons/joinery/review_flow.gd")
 const EDITOR_CONTEXT := preload("res://addons/joinery/editor_context.gd")
 const PANELS_SCRIPT := preload("res://addons/joinery/godot_panels.gd")
+const FILE_SETTLE := preload("res://addons/joinery/file_settle.gd")
 
 ## Focus mode is remembered, so it comes back on every launch.
 const FOCUS_SETTING := "joinery/focus_mode"
@@ -910,19 +911,20 @@ func _on_file_decision(event: Dictionary) -> void:
 		_accept_scene_edit(true)
 	_close_review(ACCEPTED if message.is_empty() else message, "success")
 	_flow.reopen_live()
-	var files := EditorInterface.get_resource_filesystem()
-	files.scan()
-	await get_tree().process_frame
-	while files.is_scanning() or files.is_importing():
-		await get_tree().process_frame
+	await FILE_SETTLE.scan()
+	var waiting: Array[String] = []
 	for change: Dictionary in event.get("changes", []):
 		var path := "res://" + str(change["path"])
 		if path.get_extension() != "tscn" or not FileAccess.file_exists(path):
 			continue
-		if EditorInterface.get_open_scenes().has(path):
+		if not FILE_SETTLE.loadable(path):
+			waiting.append(path.get_file())
+		elif EditorInterface.get_open_scenes().has(path):
 			EditorInterface.reload_scene_from_path(path)
 		elif EditorInterface.get_edited_scene_root() == null or change.get("change") == "created":
 			EditorInterface.open_scene_from_path(path)
+	if not waiting.is_empty():
+		_status("Not loaded, it uses files that are missing: " + ", ".join(waiting))
 	# Only a newly created model takes the user to the Assets view, where it is selected and
 	# flashed; an edit to an existing model stays in the view the user is working in.
 	for change: Dictionary in event.get("changes", []):
@@ -945,8 +947,8 @@ func _on_file_decision(event: Dictionary) -> void:
 
 
 ## A Revert restored files on disk: rescan them and reload the open scenes it rewrote, so the
-## editor shows the reverted state. A scene with unsaved edits is never reloaded (that would
-## throw the edits away); the footer says so instead.
+## editor shows the reverted state. A scene with unsaved edits (they would be lost) or one that
+## uses missing files is never reloaded; the footer says so instead.
 func _on_change_reverted(transaction_id: String) -> void:
 	# Restored files keep their earlier timestamps, so the accepted change's own file list says
 	# which scenes to reload. A change accepted in an earlier session: every open scene.
@@ -955,22 +957,18 @@ func _on_change_reverted(transaction_id: String) -> void:
 	for change: Dictionary in _accepted_changes.get(transaction_id, []):
 		restored.append("res://" + str(change.get("path", "")))
 	_accepted_changes.erase(transaction_id)
-	var files := EditorInterface.get_resource_filesystem()
-	files.scan()
-	await get_tree().process_frame
-	while files.is_scanning() or files.is_importing():
-		await get_tree().process_frame
-	var unsaved := EditorInterface.get_unsaved_scenes()
-	var kept: Array[String] = []
+	var scenes: Array[String] = []
 	for path: String in EditorInterface.get_open_scenes():
-		if known and not restored.has(path) or not FileAccess.file_exists(path):
-			continue
-		if unsaved.has(path):
-			kept.append(path.get_file())
-		else:
-			EditorInterface.reload_scene_from_path(path)
+		if (not known or restored.has(path)) and FileAccess.file_exists(path):
+			scenes.append(path)
+	# Scenes that load as restored go back before the scan, so the editor stops holding
+	# files the revert removed; the rest once the restored files are imported.
+	if known:
+		scenes = FILE_SETTLE.reload_untouched(scenes, restored)
+	await FILE_SETTLE.scan()
+	var kept := FILE_SETTLE.reload_open(scenes)
 	if not kept.is_empty():
-		_status("Reverted. Not reloaded, it has unsaved edits: " + ", ".join(kept))
+		_status("Reverted. Not reloaded: " + ", ".join(kept))
 	_workspace.invalidate()
 	_workspace.refresh()
 
