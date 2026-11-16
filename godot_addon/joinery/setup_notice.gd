@@ -19,6 +19,8 @@ extends MarginContainer
 ## Cancel and Show log. When it ends the notice asks readiness afresh itself (never the cached
 ## answer from before the refresh): it leaves once the apps are ready. If the refresh failed, or
 ## finished and an app still can't work, it says so in plain words with Check again and Show log.
+## A check that gets no answer yet (Docker busy, the editor just opened) says it is checking and
+## asks again by itself; one that fails shows the CLI's own words on its (!) glyph's tooltip.
 ## While it names a problem it looks again every [member recheck_seconds], so a fix made
 ## elsewhere (a terminal, doctor, another editor) clears it too.
 ## Only one refresh runs at a time: one started anywhere else (the app rail, Project setup, a
@@ -51,6 +53,11 @@ const DOCKER_POLLS := 40
 ## A refresh that ran to the end, yet an app still can't work.
 const STILL_NEEDS := "The refresh finished, but %s still can't work."
 const CHECK_FAILED := "Joinery couldn't check the apps just now."
+## Said while Check again (or the check after a refresh) runs, and while a slow answer is retried.
+const CHECKING := "Checking the apps…"
+## An empty or unreadable answer (Docker busy, an editor just opened) is asked again, RETRIES
+## times, [member retry_seconds] apart, before the notice says the check failed.
+const RETRIES := 3
 const CHECK_AGAIN := "Check again"
 
 ## The command that runs the Joinery CLI and its leading arguments. Empty: the engine
@@ -70,6 +77,8 @@ var watch_refreshes := Engine.is_editor_hint()
 var refresh_state_path := ""
 ## Seconds between looks while the notice names a problem (0: never; on in the editor).
 var recheck_seconds := 30.0 if Engine.is_editor_hint() else 0.0
+## Seconds before a slow (empty) answer is asked again.
+var retry_seconds := 5.0
 
 var _panel: PanelContainer
 var _glyph: TextureRect
@@ -103,6 +112,13 @@ var _check_why := ""
 ## Questions left to ask Docker after Start Docker, and seconds to the next one.
 var _docker_polls := 0
 var _docker_in := 0.0
+## Slow answers left to ask again, and seconds to the next ask (0: none waiting).
+var _retries := RETRIES
+var _retry_in := 0.0
+## Why the last check failed, in its own words (the glyph's and the sentence's tooltip).
+var _failed_why := ""
+## The last failed check's output, printed to Output once rather than on every try.
+var _logged_failure := ""
 
 
 func _init() -> void:
@@ -207,6 +223,10 @@ func _look_again() -> void:
 func _check(why: String) -> void:
 	if _jobs.has("check"):
 		return
+	if why == "again":
+		_retries = RETRIES  # The user asked: slow answers get their tries again.
+		_retry_in = 0.0
+		_said = CHECKING  # Pressed, and seen to be pressed.
 	_check_why = why
 	var args := ["status", "--project", _project(), "--json"]
 	if why == "look":
@@ -354,7 +374,7 @@ func _refresh() -> void:
 	elif not _said.is_empty():
 		kind = "tools"
 		words = _said
-		action = CHECK_AGAIN
+		action = CHECK_AGAIN if _said != CHECKING else ""
 	elif not _tools.is_empty():
 		kind = "tools"
 		words = str(_tools.get("text", ""))
@@ -363,14 +383,23 @@ func _refresh() -> void:
 			var id := str((found as Dictionary).get("id", ""))
 			action = str(ACTION_TEXT.get(id, (found as Dictionary).get("label", "")))
 	_kind = kind
-	var failed_now := not _said.is_empty() or not str(_addon.get("last_error", "")).is_empty()
+	var failed_now := (
+		(not _said.is_empty() and _said != CHECKING)
+		or not str(_addon.get("last_error", "")).is_empty()
+	)
 	STYLE.set_glyph(
 		_glyph, "error" if failed_now else "warning", "danger" if failed_now else "text_muted"
 	)
 	_glyph.visible = not refreshing()
 	var fresh := _text.text != words or not visible
 	_text.text = words
-	_text.tooltip_text = words
+	# The words a failed check came back with: on the sentence and on its (!) glyph.
+	var why := _failed_why if _said == CHECK_FAILED else ""
+	_text.tooltip_text = words + ("\n" + why if not why.is_empty() else "")
+	_glyph.tooltip_text = why
+	_glyph.mouse_filter = (
+		Control.MOUSE_FILTER_IGNORE if why.is_empty() else Control.MOUSE_FILTER_PASS
+	)
 	_action.text = action
 	_action.accessibility_name = action
 	_action.visible = not action.is_empty()
@@ -379,8 +408,11 @@ func _refresh() -> void:
 	_bar.value = progress()
 	_cancel.visible = _bar.visible
 	_cancel.disabled = _jobs.has("cancel")
+	# While a refresh runs its log is on its way; after it, Show log needs the file there.
 	_show_log.visible = (
-		kind == "tools" and not _log.is_empty() and (_bar.visible or not _said.is_empty())
+		kind == "tools"
+		and not _log.is_empty()
+		and (_bar.visible or (not _said.is_empty() and FileAccess.file_exists(_log)))
 	)
 	_links.visible = _cancel.visible or _show_log.visible
 	var show_it := not kind.is_empty() and not _held
@@ -436,10 +468,19 @@ func _run(kind: String, args: Array) -> void:
 	var job: RefCounted = COMMAND.joinery(cli_prefix, args)
 	if job != null:
 		_jobs[kind] = job
-	set_process(not _jobs.is_empty() or _docker_polls > 0)
+	set_process(_busy())
+
+
+func _busy() -> bool:
+	return not _jobs.is_empty() or _docker_polls > 0 or _retry_in > 0.0
 
 
 func _process(delta: float) -> void:
+	if _retry_in > 0.0:
+		_retry_in -= delta
+		if _retry_in <= 0.0:
+			_retry_in = 0.0
+			_check("retry")
 	if _docker_polls > 0 and not _jobs.has("docker"):
 		_docker_in -= delta
 		if _docker_in <= 0.0:
@@ -460,7 +501,7 @@ func _process(delta: float) -> void:
 		if kind == "refresh" and data.is_empty():
 			data = _result  # The result line already came through take_lines.
 		_finished(kind, int(done.get("code", 1)), data, done)
-	set_process(not _jobs.is_empty() or _docker_polls > 0)
+	set_process(_busy())
 
 
 func _exit_tree() -> void:
@@ -501,19 +542,35 @@ func _finished(kind: String, code: int, data: Dictionary, raw: Dictionary) -> vo
 			# The notice asks itself: a /tools check can be refused while another one runs.
 			_check("refreshed" if code == 0 else "failed")
 		"check":
-			_checked(code, data)
+			_checked(code, data, raw)
 	_refresh()
 
 
 ## A readiness answer for the notice: shown, and after a refresh, what is still wrong is said.
-func _checked(code: int, data: Dictionary) -> void:
+## No answer at all (empty, or not JSON) is a slow one: asked again before it is called a failure.
+func _checked(code: int, data: Dictionary, raw: Dictionary) -> void:
 	var why := _check_why
 	_check_why = ""
 	if code != 0 or not data.has("tools"):
-		if why == "again" or why == "refreshed":
-			_said = CHECK_FAILED
+		if not why in ["again", "refreshed", "retry"]:
+			return
+		var reason := str(data.get("error", ""))
+		if reason.is_empty() and _retries > 0:
+			_retries -= 1
+			_said = CHECKING
+			_retry_in = retry_seconds
+			set_process(true)
+			return
+		_said = CHECK_FAILED
+		_failed_why = reason if not reason.is_empty() else _first_line(raw)
+		var printed := "%s\n%s" % [raw.get("output", ""), raw.get("error", "")]
+		if printed != _logged_failure:
+			_logged_failure = printed
+			print("[Joinery] status\n", printed)
 		return
-	if why == "again":
+	_retries = RETRIES
+	_failed_why = ""
+	if why in ["again", "retry"]:
 		_said = ""
 	show_readiness(data)
 	if why == "refreshed" and str(_tools.get("state", "")) == "needs_image":
@@ -535,6 +592,15 @@ func _project() -> String:
 	if not project_path.is_empty():
 		return project_path
 	return ProjectSettings.globalize_path("res://").rstrip("/")
+
+
+## The first line a failed command printed: its error output, else its standard output.
+static func _first_line(raw: Dictionary) -> String:
+	for key: String in ["error", "output"]:
+		var text := str(raw.get(key, "")).strip_edges()
+		if not text.is_empty():
+			return text.get_slice("\n", 0).left(200)
+	return ""
 
 
 ## The JSON object in [param output] (`joinery status` prints one over many lines), or {}.

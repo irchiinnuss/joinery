@@ -21,6 +21,15 @@ if a[0] == "update-addon" and "--check" in a:
     print(json.dumps({"state": os.environ.get("ADDON", "stale")}))
 elif a[0] == "update-addon":
     print(json.dumps({"state": "scheduled", "helper": 7, "project": "p"}))
+elif a[0] == "status" and os.environ.get("STATUS") == "broken":
+    print(json.dumps({"error": "Docker didn't answer in time."}, indent=2))
+    sys.exit(2)
+elif a[0] == "status" and os.environ.get("STATUS") == "slow":
+    seen = os.environ["CALLS"] + ".slow"
+    count = int(open(seen).read()) + 1 if os.path.exists(seen) else 1
+    open(seen, "w").write(str(count))
+    if count >= 2:
+        print(json.dumps({"docker": "ok", "tools": [], "notice": None}, indent=2))
 elif a[0] == "status" and os.environ.get("STATUS"):
     needs = os.environ["STATUS"] == "needs"
     # Like the real CLI: one object over many lines.
@@ -46,6 +55,7 @@ elif a[0] == "bootstrap" and "--cancel" in a:
 elif a[0] == "bootstrap":
     import time
     log = os.environ["CALLS"] + ".log"
+    open(log, "w").write("refresh log\\n")
     for step in (1, 2):
         print(json.dumps({"state": "running", "progress": (step - 1) / 2, "step": step,
             "steps": 2, "text": "Refreshing Blender (step %d of 2)…" % step, "log": log}),
@@ -105,7 +115,7 @@ func _logged() -> Array:
 func _run() -> void:
 	root.size = Vector2i(500, 700)
 	_calls = OS.get_user_data_dir().path_join("setup-notice-calls.jsonl")
-	for left: String in [_calls, _calls + ".status"]:
+	for left: String in [_calls, _calls + ".status", _calls + ".slow", _calls + ".log"]:
 		if FileAccess.file_exists(left):
 			DirAccess.remove_absolute(left)
 	OS.set_environment("CALLS", _calls)
@@ -114,6 +124,7 @@ func _run() -> void:
 	_check_doctor()
 	await _check_refresh()
 	await _check_recheck()
+	await _check_slow_answer()
 	await _check_docker()
 	await _check_join()
 	print("setup notice: ok" if not _failed else "setup notice: FAILED")
@@ -287,6 +298,38 @@ func _check_recheck() -> void:
 		"Fixed elsewhere, the notice leaves without a click: " + notice.text()
 	)
 	_check(_logged()[-1].has("--background"), "Looking again is the cheap, cached question")
+	OS.set_environment("STATUS", "")
+	notice.queue_free()
+
+
+## Check again shows it was pressed; an empty (slow) answer is asked again by itself rather than
+## called a failure; a real failure says so, with the CLI's own words on the (!) glyph.
+func _check_slow_answer() -> void:
+	var notice := _notice()
+	notice.retry_seconds = 0.2
+	root.add_child(notice)
+	notice.show_readiness({"notice": {"state": "needs_image", "text": "Blender needs a refresh."}})
+	OS.set_environment("STATUS", "broken")
+	notice.call("_check", "again")
+	_check(
+		await _until(func() -> bool: return notice.text() == NOTICE.CHECK_FAILED),
+		"An answer with an error is a failed check: " + notice.text()
+	)
+	_check(notice.action_text() == NOTICE.CHECK_AGAIN, "With Check again")
+	var glyph: TextureRect = notice.get("_glyph")
+	_check(glyph.tooltip_text == "Docker didn't answer in time.", "Why: " + glyph.tooltip_text)
+	_check(glyph.mouse_filter != Control.MOUSE_FILTER_IGNORE, "The (!) shows why on hover")
+	_check(not (notice.get("_show_log") as Button).visible, "No Show log without a log to show")
+	OS.set_environment("STATUS", "slow")
+	notice.press()
+	_check(notice.text() == NOTICE.CHECKING, "Check again is seen at once: " + notice.text())
+	_check(
+		await _until(func() -> bool: return notice.text().is_empty(), 10.0),
+		"An empty answer is asked again, and the next one clears it: " + notice.text()
+	)
+	var slow := FileAccess.get_file_as_string(_calls + ".slow")
+	_check(slow == "2", "Asked twice: " + slow)
+	_check(glyph.tooltip_text.is_empty(), "Nothing to explain once it works")
 	OS.set_environment("STATUS", "")
 	notice.queue_free()
 
