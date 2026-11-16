@@ -15,6 +15,9 @@ extends Node
 ##   only the shown dock's title, ⋮ and ×. The icon again, ×, or Esc (in the panel) hides it.
 ##   Godot still opens a dock there by itself when it needs to (the debugger on Run, the
 ##   animation editor for an AnimationPlayer); Output never does, its icon shows a dot.
+## - Both side columns, the viewport and the sidebar need more room than a small window has:
+##   rather than push the title bar's and the sidebar's buttons past the window's right edge,
+##   the column opened first closes (make_room), and the one just opened stays.
 ##
 ## Ctrl+Alt+I (Cmd+Option+I on macOS) shows or hides Scene and Inspector together, and Inspect
 ## in the 2D view's right-click menu shows the Inspector. Godot's classic view is never
@@ -66,6 +69,10 @@ var _state: Array = []
 var _since_mark := 0.0
 ## Every dock by id, from the last look at the editor (_all_docks).
 var _docks: Dictionary = {}
+## The side columns (SIDE_SPLITS) that show, in the order they opened: the latest last.
+var _columns: Array[String] = []
+## The editor's content below its base: the title bar and every column.
+var _content: Control
 
 
 ## Shows the Inspector for the node under the pointer, from the 2D view's right-click menu.
@@ -108,6 +115,9 @@ func apply(base: Control, settings: EditorSettings) -> void:
 			if slot is TabContainer:
 				slot.child_order_changed.connect(_on_docks_moved)
 				(slot as TabContainer).tab_changed.connect(_on_side_tab)
+	for bar: Node in base.find_children("*", "EditorTitleBar", true, false):
+		_content = bar.get_parent() as Control
+	base.resized.connect(make_room, CONNECT_DEFERRED)
 	set_process(true)
 	set_process_shortcut_input(true)
 
@@ -270,6 +280,10 @@ func show_panel(id: String) -> void:
 		_bottom.current_tab = _bottom.get_tab_idx_from_control(dock)
 	else:
 		dock.call("make_visible")
+		var column := _column_of(dock)
+		_columns.erase(column)
+		_columns.append(column)
+		make_room.call_deferred()
 	_remember_side()
 	changed.emit()
 
@@ -331,6 +345,54 @@ func _process(delta: float) -> void:
 	if _since_mark >= MARK_INTERVAL:
 		_since_mark = 0.0
 		_update_rail()
+		make_room()
+
+
+## How far the editor's content reaches past the window's right edge, in pixels: what its
+## columns need at their narrowest beyond the window's width, or 0 when everything fits.
+func overflow() -> float:
+	if not is_instance_valid(_content) or not is_instance_valid(_base):
+		return 0.0
+	var need := (
+		_content.get_combined_minimum_size().x + _content.offset_left - _content.offset_right
+	)
+	return maxf(0.0, need - _base.size.x)
+
+
+## While the content is wider than the window, close the side column that opened first, so
+## the one just opened stays and nothing is pushed past the window's edge. Only a column is
+## closed: the viewport and the sidebar keep their place.
+func make_room() -> void:
+	_track_columns()
+	while overflow() > 0.5 and _columns.size() > 1:
+		var oldest: String = _columns.pop_front()
+		for dock: Control in _side_docks():
+			if _column_of(dock) == oldest and _is_open(dock):
+				hide_panel(_key(dock))
+
+
+## Note a side column that shows now and was not shown before (opened by Godot, a layout, or a
+## dock dragged there), and forget one that no longer shows.
+func _track_columns() -> void:
+	if not is_instance_valid(_base):
+		return
+	for split_name: String in SIDE_SPLITS:
+		var split := _base.find_child(split_name, true, false) as Control
+		var shown := split != null and split.is_visible_in_tree()
+		if shown and not _columns.has(split_name):
+			_columns.append(split_name)
+		elif not shown:
+			_columns.erase(split_name)
+
+
+## The side column (a SIDE_SPLITS name) [param dock] sits in, or "".
+static func _column_of(dock: Control) -> String:
+	var node := dock.get_parent()
+	while node != null:
+		if SIDE_SPLITS.has(str(node.name)):
+			return str(node.name)
+		node = node.get_parent()
+	return ""
 
 
 func _update_rail() -> void:
