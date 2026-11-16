@@ -15,12 +15,14 @@ import asyncio
 import contextlib
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from bridge.crew import FINAL, IN_REVIEW, QUEUED, WORKING, Crew, Task
 from bridge.instructions import STEP_PROMPT
 from bridge.protocol import Prompt
 from joinery import done_when
+from joinery.routing import routing_settings, step_model
 
 Emit = Callable[[dict[str, Any]], None]
 #: Seconds between looks at the running steps.
@@ -54,6 +56,19 @@ class StepRun:
         self.progress = progress
         self.poll = poll
 
+    def _for_step(self, base: Prompt, step: str) -> Prompt:
+        """A routine step (a small edit, naming nothing to make) runs on the light
+        model when the project names one (ADR 0090); the rest on the main one."""
+        project = getattr(self.crew.gateway, "project", None)
+        if not isinstance(project, Path):
+            return base
+        model = step_model(routing_settings(project), self.crew.agent, "step", step)
+        if not model:
+            return base
+        return base.model_copy(
+            update={"selection": base.selection.model_copy(update={"model": model})}
+        )
+
     async def run(
         self, todo: done_when.Todo, together: list[int]
     ) -> list[done_when.StepOutcome]:
@@ -81,7 +96,7 @@ class StepRun:
                     title(index + 1, todo.steps[index]),
                     todo.steps[index],
                     origin="lead",
-                    prompt=base,
+                    prompt=self._for_step(base, todo.steps[index]),
                     text=parts["text"],
                     rules=parts["rules"],
                 )

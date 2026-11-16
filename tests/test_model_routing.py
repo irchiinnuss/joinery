@@ -27,6 +27,8 @@ from joinery.routing import (
     review_route,
     routing_settings,
     set_routing,
+    step_model,
+    step_tier,
 )
 from joinery.timing import TurnTiming
 from joinery.turn import TurnController
@@ -500,3 +502,57 @@ def test_check_wording_uses_the_light_model_then_the_main_one(
     )
     assert run(lambda: checks.advise("access", task)) == "Fix."
     assert asked == ["mini", ""]
+
+
+# --- Per step ----------------------------------------------------------------------
+
+
+def test_the_main_model_plans_and_makes() -> None:
+    assert step_tier("request", "Set the jump to 1.2 m") == "main"
+    assert step_tier("build", "Rename the door") == "main"
+
+
+def test_a_fix_is_light_only_when_every_failure_is_routine() -> None:
+    assert step_tier("fix", checks=["tests", "references"]) == "light"
+    assert step_tier("fix", checks=["tests", "art_bible"]) == "main"
+    assert step_tier("fix", checks=["assets"]) == "main"
+    assert step_tier("fix", checks=[]) == "main"
+
+
+@pytest.mark.parametrize(
+    ("step", "tier"),
+    [
+        ("Set the Drudge's health to 60 and its swipe damage to 15", "light"),
+        ("Wire the exit switch to the end screen", "light"),
+        ("Wire the exit switch to the level-end screen", "main"),
+        ("Rename the RedKey marker to KeyRed", "light"),
+        ("Make a low-poly Rivet Driver model in Blender", "main"),
+        ("Set up the music for the Casting Hall", "main"),
+        ("Paint the crate texture", "main"),
+        ("Spawn Drudges at the enemy markers", "main"),
+        ("", "main"),
+    ],
+)
+def test_a_to_do_step_is_light_when_it_is_a_small_edit(step: str, tier: str) -> None:
+    assert step_tier("step", step) == tier
+
+
+def test_a_routine_to_do_step_task_runs_on_the_light_model(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    from bridge.steps import StepRun
+
+    (tmp_path / "joinery.toml").write_text('[agents]\nlight_model = "haiku"\n')
+    crew = SimpleNamespace(gateway=SimpleNamespace(project=tmp_path), agent="claude")
+    base = Prompt(text="Go", project_dir=str(tmp_path))
+    steps = StepRun(crew, lambda: base, lambda _e: None)  # type: ignore[arg-type]
+    assert steps._for_step(base, "Rename the door").selection.model == "haiku"
+    assert steps._for_step(base, "Model the door in Blender") is base
+
+
+def test_a_light_step_needs_a_light_model() -> None:
+    light = RoutingSettings(light_models={"claude": "haiku"})
+    assert step_model(light, "claude", "fix", checks=["tests"]) == "haiku"
+    assert step_model(light, "codex", "fix", checks=["tests"]) == ""
+    assert step_model(RoutingSettings(), "claude", "fix", checks=["tests"]) == ""
+    assert step_model(light, "claude", "fix", checks=["art_bible"]) == ""

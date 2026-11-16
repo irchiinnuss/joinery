@@ -8,8 +8,10 @@ settings in ``[agents]`` of joinery.toml:
   (``light_model = { claude = "haiku", codex = "gpt-5-mini" }``). Unset (the
   default) means everything runs on the main model, as before. It is used for
   the reviewer's first pass on a low-risk change, the session summary written
-  before a long chat continues fresh, and the accessibility and performance
-  agents' wording of a fix. Whenever the light pass sends a change back, is
+  before a long chat continues fresh, the accessibility and performance
+  agents' wording of a fix, and the routine steps of a request
+  (:func:`step_tier`: a fix after checks that only code or settings fail, a
+  to-do step that is a small edit). Whenever the light pass sends a change back, is
   unsure, fails or runs out of time, the main model does the work again and its
   answer is the one that counts: a light model never decides alone.
 * ``review``: ``"always"`` (default, today's behaviour), ``"risky"`` (skip the
@@ -268,3 +270,65 @@ def review_route(settings: RoutingSettings, risk: Risk, agent: str) -> Route:
     if risk.low and settings.light_model(agent):
         return "light"
     return "main"
+
+
+# --- Per step: the model each step of a request runs on ------------------------------
+
+#: What one provider prompt of a request does:
+#: ``request`` the user's request as sent (the lead plans and makes);
+#: ``build`` the build step of a planned request (ADR 0090), made from the plan;
+#: ``fix`` the follow-up after Joinery's checks sent the change back;
+#: ``step`` a to-do step made by a parallel task (ADR 0072).
+StepKind = Literal["request", "build", "fix", "step"]
+
+#: Checks whose failures are fixed in code, settings or scene wiring: reading the
+#: report and a small edit. Any other check (the look, provenance, sound, models)
+#: means making an asset again, which is the main model's work.
+ROUTINE_CHECKS = frozenset(
+    {"tests", "godot_import", "references", "dependencies", "saves", "replays"}
+)
+#: Words that make a to-do step asset or design work, whatever else it says.
+_MAKING = re.compile(
+    r"\b(model|mesh|sculpt|rig|animat\w*|textur\w*|paint\w*|material|sprite|sound|"
+    r"sfx|music|song|riff|level|blockout|greybox|room|layout|design\w*|make|create|"
+    r"build|draw|compose|art)\b",
+    re.IGNORECASE,
+)
+#: Words of a small, routine step: wiring, values, wording, moving things.
+_ROUTINE = re.compile(
+    r"^(set|change|tune|tweak|adjust|rename|move|wire|connect|hook|hide|show|"
+    r"enable|disable|remove|delete|update|fix|raise|lower|increase|decrease|swap|"
+    r"replace|add (a|an|the) (signal|export|label|line|setting|input|action|test))\b",
+    re.IGNORECASE,
+)
+
+
+def step_tier(kind: StepKind, text: str = "", checks: Sequence[str] = ()) -> Tier:
+    """Which model a step of a request needs ("light" or "main").
+
+    The main model plans and makes: the request itself and the build step of a
+    plan always run on it. A fix after Joinery's checks is light when every
+    failure is one fixed in code or settings (``ROUTINE_CHECKS``); a to-do step
+    is light when it reads as a small routine edit and names nothing to make.
+    Anything unclear is main."""
+    if kind == "fix":
+        named = [c for c in checks if c]
+        return "light" if named and set(named) <= ROUTINE_CHECKS else "main"
+    if kind == "step":
+        words = " ".join(text.split())
+        if words and _ROUTINE.match(words) and not _MAKING.search(words):
+            return "light"
+    return "main"
+
+
+def step_model(
+    settings: RoutingSettings,
+    agent: str,
+    kind: StepKind,
+    text: str = "",
+    checks: Sequence[str] = (),
+) -> str:
+    """The light model for a light step, or "" (the session's own model)."""
+    if step_tier(kind, text, checks) != "light":
+        return ""
+    return settings.light_model(agent)

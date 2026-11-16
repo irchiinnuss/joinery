@@ -32,6 +32,7 @@ from bridge.protocol import (
 from joinery import done_when, metrics
 from joinery.fallback import is_quota, provider_error
 from joinery.headless import LEFT_CHANGE, PROVIDER_ERROR
+from joinery.routing import routing_settings, step_model
 from joinery.timing import TurnTiming
 from joinery.turn import MAX_CONTINUATIONS, Problem, SubmitResult, TurnController
 
@@ -213,6 +214,27 @@ def continuation(prompt: Prompt, result: SubmitResult) -> Prompt:
     )
 
 
+def _light(controller: TurnController) -> str:
+    project = getattr(controller.gateway, "project", None)
+    if not isinstance(project, Path):
+        return ""
+    return routing_settings(project).light_model(controller.agent_id)
+
+
+def fix_model(controller: TurnController, result: SubmitResult) -> str:
+    """The light model for a fix every failure of which is routine (ADR 0090), or ""
+    for the session's own model."""
+    project = getattr(controller.gateway, "project", None)
+    if not isinstance(project, Path):
+        return ""
+    return step_model(
+        routing_settings(project),
+        controller.agent_id,
+        "fix",
+        checks=[p.check for p in result.problems],
+    )
+
+
 def _usage(controller: TurnController, usage: Usage | None) -> metrics.Totals | None:
     """This provider prompt's tokens, from the session totals it reported."""
     if usage is None:
@@ -238,6 +260,8 @@ async def stream(
     ok = False
     usage: Usage | None = None
     attrs = metrics.agent_attributes(controller.agent_id, "lead")
+    if prompt.selection.model and prompt.selection.model == _light(controller):
+        attrs[metrics.MODEL_TIER] = "light"
     attrs[metrics.ROUND] = asked
     attrs[metrics.TASK] = getattr(controller.gateway, "task_id", "")
     with timing.trace.span(metrics.AGENT_TURN, "invoke_agent lead", attrs) as span:
@@ -630,17 +654,27 @@ async def _run_turn(
                 together,
             )
     asked = 0
+    allowed = MAX_CONTINUATIONS
+    escalated = False
     while True:
-        result = await controller.end(ok, last=asked >= MAX_CONTINUATIONS)
+        result = await controller.end(ok, last=asked >= allowed)
         if result is None or result.status != "failed" or result.final:
             break
         # Joinery submitted the change the agent left, and it failed: the agent
         # gets one chance in this turn to fix it.
         asked += 1
         timing.trace.attributes[metrics.CONTINUATIONS] = asked
-        ok = await stream(
-            controller, bridge, continuation(prompt, result), emit, timing, asked
-        )
+        fix = continuation(prompt, result)
+        light = "" if escalated else fix_model(controller, result)
+        if light:
+            # A routine fix (tests, imports, references) on the light model; if
+            # its fix fails too, the main model gets one more go (ADR 0090).
+            fix = fix.model_copy(
+                update={"selection": fix.selection.model_copy(update={"model": light})}
+            )
+            allowed += 1
+            escalated = True
+        ok = await stream(controller, bridge, fix, emit, timing, asked)
         if not ok and controller.quota:
             ok, bridge = await _carry_on(
                 controller, bridge, prompt, emit, timing, fallback

@@ -363,6 +363,37 @@ def test_the_continuation_can_fix_the_change(host: Host) -> None:
     )
 
 
+def test_a_routine_fix_runs_light_and_escalates_to_the_main_model(
+    host: Host,
+) -> None:
+    (host.root / "joinery.toml").write_text(
+        '[tools]\nenabled=["godot"]\n[agents]\nlight_model = "haiku"\n'
+    )
+
+    async def agent(bridge: Any) -> AsyncIterator[Any]:
+        host.stage({"scenes/ashtray.tscn": SCENE})
+        yield Done(ok=True)
+
+    async def light_try(bridge: Any) -> AsyncIterator[Any]:
+        yield Message(text="Looked; nothing to change.")
+        yield Done(ok=True)
+
+    async def fixed(bridge: Any) -> AsyncIterator[Any]:
+        assert host.gateway is not None and host.gateway.turn is not None
+        tx = host.gateway.transaction
+        assert tx is not None
+        (tx.stage / "art/models").mkdir(parents=True)
+        (tx.stage / "art/models/ashtray.glb").write_text("glTF")
+        result = await host.gateway.turn.submit("An ashtray with its model", "agent")
+        assert result.status == "in_review"
+        yield Done(ok=True)
+
+    host.run(agent, light_try, fixed)
+    models = [p.selection.model for p in host.prompts]
+    assert models == ["", "haiku", ""]
+    assert host.kinds().count("file_preview") == 1
+
+
 def test_a_failed_turn_rejects_its_change(host: Host) -> None:
     async def agent(bridge: Any) -> AsyncIterator[Any]:
         host.tx = host.stage({"a.gd": "extends Node\n"})  # type: ignore[attr-defined]
