@@ -155,7 +155,11 @@ def test_a_stage_import_gets_more_time_under_emulation(
     assert submission.import_seconds(tmp_path) == submission.IMPORT_SECONDS * 2 > 180
 
 
-def test_a_worker_error_elsewhere_cancels_the_other_runs(tmp_path: Path) -> None:
+def test_a_worker_error_elsewhere_cancels_the_other_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Side by side even on a small runner (PARALLEL follows the core count).
+    monkeypatch.setattr(scene_tests, "PARALLEL", 4)
     started: list[str] = []
     cancelled: list[str] = []
     slow_running = asyncio.Event()

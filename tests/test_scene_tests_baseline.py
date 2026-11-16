@@ -120,6 +120,8 @@ def test_only_a_test_the_change_breaks_holds_it(
         }
     )
     monkeypatch.setattr("joinery.submission.run_offline", fake)
+    # Side by side even on a small runner (PARALLEL follows the core count).
+    monkeypatch.setattr("joinery.scene_tests.PARALLEL", 4)
     info: list[str] = []
     problems = _run(tx, info)
     assert sorted(p.paths[0] for p in problems) == ["tests/test_lever.gd", "tests/test_new.gd"]

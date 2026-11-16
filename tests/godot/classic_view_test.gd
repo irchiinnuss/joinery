@@ -97,7 +97,7 @@ func _run() -> void:
 		"The seeded layout setting reads " + _layout
 	)
 	_check(bool(_plugin.get("_joinery_layout")) != classic, "The addon sees the " + _layout)
-	_check_docks(base, classic)
+	await _check_docks(base, classic)
 	_check_chrome(base, classic)
 	_check_sidebar(classic)
 	if not classic and _step == "restore":
@@ -160,6 +160,12 @@ func _check_docks(base: Control, classic: bool) -> void:
 			_check(control.is_visible_in_tree(), type + " is open")
 		if classic or panels == null:
 			continue
+		# Joinery hides the panels once the editor has loaded its layout, which a
+		# slow machine reaches a little later: give it up to 3 s.
+		var waited := 0
+		while control.is_visible_in_tree() and waited < 180:
+			await get_tree().process_frame
+			waited += 1
 		_check(not control.is_visible_in_tree(), type + " starts hidden")
 		var id := str(panels.call("_key", control))
 		panels.call("show_panel", id)
