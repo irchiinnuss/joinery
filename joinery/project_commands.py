@@ -80,6 +80,7 @@ RESERVED = frozenset(
         "match",
         "mix",
         "models",
+        "open",
         "perf",
         "playtest",
         "rebuild",

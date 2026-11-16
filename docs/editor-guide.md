@@ -34,6 +34,17 @@ Below the apps, Review opens Joinery's change review the same way, and
 Timeline and Share are full pages. Journeyman stays on the right without a
 docking tab bar.
 
+To find a scene, type `/open` and its name in Journeyman: `/open cave`,
+`/open main menu`, `/open levels/harbour`. When only one scene matches the
+name, file name or path it opens straight away; otherwise Godot's own **Quick
+Open Scene** picker shows with the name typed in, every scene in the project
+listed and the ones you picked before first. `/open` alone shows the picker, as
+does the **Scenes** icon (a magnifier) under FileSystem on the rail, and
+**Ctrl+Shift+O** (Cmd+Shift+O on macOS, also **Scene > Quick Open Scene**). A
+name that matches no scene but one script opens it in the script editor; one
+other file is selected in FileSystem. `/open` works in Godot's classic view
+too.
+
 Scene tabs sit above the viewport: click a tab to switch between open scenes,
 or **+** at the end of the tabs to make a new scene (also **Scene > New Scene**,
 Ctrl+N or Cmd+N). Godot's own 2D, 3D, Script and Game buttons sit at the
@@ -788,6 +799,8 @@ again.
 
 ### Sidebar commands
 
+- `/open [name]` opens the scene that name matches, or Godot's Quick Open
+  Scene picker to choose from (see Scene tabs above).
 - `/feature` or `/feature list` says what the game has and what can be added.
   `/feature add|remove <id>` shows a plan first (files, settings in plain words,
   notes and conflicts). Nothing changes until you press **Apply**; Journeyman

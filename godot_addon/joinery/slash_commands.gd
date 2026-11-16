@@ -67,12 +67,14 @@ signal project_command_requested(command: String, words: PackedStringArray)
 
 const COMMAND_SCRIPT := preload("command_job.gd")
 const REPLAY_RECORD := preload("replay_record.gd")
+const SCENE_FINDER := preload("scene_finder.gd")
 const RECORDING := (
 	"Recording this play to user://joinery_replays/. "
 	+ "Keep it as a test with: joinery replay add <file>"
 )
 ## Everyday commands first; descriptions stay at 32 characters or fewer.
 const COMMANDS := {
+	"/open": ["Open a scene by name", "ui"],
 	"/art": ["Review the art direction", "ui"],
 	"/brief": ["Read the game brief", "ui"],
 	"/blockout": ["Build a level from a sketch", "prompt"],
@@ -129,6 +131,8 @@ const BRIEF_PATH := "res://design/brief.md"
 ## The project's own commands (.joinery/commands/*.toml, read by sidebar_commands.gd):
 ## {"/new-enemy": [description, "project"]}. Shown after the sidebar's own.
 static var project := {}
+## "/open [name]": Godot's Quick Open Scene picker, or the one scene the name matches.
+var finder: RefCounted = SCENE_FINDER.new()
 ## Running jobs by slot: {slot: [job, callback]}. One job per slot.
 var _jobs: Dictionary = {}
 var _running := ""
@@ -224,6 +228,8 @@ func run(entry: String) -> bool:
 			mix_requested.emit(" ".join(arguments(entry)))
 		elif command == "/sound-pass":
 			sound_pass_requested.emit(" ".join(arguments(entry)))
+		elif command == "/open":
+			finder.call("open", " ".join(arguments(entry)))
 		elif command == "/record":
 			if is_inside_tree() and Engine.is_editor_hint():
 				REPLAY_RECORD.record_play(get_tree())

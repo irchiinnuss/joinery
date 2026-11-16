@@ -78,6 +78,7 @@ CASES = {
     "sound_pass_card_test.gd": "sound pass card: ok",
     "sidebar_margins_test.gd": "sidebar margins: ok",
     "tour_test.gd": "tour: ok",
+    "scene_finder_test.gd": "scene finder: ok",
     "update_dialog_test.gd": "update dialog: ok",
     "setup_notice_test.gd": "setup notice: ok",
     "departures_test.gd": "departures: ok",
