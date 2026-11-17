@@ -42,6 +42,7 @@ from joinery.bible_schema import REFERENCE_DIR
 from joinery.catalog import load_catalog
 from joinery.deps import check_deps
 from joinery.lockfile import check_assets
+from joinery.measure_cache import MeasureCache
 from joinery.policy import load_denylist
 from joinery.puzzle import check as puzzle_check
 from joinery.runner import Result
@@ -119,6 +120,8 @@ GODOT_SUFFIXES = frozenset({".gd", ".tscn", ".tres", ".gdshader", ".glb"})
 GUT_RUNNER = "addons/gut/gut_cmdln.gd"
 TEST_DIRS = ("test", "tests")
 OFFLINE_SECONDS = 180
+#: The art bible's measurements of a change, per file, in its transaction folder.
+MEASURES = "measures.json"
 #: Godot's import of a stage in the offline worker: the whole command. The user
 #: argument tells Joinery's editor plugin to stay unbuilt (it only imports), which
 #: takes about a third off each import.
@@ -664,14 +667,19 @@ async def checks(
     async def measured() -> list[Problem]:
         if not rules:
             return []
+        # Files measured by an earlier check of this change are not measured again.
+        kept = MeasureCache(tx.directory / MEASURES, CREATIVE_IMAGE)
         with timed("review_rules"):
             found = await check_rules(
                 tx.stage,
                 [change["path"] for change in changes],
-                lambda argv, root: worker_run(
-                    argv, root, OFFLINE_SECONDS, readonly=True
+                kept.wrap(
+                    lambda argv, root: worker_run(
+                        argv, root, OFFLINE_SECONDS, readonly=True
+                    )
                 ),
             )
+        await asyncio.to_thread(kept.save)
         # One problem per finding, each naming its file, so the author sees a
         # list it can work through rather than one long joined line.
         return [
