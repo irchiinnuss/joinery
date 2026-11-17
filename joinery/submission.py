@@ -630,6 +630,7 @@ async def validate(
         compiled=compiled,
         note=getattr(gateway, "progress_detail", None),
         report=getattr(gateway, "tests_report", None),
+        mirrors=getattr(gateway, "stage_mirror", None),
     )
     return found
 
@@ -652,6 +653,8 @@ async def checks(
     compiled: list[str] | None = None,
     note: Callable[[str], None] | None = None,
     report: Callable[[dict[str, Any]], None] | None = None,
+    mirrors: Callable[[FileTransaction, str], Awaitable[check_mirror.Mirror | None]]
+    | None = None,
 ) -> list[Problem]:
     """The art bible's measured rules beside Godot's import check, the project's tests,
     its recorded replays and its kept saves.
@@ -664,7 +667,9 @@ async def checks(
     names the scripts changed since then (nothing else), compiled instead of a
     whole import (``compile_scripts``). An import past
     its limit (``import_seconds``) is a problem of its own, never an error that
-    ends the other checks.
+    ends the other checks. Godot's runs read the stage from a copy in their worker
+    (``check_mirror``): ``mirrors`` gives the change's own, kept between checks;
+    without it the check makes one for itself.
     """
 
     def timed(phase: str) -> AbstractContextManager[None]:
@@ -710,11 +715,12 @@ async def checks(
         testing = bool(tests) or bool(scene_tests)
         # Godot's runs read the stage from a copy in their worker, not over a
         # slow bind mount, when there is more than a quick compile to do.
-        mirror = (
-            await check_mirror.open_mirror(tx.stage, image, scene_cache.PARALLEL)
-            if godot or testing
-            else None
-        )
+        if not (godot or testing):
+            return await godot_runs(None)
+        if mirrors is not None:
+            # The change's own, kept for its later checks (the gateway's).
+            return await godot_runs(await mirrors(tx, image))
+        mirror = await check_mirror.open_mirror(tx.stage, image, scene_cache.PARALLEL)
         try:
             return await godot_runs(mirror)
         finally:

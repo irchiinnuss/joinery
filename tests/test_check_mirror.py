@@ -79,8 +79,14 @@ def test_linux_keeps_the_bind_mount_unless_told(
 class FakeMirror(check_mirror.Mirror):
     """A mirror that records its runs instead of starting a worker."""
 
-    def __init__(self, root: Path, lost: bool = False) -> None:
-        super().__init__(root, "joinery-godot-worker")
+    def __init__(
+        self,
+        root: Path,
+        lost: bool = False,
+        image: str = "joinery-godot-worker",
+        parallel: int = 1,
+    ) -> None:
+        super().__init__(root, image, parallel)
         self.started = True
         self.lost = lost
         self.runs: list[tuple[list[str], dict[str, Any]]] = []
@@ -93,6 +99,9 @@ class FakeMirror(check_mirror.Mirror):
             raise check_mirror.MirrorLost("No such container")
         self.runs.append((argv, options))
         return Result(True, "", "", 0.0)
+
+    async def sync(self) -> None:
+        return None
 
     async def close(self) -> None:
         self.started = False
@@ -237,3 +246,71 @@ def test_a_real_copy_runs_brings_back_and_stops(
             await mirror.close()
 
     asyncio.run(go())
+
+
+# --- One copy for a change -----------------------------------------------------------
+
+
+def test_a_change_keeps_one_copy_and_sends_only_what_changed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    opened: list[FakeMirror] = []
+    synced: list[str] = []
+
+    async def open_mirror(root: Path, image: str, parallel: int = 1) -> FakeMirror:
+        opened.append(FakeMirror(root, image=image, parallel=parallel))
+        return opened[-1]
+
+    async def sync(self: FakeMirror) -> None:
+        synced.append(self.name)
+
+    monkeypatch.setattr("joinery.check_mirror.open_mirror", open_mirror)
+    monkeypatch.setattr(FakeMirror, "sync", sync)
+    held = check_mirror.Held()
+
+    async def go() -> None:
+        await held.get("tx1", tmp_path, "godot", 4)
+        await held.get("tx1", tmp_path, "godot", 4)
+        # Another change (or another image) gets a copy of its own.
+        await held.get("tx2", tmp_path, "godot", 4)
+        await held.close()
+
+    asyncio.run(go())
+    first, other = opened
+    assert synced == [first.name], "the second check only sent what changed"
+    assert first.closed and other.closed
+
+
+def test_the_stage_import_runs_on_the_change_copy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "project.godot").write_text("config_version=5\n")
+    monkeypatch.setattr("joinery.gateway.configured", lambda _: ([], []))
+    opened: list[FakeMirror] = []
+
+    async def open_mirror(root: Path, image: str, parallel: int = 1) -> FakeMirror:
+        opened.append(FakeMirror(root, image=image, parallel=parallel))
+        return opened[-1]
+
+    async def offline(*_a: Any, **_k: Any) -> Result:
+        raise AssertionError("the import runs on the copy")
+
+    monkeypatch.setattr("joinery.check_mirror.open_mirror", open_mirror)
+    monkeypatch.setattr("joinery.gateway.run_offline", offline)
+    gateway = ProjectGateway(tmp_path)
+    tx = FileTransaction(tmp_path)
+    tx.begin("Lever")
+    gateway.transaction = tx
+
+    async def go() -> None:
+        try:
+            await gateway.import_stage(tx)
+            await gateway.import_stage(tx)
+        finally:
+            gateway.transaction = None
+            await gateway.close()
+
+    asyncio.run(go())
+    (mirror,) = opened
+    assert [options["keep"] for _argv, options in mirror.runs] == [True, True]
+    assert mirror.closed, "the copy goes with the gateway"

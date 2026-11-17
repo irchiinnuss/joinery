@@ -18,6 +18,7 @@ On Linux a bind mount is the host's own disk, so no mirror is made there.
 from __future__ import annotations
 
 import asyncio
+import atexit
 import contextlib
 import os
 import subprocess
@@ -42,6 +43,27 @@ SETTING = "JOINERY_CHECK_MIRROR"
 #: Seconds the worker may take to start, and to list or move files.
 START_SECONDS = 120
 COPY_SECONDS = 600
+#: The longest a worker lives (seconds): one a crashed session left behind ends.
+LIFETIME = 6 * 3600
+#: Workers started by this process, removed when it exits.
+_live: set[str] = set()
+
+
+def _cleanup() -> None:
+    for name in tuple(_live):
+        with contextlib.suppress(OSError, subprocess.SubprocessError):
+            subprocess.run(
+                ["docker", "rm", "--force", name],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=10,
+                check=False,
+            )
+    _live.clear()
+
+
+atexit.register(_cleanup)
+
 #: A command's process group, so a stopped run leaves nothing running.
 JOB = (
     "mkdir -p /tmp/joinery-jobs && exec setsid -w sh -c "
@@ -204,6 +226,7 @@ class Mirror:
         runs_as = await asyncio.to_thread(worker_platform.platform_for, self.image)
         scope = os.environ.get("JOINERY_WORKER_SCOPE", self.name.rsplit("-", 1)[1])
         self.started = True
+        _live.add(self.name)
         await self._docker(
             "run", "-d", "--rm", *docker_owner_args(),
             "--platform", runs_as, "--network", "none", "--name", self.name,
@@ -211,7 +234,7 @@ class Mirror:
             # Room for the tests that run side by side, each once its own worker.
             "--pids-limit", str(512 * self.parallel),
             "--memory", f"{4 * self.parallel}g",
-            "-w", ROOT, self.image, "sleep", "infinity",
+            "-w", ROOT, self.image, "sleep", str(LIFETIME),
         )  # fmt: skip
         await self.sync()
 
@@ -317,6 +340,7 @@ class Mirror:
         self.started = False
         with contextlib.suppress(OSError, WorkerTimeout):
             await self._docker("rm", "--force", self.name, seconds=30)
+        _live.discard(self.name)
 
 
 async def open_mirror(root: Path, image: str, parallel: int = 1) -> Mirror | None:
@@ -335,3 +359,46 @@ async def open_mirror(root: Path, image: str, parallel: int = 1) -> Mirror | Non
         await mirror.close()
         raise
     return mirror
+
+
+class Held:
+    """One mirror kept for a change: each later check or import of the same stage
+    only sends what changed since, instead of copying the whole stage again."""
+
+    def __init__(self) -> None:
+        self._held: tuple[str, Mirror] | None = None
+        self._lock = asyncio.Lock()
+
+    async def get(
+        self, key: str, root: Path, image: str, parallel: int = 1
+    ) -> Mirror | None:
+        """The mirror for ``key`` (a change), brought up to date with ``root``;
+        a new one when there is none yet, or the one held is for another change,
+        another image or stopped. None when checks use the bind mount."""
+        async with self._lock:
+            if self._held is not None:
+                held, mirror = self._held
+                same = (held, mirror.root, mirror.image) == (key, root, image)
+                if same and mirror.started and mirror.parallel >= parallel:
+                    try:
+                        await mirror.sync()
+                        return mirror
+                    except (
+                        OSError,
+                        WorkerTimeout,
+                        subprocess.SubprocessError,
+                        tarfile.TarError,
+                    ):
+                        pass
+                self._held = None
+                await mirror.close()
+            found = await open_mirror(root, image, parallel)
+            if found is not None:
+                self._held = (key, found)
+            return found
+
+    async def close(self) -> None:
+        async with self._lock:
+            held, self._held = self._held, None
+            if held is not None:
+                await held[1].close()

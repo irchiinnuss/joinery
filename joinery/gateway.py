@@ -18,12 +18,14 @@ from mcp.types import CallToolResult, TextContent
 
 from joinery import (
     auto_accept,
+    check_mirror,
     import_cache,
     live_game,
     metrics,
     played,
     references,
     scene_guard,
+    scene_tests,
     scene_variants,
     scoped_rules,
     script_scope,
@@ -436,6 +438,9 @@ class ProjectGateway:
         self.timing: TurnTiming | None = None
         #: (transaction id, stage inventory) right after a clean Godot import.
         self._imported: tuple[str, dict[str, str]] | None = None
+        #: The change's stage copied into a Godot worker, kept for its imports
+        #: and checks (check_mirror): each sends only what changed since.
+        self.mirrors = check_mirror.Held()
         #: The class headers of the stage's scripts at that import.
         self._imported_heads: dict[str, str] = {}
         #: (transaction id, review media, renders still to run) from open_review.
@@ -765,6 +770,14 @@ class ProjectGateway:
         check, self._checks = self._checks, None
         if check is not None:
             await check.close()
+        await self.mirrors.close()
+
+    async def stage_mirror(
+        self, tx: FileTransaction, image: str
+    ) -> check_mirror.Mirror | None:
+        """``tx``'s stage copied into a Godot worker running ``image``, up to date
+        (None: Godot runs on the stage itself)."""
+        return await self.mirrors.get(tx.id, tx.stage, image, scene_tests.PARALLEL)
 
     def _before_write(self, arguments: dict[str, Any]) -> tuple[str, str | None] | None:
         """(path, its text before) when this ``write_file`` stages a file Godot
@@ -1697,11 +1710,13 @@ class ProjectGateway:
         with self.span("import"):
             # Its own worker starts each time: a busy Docker is asked again.
             image = await asyncio.to_thread(submission.check_image, tx.stage)
+            # On the change's copy when there is one; what it writes comes back.
+            on_copy = submission.on_copy(await self.stage_mirror(tx, image), keep=True)
             imported = await submission.worker_run(
                 list(submission.IMPORT_ARGV),
                 tx.stage,
                 submission.import_seconds(self.project, image),
-                runner=run_offline,
+                runner=on_copy or run_offline,
                 warm=False,
                 image=image,
             )
