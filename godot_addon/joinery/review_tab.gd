@@ -31,6 +31,7 @@ signal art_requested
 const UI_THEME := preload("ui_theme.gd")
 const UI_MOTION := preload("ui_motion.gd")
 const UI := preload("ui_components.gd")
+const STYLE := preload("sidebar_style.gd")
 const INDICATOR := preload("activity_indicator.gd")
 const COMMAND_SCRIPT := preload("command_job.gd")
 const SLASH := preload("slash_commands.gd")
@@ -108,7 +109,8 @@ func _init() -> void:
 	_detail_view.theme_type_variation = "JoineryTight"
 	_detail_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_detail_view.hide()
-	add_child(_detail_view)
+	# Never taller than the panel: the editor, the sidebar's message box with it, stays inside.
+	add_child(STYLE.hold_in_scroll(_detail_view))
 	_queue = QUEUE.new(self)
 	_tasks = load("res://addons/joinery/review_tasks.gd").new(self, _detail_view)
 	_queue.follow(_tasks.panel)

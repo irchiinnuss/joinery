@@ -340,6 +340,14 @@ func _check_live(tab: TAB, panel: PANEL) -> void:
 	await _frames()
 	_check(tab.showing_detail and panel.is_visible_in_tree(), "It opens the full review")
 	_check(not tab._list_view.visible, "The full review replaces the list")
+	# Its least height would add to the main screen's and push the editor, with the sidebar's
+	# message box, past the window's bottom edge: the tab asks for none and scrolls instead.
+	_check(panel.get_combined_minimum_size().y > 100.0, "The review needs height of its own")
+	_check(
+		tab.get_combined_minimum_size().y < 1.0,
+		"The full review asks the bottom panel for no height: %s" % tab.get_combined_minimum_size()
+	)
+	_check(panel.size.y >= tab.size.y - 1.0, "Given the room, it fills the tab: %s" % panel.size)
 	var rail: Control = panel.get("_rail")
 	_check((rail.get("nav") as Control).visible, "The review's rail leads back to the list")
 	_check(not (rail.get("next") as Control).visible, "One change waiting has no arrows")

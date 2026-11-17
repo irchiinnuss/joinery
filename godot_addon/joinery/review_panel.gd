@@ -871,13 +871,21 @@ func _fit() -> void:
 	if _stage_area == null or not is_visible_in_tree():
 		return
 	# The editor's columns hold the panel: when their least height is more than the window has,
-	# they reach past its bottom edge, the panel with them.
-	var foot := get_global_rect().end.y
+	# they reach past its bottom edge, the panel with them. Held in a scroll (the Review tab),
+	# the foot leaving the scroll's view counts too.
+	var end := get_global_rect().end.y
+	var foot := end
+	var over := 0.0
+	var scrolled := false
 	var holder := get_parent() as Control
 	while holder != null:
-		foot = maxf(foot, holder.get_global_rect().end.y)
+		var holder_end := holder.get_global_rect().end.y
+		if holder is ScrollContainer and not scrolled:
+			scrolled = true
+			over = end - holder_end
+		foot = maxf(foot, holder_end)
 		holder = holder.get_parent() as Control
-	var over := foot - get_viewport().get_visible_rect().end.y
+	over = maxf(over, foot - get_viewport().get_visible_rect().end.y)
 	if over > 0.5 and _body.custom_minimum_size.y > 0.0:
 		_cut += ceilf(over)
 		_size_stage()
