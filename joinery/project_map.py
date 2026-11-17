@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from joinery import asset_categories
 from joinery.references import references
 
 MAP_DIR = ".joinery/map"
@@ -429,6 +430,10 @@ def build(project: Path, budget: int = BUDGET) -> str:
             recipe_lines.append(
                 f"- {rel} ({recipe.get('tool', '')}) → {_short(outputs, 2)}"
             )
+    category_lines = [
+        f"- {name}: {_short([PurePosixPath(p).name for p in paths], 4) or '(empty)'}"
+        for name, paths in asset_categories.load(project)
+    ]
     tests = sum(1 for r in files if tested(r) and _suffix(r) in CODE)
 
     sections: list[tuple[str, list[str], str]] = [
@@ -437,6 +442,11 @@ def build(project: Path, budget: int = BUDGET) -> str:
         (f"Scripts ({len(script_lines)}):", script_lines, "scripts"),
         (f"Resources ({len(resource_lines)}):", resource_lines, "resources"),
         ("Assets by folder:", asset_lines, "asset folders"),
+        (
+            f"Asset categories ({asset_categories.PATH.as_posix()}):",
+            category_lines,
+            "asset categories",
+        ),
         (f"Recipes ({len(recipe_lines)}):", recipe_lines, "recipes"),
     ]
     caps = {
@@ -445,6 +455,7 @@ def build(project: Path, budget: int = BUDGET) -> str:
         "scripts": 25,
         "resources": 8,
         "asset folders": 15,
+        "asset categories": 8,
         "recipes": 8,
     }
     tail = [f"Tests: {tests} scripts under tests/."] if tests else []
