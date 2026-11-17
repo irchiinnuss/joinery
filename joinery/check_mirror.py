@@ -43,6 +43,9 @@ SETTING = "JOINERY_CHECK_MIRROR"
 #: Seconds the worker may take to start, and to list or move files.
 START_SECONDS = 120
 COPY_SECONDS = 600
+#: A stage larger than this (bytes) stays on the mount: copying it would cost
+#: more than its reads save, and the worker's disk would hold it twice.
+MAX_BYTES = 1 << 30
 #: The longest a worker lives (seconds): one a crashed session left behind ends.
 LIFETIME = 6 * 3600
 #: Workers started by this process, removed when it exits.
@@ -223,6 +226,12 @@ class Mirror:
 
     async def start(self) -> None:
         """Start the worker (idle until a command runs) and copy the stage in."""
+        size = sum(
+            size
+            for size, _ in (await asyncio.to_thread(host_marks, self.root)).values()
+        )
+        if size > MAX_BYTES:
+            raise OSError(f"the stage is {size >> 20} MB: it stays on the mount")
         runs_as = await asyncio.to_thread(worker_platform.platform_for, self.image)
         scope = os.environ.get("JOINERY_WORKER_SCOPE", self.name.rsplit("-", 1)[1])
         self.started = True

@@ -314,3 +314,20 @@ def test_the_stage_import_runs_on_the_change_copy(
     (mirror,) = opened
     assert [options["keep"] for _argv, options in mirror.runs] == [True, True]
     assert mirror.closed, "the copy goes with the gateway"
+
+
+def test_a_large_stage_stays_on_the_mount(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(check_mirror.SETTING, "1")
+    monkeypatch.setattr("joinery.check_mirror.MAX_BYTES", 10)
+    (tmp_path / "big.png").write_bytes(b"x" * 11)
+    started: list[str] = []
+
+    async def docker(self: check_mirror.Mirror, *argv: str, **_k: Any) -> bytes:
+        started.append(argv[0])
+        return b""
+
+    monkeypatch.setattr(check_mirror.Mirror, "_docker", docker)
+    assert asyncio.run(check_mirror.open_mirror(tmp_path, "godot")) is None
+    assert started == [], "no worker started for it"
