@@ -380,3 +380,15 @@ def test_claude_code_shows_its_work_as_it_goes(tmp_path: Path) -> None:
         # The stream ended before its result: done with it.
         ("tool", "done", "Editing level.gd"),
     ]
+
+
+def test_windows_paths_read_like_any_other() -> None:
+    calls = trail.Calls()
+    read = calls.start(
+        "w", "Read", {"file_path": "C:\\Users\\me\\game\\levels\\yard.tscn"}
+    )
+    assert read.text == "Reading yard.tscn" and read.path == ""
+    assert trail.file_name("C:\\Users\\me\\game\\a.gd") == "a.gd"
+    assert trail.project_path("C:\\Users\\me\\a.gd") == ""
+    assert trail.project_path("..\\secret.gd") == ""
+    assert trail.project_path("game\\level.gd") == "res://game/level.gd"

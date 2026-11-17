@@ -273,9 +273,23 @@ def words(name: str) -> str:
     return " ".join(spaced.replace("_", " ").replace("-", " ").split()).lower()
 
 
+#: A Windows drive ("C:/" once its backslashes read as slashes).
+_DRIVE = re.compile(r"^[A-Za-z]:/")
+
+
+def slashed(path: str) -> str:
+    """``path`` with Windows backslashes read as slashes, so one path reads the same
+    whichever system the agent runs on."""
+    return path.replace("\\", "/")
+
+
+def _is_absolute(text: str) -> bool:
+    return text.startswith("/") or bool(_DRIVE.match(text))
+
+
 def file_name(path: object) -> str:
-    """A path's last part ("res://game/level.gd" -> "level.gd")."""
-    text = str(path or "").strip().rstrip("/")
+    """A path's last part ("res://game/level.gd" -> "level.gd", "C:\\a\\b.gd" -> "b.gd")."""
+    text = slashed(str(path or "").strip()).rstrip("/")
     return PurePosixPath(text.removeprefix("res://")).name if text else ""
 
 
@@ -293,11 +307,11 @@ def project_path(path: str, project: Path | None = None) -> str:
     """``path`` as a res:// path when it is in the project: res:// as it is, a relative
     path from the project folder (where the agent works), an absolute one inside
     ``project``; "" for anything else."""
-    text = str(path or "").strip()
+    text = slashed(str(path or "").strip())
     if not text or "\n" in text or "://" in text.removeprefix("res://"):
         return ""
     pure = PurePosixPath(text.removeprefix("res://"))
-    if pure.is_absolute():
+    if _is_absolute(text.removeprefix("res://")):
         if text.startswith("res://") or project is None:
             return ""
         try:
@@ -548,7 +562,7 @@ def _subject(arguments: dict[str, Any]) -> str:
     for key in ("source", "model", "path", "image", "graph", "document", "name"):
         value = arguments.get(key)
         if isinstance(value, str) and value.strip():
-            stem = PurePosixPath(value.removeprefix("res://")).stem
+            stem = PurePosixPath(slashed(value).removeprefix("res://")).stem
             return "the " + words(stem) if stem else ""
     return ""
 

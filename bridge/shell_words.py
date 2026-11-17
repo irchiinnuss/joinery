@@ -154,7 +154,7 @@ def _unredirect(words: list[str]) -> list[str]:
 def _unwrap(words: list[str]) -> list[str]:
     rest = list(words)
     while rest:
-        head = PurePosixPath(rest[0]).name
+        head = PurePosixPath(rest[0].replace("\\", "/")).name
         if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", rest[0]):
             rest = rest[1:]
         elif head in WRAPPERS:
@@ -321,7 +321,7 @@ def pattern_words(pattern: str) -> str:
 
 def _name(path: str) -> str:
     """A path as the trail shows it: never whole, only its last part."""
-    text = str(path).strip().rstrip("/")
+    text = str(path).strip().replace("\\", "/").rstrip("/")
     if not text or text in {".", "./"}:
         return "the project"
     return PurePosixPath(text.removeprefix("res://")).name or text
