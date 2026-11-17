@@ -390,7 +390,14 @@ func make_room() -> void:
 	while overflow() > 0.5 and _columns.size() > 1:
 		var oldest: String = _columns.pop_front()
 		for dock: Control in _side_docks():
-			if _column_of(dock) == oldest and _is_open(dock):
+			if _column_of(dock) != oldest or not _is_open(dock):
+				continue
+			if _settling():
+				# The editor's own start-up layout, not the user's choice: close it without
+				# ending the settling that closes the other docks it reopened.
+				dock.call("close")
+				changed.emit()
+			else:
 				hide_panel(_key(dock))
 
 
