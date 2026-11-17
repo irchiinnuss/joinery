@@ -201,3 +201,18 @@ def test_comments_and_path_checks_are_not_dependencies(tmp_path: Path) -> None:
     )
     door = scene_tests.Tree(tmp_path).dependencies("tests/test_door.gd")
     assert "game/lever.gd" not in door and "notes.md" not in door
+
+
+def test_a_full_cache_drops_the_result_used_least_recently(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("joinery.scene_tests.CACHE_MAX", 3)
+    cache = scene_tests.Cache(None)
+    for key in ("a", "b", "c"):
+        cache.put(key, scene_tests.Outcome(True))
+    # "a" answers every check (its files never change); "b" was not asked since.
+    assert cache.get("a") is not None
+    cache.put("d", scene_tests.Outcome(True))
+    assert cache.get("a") is not None
+    assert cache.get("b") is None
+    assert list(cache.entries) == ["c", "d", "a"]

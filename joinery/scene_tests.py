@@ -300,10 +300,13 @@ class Cache:
     def get(self, key: str, seconds: int = 0) -> Outcome | None:
         """The cached result for ``key``. A time-out at its limit answers only a
         run with no longer a limit (a raised limit runs the test again); one a
-        script error stopped answers any."""
+        script error stopped answers any. A result read is kept longest: the
+        oldest unused one goes first when the cache is full."""
         entry = self.entries.get(key)
         if entry is None:
             return None
+        # Used now: the last to go when the cache is full, not the first.
+        self.entries[key] = self.entries.pop(key)
         found = Outcome(
             bool(entry.get("passed")),
             str(entry.get("output", "")),
