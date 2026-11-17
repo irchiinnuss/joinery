@@ -37,6 +37,7 @@ CASES = {
     "review_dialogue_test.gd": "review dialogue: ok",
     "review_stacked_test.gd": "review stacked: ok",
     "asset_workspace_test.gd": "asset workspace: ok",
+    "asset_groups_test.gd": "asset groups: ok",
     "kits_panel_test.gd": "kits panel: ok",
     "animation_browser_test.gd": "animation browser: ok",
     "review_clip_test.gd": "review clip: ok",

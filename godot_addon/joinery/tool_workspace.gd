@@ -26,6 +26,7 @@ const UI_THEME := preload("res://addons/joinery/ui_theme.gd")
 const UI_COMPONENTS := preload("res://addons/joinery/ui_components.gd")
 const UI_MOTION := preload("res://addons/joinery/ui_motion.gd")
 const WORDING := preload("res://addons/joinery/asset_wording.gd")
+const GROUPS_SCRIPT := preload("res://addons/joinery/asset_groups.gd")
 ## Section titles in list order; "other" collects files of no known kind.
 const SECTIONS := {
 	"model": "Models",
@@ -61,6 +62,8 @@ var _empty: Label
 var _error_box: VBoxContainer
 var _error_label: Label
 var _assets: LIST_SCRIPT
+## User categories and kind groups of the list (asset_groups.gd).
+var _groups: GROUPS_SCRIPT
 var _header: HBoxContainer
 var _title: Label
 var _caption: Label
@@ -174,6 +177,10 @@ func _build_browser(split: HSplitContainer) -> void:
 	_assets.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_assets.item_selected.connect(_select)
 	_listing.add_child(_assets)
+	_groups = GROUPS_SCRIPT.new()
+	_groups.setup(_assets, _kind_of, SECTIONS)
+	_groups.changed.connect(_filter)
+	add_child(_groups)
 	_browser.add_child(_kits.list)
 
 
@@ -396,6 +403,8 @@ func _start_job(job: String, arguments: PackedStringArray) -> void:
 
 
 func refresh() -> void:
+	if _groups.reload_if_changed() and not _data.is_empty():
+		_filter()
 	if _command_job != null:
 		return
 	var since := "" if _invalidated else _stamp
@@ -554,41 +563,14 @@ func _matches_search(asset: Dictionary, query: String) -> bool:
 
 func _filter(animate := false) -> void:
 	_assets.clear()
-	_rows.clear()
 	var tool := _tool_id()
 	creator_changed.emit(tool)
 	var query := _search.text.strip_edges().to_lower()
+	var shown: Array[Dictionary] = []
 	for asset: Dictionary in _top_level():
 		if _matches_tool(asset, tool) and _matches_search(asset, query):
-			_rows.append(asset)
-	var order := SECTIONS.keys()
-	_rows.sort_custom(
-		func(left: Dictionary, right: Dictionary) -> bool:
-			var a := order.find(_kind_of(left))
-			var b := order.find(_kind_of(right))
-			if a != b:
-				return a < b
-			var title := _display_name(str(left["path"]))
-			return title.naturalnocasecmp_to(_display_name(str(right["path"]))) < 0
-	)
-	var label_counts: Dictionary = {}
-	for asset: Dictionary in _rows:
-		var label := _display_name(str(asset["path"]))
-		label_counts[label] = int(label_counts.get(label, 0)) + 1
-	var section := ""
-	for asset: Dictionary in _rows:
-		var kind := _kind_of(asset)
-		if kind != section:
-			section = kind
-			_assets.add_section(SECTIONS[kind])
-		var path := str(asset["path"])
-		var label := _display_name(path)
-		if int(label_counts[label]) > 1:
-			label += " · " + path.get_extension().to_lower()
-		var index := _assets.add_item(label, kind if kind != "other" else "")
-		var waiting := not str(asset.get("pending", "")).is_empty()
-		_assets.set_item_tooltip(index, path + (" · " + WORDING.WAITING if waiting else ""))
-		_assets.set_item_status(index, "working" if waiting else "")
+			shown.append(asset)
+	_rows = _groups.fill(shown, not query.is_empty(), not (query + tool).is_empty(), _by_path)
 	if animate:
 		_assets.stagger()
 	var found := _rows.find_custom(_holds_selection)
