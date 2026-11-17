@@ -199,6 +199,25 @@ def copy_file(source: Path, target: Path) -> None:
         shutil.copy2(source, target)
 
 
+def place_file(source: Path, target: Path) -> None:
+    """Put a copy of ``source`` at the project's ``target`` in one step, dated now.
+
+    A copy keeps the source's time, and git on Windows (no inode or change time to
+    compare) takes a file with the time and size its index holds as unchanged: a
+    same-size picture put back from an older copy would never be committed.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temp = tempfile.mkstemp(prefix=".joinery-", dir=target.parent)
+    os.close(descriptor)
+    try:
+        copy_file(source, Path(temp))
+        os.utime(temp)
+        os.replace(temp, target)
+    finally:
+        if os.path.exists(temp):
+            os.unlink(temp)
+
+
 def _copy_entry(source: str, target: str) -> str:
     copy_file(Path(source), Path(target))
     return target
@@ -549,17 +568,7 @@ class FileTransaction:
                 elif change["before"] == DIRECTORY:
                     target.rmdir()
                 elif change["after"]:
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    descriptor, temp = tempfile.mkstemp(
-                        prefix=".joinery-", dir=target.parent
-                    )
-                    os.close(descriptor)
-                    try:
-                        copy_file(self.stage / path, Path(temp))
-                        os.replace(temp, target)
-                    finally:
-                        if os.path.exists(temp):
-                            os.unlink(temp)
+                    place_file(self.stage / path, target)
                 else:
                     target.unlink()
                 applied.append(change)
@@ -685,16 +694,7 @@ class FileTransaction:
         self.carried = planned
         self._record(changes=self.changes)
         for entry in planned:
-            target = self.project / entry["path"]
-            target.parent.mkdir(parents=True, exist_ok=True)
-            descriptor, temp = tempfile.mkstemp(prefix=".joinery-", dir=target.parent)
-            os.close(descriptor)
-            try:
-                copy_file(self.stage / entry["path"], Path(temp))
-                os.replace(temp, target)
-            finally:
-                if os.path.exists(temp):
-                    os.unlink(temp)
+            place_file(self.stage / entry["path"], self.project / entry["path"])
 
     def _merge_carried(self, path: str, now: str) -> None:
         """Another change rewrote the project's ``path`` since this one began: put
@@ -722,7 +722,7 @@ class FileTransaction:
                 continue
             saved = self.snapshot / entry["path"]
             if entry["before"] and saved.is_file():
-                copy_file(saved, target)
+                place_file(saved, target)
             elif not entry["before"]:
                 target.unlink()
 
@@ -772,17 +772,7 @@ class FileTransaction:
                 if target.is_dir():
                     target.rmdir()
             elif change["before"]:
-                target.parent.mkdir(parents=True, exist_ok=True)
-                descriptor, temp = tempfile.mkstemp(
-                    prefix=".joinery-", dir=target.parent
-                )
-                os.close(descriptor)
-                try:
-                    copy_file(self.snapshot / change["path"], Path(temp))
-                    os.replace(temp, target)
-                finally:
-                    if os.path.exists(temp):
-                        os.unlink(temp)
+                place_file(self.snapshot / change["path"], target)
             elif target.exists():
                 target.unlink()
 
