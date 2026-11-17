@@ -4,11 +4,27 @@ extends ScrollContainer
 ## app filter. Rows are real controls, so they can stagger in and carry a kind icon, a
 ## rolling count and a readiness dot. The item API mirrors ItemList (add_item, select,
 ## get_selected_items, item_selected), and indexes count rows only, never section titles.
+## A section added with a key has a header that folds it (click, Enter or Space; a count shows
+## while folded), a right-click or Menu-key menu, takes dropped rows and can be renamed in
+## place. Whoever fills the list decides what each menu offers and what a drop means.
 
 signal item_selected(index: int)
+## The header of section [param key] was clicked: it is now [param open] or folded.
+signal section_toggled(key: String, open: bool)
+## Right-click or the Menu key on a section header, at [param at] (global position).
+signal section_menu_requested(key: String, at: Vector2)
+## Right-click or the Menu key on row [param index].
+signal item_menu_requested(index: int, at: Vector2)
+## Row [param index] was dropped on section [param key].
+signal item_dropped(index: int, key: String)
+## Section [param key]'s header was dropped on section [param target]'s.
+signal section_dropped(key: String, target: String)
+## The title typed for section [param key] (begin_rename); "" when cancelled.
+signal section_renamed(key: String, title: String)
 
 const UI_COMPONENTS := preload("ui_components.gd")
 const UI_MOTION := preload("ui_motion.gd")
+const SECTION_SCRIPT := preload("asset_list_section.gd")
 const _SELECTED_STATES := ["pressed", "hover_pressed"]
 
 ## Number of rows (section titles excluded).
@@ -24,9 +40,15 @@ var fit_content := false:
 			ScrollContainer.SCROLL_MODE_DISABLED if value else ScrollContainer.SCROLL_MODE_AUTO
 		)
 
+## Rows can be dragged onto section headers ([signal item_dropped]).
+var drag_rows := false
+## (data: Dictionary, key: String) -> bool: whether a dragged row or header may land on [param key].
+var can_drop := Callable()
+
 var _box: VBoxContainer
 var _group: VBoxContainer
 var _rows: Array[Button] = []
+var _sections: Dictionary = {}
 var _selected := -1
 var _styling := false
 
@@ -40,6 +62,7 @@ class Row:
 	var dot: Control
 	var metadata: Variant = null
 	var text_value := ""
+	var section := ""
 
 
 func _init() -> void:
@@ -60,19 +83,60 @@ func clear() -> void:
 		_box.remove_child(child)
 		child.queue_free()
 	_rows.clear()
+	_sections.clear()
 	_group = null
 	_selected = -1
 
 
 ## Start a new group under [param title] (a JoinerySection label lined up with row text).
-func add_section(title: String) -> void:
-	_group = VBoxContainer.new()
-	_group.theme_type_variation = "JoineryTight"
-	_box.add_child(_group)
-	var inset := MarginContainer.new()
-	inset.theme_type_variation = "JoineryInset"
-	inset.add_child(UI_COMPONENTS.label(title, "JoinerySection"))
-	_group.add_child(inset)
+## With a [param key] the header folds the group ([param open] says how it starts), and
+## [param empty_text] is shown faintly while it has no rows; a [param movable] header can be
+## dragged onto another ([signal section_dropped]).
+func add_section(
+	title: String, key := "", open := true, empty_text := "", movable := false
+) -> void:
+	if key.is_empty():
+		_group = VBoxContainer.new()
+		_group.theme_type_variation = "JoineryTight"
+		_box.add_child(_group)
+		var inset := MarginContainer.new()
+		inset.theme_type_variation = "JoineryInset"
+		inset.add_child(UI_COMPONENTS.label(title, "JoinerySection"))
+		_group.add_child(inset)
+		return
+	var section: SECTION_SCRIPT = SECTION_SCRIPT.new()
+	section.setup(self, title, key, empty_text)
+	section.movable = movable
+	_sections[key] = section
+	_box.add_child(section)
+	_group = section.body
+	section.set_open(open)
+
+
+## The keys of the folding sections, in list order.
+func section_keys() -> PackedStringArray:
+	return PackedStringArray(_sections.keys())
+
+
+## Folding section [param key] (asset_list_section.gd), or null.
+func get_section(key: String) -> SECTION_SCRIPT:
+	return _sections.get(key) as SECTION_SCRIPT
+
+
+## Whether section [param key] is open (true for a list without it).
+func is_section_open(key: String) -> bool:
+	return not _sections.has(key) or (_sections[key] as SECTION_SCRIPT).open
+
+
+## The header button of section [param key], or null.
+func section_header(key: String) -> Button:
+	return (_sections[key] as SECTION_SCRIPT).header if _sections.has(key) else null
+
+
+## Type a new title for section [param key] in place; [signal section_renamed] says what.
+func begin_rename(key: String) -> void:
+	if _sections.has(key):
+		(_sections[key] as SECTION_SCRIPT).begin_rename()
 
 
 ## Add a row and return its index. [param icon_name] is a ui_theme icon ("" for none).
@@ -88,6 +152,8 @@ func add_item(text: String, icon_name := "") -> int:
 	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.text_value = text
 	row.accessibility_name = text
+	if _group.get_parent() is SECTION_SCRIPT:
+		row.section = (_group.get_parent() as SECTION_SCRIPT).key
 	UI_COMPONENTS.bind_height(row, "md", false)
 	UI_MOTION.press_feedback(row)
 	var line := HBoxContainer.new()
@@ -119,7 +185,16 @@ func add_item(text: String, icon_name := "") -> int:
 	var index := _rows.size()
 	row.pressed.connect(_on_row_pressed.bind(index))
 	row.theme_changed.connect(_style_row.bind(row))
+	row.gui_input.connect(_row_input.bind(row, index))
+	if drag_rows:
+		row.set_drag_forwarding(
+			SECTION_SCRIPT.drag_row.bind(row, index),
+			func(_at: Vector2, data: Variant) -> bool: return _accepts(data, row.section),
+			func(_at: Vector2, data: Variant) -> void: drop(data, row.section)
+		)
 	_group.add_child(row)
+	if _group.get_parent() is SECTION_SCRIPT:
+		(_group.get_parent() as SECTION_SCRIPT).update_count()
 	_rows.append(row)
 	return index
 
@@ -188,8 +263,42 @@ func get_selected_items() -> PackedInt32Array:
 func stagger() -> void:
 	var nodes: Array = []
 	for group: Node in _box.get_children():
-		nodes.append_array(group.get_children())
+		if group is SECTION_SCRIPT:
+			nodes.append((group as SECTION_SCRIPT).header)
+			if (group as SECTION_SCRIPT).open:
+				nodes.append_array((group as SECTION_SCRIPT).body.get_children())
+		else:
+			nodes.append_array(group.get_children())
 	UI_MOTION.stagger(nodes)
+
+
+## Whether [param data] (a dragged row or header) may land on section [param key].
+func _accepts(data: Variant, key: String) -> bool:
+	if not data is Dictionary or key.is_empty() or not can_drop.is_valid():
+		return false
+	if (data as Dictionary).get("list") != get_instance_id():
+		return false
+	return bool(can_drop.call(data, key))
+
+
+## Land a dragged row or header on section [param key].
+func drop(data: Variant, key: String) -> void:
+	if not _accepts(data, key):
+		return
+	var payload := data as Dictionary
+	if payload.get("type") == SECTION_SCRIPT.ROW_DRAG:
+		item_dropped.emit(int(payload["index"]), key)
+	elif payload.get("type") == SECTION_SCRIPT.SECTION_DRAG:
+		section_dropped.emit(str(payload["key"]), key)
+
+
+## Right-click, or the Menu key (Shift+F10) while focused, asks for the row's menu.
+func _row_input(event: InputEvent, row: Row, index: int) -> void:
+	var at := SECTION_SCRIPT.menu_point(row, event)
+	if at.x >= 0.0:
+		row.accept_event()
+		select(index)
+		item_menu_requested.emit(index, at)
 
 
 ## Scroll [param row] into view, unless the list was rebuilt before this deferred call ran.
