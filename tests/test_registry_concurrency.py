@@ -3,7 +3,7 @@ behind a slow one, reads run together, and writes to one change stay in order.""
 
 import asyncio
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 import pytest
 from mcp.types import CallToolResult, TextContent, Tool
@@ -396,5 +396,97 @@ def test_a_waiting_writer_goes_first_and_a_cancelled_one_lets_readers_on() -> No
         await asyncio.wait_for(late, 1)
         lock.release_read()
         assert not lock.write.locked() and not lock.read.locked()
+
+    asyncio.run(run())
+
+
+class SlowPeer:
+    """A protocol peer whose calls take a while; it counts how many overlap."""
+
+    protocol_version = "fixture-protocol"
+
+    def __init__(self, *tools: str) -> None:
+        self.tools = [
+            Tool(name=name, input_schema={"type": "object"}) for name in tools
+        ]
+        self.running = 0
+        self.most = 0
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(self, *_args: object) -> None:
+        return None
+
+    async def list_tools(self, cursor: str | None = None) -> Any:
+        return type("Page", (), {"tools": self.tools, "next_cursor": None})()
+
+    async def call_tool(self, name: str, arguments: Any, **_: Any) -> CallToolResult:
+        self.running += 1
+        self.most = max(self.most, self.running)
+        try:
+            if name == "crash":
+                await asyncio.sleep(0.05)
+                raise OSError("the server went away")
+            await asyncio.sleep(0.2)
+            return text(name)
+        finally:
+            self.running -= 1
+
+
+def served(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, peer: SlowPeer
+) -> MCPConnection:
+    monkeypatch.setattr("joinery.mcp_runtime.Client", lambda *_a, **_k: peer)
+    monkeypatch.setattr("joinery.mcp_runtime.mcp_violation", lambda *a, **k: None)
+    return MCPConnection(ServerSpec(name="godot", command="fixture"), tmp_path)
+
+
+def test_one_godot_connection_answers_reads_at_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    peer = SlowPeer("validate_script", "write_file")
+    connection = served(tmp_path, monkeypatch, peer)
+
+    async def run() -> None:
+        try:
+            loop = asyncio.get_running_loop()
+            started = loop.time()
+            await asyncio.gather(
+                *(connection.call("validate_script", {}) for _ in range(4))
+            )
+            assert peer.most == 4
+            assert loop.time() - started < 0.6
+            peer.most = 0
+            await asyncio.gather(*(connection.call("write_file", {}) for _ in range(2)))
+            assert peer.most == 1
+        finally:
+            await connection.close()
+
+    asyncio.run(run())
+
+
+def test_a_failed_request_ends_the_ones_beside_it_at_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    peer = SlowPeer("validate_script", "crash")
+    connection = served(tmp_path, monkeypatch, peer)
+    monkeypatch.setattr("joinery.mcp_runtime.read_only", lambda *_: True)
+
+    async def run() -> None:
+        try:
+            await connection.connect()
+            results = await asyncio.wait_for(
+                asyncio.gather(
+                    connection.call("crash", {}, timeout=30),
+                    connection.call("validate_script", {}, timeout=30),
+                    return_exceptions=True,
+                ),
+                # Answered when the crash ends the connection, not at 30 s.
+                1,
+            )
+            assert all(isinstance(result, Exception) for result in results), results
+        finally:
+            await connection.close()
 
     asyncio.run(run())

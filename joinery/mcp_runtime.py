@@ -466,6 +466,7 @@ class MCPConnection:
                 "press Refresh tools in the Joinery sidebar, then try again."
             )
             raise ValueError(self.readiness.detail)
+        self.tools.clear()
         self._ready = asyncio.get_running_loop().create_future()
         self._task = asyncio.create_task(self._serve())
         try:
@@ -534,6 +535,12 @@ class MCPConnection:
                             )
                         raise
                     finally:
+                        # Cancelled with the others when one request fails: its
+                        # caller hears now, not at its own time-out.
+                        if not request.future.done():
+                            request.future.set_exception(
+                                ConnectionError("MCP connection closed.")
+                            )
                         active.discard(request)
 
                 # Each request is answered in its own task, so reads that `call`
@@ -615,9 +622,9 @@ class MCPConnection:
             if verdict.severity is Severity.STOP:
                 raise PolicyStop(verdict.reason)
             raise PermissionError(verdict.reason)
-        if self._task is None or self._task.done():
-            self.tools.clear()
-            await self.connect()
+        # Starts the server when it isn't running, and waits while it is still
+        # listing its tools (a call beside the one that started it, too).
+        await self.connect()
         definition = self.tools.get(tool)
         if definition is None:
             raise ValueError(f"{self.spec.name} does not expose {tool}.")
