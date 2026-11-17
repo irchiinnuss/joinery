@@ -443,6 +443,8 @@ class ProjectGateway:
         #: While others work: the stage's stat snapshot and the files it changed.
         self._watch: StageWatch | None = None
         self._changed: set[str] = set()
+        #: The notes of the call that finished last (see :attr:`_notes`).
+        self._last_notes = _CallNotes()
         #: Teammates' recent changes said this turn, and those for the call now.
         self._team_warned: set[str] = set()
         #: Godot's check of this stage's script writes.
@@ -521,12 +523,10 @@ class ProjectGateway:
 
     @property
     def _notes(self) -> _CallNotes:
-        """What the call now running (in this task) says beyond its result."""
+        """What the call now running (in this task) says beyond its result; outside a
+        call, what the last call to finish said."""
         notes = _CALL_NOTES.get()
-        if notes is None:
-            notes = _CallNotes()
-            _CALL_NOTES.set(notes)
-        return notes
+        return self._last_notes if notes is None else notes
 
     @property
     def _team_notes(self) -> list[str]:
@@ -666,12 +666,14 @@ class ProjectGateway:
                 },
             ) as attrs:
                 # Each call's notes are its own, also when reads run side by side.
-                _CALL_NOTES.set(_CallNotes())
+                notes = _CallNotes()
+                _CALL_NOTES.set(notes)
                 named = self._named(arguments)
                 try:
                     result = await self._call(server, tool, arguments, view=view)
                 finally:
                     attrs.update(self._call_attrs)
+                    self._last_notes = notes
                 if named and not result.is_error:
                     # Reads, writes and new files alike: a rule for files that don't
                     # exist yet still reaches the agent that makes them.

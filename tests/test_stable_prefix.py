@@ -248,11 +248,18 @@ def test_each_role_is_offered_what_it_may_call(role: str) -> None:
     names = set(listed(role))
     assert names == offered_tools(role)
     # drive_game is judged against the project's own setting (joinery.roles.may_drive).
-    for tool in names - {"call_tool", "drive_game"}:
+    # call_tool and read_tool are judged by the tool they call (role_violation).
+    for tool in names - {"call_tool", "read_tool", "drive_game"}:
         assert registry_allowed(role, tool), tool
     if role in READ_ONLY_ROLES:
         assert not names & WRITERS
-        assert {"discover_tools", "tool_schema", "inspect_editor", "call_tool"} <= names
+        assert {
+            "discover_tools",
+            "tool_schema",
+            "inspect_editor",
+            "call_tool",
+            "read_tool",
+        } <= names
         assert "inspect_game" in names
         assert ("drive_game" in names) == (role in {"playtester", "debugger"})
 
