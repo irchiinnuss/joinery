@@ -5,6 +5,7 @@ extends SceneTree
 ## text never inside a script's source.
 
 const NOTIFY := preload("res://addons/joinery/desktop_notify.gd")
+const SETTING := preload("res://addons/joinery/notify_setting.gd")
 const SHELLS := ["sh", "bash", "zsh", "dash", "fish", "cmd", "cmd.exe"]
 
 
@@ -78,6 +79,7 @@ func _run() -> void:
 	_check_linux()
 	_check_windows()
 	_check_clean()
+	_check_setting_rows()
 	_dock.queue_free()
 	await process_frame
 	print("desktop notify: ", "FAILED" if _failed else "ok")
@@ -285,3 +287,21 @@ func _check_clean() -> void:
 	_check(NOTIFY.clean("a\u0007b\nc\td\u009b") == "a b c d", "Control characters go")
 	var long := NOTIFY.clean("word ".repeat(60))
 	_check(long.length() == NOTIFY.MAX_CHARS and long.ends_with("…"), "Long text is cut")
+
+
+func _check_setting_rows() -> void:
+	var body := VBoxContainer.new()
+	SETTING.add_to(body)
+	var main: Node = body.find_child("DesktopNotifications", false, false)
+	var only: Node = body.find_child("NotifyInputOnly", false, false)
+	_check(main != null and only != null, "Settings has both rows")
+	var main_switch: CheckButton = main.get("switch_button")
+	var only_switch: CheckButton = only.get("switch_button")
+	_check(main_switch.button_pressed and not only_switch.button_pressed, "On; everything")
+	main_switch.button_pressed = false
+	_check(not NOTIFY.pref(NOTIFY.ENABLED) and only_switch.disabled, "Off: the sub-option rests")
+	main_switch.button_pressed = true
+	only_switch.button_pressed = true
+	_check(NOTIFY.pref(NOTIFY.INPUT_ONLY) and not only_switch.disabled, "Only when needed, saved")
+	only_switch.button_pressed = false
+	body.free()

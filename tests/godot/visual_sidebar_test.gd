@@ -392,6 +392,13 @@ func _states(light: bool, width: int) -> void:
 	(settings as ScrollContainer).scroll_vertical = 0
 	await _shot("settings-policy-custom", light, width, chat)
 	settings.call("_close_policy")
+	# Notifications: desktop notifications on, "Only when you're needed" off (the defaults).
+	var notify: Node = settings.find_child("NotificationsGroup", true, false)
+	_check(notify != null, "Settings shows Notifications")
+	if notify != null:
+		(settings as ScrollContainer).ensure_control_visible(notify as Control)
+		await _shot("settings-notify", light, width, chat)
+		(settings as ScrollContainer).scroll_vertical = 0
 	# Under Advanced: the Reviewer agent and Complex models in Blender.
 	settings.find_child("Advanced", true, false).call("set_open", true)
 	var models: Node = settings.find_child("ComplexModelsSetting", true, false)

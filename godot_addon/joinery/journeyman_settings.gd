@@ -5,9 +5,10 @@ extends ScrollContainer
 ## A failed write puts the control back and says so under the title.
 ##
 ## One centred column (MAX_W.group) of grouped cards (settings_group.gd): Agent (who answers,
-## its model, reply mode, accepting changes automatically), Appearance and Project, then
-## "Advanced" folded: reply times, review details, the reviewer and other agents' behaviour,
-## the project's checks and tools, and troubleshooting. A value not known yet is a skeleton bar.
+## its model, reply mode, accepting changes automatically), Appearance, Notifications and
+## Project, then "Advanced" folded: reply times, review details, the reviewer and other agents'
+## behaviour, the project's checks and tools, and troubleshooting. A value not known yet is a
+## skeleton bar.
 
 signal closed
 
@@ -28,6 +29,7 @@ const FIX_ERRORS_SETTING := preload("fix_errors_setting.gd")
 const AGENT_SETTING := preload("agent_setting.gd")
 const AUTO_ACCEPT_SETTING := preload("auto_accept_setting.gd")
 const TODO_GO_SETTING := preload("todo_go_setting.gd")
+const NOTIFY_SETTING := preload("notify_setting.gd")
 const GROUP := preload("settings_group.gd")
 const BLOCKS := preload("ui_blocks.gd")
 const PATH := "Joinery/journeyman.cfg"
@@ -190,6 +192,7 @@ func _ready() -> void:
 	STYLE.page_edges(self, _body, "group")
 	_build_agent()
 	_build_appearance()
+	NOTIFY_SETTING.add_to(_section("Notifications").body)
 	_build_project()
 	_build_advanced()
 	_on_theme_rebuilt()

@@ -130,6 +130,7 @@ SIDEBAR_STATES = (
     "settings-policy",
     "settings-policy-custom",
     "settings-models",
+    "settings-notify",
     "chat-restored",
     "chats",
     "chats-rename",
