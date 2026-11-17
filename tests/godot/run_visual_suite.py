@@ -138,6 +138,7 @@ SIDEBAR_STATES = (
     "rewound",
     "chat-new-while-working",
     "chats-working",
+    "turn-finished-long",
 )
 # The sidebar's docked widths: its narrowest, its usual one and a wide dock.
 SIDEBAR_WIDTHS = (340, 480, 1000)

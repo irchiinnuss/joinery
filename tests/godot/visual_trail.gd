@@ -7,6 +7,7 @@ extends RefCounted
 ## [param suite] is visual_sidebar_test.gd, whose `_build`, `_shot` and `_thumbnail` these use;
 ## the screens are taken on a sidebar of their own, with [param beside]'s hidden meanwhile.
 ## A line naming a project file shows its name as a link ("trail-link", and in the open record).
+## [method finished_long]: a turn that finished with a long reply ("turn-finished-long").
 
 
 static func shots(suite: Variant, light: bool, width: int, beside: Control) -> void:
@@ -138,3 +139,44 @@ static func preview_note(suite: Variant, light: bool, width: int, chat: Control)
 		asked == ["audio/engine_sound.scd"], "Ask to fix asks about that asset: %s" % [asked]
 	)
 	review.disconnect("revise_requested", ask)
+
+
+## A turn that finished with a long Markdown reply, more than the sidebar shows: the
+## conversation scrolls to its end above the message box, which stays whole and inside the
+## sidebar.
+static func finished_long(suite: Variant, light: bool, width: int) -> void:
+	var built: Array = suite._build(light)
+	var host: Control = built[0]
+	var chat: Control = built[1]
+	await suite._frames()
+	chat.set_chat_agent("codex")
+	chat.set_chat_state("connected", "Codex connected")
+	chat.call("_on_submit", "Fix the mower's cutting sound; it stalls after the wind-up.")
+	chat.set_chat_busy(true)
+	chat.call("_on_sent")
+	var reply := "I've changed the push mower's engine sounds and how it stops.\n\n"
+	for part: String in ["Engine keeps running", "Sounds", "Stalling", "Tests"]:
+		reply += "**%s**\n" % part
+		reply += "- Letting go of the mower, or picking it up, no longer turns it off.\n"
+		reply += "- It stops when you switch it off with `use_tool`, or runs out of fuel.\n\n"
+	chat.append_agent_text(reply, true)
+	chat.finish_agent_response(true)
+	chat.show_timing({"outcome": "done", "total_ms": 779955, "first_response_ms": 900})
+	chat.set_chat_busy(false)
+	await suite._frames(4)
+	var composer: Control = chat.get("_composer")
+	var transcript: ScrollContainer = chat.get("_transcript")
+	var bar := transcript.get_v_scroll_bar()
+	suite._check(bar.max_value > bar.page, "The reply is longer than the sidebar shows")
+	suite._check(composer.is_visible_in_tree(), "The message box shows after the turn")
+	suite._check(
+		chat.get_global_rect().grow(0.5).encloses(composer.get_global_rect()),
+		"The message box is inside the sidebar: %s" % composer.get_global_rect()
+	)
+	suite._check(
+		transcript.get_global_rect().end.y <= composer.get_global_rect().position.y + 0.5,
+		"The conversation ends above the message box"
+	)
+	await suite._shot("turn-finished-long", light, width, chat)
+	host.queue_free()
+	await suite._frames(2)

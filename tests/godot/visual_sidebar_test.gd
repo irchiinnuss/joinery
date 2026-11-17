@@ -355,6 +355,7 @@ func _states(light: bool, width: int) -> void:
 	await _changes(light, width)
 	await _saved_chats(light, width)
 	await _variants(light, width)
+	await TRAIL.finished_long(self, light, width)
 	built = _build(light)
 	host = built[0]
 	chat = built[1]
