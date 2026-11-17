@@ -77,6 +77,8 @@ func _accepted_instanced_model(plugin: EditorPlugin) -> void:
 	if level == null:
 		return
 	var original := FileAccess.get_file_as_string("res://main.tscn")
+	# A Windows checkout may have written it with CRLF line ends.
+	var source := original.replace("\r\n", "\n")
 	var model := Node3D.new()
 	var mesh := MeshInstance3D.new()
 	mesh.mesh = BoxMesh.new()
@@ -102,7 +104,7 @@ func _accepted_instanced_model(plugin: EditorPlugin) -> void:
 		)
 	)
 	tool_scene.close()
-	var with_tool := original.replace(
+	var with_tool := source.replace(
 		"[gd_scene format=3]\n",
 		(
 			"[gd_scene load_steps=2 format=3]\n"
