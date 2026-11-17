@@ -18,7 +18,8 @@ extends VBoxContainer
 ## inside the window. The actions (and a decision's error) are never scrolled out of sight: side
 ## by side they end the rail, which the panel always has the height for (the stage gives its
 ## height up first, and the rail's middle scrolls); stacked, they leave the scroll for a foot of
-## their own under it.
+## their own under it, on one row when the links fit beside the buttons, so the stage keeps
+## most of the height.
 ##
 ## Narrow (the sidebar's width), the rail stacks under the stage. Details slide over the stage
 ## as a drawer (review_drawer.gd) with the files and their diffs, the checks that ran and every
@@ -119,7 +120,7 @@ var _error_icon: TextureRect
 var _error: Label
 ## True after a decision failed: Accept reads "Try again" until the next decision.
 var _failed := false
-var _footer: VBoxContainer
+var _footer: BoxContainer
 var _reject: Button
 var _accept: Button
 var _applying: HBoxContainer
@@ -659,6 +660,7 @@ func _show_foot() -> void:
 ## and the foot is the panel's own, under the scroll.
 func _place_foot() -> void:
 	var home: Control = self if _body.narrow else _rail
+	_rail.set_compact(_body.narrow)
 	if _foot.get_parent() != home:
 		_foot.get_parent().remove_child(_foot)
 		home.add_child(_foot)

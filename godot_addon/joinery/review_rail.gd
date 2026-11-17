@@ -6,7 +6,8 @@ extends VBoxContainer
 ## (review_summary.gd); the ways of a request tried several ways (variant_strip.gd, placed here
 ## by review_tasks.gd); then the error of a decision that failed, and the actions: Details,
 ## which slides a drawer over the stage, Ask for changes and, for a scene edit, Open in editor,
-## as quiet links on one line, and under them Discard and a large Accept. The middle scrolls
+## as quiet links on one line, and under them Discard and a large Accept (stacked, on one row
+## when they fit: set_compact). The middle scrolls
 ## when it is long. The panel gathers the error and the actions into one foot, which it moves
 ## out from under the rail when the rail stacks under the stage (review_panel.gd).
 ##
@@ -38,7 +39,8 @@ var slot: VBoxContainer
 var error_row: HBoxContainer
 var error_icon: TextureRect
 var error: Label
-var actions: VBoxContainer
+## The links over the buttons; one row when stacked under the stage and they fit (set_compact).
+var actions: BoxContainer
 var links: HFlowContainer
 var revise: Button
 var open_link: Button
@@ -50,6 +52,8 @@ var applying_dots: INDICATOR
 var _scroll: ScrollContainer
 var _info: VBoxContainer
 var _total := -1
+## True while the rail is stacked under the stage (set_compact).
+var _stacked := false
 
 
 func _init() -> void:
@@ -177,9 +181,12 @@ func _build_error() -> void:
 
 
 func _build_actions() -> void:
-	actions = VBoxContainer.new()
+	actions = BoxContainer.new()
+	actions.vertical = true
 	actions.name = "Actions"
 	actions.theme_type_variation = "JoineryTight"
+	# Its width decides whether the links fit beside the buttons (set_compact).
+	actions.resized.connect(func() -> void: _arrange_actions.call_deferred())
 	add_child(actions)
 	links = HFlowContainer.new()
 	links.name = "Links"
@@ -222,15 +229,50 @@ func _build_actions() -> void:
 	applying.add_child(label)
 
 
+## Stacked under the stage ([param on]), the links sit beside the buttons on one row when the
+## row has the width for all of them, so the actions take one control's height of the panel and
+## the stage keeps the rest; narrower, and beside the stage, the links sit over Discard and
+## Accept. The row never asks for more width than the links over the buttons would.
+func set_compact(on: bool) -> void:
+	_stacked = on
+	_arrange_actions()
+
+
+func _arrange_actions() -> void:
+	if actions == null:
+		return
+	var row := _stacked and _row_width() <= actions.size.x
+	if row == (not actions.vertical):
+		return
+	actions.vertical = not row
+	links.size_flags_horizontal = Control.SIZE_EXPAND_FILL if row else Control.SIZE_FILL
+	links.size_flags_vertical = Control.SIZE_SHRINK_CENTER if row else Control.SIZE_FILL
+	buttons.size_flags_horizontal = Control.SIZE_SHRINK_END if row else Control.SIZE_FILL
+
+
+## The width of the visible links on one line beside the buttons.
+func _row_width() -> float:
+	var width := buttons.get_combined_minimum_size().x
+	if not links.visible:
+		return width
+	var gap := float(links.get_theme_constant("h_separation"))
+	for link: Node in links.get_children():
+		if link is Control and (link as Control).visible:
+			width += (link as Control).get_combined_minimum_size().x + gap
+	return width + float(actions.get_theme_constant("separation")) - gap
+
+
 ## Show the links row only when one of its links is on.
 func sync_links() -> void:
 	links.visible = details_button.visible or revise.visible or open_link.visible
+	_arrange_actions.call_deferred()
 
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_THEME_CHANGED and links != null:
 		links.add_theme_constant_override("h_separation", UI_THEME.space(self, 5))
 		links.add_theme_constant_override("v_separation", UI_THEME.space(self, 1))
+		_arrange_actions.call_deferred()
 
 
 ## A quiet link on the actions' first line: muted ink after its glyph, no inset, so the first
