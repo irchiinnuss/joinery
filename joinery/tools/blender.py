@@ -1029,7 +1029,10 @@ class Blender(ToolModule):
         for export in exports:
             if Path(export).suffix != ".glb":
                 raise ValueError(
-                    "The automatic Blender export uses GLB. Render images explicitly in the operation script."
+                    "exports lists .glb files only: the export writes the model's "
+                    f"textures to {texture_dir(source)}/ by itself. Call again "
+                    "without the images; render any other image explicitly in "
+                    "the operation script."
                 )
             # Every setting that changes the written model is pinned here, so
             # the exporter's defaults (which move between Blender versions)
