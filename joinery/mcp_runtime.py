@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from typing import Any, TextIO
 
+import anyio
 from jsonschema import Draft202012Validator
 from mcp import Client, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -23,6 +24,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from joinery import docker_cli
 from joinery.hook import mcp_violation
 from joinery.policy import Severity, command_violation, load_denylist, normalise
+from joinery.read_access import read_only
+from joinery.rw_lock import ReadWriteLock
 
 
 class ServerSpec(BaseModel):
@@ -137,7 +140,9 @@ def worker_root(spec: ServerSpec) -> Path | None:
     return None
 
 
-def rewrite_root(result: CallToolResult, root: str, new_root: PurePath) -> CallToolResult:
+def rewrite_root(
+    result: CallToolResult, root: str, new_root: PurePath
+) -> CallToolResult:
     """Put every path under `root` in a result under `new_root` instead.
 
     A worker answers with its own paths (/work/...), which mean nothing on the
@@ -195,12 +200,31 @@ class PolicyStop(RuntimeError):
 def host_environment() -> dict[str, str]:
     """Inherit runtime paths and selected graphics config, never provider keys."""
     names = (
-        "PATH", "HOME", "LANG", "TMPDIR", "SYSTEMROOT", "SystemRoot",
-        "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "COMSPEC",
-        "HOMEDRIVE", "HOMEPATH", "ProgramFiles", "ProgramFiles(x86)",
-        "DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR",
-        "VK_DRIVER_FILES", "VK_ICD_FILENAMES", "LIBGL_ALWAYS_SOFTWARE",
-        "GALLIUM_DRIVER", "MESA_LOADER_DRIVER_OVERRIDE",
+        "PATH",
+        "HOME",
+        "LANG",
+        "TMPDIR",
+        "SYSTEMROOT",
+        "SystemRoot",
+        "USERPROFILE",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "TEMP",
+        "TMP",
+        "COMSPEC",
+        "HOMEDRIVE",
+        "HOMEPATH",
+        "ProgramFiles",
+        "ProgramFiles(x86)",
+        "DISPLAY",
+        "WAYLAND_DISPLAY",
+        "XAUTHORITY",
+        "XDG_RUNTIME_DIR",
+        "VK_DRIVER_FILES",
+        "VK_ICD_FILENAMES",
+        "LIBGL_ALWAYS_SOFTWARE",
+        "GALLIUM_DRIVER",
+        "MESA_LOADER_DRIVER_OVERRIDE",
     )
     return {key: os.environ[key] for key in names if key in os.environ}
 
@@ -250,7 +274,9 @@ def validate_arguments(arguments: Any) -> None:
 def result_text(result: CallToolResult) -> str:
     """The text blocks of a tool result, joined."""
     return "\n".join(
-        str(getattr(block, "text", "")) for block in result.content if hasattr(block, "text")
+        str(getattr(block, "text", ""))
+        for block in result.content
+        if hasattr(block, "text")
     ).strip()
 
 
@@ -281,7 +307,17 @@ def probe_problem(name: str, result: CallToolResult) -> str:
     return ""
 
 
-@dataclass
+#: Servers that answer several requests at once over one stdio connection. Their
+#: audited reads (joinery.read_access) are sent side by side; every other call to
+#: them, and every call to any other server, still goes alone. The pinned Godot
+#: MCP (tugcantopaloglu/godot-mcp) handles each request in its own async handler,
+#: and its reads either read a file or run their own headless Godot
+#: (validate_script), so reads don't share state. Others are not known to: the
+#: first-party tool servers and the upstream Blender MCP drive one app session.
+CONCURRENT_READS = frozenset({"godot"})
+
+
+@dataclass(eq=False)
 class _Request:
     tool: str
     arguments: dict[str, Any]
@@ -389,6 +425,10 @@ class MCPConnection:
     _queue: asyncio.Queue[_Request | None] = field(
         default_factory=asyncio.Queue, init=False
     )
+    #: Reads of a CONCURRENT_READS server share it; any other call holds it alone.
+    _requests: ReadWriteLock = field(default_factory=ReadWriteLock, init=False)
+    #: One connect at a time: two calls on a new connection start one server.
+    _connect_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False)
 
     def __post_init__(self) -> None:
         self.readiness = Readiness(
@@ -396,6 +436,10 @@ class MCPConnection:
         )
 
     async def connect(self, timeout: float = 30) -> None:
+        async with self._connect_lock:
+            await self._connect(timeout)
+
+    async def _connect(self, timeout: float) -> None:
         if self._task is not None and not self._task.done():
             if self._ready is not None:
                 await asyncio.wait_for(asyncio.shield(self._ready), timeout)
@@ -442,9 +486,14 @@ class MCPConnection:
             cwd=self.spec.cwd or self.project,
         )
         self.readiness.state = "starting"
-        active: _Request | None = None
+        active: set[_Request] = set()
         try:
-            mode = "legacy" if self.spec.name in {"godot", "blender", "inkscape", "audacity", "claude-collider"} else "auto"
+            mode = (
+                "legacy"
+                if self.spec.name
+                in {"godot", "blender", "inkscape", "audacity", "claude-collider"}
+                else "auto"
+            )
             transport = stdio_client(parameters, errlog=self.errlog or sys.stderr)
             async with Client(transport, read_timeout_seconds=30, mode=mode) as client:
                 self.readiness.state = "connected"
@@ -466,23 +515,34 @@ class MCPConnection:
                 self.readiness.state = "discovered"
                 assert self._ready is not None
                 self._ready.set_result(None)
-                while (active := await self._queue.get()) is not None:
+
+                async def answer(request: _Request) -> None:
                     try:
                         result = await client.call_tool(
-                            active.tool,
-                            active.arguments,
-                            read_timeout_seconds=active.timeout,
+                            request.tool,
+                            request.arguments,
+                            read_timeout_seconds=request.timeout,
                         )
-                        if not active.future.done():
-                            active.future.set_result(result)
+                        if not request.future.done():
+                            request.future.set_result(result)
                     except (Exception, BaseExceptionGroup) as exc:
-                        if not active.future.done():
-                            active.future.set_exception(
+                        if not request.future.done():
+                            request.future.set_exception(
                                 RuntimeError(
                                     f"{self.spec.name} tool call failed: {type(exc).__name__}"
                                 )
                             )
                         raise
+                    finally:
+                        active.discard(request)
+
+                # Each request is answered in its own task, so reads that `call`
+                # lets through together are in flight together; `call` keeps
+                # every other request alone (CONCURRENT_READS).
+                async with anyio.create_task_group() as requests:
+                    while (request := await self._queue.get()) is not None:
+                        active.add(request)
+                        requests.start_soon(answer, request)
         except asyncio.CancelledError:
             raise
         except (Exception, BaseExceptionGroup) as exc:  # noqa: BLE001 - report isolated server failures
@@ -492,8 +552,11 @@ class MCPConnection:
                 self._ready.set_exception(RuntimeError(self.readiness.detail))
         finally:
             self.readiness.connected = False
-            if active is not None and not active.future.done():
-                active.future.set_exception(ConnectionError("MCP connection closed."))
+            for request in active:
+                if not request.future.done():
+                    request.future.set_exception(
+                        ConnectionError("MCP connection closed.")
+                    )
             while not self._queue.empty():
                 request = self._queue.get_nowait()
                 if request is not None and not request.future.done():
@@ -571,16 +634,18 @@ class MCPConnection:
             # The worker sees its folder as /work: host paths go in as worker
             # paths, and worker paths come back as host paths.
             arguments = map_paths(arguments, root, PurePosixPath(WORKDIR))
-        future: asyncio.Future[CallToolResult] = (
-            asyncio.get_running_loop().create_future()
-        )
-        await self._queue.put(_Request(tool, arguments, future, timeout))
-        try:
-            result = await asyncio.wait_for(asyncio.shield(future), timeout + 2)
-        except (TimeoutError, asyncio.CancelledError):
-            future.cancel()
-            await self.close()
-            raise
+        shared = self.spec.name in CONCURRENT_READS and read_only(self.spec.name, tool)
+        async with self._requests.read if shared else self._requests.write:
+            future: asyncio.Future[CallToolResult] = (
+                asyncio.get_running_loop().create_future()
+            )
+            await self._queue.put(_Request(tool, arguments, future, timeout))
+            try:
+                result = await asyncio.wait_for(asyncio.shield(future), timeout + 2)
+            except (TimeoutError, asyncio.CancelledError):
+                future.cancel()
+                await self.close()
+                raise
         return result if root is None else rewrite_root(result, WORKDIR, root)
 
     async def probe(self, tool: str, arguments: dict[str, Any]) -> CallToolResult:
