@@ -14,7 +14,12 @@ replays the same calls under each cut and sums the context sent:
 * ``trim``: tool results get their short forms (joinery.short_results), and a
   token not sent is not sent again on any later call of the session;
 * ``light``: routine fixes after Joinery's checks move to the light model. It
-  sends the same tokens; what moves is reported as main-model tokens.
+  sends the same tokens; what moves is reported as main-model tokens;
+* ``steps``: a to-do built one step per prompt; a step that starts with the
+  session past ``fresh_at`` starts fresh from the digest, the plan, the notes of
+  the steps before it and the staged files. A step ends where the agent called
+  ``todo_step(n, 'done')``, or (older runs without it) said its progress
+  ("Update: ...").
 
 A call's context after a cut is its recorded context less what the cuts removed
 before it in its session. That keeps the calls themselves as recorded (their
@@ -40,13 +45,17 @@ from joinery import request_digest, routing, short_results
 
 #: Run 3 of the Ironworks test (the 0.7.0 baseline).
 DEFAULT = Path.home() / ".claude/projects/-Users-ninjacornix-ironworks3"
-CUTS = ("fresh", "resume", "split", "trim", "light")
+CUTS = ("fresh", "resume", "split", "trim", "light", "steps")
 #: Characters per token for text the transcripts give as characters.
 CHARS_PER_TOKEN = 4
 #: The digest's size at most, in tokens.
 DIGEST_TOKENS = request_digest.DIGEST_CHARS // CHARS_PER_TOKEN
 #: A fresh fix's prompt beyond the digest: the request, the staged files, the problems.
 FIX_TOKENS = 1500
+#: A fresh step's prompt beyond the digest: the plan, the steps' notes, the staged files.
+STEP_TOKENS = 1500
+#: An agent's progress line between steps, in runs from before todo_step.
+_UPDATE = re.compile(r"^\s*(?:\*\*)?(?:quick )?update\b", re.IGNORECASE)
 #: A session whose first call is this big is a reviewer's (it starts from the change).
 REVIEWER_START = 60_000
 
@@ -79,6 +88,8 @@ class Turn:
     #: first blockout call), or -1.
     plan_at: int = -1
     plan_chars: int = 0
+    #: Calls that start a new step of a to-do (the call after a step ended).
+    step_starts: list[int] = field(default_factory=list)
     kind: str = "fresh"
     checks: list[str] = field(default_factory=list)
 
@@ -170,10 +181,25 @@ def read_session(path: Path) -> list[Turn]:
                     + int(usage.get("cache_creation_input_tokens", 0))
                 )
             for block in content if isinstance(content, list) else []:
-                if not isinstance(block, dict) or block.get("type") != "tool_use":
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "text" and _UPDATE.match(
+                    str(block.get("text", ""))
+                ):
+                    current.step_starts.append(len(current.calls))
+                if block.get("type") != "tool_use":
                     continue
                 name = str(block.get("name", "")).split("__")[-1]
                 given = block.get("input") or {}
+                if name == "call_tool" and isinstance(given, dict):
+                    name = str(given.get("tool", name))
+                    given = given.get("arguments") or {}
+                if (
+                    name == "todo_step"
+                    and isinstance(given, dict)
+                    and given.get("state") in {"done", "skipped"}
+                ):
+                    current.step_starts.append(len(current.calls))
                 uses[str(block.get("id", ""))] = (name, given)
                 if current.plan_at >= 0:
                     continue
@@ -255,6 +281,13 @@ def replay(sessions: list[list[Turn]], cuts: set[str]) -> list[Totals]:
                     # The build starts fresh from the plan and the digest.
                     plan = turn.plan_chars // CHARS_PER_TOKEN
                     removed = max(removed, recorded - (start + plan))
+                if (
+                    "steps" in cuts
+                    and index in turn.step_starts
+                    and recorded - removed >= request_digest.FRESH_AT
+                ):
+                    # The next step starts fresh from the digest and the plan.
+                    removed = max(removed, recorded - (start + STEP_TOKENS))
                 if "trim" in cuts:
                     removed += sum(
                         (r.chars - r.short_chars) // CHARS_PER_TOKEN
@@ -345,7 +378,8 @@ _COLUMNS: dict[str, tuple[str, ...]] = {
     "resume": ("resume",),
     "split": ("split",),
     "trim": ("trim",),
-    "all": ("fresh", "resume", "split", "trim", "light"),
+    "steps": ("steps",),
+    "all": ("fresh", "resume", "split", "trim", "light", "steps"),
 }
 
 
