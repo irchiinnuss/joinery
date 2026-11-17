@@ -930,8 +930,7 @@ func _tools() -> void:
 		if id == "blender":
 			await _animations(workspace, rail)
 	await _readiness(workspace, rail)
-	EditorInterface.set_main_screen_editor("3D")
-	await _frames()
+	await load(get_script().resource_path.get_base_dir() + "/visual_assets.gd").screens(self)
 
 
 ## Every readiness state at once on the rail, as `joinery tools --json` would report them.

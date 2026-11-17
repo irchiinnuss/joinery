@@ -207,6 +207,10 @@ EDITOR_SCREENS = (
     "tools-animation",
     "tools-supercollider",
     "tools-readiness",
+    "assets-categories",
+    "assets-folded",
+    "assets-menu",
+    "assets-search",
     "bottom-panel",
     "focus",
     "tour-sidebar",
@@ -486,6 +490,7 @@ def editor(theme: str, capture: Path, logs: Path) -> Harness:
         "visual_tour.gd",
         "visual_team.gd",
         "visual_panels.gd",
+        "visual_assets.gd",
     ]
     testbed_editor(
         harness,
