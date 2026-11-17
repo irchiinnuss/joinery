@@ -16,6 +16,7 @@ from typing import Any
 
 from joinery import docker_cli, tools, worker_platform
 from joinery.catalog import load_catalog, load_project_tools, selection_ids
+from joinery.lockfile import GLTF_SUFFIXES, LOCK_NAME
 from joinery.locking import write_lock
 from joinery.mcp_runtime import validate_arguments
 from joinery.recipe import (
@@ -341,68 +342,77 @@ async def edit_document(
     for extra in inputs:
         if not confined(project, extra).is_file():
             raise ValueError(f"{extra} is not a file in this project.")
-    script = recipe_dir / (identifier + module.script_ext)
-    if isinstance(module, blender.Blender):
-        chosen = _export_shape_keys(project, source, keep_macro_shape_keys, shape_keys)
-        script.write_text(module.script(source, base, code, exports, shape_keys=chosen))
-    else:
-        script.write_text(module.script(source, base, code, exports))
-    if module.text_source:
-        target.write_text(code)
-    recipe = Recipe(
-        tool=tool,
-        script=script.relative_to(project).as_posix(),
-        outputs=(source, *exports),
-        sources=tuple(dict.fromkeys(((base,) if base else ()) + inputs)),
-        note=note,
-        seed=module.recipe_seed(code),
+    # Every file this operation may write, as it is now: a failure at any point
+    # (the app, the recipe, the lock) puts all of it back, so the model's
+    # files, its recipe and its lock entry still agree.
+    undo = Undo(
+        project,
+        (source, *exports),
+        (texture_dir(source),) if tool == "blender" else (),
     )
-    # What the exports held before, to tell an edit that changes nothing.
-    exported_before = _digests(project, exports)
-    # Keep the old maps in memory: a failed or refused edit puts them back, so
-    # the next edit still finds every output of the recipe it replaces.
-    kept = {old: (project / old).read_bytes() for old in textures}
-    for old in textures:
-        (project / old).unlink(missing_ok=True)
+    script = recipe_dir / (identifier + module.script_ext)
     try:
-        argv = module.replay_argv(recipe.script)
-        if module.replay_image:
-            # A tool with its own worker image (Audacity) replays there.
-            result = await run_offline(argv, project, image=module.replay_image)
+        if isinstance(module, blender.Blender):
+            chosen = _export_shape_keys(
+                project, source, keep_macro_shape_keys, shape_keys
+            )
+            script.write_text(
+                module.script(source, base, code, exports, shape_keys=chosen)
+            )
         else:
-            result = await run_offline(argv, project)
-    except WorkerTimeout as late:
-        _restore(project, kept)
-        script.unlink(missing_ok=True)
-        raise RuntimeError(
-            f"{tool} did not finish the document operation in {late.seconds:g} s "
-            "and was stopped: the code may loop forever or wait for something "
-            f"that never comes. {_quiet(late.output)[-1500:]}".rstrip()
-        ) from None
+            script.write_text(module.script(source, base, code, exports))
+        if module.text_source:
+            target.write_text(code)
+        recipe = Recipe(
+            tool=tool,
+            script=script.relative_to(project).as_posix(),
+            outputs=(source, *exports),
+            sources=tuple(dict.fromkeys(((base,) if base else ()) + inputs)),
+            note=note,
+            seed=module.recipe_seed(code),
+        )
+        # What the exports held before, to tell an edit that changes nothing.
+        exported_before = _digests(project, exports)
+        # The old maps go before the run, so an image the edit removed leaves no
+        # stale file behind; a failed or refused edit puts them back.
+        for old in textures:
+            (project / old).unlink(missing_ok=True)
+        try:
+            argv = module.replay_argv(recipe.script)
+            if module.replay_image:
+                # A tool with its own worker image (Audacity) replays there.
+                result = await run_offline(argv, project, image=module.replay_image)
+            else:
+                result = await run_offline(argv, project)
+        except WorkerTimeout as late:
+            raise RuntimeError(
+                f"{tool} did not finish the document operation in {late.seconds:g} s "
+                "and was stopped: the code may loop forever or wait for something "
+                f"that never comes. {_quiet(late.output)[-1500:]}".rstrip()
+            ) from None
+        if not result.ok:
+            # A failed operation is no recipe: the undo leaves no script behind.
+            raise RuntimeError(
+                f"{tool} did not complete the document operation: "
+                f"{_quiet(result.output)[-2000:]}"
+            )
+        if tool == "blender":
+            folder = confined(project, texture_dir(source))
+            written = tuple(
+                p.relative_to(project).as_posix() for p in sorted(folder.glob("*.png"))
+            )
+            recipe = recipe.model_copy(update={"outputs": (*recipe.outputs, *written)})
+            # Godot imports portable GLB exports. Keep native .blend documents
+            # without requiring a Blender install on every game developer's host.
+            (target.parent / ".gdignore").write_text("")
+        # The maps from before are this recipe's to replace even when the edit
+        # removed their image and wrote no file for it.
+        recorded = await _record(
+            project, recipe, recipe_dir / (identifier + ".toml"), replaces=textures
+        )
     except BaseException:
-        _restore(project, kept)
-        script.unlink(missing_ok=True)
+        undo.restore()
         raise
-    if not result.ok:
-        _restore(project, kept)
-        # A failed operation is no recipe: leave no script behind in recipes/.
-        script.unlink(missing_ok=True)
-    if tool == "blender" and result.ok:
-        folder = confined(project, texture_dir(source))
-        written = tuple(
-            p.relative_to(project).as_posix() for p in sorted(folder.glob("*.png"))
-        )
-        recipe = recipe.model_copy(update={"outputs": (*recipe.outputs, *written)})
-    if not result.ok:
-        raise RuntimeError(
-            f"{tool} did not complete the document operation: "
-            f"{_quiet(result.output)[-2000:]}"
-        )
-    if tool == "blender":
-        # Godot imports portable GLB exports. Keep native .blend documents
-        # without requiring a Blender install on every game developer's host.
-        (target.parent / ".gdignore").write_text("")
-    recorded = await _record(project, recipe, recipe_dir / (identifier + ".toml"))
     if tool == "blender":
         recorded.update(_export_facts(project, exports, result.output))
     if exported_before and _digests(project, exports) == exported_before:
@@ -562,6 +572,9 @@ async def edit_document_steps(
             )
         ],
     }
+    # Recording the finished steps can still fail (the lock): then the whole
+    # batch is put back, so the model, its recipe and its lock entry agree.
+    undo = Undo(project, (source, *exports), (texture_dir(source),))
     folder = project / scratch
     folder.mkdir(parents=True)
     try:
@@ -612,41 +625,82 @@ async def edit_document_steps(
     if finished:
         # Godot imports portable GLB exports, never the .blend beside them.
         (target.parent / ".gdignore").write_text("")
-    history = project / HISTORY_DIR
-    for index in range(finished):
-        done = progress.done[index]
-        step = steps[index]
-        step_base = progress.bases.get(index, "")
-        recipe = Recipe(
-            tool=tool,
-            script=scripts[index],
-            outputs=(source, *exports, *done["textures"]),
-            sources=tuple(
-                dict.fromkeys(((step_base,) if step_base else ()) + step.inputs)
-            ),
-            note=step.note,
+    try:
+        _record_steps(
+            project, source, exports, steps, ids, scripts, progress, finished, outcome
         )
-        output = progress.output.get(index, "")
-        if index < finished - 1:
-            # The next step's edit would move this recipe to history.
-            history.mkdir(parents=True, exist_ok=True)
-            path = history / (ids[index] + ".toml")
-            path.write_text(
-                recipe_text(recipe.model_copy(update={"expect": done["expect"]}))
+        if finished:
+            last = finished - 1
+            recipe = _step_recipe(
+                tool, source, exports, steps[last], scripts[last], progress, last
             )
-            result: dict[str, Any] = {
-                "source": source,
-                "outputs": list(recipe.outputs),
-                "recipe": path.relative_to(project).as_posix(),
-                "status": "staged",
-                "requires_review": True,
-            }
-            result.update(_export_facts(project, [], output))
-        else:
-            result = await _record(project, recipe, recipe_dir / (ids[index] + ".toml"))
-            result.update(_export_facts(project, exports, output))
-        outcome.results.append(result)
+            result = await _record(
+                project, recipe, recipe_dir / (ids[last] + ".toml"), replaces=textures
+            )
+            result.update(
+                _export_facts(project, exports, progress.output.get(last, ""))
+            )
+            outcome.results.append(result)
+    except BaseException:
+        undo.restore()
+        raise
     return outcome
+
+
+def _step_recipe(
+    tool: str,
+    source: str,
+    exports: list[str],
+    step: DocumentStep,
+    script: str,
+    progress: blender_batch.Progress,
+    index: int,
+) -> Recipe:
+    """The recipe of one finished step of a batch."""
+    done = progress.done[index]
+    step_base = progress.bases.get(index, "")
+    return Recipe(
+        tool=tool,
+        script=script,
+        outputs=(source, *exports, *done["textures"]),
+        sources=tuple(dict.fromkeys(((step_base,) if step_base else ()) + step.inputs)),
+        note=step.note,
+    )
+
+
+def _record_steps(
+    project: Path,
+    source: str,
+    exports: list[str],
+    steps: list[DocumentStep],
+    ids: list[str],
+    scripts: list[str],
+    progress: blender_batch.Progress,
+    finished: int,
+    outcome: StepsOutcome,
+) -> None:
+    """Write each finished step but the last to history, where the next step's
+    edit would have moved its recipe."""
+    history = project / HISTORY_DIR
+    for index in range(finished - 1):
+        done = progress.done[index]
+        recipe = _step_recipe(
+            "blender", source, exports, steps[index], scripts[index], progress, index
+        )
+        history.mkdir(parents=True, exist_ok=True)
+        path = history / (ids[index] + ".toml")
+        path.write_text(
+            recipe_text(recipe.model_copy(update={"expect": done["expect"]}))
+        )
+        result: dict[str, Any] = {
+            "source": source,
+            "outputs": list(recipe.outputs),
+            "recipe": path.relative_to(project).as_posix(),
+            "status": "staged",
+            "requires_review": True,
+        }
+        result.update(_export_facts(project, [], progress.output.get(index, "")))
+        outcome.results.append(result)
 
 
 def _undo_step(
@@ -733,12 +787,90 @@ def _export_facts(project: Path, exports: list[str], output: str) -> dict[str, A
     return facts
 
 
-def _restore(project: Path, files: dict[str, bytes]) -> None:
-    """Write back files removed before a tool run that did not complete."""
-    for relative, data in files.items():
-        path = project / relative
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
+def _read_file(path: Path) -> bytes | None:
+    return path.read_bytes() if path.is_file() else None
+
+
+def _top_files(folder: Path) -> set[str]:
+    return (
+        {p.name for p in folder.iterdir() if p.is_file()} if folder.is_dir() else set()
+    )
+
+
+class Undo:
+    """Put an operation's files, recipes and joinery.lock back as they were.
+
+    A tool operation writes its document, its exports and (Blender) the model's
+    texture folder, then records a recipe, moves the recipes it replaces to
+    history and rewrites the lock. When any of that fails part way, the model's
+    files, its recipe and its lock entry would no longer agree, and every later
+    operation on it is refused. :meth:`restore` puts back each file and folder
+    named here, removes recipe files made since, returns recipes moved to
+    history, and restores the lock byte for byte. A model's import settings,
+    written beside its first export, count as part of it.
+    """
+
+    def __init__(
+        self, project: Path, files: tuple[str, ...], folders: tuple[str, ...] = ()
+    ) -> None:
+        self.project = project
+        files = (
+            *files,
+            *(f + ".import" for f in files if Path(f).suffix.lower() in GLTF_SUFFIXES),
+        )
+        self.files = {f: _read_file(project / f) for f in files}
+        self.existed = {f for f in files if (project / f).exists()}
+        self.folders = {
+            folder: {
+                p.relative_to(project).as_posix(): p.read_bytes()
+                for p in sorted((project / folder).rglob("*"))
+                if p.is_file()
+            }
+            for folder in folders
+        }
+        self.recipes = _top_files(project / "recipes")
+        self.history = _top_files(project / HISTORY_DIR)
+        self.lock = _read_file(project / LOCK_NAME)
+
+    def restore(self) -> None:
+        project = self.project
+        recipes = project / "recipes"
+        for name in _top_files(recipes) - self.recipes:
+            (recipes / name).unlink(missing_ok=True)
+        for name in _top_files(project / HISTORY_DIR) - self.history:
+            moved = project / HISTORY_DIR / name
+            if name in self.recipes:
+                # Replaced by the recipe this operation recorded: current again.
+                moved.replace(recipes / name)
+            else:
+                # Written straight to history (an earlier step of a batch).
+                moved.unlink(missing_ok=True)
+        for folder, kept in self.folders.items():
+            path = project / folder
+            if path.is_dir():
+                for found in path.rglob("*"):
+                    rel = found.relative_to(project).as_posix()
+                    if found.is_file() and rel not in kept:
+                        found.unlink()
+            for rel, content in kept.items():
+                (project / rel).parent.mkdir(parents=True, exist_ok=True)
+                (project / rel).write_bytes(content)
+        for relative, data in self.files.items():
+            path = project / relative
+            if data is not None:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(data)
+            elif relative in self.existed:
+                continue
+            elif path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink(missing_ok=True)
+        lock = project / LOCK_NAME
+        if self.lock is not None:
+            lock.write_bytes(self.lock)
+        else:
+            lock.unlink(missing_ok=True)
 
 
 def _refuse_dropping_audio_edits(
@@ -764,12 +896,22 @@ def _refuse_dropping_audio_edits(
             )
 
 
-def _replacements(project: Path, outputs: tuple[str, ...]) -> list[Path]:
+def _replacements(
+    project: Path, outputs: tuple[str, ...], replaces: tuple[str, ...] = ()
+) -> list[Path]:
+    """The recipes whose outputs this recipe makes again, which it replaces.
+
+    `replaces` are further files the operation took over that it no longer
+    makes: a Blender model's texture files from before an edit that removed an
+    image. The recipe that made them is replaced all the same; they are gone
+    from disk, so the lock drops them.
+    """
     replacements = []
+    covered = set(outputs) | set(replaces)
     for previous in recipe_paths(project):
         old = load_recipe(previous)
-        if set(old.outputs) & set(outputs):
-            if not set(old.outputs) <= set(outputs):
+        if set(old.outputs) & covered:
+            if not set(old.outputs) <= covered:
                 raise ValueError(
                     "Refresh every output of the existing source recipe: "
                     + ", ".join(old.outputs)
@@ -799,14 +941,22 @@ def _lock(project: Path) -> None:
 
 
 async def _record(
-    project: Path, recipe: Recipe, path: Path, *, lock: bool = True
+    project: Path,
+    recipe: Recipe,
+    path: Path,
+    *,
+    lock: bool = True,
+    replaces: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """Write a recipe with its measured outputs, then the lock file.
 
     `lock=False` leaves the lock to the caller, which records several recipes
     whose files appeared together (a batch) and writes the lock once after.
+    `replaces` are files the operation took over (see :func:`_replacements`).
     """
-    replacements = [p for p in _replacements(project, recipe.outputs) if p != path]
+    replacements = [
+        p for p in _replacements(project, recipe.outputs, replaces) if p != path
+    ]
     rows = [
         "version = 1",
         f"tool = {json.dumps(recipe.tool)}",
@@ -909,30 +1059,41 @@ async def _scripted_export(
     identifier = hashlib.sha256((source + code).encode()).hexdigest()[:32]
     script = project / "recipes" / (identifier + ".py")
     script.parent.mkdir(exist_ok=True)
-    script.write_text(code)
-    result = await run_offline(
-        ["python3", script.relative_to(project).as_posix()], project
+    # A failed run or recording puts the source, its exports, the recipes and
+    # the lock back as they were.
+    undo = (
+        Undo(project, (source,), (directory,))
+        if outputs is None
+        else Undo(project, (source, *outputs))
     )
-    if not result.ok:
-        raise RuntimeError(result.output[-2000:])
-    if outputs is None:
-        after = _export_inventory(project, directory)
-        outputs = sorted(
-            relative
-            for relative, digest in after.items()
-            if relative != source
-            and (before.get(relative) != digest or relative in previous_outputs)
+    try:
+        script.write_text(code)
+        result = await run_offline(
+            ["python3", script.relative_to(project).as_posix()], project
         )
-    if not outputs:
-        raise ValueError("The application produced no exports.")
-    recipe = Recipe(
-        tool=tool,
-        script=script.relative_to(project).as_posix(),
-        outputs=(source, *outputs),
-        sources=sources,
-        note=note,
-    )
-    return await _record(project, recipe, script.with_suffix(".toml"))
+        if not result.ok:
+            raise RuntimeError(result.output[-2000:])
+        if outputs is None:
+            after = _export_inventory(project, directory)
+            outputs = sorted(
+                relative
+                for relative, digest in after.items()
+                if relative != source
+                and (before.get(relative) != digest or relative in previous_outputs)
+            )
+        if not outputs:
+            raise ValueError("The application produced no exports.")
+        recipe = Recipe(
+            tool=tool,
+            script=script.relative_to(project).as_posix(),
+            outputs=(source, *outputs),
+            sources=sources,
+            note=note,
+        )
+        return await _record(project, recipe, script.with_suffix(".toml"))
+    except BaseException:
+        undo.restore()
+        raise
 
 
 def _export_inventory(project: Path, directory: str) -> dict[str, str]:

@@ -334,6 +334,23 @@ def test_a_failing_first_step_changes_nothing(
     assert _kept(stage) == recipes
 
 
+def test_a_batch_the_lock_refuses_puts_every_step_back(
+    tmp_path: Path, blender: list[list[str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stage = _stage(tmp_path, "refused")
+    _start(stage)
+    before, recipes, history = _outputs(stage), _kept(stage), _log(stage)
+    monkeypatch.setattr(
+        authoring, "write_lock", lambda _p: ["art/x.png: no recipe produces this file"]
+    )
+    steps = [DocumentStep(code, note) for note, code in EDITS[:2]]
+    with pytest.raises(ValueError, match="art/x.png"):
+        asyncio.run(authoring.edit_document_steps(stage, SOURCE, steps, [MODEL]))
+    assert _outputs(stage) == before
+    assert _kept(stage) == recipes
+    assert _log(stage) == history
+
+
 def test_batch_codes_pass_the_same_policy_check(
     tmp_path: Path, blender: list[list[str]]
 ) -> None:
