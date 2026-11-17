@@ -284,7 +284,7 @@ func _flatten() -> void:
 ## Every part of the row on the title's first line: the circle and the buttons are one line
 ## tall, and a wrapping title starts half the difference lower so its first line centres there.
 func _fit() -> void:
-	var column := roundf(UI_THEME.unit(self) * 16.0)
+	var column := float(UI_THEME.icon_px(self))
 	mark.custom_minimum_size.x = column
 	var indent := int(column) + _top.get_theme_constant("separation")
 	_detail_box.add_theme_constant_override("margin_left", indent)
@@ -344,10 +344,10 @@ func sync_view() -> void:
 
 func _ink() -> void:
 	if title is Label:
-		var label := title as Label
-		var role := "text_muted" if progress in ["done", "skipped"] else "text"
-		label.add_theme_color_override("font_color", UI_THEME.color(self, role))
-		if progress == "started":
-			label.add_theme_font_override("font", UI_THEME.medium_font(self))
-		else:
-			label.remove_theme_font_override("font")
+		# A finished step reads muted; the one in hand leads by weight, like a card title.
+		var look := ""
+		if progress in ["done", "skipped"]:
+			look = "JoineryMuted"
+		elif progress == "started":
+			look = "JoineryCardTitle"
+		(title as Label).theme_type_variation = look

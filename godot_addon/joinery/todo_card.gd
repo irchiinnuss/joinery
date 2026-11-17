@@ -564,7 +564,7 @@ func _done_row(id: String, item: Dictionary, editable: bool) -> VBoxContainer:
 		var dot := UI.status_dot("working" if state == "checking" else "off")
 		dot.tooltip_text = "Checked after the change"
 		mark = dot
-	STYLE.on_theme(mark, func() -> void: mark.custom_minimum_size.x = UI_THEME.unit(mark) * 16.0)
+	STYLE.on_theme(mark, func() -> void: mark.custom_minimum_size.x = UI_THEME.icon_px(mark))
 	row.add_child(mark)
 	var words := _words(row, str(item.get("text", "")), editable, "Done when", block)
 	if not status.is_empty():
@@ -579,7 +579,7 @@ func _done_row(id: String, item: Dictionary, editable: bool) -> VBoxContainer:
 			indent,
 			func() -> void:
 				indent.add_theme_constant_override(
-					"margin_left", int(UI_THEME.unit(indent) * 16.0) + UI_THEME.space(indent, 1)
+					"margin_left", UI_THEME.icon_px(indent) + UI_THEME.space(indent, 1)
 				)
 		)
 		indent.add_child(evidence)
