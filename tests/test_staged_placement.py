@@ -9,11 +9,14 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import os
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
+from unittest.mock import AsyncMock
 
 import pytest
+from mcp.types import CallToolResult, TextContent
 
 from bridge.instructions import GAME_GUIDE, REVIEW_GUIDE
 from bridge.protocol import Done, EditorAction, Message
@@ -239,6 +242,76 @@ def test_a_staged_godot_call_that_loads_a_new_model_imports_the_stage_first(
             await gateway._import_for([MODEL])
             assert importer.runs == 1
         finally:
+            await gateway.close()
+
+    asyncio.run(run())
+
+
+def test_a_file_godot_never_imports_needs_no_import(tmp_path: Path) -> None:
+    # A native source under a .gdignore: Godot's import never makes a copy of it,
+    # so asking again would run the stage's whole import on every call.
+    source = tmp_path / "art/sources/garden_chair.blend"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"BLENDER")
+    (tmp_path / "art/sources/.gdignore").write_text("")
+    assert (
+        staged_assets.needs_import(tmp_path, ["art/sources/garden_chair.blend"]) == []
+    )
+    # Kept unimported on purpose, after its last change.
+    sound = tmp_path / "audio/raw.wav"
+    sound.parent.mkdir(parents=True)
+    sound.write_bytes(b"RIFF")
+    settings = tmp_path / "audio/raw.wav.import"
+    settings.write_text('[remap]\n\nimporter="keep"\n')
+    assert staged_assets.needs_import(tmp_path, ["audio/raw.wav"]) == []
+    # Changed since: Godot imports it again, so it still counts.
+    later = settings.stat().st_mtime + 5
+    os.utime(sound, (later, later))
+    assert staged_assets.needs_import(tmp_path, ["audio/raw.wav"]) == ["audio/raw.wav"]
+    # An ordinary model with no import yet still needs one.
+    model = tmp_path / MODEL
+    model.parent.mkdir(parents=True)
+    model.write_bytes(b"glTF")
+    assert staged_assets.needs_import(tmp_path, [MODEL]) == [MODEL]
+
+
+def test_deleting_a_staged_file_imports_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    importer = Importer()
+    monkeypatch.setattr("joinery.gateway.run_offline", importer)
+
+    class Deletes:
+        tools: ClassVar[dict[str, Any]] = {"delete_file": object()}
+
+        def __init__(self, stage: Path) -> None:
+            self.stage = stage
+
+        async def call(
+            self, _tool: str, arguments: dict[str, Any], **_k: Any
+        ) -> CallToolResult:
+            (self.stage / arguments["filePath"]).unlink(missing_ok=True)
+            return CallToolResult(content=[TextContent(type="text", text="deleted")])
+
+        async def close(self) -> None:
+            return None
+
+    async def run() -> None:
+        gateway = ProjectGateway(project(tmp_path, monkeypatch))
+        try:
+            tx = staged(gateway, {MODEL: b"glTF crt"})
+            fake = Deletes(tx.stage)
+            gateway.connection = AsyncMock(return_value=fake)  # type: ignore[method-assign]
+            gateway.staged["godot"] = fake  # type: ignore[assignment]
+            await gateway.call(
+                "godot",
+                "delete_file",
+                {"projectPath": str(gateway.project), "filePath": MODEL},
+            )
+            assert not (tx.stage / MODEL).exists()
+            assert importer.runs == 0
+        finally:
+            gateway.transaction = None
             await gateway.close()
 
     asyncio.run(run())

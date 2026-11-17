@@ -178,14 +178,43 @@ def _source_md5(record: Path) -> str:
 
 
 def needs_import(stage: Path, paths: Iterable[str]) -> list[str]:
-    """The imported files among ``paths`` the stage has no current import of."""
+    """The imported files among ``paths`` the stage has no current import of.
+
+    A file Godot never imports is left out, or every call naming it would run
+    the stage's whole import again for nothing: one under a folder with a
+    ``.gdignore`` (native sources, ``art/sources/hero.blend``), and one whose
+    ``.import`` keeps it unimported on purpose and is newer than it."""
     return [
         path
         for path in paths
         if Path(path).suffix.lower() in IMPORTED_SUFFIXES
         and (stage / path).is_file()
+        and not never_imported(stage, path)
         and imported_file(stage, path) is None
     ]
+
+
+_KEPT = re.compile(
+    r'^\s*(?:importer\s*=\s*"(?:keep|skip)"|valid\s*=\s*false)\s*$', re.MULTILINE
+)
+
+
+def never_imported(stage: Path, relative: str) -> bool:
+    """Godot's import leaves ``relative`` alone: a ``.gdignore`` in its folder or
+    one above it (below ``stage``), or its ``.import`` says to keep or skip it,
+    or that it can't be imported, and was written after the file last changed."""
+    folder = (stage / relative).parent
+    while folder != stage and folder.is_relative_to(stage):
+        if (folder / ".gdignore").exists():
+            return True
+        folder = folder.parent
+    settings = stage / (relative + ".import")
+    try:
+        if settings.stat().st_mtime < (stage / relative).stat().st_mtime:
+            return False
+        return _KEPT.search(settings.read_text(encoding="utf-8")) is not None
+    except OSError:
+        return False
 
 
 #: What the agent hears when a file it placed couldn't be imported. Plain and

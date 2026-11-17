@@ -152,6 +152,9 @@ OP_APPS: dict[str, tuple[str, ...]] = {
     "make_sounds": (),
 }
 NATIVE_OPS = frozenset(OP_APPS)
+#: Godot tools that never load the files they name: deleting a model needs no
+#: import of it (one took the stage's whole import, over 100 s, first).
+NOT_LOADING = frozenset({"delete_file"})
 #: Key prefix of a read-only agent's connection on the stage, beside the staged ones.
 VIEW = "view:"
 #: Seconds between progress events while a long check runs, so `joinery run`'s idle
@@ -959,7 +962,7 @@ class ProjectGateway:
             arguments = _map_paths(arguments, self.project, self.transaction.stage)
             if not readonly and self.claims.contended():
                 self._watch_stage()
-            if server == "godot" and not readonly:
+            if server == "godot" and not readonly and tool not in NOT_LOADING:
                 # A staged scene that instances a model needs its import there.
                 await self._import_for(staged_assets.loaded_paths(arguments, bare=True))
         if server == "godot" and tool == "run_project":
