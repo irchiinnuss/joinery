@@ -27,6 +27,7 @@ from joinery import (
     metrics,
     provenance_hold,
     reasons,
+    step_assets,
 )
 from joinery.claims import LEAD_BUSY, MAIN, live_refusal
 from joinery.errors import error_text
@@ -335,6 +336,19 @@ STEPS_RUNNING = (
 BUILD_NEXT = (
     "Your plan is saved. End your turn now without changing anything; Joinery starts "
     "the build from this plan in a fresh session."
+)
+#: A step marked done while the change's assets fail the lock gate.
+STEP_ASSETS_NOT_DONE = (
+    "Step {n} is not done yet: these asset files don't match joinery.lock. Fix each "
+    "in this step: make it again with its tool so Joinery records it, or delete what "
+    "this change made with it. Then call todo_step({n}, 'done') again. If it can't be "
+    "made with the tools, delete what it left and mark the step 'skipped' with why."
+)
+#: A step skipped with assets the lock gate refuses.
+STEP_ASSETS_LEFT = (
+    "The step is skipped, but the change still has these asset problems. Remove what "
+    "the step left half made (or finish it with its tool) before you end your turn, "
+    "or every later step and the final checks trip over them."
 )
 #: The checks a change passed before the reviewer reads it, in plain words.
 PASSED = (
@@ -661,9 +675,28 @@ class TurnController:
         self.emit({"kind": "todo", "todo_id": todo_id, "state": "cancelled"})
         return True
 
-    def todo_step(self, params: dict[str, Any]) -> dict[str, Any]:
-        """The building agent's word on one step (``todo_step``): started, done or
-        skipped. The card checks it off at once and counts what is done."""
+    async def todo_step_checked(self, params: dict[str, Any]) -> dict[str, Any]:
+        """:meth:`todo_step`, after checking the change's assets when a step ends.
+
+        A step marked done or skipped has the asset gate run over the asset files
+        the staged change touched (:mod:`joinery.step_assets`, the precheck's
+        provenance check limited to those files). Done is refused while it finds
+        a problem, so the step fixes what it left instead of every later step
+        tripping over it; a skip is taken, with what it left to remove or finish.
+        """
+        self._step(params)
+        problems: list[str] = []
+        tx = self.gateway.transaction
+        if params.get("state") in {"done", "skipped"} and (
+            tx is not None and tx.state == "staging"
+        ):
+            problems = await asyncio.to_thread(
+                step_assets.problems, self.gateway.project, tx.stage
+            )
+        return self.todo_step(params, problems)
+
+    def _step(self, params: dict[str, Any]) -> tuple[done_when.Todo, int]:
+        """The to-do and the step ``params`` names, refused unless it has it."""
         todo = self.todo
         if todo is None:
             if self.pending_todo is not None:
@@ -676,6 +709,18 @@ class TurnController:
             or not 1 <= number <= len(todo.steps)
         ):
             raise ValueError(f"step is the step's number, 1 to {len(todo.steps)}.")
+        return todo, number
+
+    def todo_step(
+        self, params: dict[str, Any], problems: list[str] | None = None
+    ) -> dict[str, Any]:
+        """The building agent's word on one step (``todo_step``): started, done or
+        skipped. The card checks it off at once and counts what is done.
+
+        ``problems`` are what the asset gate found in the change as the step ends
+        (:meth:`todo_step_checked`): a done step with any stays started and gets
+        them back to fix; a skipped one is skipped and hears what it left."""
+        todo, number = self._step(params)
         state = params.get("state")
         if state not in done_when.STEP_STATES:
             raise ValueError("state is started, done or skipped.")
@@ -683,6 +728,13 @@ class TurnController:
         if not isinstance(note, str) or len(note) > 160:
             raise ValueError("note is one short line.")
         note = " ".join(note.split())
+        if problems and state == "done":
+            return {
+                "status": "not_done",
+                "step": number,
+                "problems": problems,
+                "next": STEP_ASSETS_NOT_DONE.format(n=number),
+            }
         todo.mark(number - 1, str(state))
         if note:
             todo.note(number - 1, note)
@@ -694,7 +746,15 @@ class TurnController:
         finished = sum(
             1 for i in range(len(todo.steps)) if todo.state(i) in {"done", "skipped"}
         )
-        return {"status": "ok", "finished": finished, "steps": len(todo.steps)}
+        answer: dict[str, Any] = {
+            "status": "ok",
+            "finished": finished,
+            "steps": len(todo.steps),
+        }
+        if problems:
+            answer["left_behind"] = problems
+            answer["next"] = STEP_ASSETS_LEFT
+        return answer
 
     def todo_event(self, state: str, **extra: Any) -> None:
         if self.todo is not None:

@@ -546,7 +546,7 @@ class GatewayRPC:
                     )
                 if self.gateway.turn is None:
                     raise ValueError("No user request is open.")
-                data = self.gateway.turn.todo_step(params)
+                data = await self.gateway.turn.todo_step_checked(params)
             elif method == "delegate":
                 if self.inspection_only or self.delegate is None:
                     raise ValueError("Nested specialist delegation is unavailable.")

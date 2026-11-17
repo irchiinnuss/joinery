@@ -393,7 +393,11 @@ def write_assets(project: Path, drop: set[str], add: list[Entry]) -> None:
     lock.write_text(updated, encoding="utf-8")
 
 
-def check_assets(project: Path, catalog: Catalog) -> list[str]:
+def check_assets(
+    project: Path, catalog: Catalog, paths: set[str] | None = None
+) -> list[str]:
+    """Every problem of the asset gate; with ``paths``, only those of these files
+    (their lock entries, and whether each has one), so only they are hashed."""
     lock = project / LOCK_NAME
     if not lock.is_file():
         return [f"{lock}: missing"]
@@ -404,10 +408,32 @@ def check_assets(project: Path, catalog: Catalog) -> list[str]:
     errors: list[str] = []
     custom = _custom_ids(project)
     for entry in entries:
-        errors.extend(_entry_errors(project, entry, catalog, custom))
-    for extension in extensions:
-        errors.extend(_extension_errors(project, extension))
+        if paths is None or entry.path in paths:
+            errors.extend(_entry_errors(project, entry, catalog, custom))
+    if paths is None:
+        for extension in extensions:
+            errors.extend(_extension_errors(project, extension))
     locked = {e.path for e in entries}
-    unlocked = asset_files(project) - locked
+    files = asset_files(project) if paths is None else asset_files_of(project, paths)
+    unlocked = files - locked
     errors.extend(f"{p}: no {LOCK_NAME} entry" for p in sorted(unlocked))
     return errors
+
+
+def asset_files_of(project: Path, paths: set[str]) -> set[str]:
+    """Those of ``paths`` that are asset files on disk, as :func:`asset_files`
+    would list them, without walking the asset folders."""
+    roots = [
+        root.relative_to(project).as_posix() + "/" for root in asset_roots(project)
+    ]
+    found: set[str] = set()
+    for rel in paths:
+        path = project / rel
+        skipped = (
+            path.suffix == ".import"
+            or path.name in NOT_ASSETS
+            or rel in NOT_ASSET_PATHS
+        )
+        if not skipped and rel.startswith(tuple(roots)) and path.is_file():
+            found.add(rel)
+    return found
