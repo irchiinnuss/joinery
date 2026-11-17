@@ -969,18 +969,29 @@ def test_albedo_textures_may_not_be_pure_black_or_white(tmp_path: Path) -> None:
 
 
 def test_sprites_count_distinct_colours(tmp_path: Path) -> None:
+    nine = [(i * 20, 10, 10, 255) for i in range(9)]
     root = v2_stage(
-        tmp_path, {"art/sprites/hero.png": png(4, 4), "art/sprites/coin.png": png(4, 4)}
+        tmp_path,
+        {
+            "art/sprites/hero.png": png(16, 1, nine),
+            "art/sprites/coin.png": png(4, 4),
+            # A JPEG header (4 x 4): its pixels are for ffmpeg.
+            "art/sprites/gem.jpg": b"\xff\xd8\xff\xc0\x00\x11\x08\x00\x04\x00\x04"
+            + bytes(12),
+        },
     )
-    output = (
-        "JOINERY_FILE:art/sprites/coin.png\nJOINERY_COLOURS:3\n"
-        "JOINERY_FILE:art/sprites/hero.png\nJOINERY_COLOURS:9\n"
-    )
+    # A plain PNG is counted in Python; anything else in the worker.
+    output = "JOINERY_FILE:art/sprites/gem.jpg\nJOINERY_COLOURS:7\n"
     assert run_checks(
-        root, ["art/sprites/coin.png", "art/sprites/hero.png"], output
-    ) == ["art/sprites/hero.png: 9 distinct colours, over the look's 4 per sprite"]
-    assert run_checks(root, ["art/sprites/coin.png"], "", ok=False) == [
-        "art/sprites/coin.png: colours could not be counted"
+        root,
+        ["art/sprites/coin.png", "art/sprites/hero.png", "art/sprites/gem.jpg"],
+        output,
+    ) == [
+        "art/sprites/gem.jpg: 7 distinct colours, over the look's 4 per sprite",
+        "art/sprites/hero.png: 9 distinct colours, over the look's 4 per sprite",
+    ]
+    assert run_checks(root, ["art/sprites/gem.jpg"], "", ok=False) == [
+        "art/sprites/gem.jpg: colours could not be counted"
     ]
 
 

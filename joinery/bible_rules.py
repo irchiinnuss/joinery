@@ -16,7 +16,9 @@ a rule the user has not seen. Rules cover what can be measured without taste:
 
 `.glb`, `.wav`, image headers and Godot text resources are read here in Python.
 Everything that needs a real decoder (loudness, pixels, Ogg streams, `.blend`)
-runs in the offline creative worker through the `Measure` callable. A file that
+runs in the offline creative worker through the `Measure` callable, the
+independent measurements at once; a plain PNG's sprite colours are counted here
+(`joinery.png_pixels`), exactly as the worker counts them. A file that
 cannot be measured is reported, never passed. Rules are optional one by one: an
 absent table or an empty map means "not checked". Unknown keys are errors, so a
 typo is reported rather than silently ignored.
@@ -24,6 +26,8 @@ typo is reported rather than silently ignored.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import math
 import re
@@ -35,6 +39,7 @@ from typing import Any, Literal, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from joinery import png_pixels
 from joinery.bible_blend import (
     MEASURE_BLEND,
     BlendMeasure,
@@ -1953,27 +1958,58 @@ async def check_rules(
             problems += material_texel_problems(
                 path, (stage / path).read_text(errors="replace"), stage, rules
             )
-    if blends:
-        got = await measure(measure_argv(blends), stage)
-        measured = parse_measures(got.output)
-        for path in blends:
-            if path not in measured:
-                problems.append(f"{path}: Blender could not measure this file")
-                continue
-            problems += blend_problems(path, measured[path], rules)
-    problems += await _image_problems(stage, paths, rules, measure)
-    problems += await _sprite_problems(stage, paths, rules.sprites, measure)
-    if oggs:
-        got = await measure(["sh", "-c", _PROBE_AUDIO, "sh", *oggs], stage)
-        probed = parse_probe(got.output)
-        for path in oggs:
-            folder = _format_folder(rules.audio.format, path)
-            if path not in probed:
-                problems.append(f"{path}: audio format could not be read")
-                continue
-            problems += _format_problems(
-                path, probed[path], rules.audio.format[folder], folder
-            )
+    # The worker's measurements are independent: they run at once, and their
+    # findings are listed in the same order as ever.
+    measured = await asyncio.gather(
+        _blend_measured(stage, blends, rules, measure),
+        _image_problems(stage, paths, rules, measure),
+        _sprite_problems(stage, paths, rules.sprites, measure),
+        _ogg_problems(stage, oggs, rules, measure),
+        _loudness_problems(stage, paths, rules, measure),
+    )
+    for more in measured:
+        problems += more
+    return problems
+
+
+async def _blend_measured(
+    stage: Path, blends: list[str], rules: BibleRules, measure: Measure
+) -> list[str]:
+    if not blends:
+        return []
+    got = await measure(measure_argv(blends), stage)
+    measured = parse_measures(got.output)
+    problems: list[str] = []
+    for path in blends:
+        if path not in measured:
+            problems.append(f"{path}: Blender could not measure this file")
+            continue
+        problems += blend_problems(path, measured[path], rules)
+    return problems
+
+
+async def _ogg_problems(
+    stage: Path, oggs: list[str], rules: BibleRules, measure: Measure
+) -> list[str]:
+    if not oggs:
+        return []
+    got = await measure(["sh", "-c", _PROBE_AUDIO, "sh", *oggs], stage)
+    probed = parse_probe(got.output)
+    problems: list[str] = []
+    for path in oggs:
+        folder = _format_folder(rules.audio.format, path)
+        if path not in probed:
+            problems.append(f"{path}: audio format could not be read")
+            continue
+        problems += _format_problems(
+            path, probed[path], rules.audio.format[folder], folder
+        )
+    return problems
+
+
+async def _loudness_problems(
+    stage: Path, paths: list[str], rules: BibleRules, measure: Measure
+) -> list[str]:
     audio = [
         p
         for p in paths
@@ -1983,6 +2019,8 @@ async def check_rules(
             or _folder_value(rules.audio.lufs, p) is not None
         )
     ]
+    if not audio:
+        return []
     # A music track's stems play together: the bible's loudness is the section
     # mix's, and each stem only has to keep under the true-peak ceiling.
     mixes = section_mixes(stage)
@@ -1992,13 +2030,12 @@ async def check_rules(
         for label, group in mixes.items()
         if set(group) & set(audio) and all((stage / s).is_file() for s in group)
     }
-    if not audio:
-        return problems
     got = await measure(["sh", "-c", _MEASURE, "sh", *audio], stage)
     loudness = parse_loudness(got.output) if got.ok else {}
     if changed_mixes:
         got = await measure(["sh", "-c", mix_measure_script(changed_mixes)], stage)
         loudness.update(parse_loudness(got.output) if got.ok else {})
+    problems: list[str] = []
     for path in [*audio, *changed_mixes]:
         values = loudness.get(path, {})
         if "true_peak" not in values or "lufs" not in values:
@@ -2093,8 +2130,20 @@ async def _sprite_problems(
     ]
     if not images:
         return []
-    got = await measure(["sh", "-c", _COUNT_COLOURS, "sh", *images], stage)
-    counts = parse_colour_counts(got.output)
+    # A plain PNG is counted here, exactly as the worker counts it; the rest
+    # (JPEG, WebP, 16-bit, ...) go to ffmpeg in the worker.
+    native: dict[str, str] = {}
+    for path in images:
+        with contextlib.suppress(OSError):
+            said = png_pixels.count_output(path, (stage / path).read_bytes())
+            if said is not None:
+                native[path] = said
+    rest = [p for p in images if p not in native]
+    output = "\n".join(native.values())
+    if rest:
+        got = await measure(["sh", "-c", _COUNT_COLOURS, "sh", *rest], stage)
+        output += "\n" + got.output
+    counts = parse_colour_counts(output)
     problems: list[str] = []
     for path in images:
         limit = _folder_value(rules.max_colours, path)
