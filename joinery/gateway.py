@@ -9,6 +9,8 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager, nullcontext
+from contextvars import ContextVar
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -66,6 +68,8 @@ from joinery.mcp_runtime import map_paths as _map_paths
 from joinery.read_access import read_only
 from joinery.rebase import Rebase, lock_moved, rebase, refresh_review
 from joinery.review import Render, plan, render
+from joinery.rw_lock import LockSide as _LockSide
+from joinery.rw_lock import ReadWriteLock
 from joinery.server_install import configured
 from joinery.stage_watch import StageWatch
 from joinery.submission import is_reference, keep_refusal
@@ -303,6 +307,28 @@ UNFINISHED_NOTE = (
 )
 
 
+@dataclass
+class _CallNotes:
+    """What one tool call says beyond its own result, kept per call."""
+
+    team: list[str] = field(default_factory=list)
+    write: list[str] = field(default_factory=list)
+    attrs: dict[str, Any] = field(default_factory=dict)
+
+
+#: The running call's notes. Each gateway RPC request is its own task, so calls
+#: running side by side never see each other's notes.
+_CALL_NOTES: ContextVar[_CallNotes | None] = ContextVar(
+    "joinery_call_notes", default=None
+)
+
+
+def _shared_call(server: str, tool: str) -> bool:
+    """A call that may run beside other reads of the same lane: an audited read
+    (joinery.read_access), which stages nothing and touches no running game."""
+    return read_only(server, tool)
+
+
 class ProjectGateway:
     """The project's tools for one turn's agent.
 
@@ -392,7 +418,12 @@ class ProjectGateway:
         self.runtime_config: str | None = None
         self.runtime_injected: str | None = None
         self.runtime_root_script = False
-        self._call_lock = asyncio.Lock()
+        #: Tool calls: reads share it, everything that changes the stage (a write,
+        #: a submit, an import, a decision) holds it alone. Reads of a lane used
+        #: to queue behind each other one at a time (four validate_script calls
+        #: took 4 x 21 s); a staged write still never runs beside anything else
+        #: of this lane, so the transaction stays consistent.
+        self._calls = ReadWriteLock()
         self.progress: Callable[[str], None] = lambda _text: None
         #: A test run as it goes ({"kind": "tests"}, joinery.test_progress).
         self.tests_report: Callable[[dict[str, Any]], None] | None = None
@@ -414,12 +445,6 @@ class ProjectGateway:
         self._changed: set[str] = set()
         #: Teammates' recent changes said this turn, and those for the call now.
         self._team_warned: set[str] = set()
-        self._team_notes: list[str] = []
-        #: What a write did beyond the call itself (a tolerant patch, new script
-        #: errors), said after the call's own result (ADR 0078).
-        self._write_notes: list[str] = []
-        #: Span attributes the call adds as it goes (a refused raw script, a check).
-        self._call_attrs: dict[str, Any] = {}
         #: Godot's check of this stage's script writes.
         self._checks: WriteCheck | None = None
 
@@ -484,9 +509,36 @@ class ProjectGateway:
         )
 
     @property
-    def call_lock(self) -> asyncio.Lock:
-        """Held for every tool call; a submit holds it while the change is checked."""
-        return self._call_lock
+    def call_lock(self) -> _LockSide:
+        """Held alone by every call that may change the stage; a submit holds it
+        while the change is checked. Reads share :attr:`read_lock` instead."""
+        return self._calls.write
+
+    @property
+    def read_lock(self) -> _LockSide:
+        """Shared by read-only calls: they run side by side, never beside a write."""
+        return self._calls.read
+
+    @property
+    def _notes(self) -> _CallNotes:
+        """What the call now running (in this task) says beyond its result."""
+        notes = _CALL_NOTES.get()
+        if notes is None:
+            notes = _CallNotes()
+            _CALL_NOTES.set(notes)
+        return notes
+
+    @property
+    def _team_notes(self) -> list[str]:
+        return self._notes.team
+
+    @property
+    def _write_notes(self) -> list[str]:
+        return self._notes.write
+
+    @property
+    def _call_attrs(self) -> dict[str, Any]:
+        return self._notes.attrs
 
     async def game_call(self, tool: str, arguments: dict[str, Any]) -> CallToolResult:
         """One runtime-inspector call on the game this gateway started (``inspect_game``
@@ -495,7 +547,7 @@ class ProjectGateway:
             raise ValueError(f"{tool} is not a running-game read or input.")
         if not self.runtime_owned:
             raise ValueError(live_game.NO_GAME)
-        async with self._call_lock:
+        async with self.call_lock:
             # The game answers the connection that started it: the staged one in a change.
             connection = self.staged.get("godot")
             if connection is None:
@@ -601,7 +653,9 @@ class ProjectGateway:
         """Run one tool call. ``view`` serves an agent that only reads (a reviewer,
         a debugger, a specialist): an audited read, answered from a read-only view
         of this gateway's staged change while there is one (ADR 0037, 0041)."""
-        async with self._call_lock:
+        # A read runs beside other reads; anything else holds the lane alone.
+        side = self.read_lock if _shared_call(server, tool) else self.call_lock
+        async with side:
             with self.span(
                 "tools",
                 f"execute_tool {server}.{tool}",
@@ -611,7 +665,8 @@ class ProjectGateway:
                     metrics.TASK: self.task_id,
                 },
             ) as attrs:
-                self._team_notes, self._write_notes, self._call_attrs = [], [], {}
+                # Each call's notes are its own, also when reads run side by side.
+                _CALL_NOTES.set(_CallNotes())
                 named = self._named(arguments)
                 try:
                     result = await self._call(server, tool, arguments, view=view)
@@ -1693,7 +1748,7 @@ class ProjectGateway:
         made = staged_assets.staged_only(self.project, tx.stage, paths)
         if not made:
             return {}
-        async with self._call_lock:
+        async with self.call_lock:
             if staged_assets.needs_import(tx.stage, made):
                 try:
                     await self.import_stage(tx)
