@@ -62,6 +62,7 @@ CASES = {
     "agent_roles_test.gd": "agent roles: ok",
     "playtest_card_test.gd": "playtest card: ok",
     "todo_card_test.gd": "todo card: ok",
+    "composer_stays_test.gd": "composer stays: ok",
     "share_tab_test.gd": "share tab: ok",
     "match_card_test.gd": "match card: ok",
     "access_card_test.gd": "access card: ok",
