@@ -220,7 +220,7 @@ def test_blender_automatic_export_refuses_fbx_before_launch(
 ) -> None:
     execute = AsyncMock()
     monkeypatch.setattr(authoring, "run_offline", execute)
-    with pytest.raises(ValueError, match="uses GLB"):
+    with pytest.raises(ValueError, match=".glb files only"):
         asyncio.run(
             authoring.edit_document(
                 stage,
