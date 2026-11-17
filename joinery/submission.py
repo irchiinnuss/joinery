@@ -22,6 +22,7 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from joinery import (
+    check_mirror,
     complex_models,
     reasons,
     references,
@@ -706,19 +707,41 @@ async def checks(
         ]
 
     async def godot_checks() -> list[Problem]:
+        testing = bool(tests) or bool(scene_tests)
+        # Godot's runs read the stage from a copy in their worker, not over a
+        # slow bind mount, when there is more than a quick compile to do.
+        mirror = (
+            await check_mirror.open_mirror(tx.stage, image, scene_cache.PARALLEL)
+            if godot or testing
+            else None
+        )
+        try:
+            return await godot_runs(mirror)
+        finally:
+            if mirror is not None:
+                await mirror.close()
+
+    async def godot_runs(mirror: check_mirror.Mirror | None) -> list[Problem]:
         found: list[Problem] = []
         testing = bool(tests) or bool(scene_tests)
         if compiled:
             with timed("review_import"):
-                found += await compile_scripts(tx.stage, compiled, image=image)
+                found += await compile_scripts(
+                    tx.stage, compiled, image=image, runner=on_copy(mirror)
+                )
             if found:
                 return found
         if godot or (testing and not current):
             limit = import_seconds(tx.project, image)
             try:
                 with timed("review_import"):
+                    # What the import writes goes back into the stage.
                     got = await worker_run(
-                        list(IMPORT_ARGV), tx.stage, limit, image=image
+                        list(IMPORT_ARGV),
+                        tx.stage,
+                        limit,
+                        image=image,
+                        runner=on_copy(mirror, keep=True),
                     )
             except WorkerTimeout as stopped:
                 # Said as the import's own problem: the look check still counts.
@@ -738,12 +761,15 @@ async def checks(
             if imported is not None:
                 imported()
         if tests:
-            found += await run_tests(tx.stage, tests, timed, image=image)
+            found += await run_tests(
+                tx.stage, tests, timed, image=image, runner=on_copy(mirror)
+            )
         if scene_tests:
             found += await run_scene_tests(
                 tx.stage,
                 scene_tests,
                 timed,
+                mirror=mirror,
                 tx=tx,
                 info=info,
                 failing=failing,
@@ -808,6 +834,33 @@ async def worker_run(
     return got
 
 
+def on_copy(
+    mirror: check_mirror.Mirror | None, *, keep: bool = False, own_home: bool = False
+) -> Callable[..., Awaitable[Result]] | None:
+    """A ``worker_run`` runner that runs on ``mirror``'s copy of the stage (None:
+    ``run_offline`` on the stage itself). ``keep`` brings what the run wrote back
+    into the stage; ``own_home`` gives it a ``user://`` of its own. A run on any
+    other tree, or once the mirror's worker is gone, runs on the mount."""
+    if mirror is None:
+        return None
+
+    async def run(argv: list[str], root: Path, seconds: int, **options: Any) -> Result:
+        if mirror.started and root == mirror.root:
+            try:
+                return await mirror.run(
+                    argv,
+                    seconds,
+                    stall=float(options.get("stall", 0.0)),
+                    keep=keep,
+                    own_home=own_home,
+                )
+            except check_mirror.MirrorLost:
+                await mirror.close()
+        return await run_offline(argv, root, seconds, **options)
+
+    return run
+
+
 #: Godot's import of a stage: a stage starts from the project's import cache, so
 #: it redoes only what changed, but a change that adds many maps (three 1024 px PBR
 #: maps took an emulated worker past 180 s) or a project whose cache is behind
@@ -850,7 +903,11 @@ def worker_ready(got: Result) -> None:
 
 
 async def run_tests(
-    stage: Path, folders: list[str], timed: Any = None, image: str = CREATIVE_IMAGE
+    stage: Path,
+    folders: list[str],
+    timed: Any = None,
+    image: str = CREATIVE_IMAGE,
+    runner: Callable[..., Awaitable[Result]] | None = None,
 ) -> list[Problem]:
     """Run the project's GUT tests; a failure or a timeout is a problem to fix."""
     argv = [
@@ -865,7 +922,7 @@ async def run_tests(
         "-gexit",
     ]
     with timed("review_tests") if timed is not None else nullcontext():
-        got = await worker_run(argv, stage, OFFLINE_SECONDS, image=image)
+        got = await worker_run(argv, stage, OFFLINE_SECONDS, image=image, runner=runner)
     worker_ready(got)
     if got.ok and "SCRIPT ERROR:" not in got.output:
         return []
@@ -946,6 +1003,7 @@ async def run_scene_tests(
     scripts: list[str],
     timed: Any = None,
     *,
+    mirror: check_mirror.Mirror | None = None,
     tx: FileTransaction | None = None,
     info: list[str] | None = None,
     failing: list[str] | None = None,
@@ -971,6 +1029,9 @@ async def run_scene_tests(
 
     seconds = scene_test_seconds(tx.project if tx is not None else stage, image)
     stall = SCENE_TEST_STALL_SECONDS * (EMULATED_FACTOR if _emulated(image) else 1)
+    # On the copy, tests side by side share one worker: each keeps a user:// of
+    # its own, as a worker of its own gave it.
+    alone = on_copy(mirror, own_home=True)
 
     async def run(root: Path, script: str) -> Result:
         # A settings file of its own: no test sees another's. A run past the limit
@@ -980,6 +1041,7 @@ async def run_scene_tests(
             scene_test_argv(root, script, settings),
             root,
             seconds,
+            runner=alone,
             warm=False,
             stall=stall,
             image=image,
@@ -1131,14 +1193,21 @@ _COMPILE = (
 
 
 async def compile_scripts(
-    stage: Path, scripts: list[str], image: str = CREATIVE_IMAGE
+    stage: Path,
+    scripts: list[str],
+    image: str = CREATIVE_IMAGE,
+    runner: Callable[..., Awaitable[Result]] | None = None,
 ) -> list[Problem]:
     """Compile ``scripts`` as Godot runs them, in one worker run: the import's
     script check for a stage whose imports are current. A script that names an
     autoload is fine (the game adds them before it loads it), except a SceneTree
     test, which ``-s`` compiles before any autoload exists."""
     got = await worker_run(
-        ["sh", "-c", _COMPILE, "sh", *scripts], stage, OFFLINE_SECONDS, image=image
+        ["sh", "-c", _COMPILE, "sh", *scripts],
+        stage,
+        OFFLINE_SECONDS,
+        image=image,
+        runner=runner,
     )
     worker_ready(got)
     said = blocks(got.stdout)
