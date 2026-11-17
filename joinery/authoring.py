@@ -180,53 +180,12 @@ async def run_offline(
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    out, err = bytearray(), bytearray()
-    loop = asyncio.get_running_loop()
-    progress = _Progress()
-
-    async def pump(stream: asyncio.StreamReader | None, into: bytearray) -> None:
-        while stream is not None and (chunk := await stream.read(65536)):
-            into.extend(chunk)
-            progress.feed(chunk, loop.time())
-
-    async def watch() -> None:
-        # Ends (so the run is stopped) once an error is followed by nothing new.
-        while True:
-            await asyncio.sleep(min(1.0, stall / 4))
-            if progress.errored and loop.time() - progress.last_new >= stall:
-                return
-
     try:
-        finished = asyncio.ensure_future(
-            asyncio.gather(
-                pump(process.stdout, out), pump(process.stderr, err), process.wait()
-            )
-        )
-        watcher = asyncio.ensure_future(watch()) if stall > 0 else None
-        try:
-            waiting = {finished} | ({watcher} if watcher is not None else set())
-            done, _ = await asyncio.wait(
-                waiting, timeout=timeout, return_when=asyncio.FIRST_COMPLETED
-            )
-        finally:
-            pending = [t for t in (finished, watcher) if t is not None and not t.done()]
-            for task in pending:
-                task.cancel()
-            await asyncio.gather(*pending, return_exceptions=True)
-        if finished not in done:
-            # What it printed before it was stopped says why it never finished.
-            printed = (out + err).decode(errors="replace")
-            if watcher is not None and watcher in done:
-                raise WorkerStalled(stall, printed)
-            if not await docker_cli.responding_async():
-                # A hung Docker, not a slow tool: say what to do about it.
-                raise docker_cli.DockerNotResponding("docker run")
-            raise WorkerTimeout(timeout, printed)
-        finished.result()
+        out, err = await supervise(process, timeout, stall)
         return Result(
             process.returncode == 0,
-            out.decode(errors="replace"),
-            err.decode(errors="replace"),
+            out,
+            err,
             asyncio.get_running_loop().time() - start,
         )
     finally:
@@ -246,6 +205,60 @@ async def run_offline(
         if cleanup.returncode is None:
             cleanup.kill()
             await cleanup.wait()
+
+
+async def supervise(
+    process: asyncio.subprocess.Process, timeout: float, stall: float = 0.0
+) -> tuple[str, str]:
+    """``process``'s output once it ends, read as it goes.
+
+    Raises :class:`WorkerTimeout` past ``timeout`` and, with ``stall``, raises
+    :class:`WorkerStalled` once it printed a script or parse error and then no new
+    line for that long. Stopping the run is the caller's (the process may be a
+    ``docker`` client whose work goes on in a container)."""
+    out, err = bytearray(), bytearray()
+    loop = asyncio.get_running_loop()
+    progress = _Progress()
+
+    async def pump(stream: asyncio.StreamReader | None, into: bytearray) -> None:
+        while stream is not None and (chunk := await stream.read(65536)):
+            into.extend(chunk)
+            progress.feed(chunk, loop.time())
+
+    async def watch() -> None:
+        # Ends (so the run is stopped) once an error is followed by nothing new.
+        while True:
+            await asyncio.sleep(min(1.0, stall / 4))
+            if progress.errored and loop.time() - progress.last_new >= stall:
+                return
+
+    finished = asyncio.ensure_future(
+        asyncio.gather(
+            pump(process.stdout, out), pump(process.stderr, err), process.wait()
+        )
+    )
+    watcher = asyncio.ensure_future(watch()) if stall > 0 else None
+    try:
+        waiting = {finished} | ({watcher} if watcher is not None else set())
+        done, _ = await asyncio.wait(
+            waiting, timeout=timeout, return_when=asyncio.FIRST_COMPLETED
+        )
+    finally:
+        pending = [t for t in (finished, watcher) if t is not None and not t.done()]
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+    if finished not in done:
+        # What it printed before it was stopped says why it never finished.
+        printed = (out + err).decode(errors="replace")
+        if watcher is not None and watcher in done:
+            raise WorkerStalled(stall, printed)
+        if not await docker_cli.responding_async():
+            # A hung Docker, not a slow tool: say what to do about it.
+            raise docker_cli.DockerNotResponding("docker run")
+        raise WorkerTimeout(timeout, printed)
+    finished.result()
+    return out.decode(errors="replace"), err.decode(errors="replace")
 
 
 async def inspect_document(project: Path, tool: str, source: str) -> dict[str, Any]:
