@@ -54,8 +54,10 @@ const GLYPHS := {"Journeyman": "chats", "Review": "check"}
 const ONE_TAB := "joinery_one_tab"
 ## Seconds between looks at Output's mark.
 const MARK_INTERVAL := 0.5
-## How long after start-up the editor may still reopen docks on its own (ms).
+## How long after its first file scan the editor may still reopen docks on its own (ms).
 const SETTLE_MS := 20000
+## The longest start-up waits for that first scan before settling anyway (ms).
+const SCAN_WAIT_MS := 180000
 const SCENE_FINDER := preload("scene_finder.gd")
 
 ## Opens Godot's Quick Open Scene picker for the Scenes entry; tests replace its editor.
@@ -73,6 +75,9 @@ var _touched := false
 ## When attach ran (ms). Until SETTLE_MS later, docks the editor itself reopens (its default
 ## layout on a slow first launch) are closed again rather than saved as the user's choice.
 var _attached_at := -1
+## When the editor's first file scan ended (ms), or -1 before; settling counts from it,
+## since a slow machine's first launch loads its layout only after that scan.
+var _scanned_at := -1
 ## What the rail last showed (marks and shown panels), to update it only on a change.
 var _state: Array = []
 var _since_mark := 0.0
@@ -171,6 +176,7 @@ func attach(plugin: EditorPlugin, rail: Control) -> void:
 	# close side docks: the bottom panel may already hold an opening review.
 	EditorInterface.get_resource_filesystem().filesystem_changed.connect(
 		func() -> void:
+			_scanned_at = Time.get_ticks_msec()
 			if not _touched:
 				reapply.call_deferred(false),
 		CONNECT_ONE_SHOT
@@ -470,7 +476,12 @@ func _on_docks_moved() -> void:
 ## Still starting up: the user has not opened or hidden a panel and the editor may yet load
 ## its layout, so a dock it moves is not a choice to remember.
 func _settling() -> bool:
-	return not _touched and _attached_at >= 0 and Time.get_ticks_msec() - _attached_at < SETTLE_MS
+	if _touched or _attached_at < 0:
+		return false
+	var now := Time.get_ticks_msec()
+	if _scanned_at < 0:
+		return now - _attached_at < SCAN_WAIT_MS
+	return now - maxi(_attached_at, _scanned_at) < SETTLE_MS
 
 
 ## The × at the right end of the bottom panel's title row.
