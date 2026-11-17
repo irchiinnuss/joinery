@@ -577,26 +577,103 @@ async def _fresh_fix(
     has grown past ``[agents] fresh_at`` (ADR 0090): the digest, the request, the
     change staged so far and the problems, instead of the whole turn again. The
     staged change is the gateway's, so nothing of it is lost."""
+    start = await _fresh_start(controller, bridge, emit, request)
+    if start is None:
+        return fix
+    return fix.model_copy(
+        update={"text": "\n\n".join(p for p in [start, fix.text] if p)}
+    )
+
+
+async def _fresh_start(
+    controller: TurnController, bridge: AgentBridge, emit: Emit, request: str = ""
+) -> str | None:
+    """A fresh provider session when the turn's session has grown past ``[agents]
+    fresh_at`` (ADR 0090), and what its first prompt starts with: the digest, the
+    request (when given) and the change staged so far. None, and the session goes
+    on, when it is small, or there is no stage or no way to start one."""
     project = getattr(controller.gateway, "project", None)
     fresh = getattr(bridge, "new_session", None)
     tx = getattr(controller.gateway, "transaction", None)
     if fresh is None or not isinstance(project, Path) or tx is None:
-        return fix
+        return None
     limit = request_digest.fresh_at(project)
     if limit <= 0 or controller.meter.used < limit:
-        return fix
+        return None
     try:
         changes = list(tx.diff() if tx.state == "staging" else tx.changes)
     except (OSError, ValueError):
-        return fix
+        return None
     await fresh()
     controller.meter.reset()
     emit(Usage().model_dump())
     digest = ""
     with contextlib.suppress(OSError, ValueError):
         digest = request_digest.build(project)
-    parts = [digest, f"The request was: {request}", staged_lines(changes), fix.text]
-    return fix.model_copy(update={"text": "\n\n".join(p for p in parts if p)})
+    parts = [
+        digest,
+        f"The request was: {request}" if request else "",
+        staged_lines(changes),
+    ]
+    return "\n\n".join(p for p in parts if p)
+
+
+def _stepwise(
+    controller: TurnController, prompt: Prompt, todo: done_when.Todo | None
+) -> Prompt | None:
+    """The first step's prompt when the to-do the user pressed Go on is built a step
+    per prompt (``done_when.stepwise``), else None (it is built in one)."""
+    project = getattr(controller.gateway, "project", None)
+    if todo is None or not isinstance(project, Path):
+        return None
+    if not done_when.stepwise(todo, done_when.run_steps_mode(project)):
+        return None
+    whole = done_when.go_prompt(todo)
+    if whole not in prompt.text:
+        return None
+    first = done_when.step_prompt(todo, 0, first=True)
+    return prompt.model_copy(update={"text": prompt.text.replace(whole, first)})
+
+
+def _submitted(controller: TurnController) -> bool:
+    """The agent handed its change over (or Joinery has a result for it)."""
+    return controller.last_result is not None or controller.attempts > 0
+
+
+async def _step_by_step(
+    controller: TurnController,
+    bridge: AgentBridge,
+    first: Prompt,
+    emit: Emit,
+    timing: TurnTiming,
+    todo: done_when.Todo,
+) -> bool:
+    """Build ``todo`` a step per prompt: ``first`` is step 1's; each step after it
+    hears the plan, what the steps before it made (their notes) and its own step,
+    in a fresh session from the digest and the staged change once the session has
+    grown past ``[agents] fresh_at``, so one session never carries every step's
+    reads. The last step submits. Returns the provider's ``Done.ok``."""
+    trace = timing.trace
+    prompts = fresh = 0
+    ok = await stream(controller, bridge, first, emit, timing)
+    prompts += 1
+    for index in range(1, len(todo.steps)):
+        if not ok or controller.quota or _submitted(controller):
+            break
+        if todo.state(index) in {"done", "skipped"} and index < len(todo.steps) - 1:
+            continue  # the agent did it already
+        controller.gateway.progress(f"Step {index + 1} of {len(todo.steps)}…")
+        text = done_when.step_prompt(todo, index)
+        start = await _fresh_start(controller, bridge, emit)
+        if start is not None:
+            fresh += 1
+            text = f"{start}\n\n{text}"
+        step = first.model_copy(update={"text": text, "attachments": (), "primer": ""})
+        ok = await stream(controller, bridge, step, emit, timing)
+        prompts += 1
+    trace.attributes[metrics.STEPS_PROMPTS] = prompts
+    trace.attributes[metrics.STEPS_FRESH] = fresh
+    return ok
 
 
 async def _build(
@@ -625,7 +702,15 @@ async def _build(
             with contextlib.suppress(OSError, ValueError):
                 digest = request_digest.build(project)
     controller.gateway.progress("Building from the plan…")
-    text = done_when.build_prompt(todo)
+    project = getattr(controller.gateway, "project", None)
+    stepping = isinstance(project, Path) and done_when.stepwise(
+        todo, done_when.run_steps_mode(project)
+    )
+    text = (
+        done_when.step_prompt(todo, 0, first=True, planned=True)
+        if stepping
+        else done_when.build_prompt(todo)
+    )
     build = prompt.model_copy(
         update={
             "text": f"{digest}\n\n{text}" if digest else text,
@@ -633,6 +718,8 @@ async def _build(
             "primer": "",
         }
     )
+    if stepping:
+        return await _step_by_step(controller, bridge, build, emit, timing, todo)
     return await stream(controller, bridge, build, emit, timing, 1)
 
 
@@ -705,7 +792,11 @@ async def _run_turn(
             controller, bridge, prompt, emit, timing, steps, todo, together
         )
     else:
-        ok = await stream(controller, bridge, prompt, emit, timing)
+        first = _stepwise(controller, prompt, todo)
+        if first is not None and todo is not None:
+            ok = await _step_by_step(controller, bridge, first, emit, timing, todo)
+        else:
+            ok = await stream(controller, bridge, prompt, emit, timing)
         if not ok and controller.quota:
             ok, bridge = await _carry_on(
                 controller, bridge, prompt, emit, timing, fallback

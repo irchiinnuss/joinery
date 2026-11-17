@@ -129,6 +129,8 @@ class Todo:
     details: list[str] = field(default_factory=list)
     #: Each step's progress while it is built: "", started, done or skipped.
     states: list[str] = field(default_factory=list)
+    #: Each step's last word from the agent (``todo_step``'s note); "" for none.
+    notes: list[str] = field(default_factory=list)
 
     def needs(self, index: int) -> list[int]:
         """The step numbers step ``index`` (0-based) needs first."""
@@ -155,6 +157,13 @@ class Todo:
         """Set step ``index`` (0-based) to ``state`` ("", started, done or skipped)."""
         self.states = [self.state(i) for i in range(len(self.steps))]
         self.states[index] = state
+
+    def note(self, index: int, text: str = "") -> str:
+        """Step ``index``'s note; with ``text``, keep that as its note first."""
+        if text:
+            self.notes = [self.note(i) for i in range(len(self.steps))]
+            self.notes[index] = text
+        return self.notes[index] if index < len(self.notes) else ""
 
     def finish(self) -> None:
         """The change is made: every step not skipped is done."""
@@ -746,6 +755,84 @@ def build_prompt(todo: Todo) -> str:
         "propose the to-do again.\n\n"
         f"The request was: {todo.request}"
     )
+
+
+#: A to-do of at least this many steps, run one by one, is built a step per agent
+#: prompt: each step after the first starts in a fresh session once the session
+#: has grown past ``[agents] fresh_at`` (ADR 0090), so the reads and tool results
+#: of the steps before it don't ride along on every call of the ones after.
+STEPWISE_STEPS = 2
+
+
+def stepwise(todo: Todo, mode: str) -> bool:
+    """Whether the to-do is built a step per prompt (``run_steps = "one_by_one"``)."""
+    return mode == "one_by_one" and len(todo.steps) >= STEPWISE_STEPS
+
+
+#: What the agent hears about the step's end, when more steps follow.
+_STEP_END = (
+    "Do this step only, on top of the change staged so far; read only what it needs. "
+    "Call todo_step({n}, 'started') as you begin and todo_step({n}, 'done') with a "
+    "note when it is finished (or 'skipped', with why). The note is what the next "
+    "steps hear of this one, so name what you made: files, nodes, functions. Don't "
+    "submit yet and don't start the next step: end your turn with one short line on "
+    "what you did, and Joinery hands you step {next}."
+)
+#: ... and when it is the last.
+_LAST_END = (
+    "Do this step on top of the change staged so far; read only what it needs. Call "
+    "todo_step({n}, 'started') as you begin and todo_step({n}, 'done') when it is "
+    "finished. Then submit the whole change (every step) with submit_for_review. "
+    "Joinery checks each done-when item after the change passes its checks; don't "
+    "propose the to-do again."
+)
+
+
+def done_lines(todo: Todo, upto: int) -> str:
+    """The steps before ``upto`` (0-based) as the next step hears them: each step's
+    title and what its note said was made."""
+    lines = []
+    for index in range(upto):
+        state = todo.state(index) or "done"
+        note = todo.note(index)
+        lines.append(
+            f"{index + 1}. {todo.steps[index]} ({state})"
+            + (f": {note}" if note else "")
+        )
+    return "\n".join(lines)
+
+
+def step_prompt(
+    todo: Todo, index: int, *, first: bool = False, planned: bool = False
+) -> str:
+    """What the agent hears for step ``index`` (0-based) of a to-do built a step per
+    prompt. ``first``: the user just pressed Go, or (``planned``) the build of a
+    plan made in an earlier session starts."""
+    number = index + 1
+    count = len(todo.steps)
+    last = number == count
+    done = "\n".join(f"- {c.text}" for c in todo.done_when) or "- (none)"
+    plan = "\n".join(f"{i + 1}. {todo.steps[i]}" for i in range(count))
+    parts = [
+        "You planned this request in an earlier session; build it now from the plan. "
+        "Joinery hands you its steps one at a time."
+        if first and planned
+        else "The user pressed Go on your to-do, as they left it (they may have edited "
+        "or removed items). Joinery hands you its steps one at a time."
+        if first
+        else f"Step {number} of {count} of your to-do, the change still staged.",
+        f"The whole to-do, for context:\n{plan}\nDone when (checked at the end):\n{done}",
+    ]
+    if index:
+        parts.append(f"Done so far:\n{done_lines(todo, index)}")
+    parts.append(f"Now step {number} of {count}: {todo.step_line(index)}")
+    parts.append(
+        _LAST_END.format(n=number)
+        if last
+        else _STEP_END.format(n=number, next=number + 1)
+    )
+    parts.append(f"The request was: {todo.request}")
+    return "\n\n".join(parts)
 
 
 @dataclass

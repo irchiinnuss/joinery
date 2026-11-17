@@ -79,6 +79,10 @@ STEPS_MODE = "joinery.steps.mode"
 STEPS_TOGETHER = "joinery.steps.together"
 STEPS_FAILED = "joinery.steps.failed"
 STEPS_BACK = "joinery.steps.back_to_lead"
+#: A to-do built a step per prompt: how many prompts, and how many of them started a
+#: fresh session (``[agents] fresh_at``).
+STEPS_PROMPTS = "joinery.steps.prompts"
+STEPS_FRESH = "joinery.steps.fresh_sessions"
 STEP_NUMBER = "joinery.step.number"
 STEP_STATE = "joinery.step.state"
 #: A run queued for when the user is away (ADR 0072): what it was and how long it waited.

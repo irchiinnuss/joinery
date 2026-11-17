@@ -437,16 +437,61 @@ def test_a_big_request_is_planned_then_built_in_a_fresh_session(
             host.gateway.turn.admit_mutation()
         yield Done(ok=True)
 
+    def build(number: int, *, big: bool = False) -> Script:
+        async def step(bridge: Any) -> AsyncIterator[Any]:
+            assert host.gateway is not None and host.gateway.turn is not None
+            turn = host.gateway.turn
+            if number == 1:
+                host.stage({"a.gd": "extends Node\n"})
+            turn.todo_step(
+                {"step": number, "state": "done", "note": f"made room {number}"}
+            )
+            if big:
+                turn.meter.update(150_000, 200_000)
+            yield Done(ok=True)
+
+        return step
+
+    host.run(plan, build(1), build(2, big=True), build(3))
+    # The plan's session, then one for the build; step 3 starts fresh again because
+    # step 2 left the session past [agents] fresh_at.
+    assert host.log.count("new_session") == 2
+    first, second, third = (p.text for p in host.prompts[1:4])
+    assert "You planned this request in an earlier session" in first
+    assert "Now step 1 of 3: Gatehouse room 16 x 14 m" in first
+    assert "Don't submit yet" in first
+    assert "Now step 2 of 3: Ore yard 36 x 30 m" in second
+    assert "1. Gatehouse room 16 x 14 m (done): made room 1" in second
+    assert "Joinery's record of this project" not in second  # the session goes on
+    assert "Now step 3 of 3: Exit switch office" in third
+    assert "2. Ore yard 36 x 30 m (done): made room 2" in third
+    assert "- a.gd (new)" in third  # fresh: the staged change, the digest
+    assert "submit the whole change" in third
+    assert host.kinds().count("file_preview") == 1
+
+
+def test_a_big_request_is_built_in_one_prompt_when_steps_run_together(
+    host: Host,
+) -> None:
+    (host.root / "joinery.toml").write_text(
+        '[tools]\nenabled=["godot"]\n[agents]\ntodo_go = "never"\n'
+        'run_steps = "together"\n'
+    )
+    steps = ["Gatehouse room 16 x 14 m", "Ore yard 36 x 30 m", "Exit switch office"]
+
+    async def plan(bridge: Any) -> AsyncIterator[Any]:
+        assert host.gateway is not None and host.gateway.turn is not None
+        host.gateway.turn.propose_todo({"steps": steps, "done_when": []})
+        yield Done(ok=True)
+
     async def build(bridge: Any) -> AsyncIterator[Any]:
         host.stage({"a.gd": "extends Node\n"})
         yield Done(ok=True)
 
     host.run(plan, build)
-    assert host.log.count("new_session") == 1
     sent = host.prompts[1].text
     assert "You planned this request in an earlier session" in sent
     assert "2. Ore yard 36 x 30 m" in sent
-    assert host.kinds().count("file_preview") == 1
 
 
 def test_a_failed_turn_rejects_its_change(host: Host) -> None:

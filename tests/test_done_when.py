@@ -553,6 +553,80 @@ def test_go_starts_the_work_and_a_fail_goes_back_to_the_agent_once(
     run(go)
 
 
+def test_go_builds_the_steps_one_prompt_each_with_what_came_before(
+    project: Path, plays: Plays
+) -> None:
+    """Run one by one, each step is a prompt of its own: it hears the plan, the notes
+    of the steps before it and its own step; only the last one submits."""
+    plays.reports.extend([report(True)])
+    (project / "joinery.toml").write_text("[agents]\nfresh_at = 0\n")
+
+    async def go() -> None:
+        events: list[dict[str, Any]] = []
+        gateway = wire(ProjectGateway(project))
+        controller = TurnController(gateway, events.append, "codex")
+        submitted: list[dict[str, Any]] = []
+
+        async def proposes(lane: ProjectGateway) -> AsyncIterator[Any]:
+            assert lane.turn is not None
+            lane.turn.propose_todo(TODO)
+            yield Done(ok=True)
+
+        def step(number: int) -> Any:
+            async def works(lane: ProjectGateway) -> AsyncIterator[Any]:
+                assert lane.turn is not None
+                await write(lane, f"notes/step{number}.md", "done\n")
+                lane.turn.todo_step(
+                    {"step": number, "state": "done", "note": f"notes/step{number}.md"}
+                )
+                if number == 3:
+                    await write(lane, "notes/gate.md", "lever, gate opens\n")
+                    result = await lane.turn.submit("The vault gate")
+                    submitted.append(result.as_tool_result())
+                yield Message(text=f"Step {number} done.")
+                yield Done(ok=True)
+
+            return works
+
+        author = Author(gateway, [proposes, step(1), step(2), step(3)])
+        try:
+            await run_turn(
+                controller,
+                author,
+                Prompt(text="Lock the vault", project_dir=str(project)),
+                events.append,
+                TurnTiming(),
+                request="Lock the vault",
+            )
+            held = controller.pending_todo
+            assert held is not None
+            todo = done_when.edited(held, {"steps": TODO["steps"], "done_when": []})
+            outcome = await run_turn(
+                controller,
+                author,
+                Prompt(text=done_when.go_prompt(todo), project_dir=str(project)),
+                events.append,
+                TurnTiming(),
+                request=todo.request,
+                todo=todo,
+            )
+            assert outcome == "done"
+            first, second, third = (p.text for p in author.prompts[1:])
+            assert "Now step 1 of 3: Put a lever beside the gate" in first
+            assert "Don't submit yet" in first
+            assert "Done so far" not in first
+            assert "1. Put a lever beside the gate (done): notes/step1.md" in second
+            assert "Now step 2 of 3" in second
+            assert "2. Open the gate when the lever is pulled (done)" in third
+            assert "submit the whole change" in third
+            (result,) = submitted
+            assert result["status"] == "in_review"
+        finally:
+            await gateway.close()
+
+    run(go)
+
+
 def test_a_fail_that_stays_opens_with_its_result_and_never_drops_the_change(
     project: Path, plays: Plays
 ) -> None:

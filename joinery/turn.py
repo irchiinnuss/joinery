@@ -684,6 +684,8 @@ class TurnController:
             raise ValueError("note is one short line.")
         note = " ".join(note.split())
         todo.mark(number - 1, str(state))
+        if note:
+            todo.note(number - 1, note)
         self.emit(done_when.step_event(todo, number, note))
         if state == "started":
             self.gateway.progress(
