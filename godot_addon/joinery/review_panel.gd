@@ -13,6 +13,13 @@ extends VBoxContainer
 ##   (review_summary.gd); Details; a request's other ways; and, anchored at the foot, Ask for
 ##   changes, Discard and a large Accept.
 ##
+## The stage and the rail scroll inside the panel, which asks only for the rail's head and
+## actions and a little room for the rest: the editor, the sidebar's message box with it, stays
+## inside the window. The actions (and a decision's error) are never scrolled out of sight: side
+## by side they end the rail, which the panel always has the height for (the stage gives its
+## height up first, and the rail's middle scrolls); stacked, they leave the scroll for a foot of
+## their own under it.
+##
 ## Narrow (the sidebar's width), the rail stacks under the stage. Details slide over the stage
 ## as a drawer (review_drawer.gd) with the files and their diffs, the checks that ran and every
 ## note; closed unless asked for, or when there is nothing else to show. Discard only throws
@@ -87,6 +94,10 @@ var _details_pref := false
 var _header: VBoxContainer
 var _title: Label
 var _stage: MarginContainer
+## The stage and the rail, scrolled when the panel is shorter than they need.
+var _content: ScrollContainer
+## A decision's error and the actions: the rail's foot side by side, the panel's when stacked.
+var _foot: VBoxContainer
 var _body: LAYOUT
 var _rail: RAIL
 var _stage_area: Control
@@ -133,10 +144,22 @@ func _init() -> void:
 	# A click anywhere in the review gives it focus, so its keys work.
 	focus_mode = Control.FOCUS_CLICK
 	accessibility_name = "Review the proposed change"
+	_content = ScrollContainer.new()
+	_content.name = "Content"
+	_content.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	# The bar's room is kept even while it hides, so the stage's width (and with it its height
+	# and the layout) never changes as the bar comes and goes.
+	_content.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_RESERVE
+	_content.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_content.follow_focus = true
+	_content.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
+	add_child(_content)
 	_stage = MarginContainer.new()
+	_stage.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_stage.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	add_child(_stage)
+	_content.add_child(_stage)
 	_build_body()
+	_build_foot()
 	_build_outcome()
 	_build_empty()
 	_set_state("empty")
@@ -159,6 +182,8 @@ func _notification(what: int) -> void:
 
 
 func _process(_delta: float) -> void:
+	# The foot fades with the review it belongs to (a decision's crossfade to the outcome).
+	_foot.modulate.a = _body.modulate.a if _foot.get_parent() == self else 1.0
 	_fit()
 
 
@@ -611,6 +636,50 @@ func _build_body() -> void:
 	set_applying(false)
 
 
+## Gather the rail's error and actions into the foot, at the rail's end (_place_foot).
+func _build_foot() -> void:
+	_foot = VBoxContainer.new()
+	_foot.name = "Foot"
+	_foot.theme_type_variation = "JoineryStack"
+	for part: Control in [_rail.error_row, _rail.actions]:
+		_rail.remove_child(part)
+		_foot.add_child(part)
+	_rail.add_child(_foot)
+	_body.visibility_changed.connect(_show_foot)
+	_body.narrow_changed.connect(func(_narrow: bool) -> void: _place_foot())
+	_rail.minimum_size_changed.connect(_size_content)
+
+
+func _show_foot() -> void:
+	if _foot != null:
+		_foot.visible = _content.visible and _body.visible
+
+
+## Side by side, the foot ends the rail; stacked, the rail scrolls under the stage with the rest
+## and the foot is the panel's own, under the scroll.
+func _place_foot() -> void:
+	var home: Control = self if _body.narrow else _rail
+	if _foot.get_parent() != home:
+		_foot.get_parent().remove_child(_foot)
+		home.add_child(_foot)
+		if home == self:
+			move_child(_foot, _content.get_index() + 1)
+		_foot.modulate.a = 1.0
+	_size_content()
+
+
+## The content always gets a large control's height; side by side, the rail's whole minimum
+## (its head and the actions), so the scroll never hides Accept.
+func _size_content() -> void:
+	if _content == null or not is_inside_tree():
+		return
+	var least := float(UI_THEME.control_h(self, "lg"))
+	if not _body.narrow:
+		least = maxf(least, _rail.get_combined_minimum_size().y)
+	if not is_equal_approx(_content.custom_minimum_size.y, least):
+		_content.custom_minimum_size.y = least
+
+
 func _build_outcome() -> void:
 	_outcome = HBoxContainer.new()
 	_outcome.theme_type_variation = "JoineryRow"
@@ -655,6 +724,8 @@ func _set_state(state: String) -> void:
 	var idle := state == "empty"
 	_empty.visible = idle
 	_stage.visible = not idle
+	_content.visible = not idle
+	_show_foot()
 
 
 func _next_serial() -> int:
@@ -830,7 +901,7 @@ func _apply_sizes() -> void:
 	# Discard keeps its normal fill and ink when disabled; set_applying dims it instead.
 	_reject.add_theme_stylebox_override("disabled", _reject.get_theme_stylebox("normal"))
 	_reject.add_theme_color_override("font_disabled_color", _reject.get_theme_color("font_color"))
-	custom_minimum_size.y = UI_THEME.control_h(self, "md") * 6
+	_size_content()
 	_size_stage()
 
 
@@ -863,29 +934,25 @@ func _refit() -> void:
 	set_process(is_visible_in_tree())
 
 
-## Keep the panel's foot, with Accept and Discard, inside its window. The rest of the editor
-## has least heights of its own (the script editor's is larger than the 3D view's), so in a
-## short window the stage's least height can push the editor past the window's bottom edge;
-## the stage then asks for that much less, and the rail's middle scrolls instead.
+## Give the stage's height up first: the review's content fits the panel without scrolling as
+## long as the stage has height to give, and the panel's foot, with Accept and Discard, stays
+## inside the window. The rest of the editor has least heights of its own (the script editor's
+## is larger than the 3D view's), so in a short window the editor's columns can reach past the
+## window's bottom edge, the panel with them; the content then scrolls instead.
 func _fit() -> void:
-	if _stage_area == null or not is_visible_in_tree():
+	if _stage_area == null or not is_visible_in_tree() or _content.size.y < 1.0:
 		return
-	# The editor's columns hold the panel: when their least height is more than the window has,
-	# they reach past its bottom edge, the panel with them. Held in a scroll (the Review tab),
-	# the foot leaving the scroll's view counts too.
-	var end := get_global_rect().end.y
-	var foot := end
-	var over := 0.0
-	var scrolled := false
+	var over := _stage.get_combined_minimum_size().y - _content.size.y
+	var foot := get_global_rect().end.y
 	var holder := get_parent() as Control
 	while holder != null:
-		var holder_end := holder.get_global_rect().end.y
-		if holder is ScrollContainer and not scrolled:
-			scrolled = true
-			over = end - holder_end
-		foot = maxf(foot, holder_end)
+		foot = maxf(foot, holder.get_global_rect().end.y)
 		holder = holder.get_parent() as Control
 	over = maxf(over, foot - get_viewport().get_visible_rect().end.y)
 	if over > 0.5 and _body.custom_minimum_size.y > 0.0:
 		_cut += ceilf(over)
+		_size_stage()
+	elif over < -0.5 and _cut > 0.0:
+		# Room came back (a shorter main screen, a taller panel): the stage takes it again.
+		_cut = maxf(_cut + ceilf(over), 0.0)
 		_size_stage()

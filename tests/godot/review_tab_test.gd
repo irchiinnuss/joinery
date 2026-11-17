@@ -9,6 +9,7 @@ extends SceneTree
 const TAB := preload("res://addons/joinery/review_tab.gd")
 const PANEL := preload("res://addons/joinery/review_panel.gd")
 const UI_MOTION := preload("res://addons/joinery/ui_motion.gd")
+const UI_THEME := preload("res://addons/joinery/ui_theme.gd")
 
 var _failed := false
 var _host: Control
@@ -340,12 +341,24 @@ func _check_live(tab: TAB, panel: PANEL) -> void:
 	await _frames()
 	_check(tab.showing_detail and panel.is_visible_in_tree(), "It opens the full review")
 	_check(not tab._list_view.visible, "The full review replaces the list")
-	# Its least height would add to the main screen's and push the editor, with the sidebar's
-	# message box, past the window's bottom edge: the tab asks for none and scrolls instead.
-	_check(panel.get_combined_minimum_size().y > 100.0, "The review needs height of its own")
+	# Its least height adds to the main screen's and could push the editor, with the sidebar's
+	# message box, past the window's bottom edge: the tab asks only for the review's actions and
+	# a little room above them; the stage and the rail scroll in that room.
+	var content: ScrollContainer = panel.get("_content")
+	var foot: Control = panel.get("_foot")
+	var stage: Control = panel.get("_stage")
+	_check(stage.get_parent() == content, "The stage and the rail scroll in the panel")
+	_check(foot.is_visible_in_tree(), "The actions show under the scroll")
+	_check(foot.is_ancestor_of(panel.get("_accept") as Node), "Accept sits in the foot")
+	var least := tab.get_combined_minimum_size().y
+	var asked := foot.get_combined_minimum_size().y + content.get_combined_minimum_size().y
 	_check(
-		tab.get_combined_minimum_size().y < 1.0,
-		"The full review asks the bottom panel for no height: %s" % tab.get_combined_minimum_size()
+		least <= asked + 2.0 * float(UI_THEME.space(tab, 4)),
+		"The full review asks for its actions and a little room only: %s, %s" % [least, asked]
+	)
+	_check(
+		least < stage.get_combined_minimum_size().y + foot.get_combined_minimum_size().y,
+		"The stage's least height is not asked of the bottom panel"
 	)
 	_check(panel.size.y >= tab.size.y - 1.0, "Given the room, it fills the tab: %s" % panel.size)
 	var rail: Control = panel.get("_rail")

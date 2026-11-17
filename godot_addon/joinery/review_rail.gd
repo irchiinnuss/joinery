@@ -4,10 +4,11 @@ extends VBoxContainer
 ## among those waiting ("2 of 5" with previous and next, and All approvals back to the list);
 ## the request as the title, up to two lines; one line of facts and the checks as chips
 ## (review_summary.gd); the ways of a request tried several ways (variant_strip.gd, placed here
-## by review_tasks.gd); then, anchored at the foot: Details, which slides a drawer over the
-## stage, Ask for changes and, for a scene edit, Open in editor, as quiet links on one line, and
-## under them Discard and a large Accept. The middle scrolls when it is long, so the actions are
-## always on screen.
+## by review_tasks.gd); then the error of a decision that failed, and the actions: Details,
+## which slides a drawer over the stage, Ask for changes and, for a scene edit, Open in editor,
+## as quiet links on one line, and under them Discard and a large Accept. The middle scrolls
+## when it is long. The panel gathers the error and the actions into one foot, which it moves
+## out from under the rail when the rail stacks under the stage (review_panel.gd).
 ##
 ## It only builds and lays out; the panel (review_panel.gd) decides what the buttons do.
 
@@ -111,9 +112,9 @@ func wanted_height() -> float:
 	var gap := float(get_theme_constant("separation"))
 	var total := 0.0
 	var shown := 0
-	for part: Control in [nav, error_row, actions]:
-		if part.visible:
-			total += part.get_combined_minimum_size().y
+	for part: Node in get_children():
+		if part is Control and part != _scroll and (part as Control).visible:
+			total += (part as Control).get_combined_minimum_size().y
 			shown += 1
 	total += _info.get_combined_minimum_size().y
 	return total + gap * shown

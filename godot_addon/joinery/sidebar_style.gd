@@ -359,24 +359,6 @@ static func centered_column(page: Control, max_w := "column") -> Container:
 	return column
 
 
-## Hold [param view] in a vertical scroll that asks its parent for no height of its own: the
-## view fills the room it gets and scrolls when that is less than it needs, so its least height
-## never pushes a whole column (the editor's, under a bottom panel) past the window's edge. The
-## scroll shows and hides with the view.
-static func hold_in_scroll(view: Control) -> ScrollContainer:
-	var scroll := ScrollContainer.new()
-	scroll.name = view.name + "Scroll" if not view.name.is_empty() else "Scroll"
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.size_flags_horizontal = view.size_flags_horizontal
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
-	scroll.visible = view.visible
-	view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.add_child(view)
-	view.visibility_changed.connect(func() -> void: scroll.visible = view.visible)
-	return scroll
-
-
 ## Show [param page] in place of the conversation, or close it ([param open]): the sidebar
 ## content's other parts hide while it shows and come back as they were. [param key] names the
 ## page ("chats", "settings", "art"); pages can open over each other.
