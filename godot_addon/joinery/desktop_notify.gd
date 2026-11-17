@@ -370,7 +370,9 @@ static func clean(text: String) -> String:
 
 
 static func _on_path(program: String) -> String:
-	for folder: String in OS.get_environment("PATH").split(":", false):
+	# PATH's separator is the host's: ";" on Windows, whose folders hold a drive's ":".
+	var separator := ";" if OS.get_name() == "Windows" else ":"
+	for folder: String in OS.get_environment("PATH").split(separator, false):
 		var path := folder.path_join(program)
 		if FileAccess.file_exists(path):
 			return path
