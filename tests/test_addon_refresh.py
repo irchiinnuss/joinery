@@ -153,7 +153,9 @@ def test_an_update_is_one_timeline_entry_and_leaves_nothing_loose(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> None:
     home = tmp_path_factory.mktemp("git-home")
-    (home / "gitconfig").write_text("[init]\n\tdefaultBranch = main\n")
+    (home / "gitconfig").write_text(
+        "[init]\n\tdefaultBranch = main\n[user]\n\tname = Joinery Test\n\temail = test@example.com\n"
+    )
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(home / "gitconfig"))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     monkeypatch.setenv("HOME", str(home))
