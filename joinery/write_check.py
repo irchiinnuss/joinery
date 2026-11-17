@@ -149,6 +149,7 @@ def builtin_scripts(text: str) -> list[tuple[str, int, str]]:
 
 _CLASS_NAME = re.compile(r"^\s*(?:@\w+\s+)*class_name\s+([A-Za-z_]\w*)", re.MULTILINE)
 _SKIP_DIRS = frozenset({".godot", ".git", ".joinery", "__pycache__"})
+_RACY_NS = 2_000_000_000
 
 
 class ClassNames:
@@ -175,7 +176,10 @@ class ClassNames:
                 except OSError:
                     continue
                 found = frozenset(_CLASS_NAME.findall(text))
-            seen[path] = (stat.st_mtime_ns, stat.st_size, found)
+            # A file written within the clock's tick of this read may change again
+            # with the same time and size (coarse on Windows): read it again next time.
+            racy = stat.st_mtime_ns > time.time_ns() - _RACY_NS
+            seen[path] = (-1 if racy else stat.st_mtime_ns, stat.st_size, found)
             names |= found
         self._seen = seen
         return frozenset(names)
