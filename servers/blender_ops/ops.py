@@ -15,16 +15,15 @@ Blender side runs inside the scope guard, so nothing else in the model changes.
 from __future__ import annotations
 
 import re
-import shutil
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from mcp.server import MCPServer
 
 from joinery import parts
-from joinery.authoring import confined, edit_document, edit_graph
-from joinery.locking import claimed_outputs, write_lock
-from joinery.recipe import HISTORY_DIR, RECIPE_DIR, store_preimage
+from joinery.authoring import Undo, confined, edit_document, edit_graph, texture_dir
+from joinery.locking import claimed_outputs
+from joinery.recipe import store_preimage
 from joinery.tools import blender_parts, krita_ops
 from servers.authoring import Step, _exports, _name, run_step
 from servers.errors import tool_errors
@@ -58,43 +57,6 @@ def map_paths(source: str, image: str, editor: str = "krita") -> tuple[str, str]
     if editor == "material-maker":
         return f"{folder}/{stem}.ptex", f"{folder}/{stem}_export"
     return f"{folder}/{stem}.kra", f"{folder}/{stem}.png"
-
-
-class _Undo:
-    """Put the stage back as it was when a two-step map operation fails halfway."""
-
-    def __init__(self, project: Path, files: tuple[str, ...]) -> None:
-        self.project = project
-        self.files = {f: _read(project / f) for f in files}
-        self.existed = {f for f in files if (project / f).exists()}
-        self.recipes = set(_listing(project / RECIPE_DIR))
-        self.history = set(_listing(project / HISTORY_DIR))
-
-    def restore(self) -> None:
-        project = self.project
-        for name in set(_listing(project / RECIPE_DIR)) - self.recipes:
-            (project / RECIPE_DIR / name).unlink(missing_ok=True)
-        for name in set(_listing(project / HISTORY_DIR)) - self.history:
-            (project / HISTORY_DIR / name).rename(project / RECIPE_DIR / name)
-        for relative, data in self.files.items():
-            path = project / relative
-            if data is not None:
-                path.write_bytes(data)
-            elif relative in self.existed:
-                continue
-            elif path.is_dir():
-                shutil.rmtree(path)
-            else:
-                path.unlink(missing_ok=True)
-        write_lock(project)
-
-
-def _read(path: Path) -> bytes | None:
-    return path.read_bytes() if path.is_file() else None
-
-
-def _listing(folder: Path) -> list[str]:
-    return sorted(p.name for p in folder.glob("*.toml")) if folder.is_dir() else []
 
 
 async def _map_part(
@@ -133,10 +95,15 @@ async def _link(
 
 
 async def _two_steps(
-    project: Path, files: tuple[str, ...], first: Any, second: Any
+    project: Path, source: str, files: tuple[str, ...], first: Any, second: Any
 ) -> dict[str, Any]:
-    """Run the tool step then the Blender step; undo the first if the second fails."""
-    undo = _Undo(project, files)
+    """Run the tool step then the Blender step; undo the first if the second fails.
+
+    The model's texture folder is put back too: the first step may be a Blender
+    edit that wrote a map, and a texture file no recipe makes any more would
+    leave joinery.lock behind the files on disk.
+    """
+    undo = Undo(project, files, (texture_dir(source),))
     try:
         made = await first()
         linked: dict[str, Any] = await second(made)
@@ -211,7 +178,7 @@ async def make_map_editable(
             )
             return {**linked, "editable": document, "map": result_png, "graph": made}
 
-        return await _two_steps(project, (document, picture), first, second)
+        return await _two_steps(project, source, (document, picture), first, second)
 
     async def seed_krita() -> dict[str, Any]:
         return await edit_document(
@@ -237,7 +204,9 @@ async def make_map_editable(
         )
         return {**linked, "editable": document, "map": picture, "painting": made}
 
-    return await _two_steps(project, (document, picture), seed_krita, link_krita)
+    return await _two_steps(
+        project, source, (document, picture), seed_krita, link_krita
+    )
 
 
 def bible_texture_plan(project: Path, source: str) -> TexturePlan:
@@ -312,6 +281,7 @@ async def add_painted_map(
 
     return await _two_steps(
         project,
+        source,
         (source, document, picture, *(_exports(project, source, exports))),
         add,
         paint,
@@ -375,7 +345,7 @@ async def paint_map(
         )
         return {**linked, "editable": document, "map": picture, "painting": made}
 
-    return await _two_steps(project, (document, picture), paint, link)
+    return await _two_steps(project, source, (document, picture), paint, link)
 
 
 async def replace_map(

@@ -545,6 +545,36 @@ def test_add_painted_map_refuses_a_material_outside_the_selection(
         blender_parts.add_map_code("Steel", "x", "base_color", 100)
 
 
+def test_a_new_map_whose_krita_step_fails_takes_its_texture_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The Blender step wrote the new map's texture, its recipe and the lock; the
+    # Krita step then failed. The texture must go with the recipe, or the lock
+    # names a file no recipe makes.
+    stage, edit = _project(tmp_path, monkeypatch)
+    _pick(stage, part_kind="material", material="Steel")
+    folder = stage / "art/textures/hammer"
+    lock = stage / "joinery.lock"
+    lock.write_text("version = 1\n")
+
+    async def blender_step(*_a: Any, **_k: Any) -> dict[str, Any]:
+        (folder / "Steel_base_color.png").write_bytes(b"flat")
+        (stage / "recipes/added.toml").write_text("made")
+        lock.write_text("version = 1\n# with the new map\n")
+        return {"status": "staged"}
+
+    async def krita_step(*_a: Any) -> dict[str, Any]:
+        raise RuntimeError("Krita stopped")
+
+    edit.side_effect = blender_step
+    monkeypatch.setattr("servers.blender_ops.ops.make_map_editable", krita_step)
+    result = _call(stage, "add_painted_map", {"material": "Steel", "size": 64})
+    assert result.is_error and "Krita stopped" in result.content[0].text
+    assert sorted(p.name for p in folder.iterdir()) == ["steel_rough.png"]
+    assert not (stage / "recipes/added.toml").exists()
+    assert lock.read_text() == "version = 1\n"
+
+
 def test_a_new_map_is_sized_from_the_bible(tmp_path: Path) -> None:
     from joinery.bible_presets import rules_block
     from servers.blender_ops.ops import bible_map_size
