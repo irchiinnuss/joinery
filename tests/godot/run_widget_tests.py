@@ -77,6 +77,7 @@ CASES = {
     "fix_errors_setting_test.gd": "fix errors setting: ok",
     "auto_accept_setting_test.gd": "auto accept setting: ok",
     "todo_go_setting_test.gd": "todo go setting: ok",
+    "desktop_notify_test.gd": "desktop notify: ok",
     "mix_command_test.gd": "mix command: ok",
     "sound_pass_card_test.gd": "sound pass card: ok",
     "sidebar_margins_test.gd": "sidebar margins: ok",

@@ -63,6 +63,7 @@ const PERSONA := "Journeyman"
 const DISCARDED := "Discarded"
 const BRIEF := preload("res://addons/joinery/sidebar_brief.gd")
 const FILE_OPEN := preload("res://addons/joinery/sidebar_file_open.gd")
+const NOTIFY := preload("res://addons/joinery/desktop_notify.gd")
 ## Minimum dock width in font sizes: in Joinery's layout, the whole visible sidebar.
 const MIN_EM := 26
 ## The same below the Inspector (classic layout): a wider shared column crowds a laptop screen.
@@ -189,6 +190,7 @@ func _ready() -> void:
 	_chats = CHATS_SCRIPT.attach(self, _header.row, _content)
 	_tasks = TASKS_SCRIPT.attach(self, _content, _composer.get_parent())
 	_settings = SETTINGS_SCRIPT.attach(self, _header.row, _content)
+	NOTIFY.attach(self)  # Done or needs you while the editor is in the background.
 	_show_connection()
 	_settings.apply_all()
 	if Engine.is_editor_hint():  # Which app needs something, from the cache.
