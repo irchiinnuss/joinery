@@ -42,7 +42,7 @@ from joinery.bible_schema import REFERENCE_DIR
 from joinery.catalog import load_catalog
 from joinery.deps import check_deps
 from joinery.lockfile import check_assets
-from joinery.measure_cache import MeasureCache
+from joinery.measure_cache import MeasureCache, blocks
 from joinery.policy import load_denylist
 from joinery.puzzle import check as puzzle_check
 from joinery.runner import Result
@@ -584,6 +584,12 @@ async def validate(
     if godot and not tests and not scene_tests:
         found.skipped.append("tests")
     importing = godot and not gateway.import_current(tx)
+    # Only scripts changed since the stage's last clean import, their class headers
+    # alike: compiling them is the import's check, without Godot's whole scan.
+    since = getattr(gateway, "scripts_since_import", None)
+    compiled = (since(tx) if importing and since is not None else None) or []
+    if compiled:
+        importing = False
     # Recorded play sessions replay on a change to the game (ADR 0059).
     replaying = godot and replays.config(tx.stage)["replays"]
     # Kept saves load in a change that touches what saves are made of (ADR 0066).
@@ -596,7 +602,10 @@ async def validate(
         name
         for name, on in (
             ("art bible", rules),
-            ("Godot import", importing or bool(tests) or bool(scene_tests)),
+            (
+                "Godot import",
+                importing or bool(compiled) or bool(tests) or bool(scene_tests),
+            ),
             ("tests", bool(tests) or bool(scene_tests)),
             ("replays", replaying),
             ("saves", saving),
@@ -617,6 +626,7 @@ async def validate(
         info=found.info,
         failing=found.already_failing,
         current=not importing and godot,
+        compiled=compiled,
         note=getattr(gateway, "progress_detail", None),
         report=getattr(gateway, "tests_report", None),
     )
@@ -638,6 +648,7 @@ async def checks(
     info: list[str] | None = None,
     failing: list[str] | None = None,
     current: bool = False,
+    compiled: list[str] | None = None,
     note: Callable[[str], None] | None = None,
     report: Callable[[dict[str, Any]], None] | None = None,
 ) -> list[Problem]:
@@ -648,7 +659,9 @@ async def checks(
     read-only and run alongside; the tests and replays need the import, so they follow it.
     ``imported`` is told when Godot imported the stage cleanly, so the next check
     of the same stage (a submit after a precheck) can skip that import; ``current``
-    says it did already, so the tests run without importing again. An import past
+    says it did already, so the tests run without importing again; ``compiled``
+    names the scripts changed since then (nothing else), compiled instead of a
+    whole import (``compile_scripts``). An import past
     its limit (``import_seconds``) is a problem of its own, never an error that
     ends the other checks.
     """
@@ -660,7 +673,7 @@ async def checks(
     deadline = time.monotonic() + budget
     image = (
         await asyncio.to_thread(check_image, tx.stage)
-        if godot or tests or scene_tests
+        if godot or tests or scene_tests or compiled
         else CREATIVE_IMAGE
     )
 
@@ -695,6 +708,11 @@ async def checks(
     async def godot_checks() -> list[Problem]:
         found: list[Problem] = []
         testing = bool(tests) or bool(scene_tests)
+        if compiled:
+            with timed("review_import"):
+                found += await compile_scripts(tx.stage, compiled, image=image)
+            if found:
+                return found
         if godot or (testing and not current):
             limit = import_seconds(tx.project, image)
             try:
@@ -736,10 +754,14 @@ async def checks(
                 image=image,
             )
         if replays_on:
-            found += await run_replays(tx, imported=godot or testing, timed=timed)
+            found += await run_replays(
+                tx, imported=godot or testing or bool(compiled), timed=timed
+            )
         if saves_on:
             found += await run_saves(
-                tx, imported=godot or testing or replays_on, timed=timed
+                tx,
+                imported=godot or testing or replays_on or bool(compiled),
+                timed=timed,
             )
         return found
 
@@ -1066,6 +1088,93 @@ UNCHECKABLE = (
     "checked now ({reason}). Start Docker and accept it again, or continue the "
     "chat so Journeyman finishes and checks it."
 )
+
+
+#: The lines of a script Godot's class cache is made of: its global name, its
+#: base, and whether it runs in the editor or is abstract.
+_CLASS_HEAD = re.compile(
+    r"^[ \t]*(?:class_name\b|extends\b|@tool\b|@icon\b|@abstract\b|@static_unload\b).*$",
+    re.MULTILINE,
+)
+
+
+def script_heads(stage: Path, paths: list[str] | None = None) -> dict[str, str]:
+    """Each script's class header (``_CLASS_HEAD`` lines), by project path: every
+    ``.gd`` Godot scans in ``stage``, or just ``paths``."""
+    if paths is None:
+        paths = []
+        for directory, folders, names in os.walk(stage):
+            if ".gdignore" in names:
+                folders[:] = []
+                continue
+            folders[:] = [f for f in folders if f not in _NOT_SCANNED]
+            paths += [
+                (Path(directory) / name).relative_to(stage).as_posix()
+                for name in names
+                if name.endswith(".gd")
+            ]
+    heads: dict[str, str] = {}
+    for path in paths:
+        try:
+            text = (stage / path).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        heads[path] = "\n".join(line.strip() for line in _CLASS_HEAD.findall(text))
+    return heads
+
+
+#: Compiles each script named after it, one block per script.
+_COMPILE = (
+    'for f; do echo "JOINERY_FILE:$f"; '
+    'godot --headless --path /work --check-only -s "res://$f" 2>&1; done'
+)
+
+
+async def compile_scripts(
+    stage: Path, scripts: list[str], image: str = CREATIVE_IMAGE
+) -> list[Problem]:
+    """Compile ``scripts`` as Godot runs them, in one worker run: the import's
+    script check for a stage whose imports are current. A script that names an
+    autoload is fine (the game adds them before it loads it), except a SceneTree
+    test, which ``-s`` compiles before any autoload exists."""
+    got = await worker_run(
+        ["sh", "-c", _COMPILE, "sh", *scripts], stage, OFFLINE_SECONDS, image=image
+    )
+    worker_ready(got)
+    said = blocks(got.stdout)
+    names = set(autoloads(stage))
+    problems: list[Problem] = []
+    for script in scripts:
+        output = said.get(script)
+        if output is None:
+            problems.append(
+                Problem(
+                    "godot_import",
+                    "Godot import/script validation failed: "
+                    + (got.output[-4000:] or "Godot exited with an error."),
+                    items=reasons.godot_import(got.output),
+                )
+            )
+            break
+        test = is_scene_tree_test(stage / script)
+        errors = [
+            line.strip()
+            for line in _SCRIPT_ERROR.findall(output)
+            if test
+            or (found := _UNKNOWN_NAME.search(line)) is None
+            or found.group(1) not in names
+        ]
+        if errors:
+            hint = autoload_hint(stage, output) if test else ""
+            problems.append(
+                Problem(
+                    "tests" if test else "godot_import",
+                    f"res://{script}: " + "; ".join(dict.fromkeys(errors[:3])) + hint,
+                    [script],
+                    items=reasons.godot_import(output),
+                )
+            )
+    return problems
 
 
 def _scripts_of(tx: FileTransaction) -> list[str]:

@@ -1,16 +1,26 @@
 """A change checked again (the next precheck, the submit after it) re-runs only what
 its edits since the last check can affect: the art bible measures only changed
-files."""
+files, and a stage whose only edits since its last clean import are scripts is
+compiled rather than imported again."""
 
 from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import Any
 
+import pytest
+
+from joinery import submission
 from joinery.bible_rules import check_rules
+from joinery.gateway import ProjectGateway
 from joinery.measure_cache import MeasureCache
 from joinery.runner import Result
+from joinery.transactions import FileTransaction
 from tests.test_bible_rules import png, v2_stage
+from tests.test_crew import project
+
+__all__ = ["project"]  # the fixture, used by name
 
 
 class Worker:
@@ -124,3 +134,75 @@ def test_a_command_that_is_not_a_per_file_loop_always_runs(tmp_path: Path) -> No
     asyncio.run(measure(["sh", "-c", "mix script"], tmp_path))
     asyncio.run(measure(["sh", "-c", "mix script"], tmp_path))
     assert len(calls) == 2
+
+
+def _game(root: Path) -> None:
+    (root / "project.godot").write_text(
+        'config_version=5\n\n[autoload]\n\nScore="*res://game/score.gd"\n'
+    )
+    (root / "game").mkdir(exist_ok=True)
+    (root / "game/score.gd").write_text("extends Node\nvar points := 0\n")
+    (root / "game/door.gd").write_text(
+        "class_name Door\nextends Node3D\nfunc open() -> void:\n\tScore.points += 1\n"
+    )
+
+
+def test_only_scripts_changed_since_the_import_are_compiled_not_imported(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _game(project)
+    runs: list[list[str]] = []
+
+    async def offline(argv: list[str], root: Path, *_a: Any, **_k: Any) -> Result:
+        runs.append(argv)
+        if argv[:2] == ["sh", "-c"]:
+            said = [f"JOINERY_FILE:{f}\nGodot Engine v4.7" for f in argv[4:]]
+            if (
+                "game/door.gd" in argv
+                and "broken" in (root / "game/door.gd").read_text()
+            ):
+                said.append("SCRIPT ERROR: Parse Error: Expected end of statement.")
+            # Naming an autoload is fine outside a SceneTree test.
+            said.append("SCRIPT ERROR: Compile Error: Identifier not found: Score")
+            return Result(True, "\n".join(said), "", 0.0)
+        return Result(True, "", "", 0.0)
+
+    monkeypatch.setattr("joinery.submission.run_offline", offline)
+    monkeypatch.setattr("joinery.gateway.run_offline", offline)
+    monkeypatch.setattr("joinery.submission.check_image", lambda _s: "godot-worker")
+
+    async def go() -> None:
+        gateway = ProjectGateway(project)
+        tx = FileTransaction(project)
+        tx.begin("Door")
+        gateway.transaction = tx
+        try:
+            door = tx.stage / "game/door.gd"
+            door.write_text(door.read_text() + "\nvar shut := true\n")
+            first = await submission.validate(gateway, tx, set())
+            assert first.problems == []
+            assert sum("--import" in argv for argv in runs) == 1
+            assert gateway.scripts_since_import(tx) is None  # just imported
+            # The agent fixes one line of a script: compiled, not imported.
+            door.write_text(door.read_text() + "var locked := false\n")
+            assert gateway.scripts_since_import(tx) == ["game/door.gd"]
+            again = await submission.validate(gateway, tx, set())
+            assert again.problems == []
+            assert "Godot import" in again.ran
+            assert sum("--import" in argv for argv in runs) == 1
+            assert runs[-1][4:] == ["game/door.gd"]
+            # A broken script is the import's problem, as before.
+            door.write_text(door.read_text() + "var broken := \n")
+            broken = await submission.validate(gateway, tx, set())
+            assert [p.check for p in broken.problems] == ["godot_import"]
+            assert "Expected end of statement" in broken.problems[0].message
+            # A changed class header, a new file or an asset: Godot imports again.
+            door.write_text("class_name Gate\nextends Node3D\n")
+            assert gateway.scripts_since_import(tx) is None
+            door.write_text(door.read_text().replace("Gate", "Door"))
+            (tx.stage / "game/lamp.gd").write_text("extends Node\n")
+            assert gateway.scripts_since_import(tx) is None
+        finally:
+            await gateway.close()
+
+    asyncio.run(go())

@@ -402,6 +402,8 @@ class ProjectGateway:
         self.timing: TurnTiming | None = None
         #: (transaction id, stage inventory) right after a clean Godot import.
         self._imported: tuple[str, dict[str, str]] | None = None
+        #: The class headers of the stage's scripts at that import.
+        self._imported_heads: dict[str, str] = {}
         #: (transaction id, review media, renders still to run) from open_review.
         self._media_jobs: tuple[str, list[dict[str, Any]], list[Render]] = ("", [], [])
         self._media_task: asyncio.Task[None] | None = None
@@ -1425,10 +1427,38 @@ class ProjectGateway:
     def mark_imported(self, tx: FileTransaction) -> None:
         """Godot just imported ``tx``'s stage cleanly; the next check may skip that."""
         if tx is self.transaction and tx.state == "staging":
-            try:
-                self._imported = (tx.id, inventory(tx.stage, include_dirs=True))
-            except (OSError, ValueError):
-                self._imported = None
+            self._record_import(tx)
+
+    def _record_import(self, tx: FileTransaction) -> None:
+        try:
+            self._imported = (tx.id, inventory(tx.stage, include_dirs=True))
+            self._imported_heads = submission.script_heads(tx.stage)
+        except (OSError, ValueError):
+            self._imported = None
+            self._imported_heads = {}
+
+    def scripts_since_import(self, tx: FileTransaction) -> list[str] | None:
+        """The scripts changed since Godot last imported ``tx``'s stage cleanly, when
+        nothing else changed: no file added, removed or other than a ``.gd`` edited,
+        and no script's class header (``class_name``, ``extends``, ``@tool``...)
+        changed. Godot's import would only parse those scripts again, so compiling
+        them is the same check (``submission.compile_scripts``). None otherwise."""
+        if self._imported is None or self._imported[0] != tx.id:
+            return None
+        try:
+            now = inventory(tx.stage, include_dirs=True)
+        except (OSError, ValueError):
+            return None
+        before = self._imported[1]
+        if now.keys() != before.keys():
+            return None
+        changed = sorted(path for path, digest in now.items() if before[path] != digest)
+        if not changed or any(not path.endswith(".gd") for path in changed):
+            return None
+        heads = submission.script_heads(tx.stage, changed)
+        if any(heads.get(path) != self._imported_heads.get(path) for path in changed):
+            return None
+        return changed
 
     def text_diff(self) -> list[str]:
         """The staged change's text files as unified diff lines."""
@@ -1626,7 +1656,7 @@ class ProjectGateway:
                 + imported.output[-2000:]
             )
         # The review's own import check is skipped while nothing changed since.
-        self._imported = (tx.id, inventory(tx.stage, include_dirs=True))
+        self._record_import(tx)
 
     async def _import_for(self, paths: list[str]) -> None:
         """Import the stage when one of ``paths`` has no current import there."""
