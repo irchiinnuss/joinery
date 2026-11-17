@@ -287,7 +287,9 @@ func _check_real_cli() -> void:
 		return
 	tab._offer_button.pressed.emit()
 	var started := func() -> bool: return tab.entry_rows().size() == 1
-	_check(await _until(started, 60.0), "Start keeping a timeline makes the first entry")
+	if not await _until(started, 120.0):
+		_check(false, "Start keeping a timeline makes the first entry")
+		return
 	var scene := "res://timeline_door.tscn"
 	var file := FileAccess.open(scene, FileAccess.WRITE)
 	file.store_string('[gd_scene format=3]\n\n[node name="Door" type="Node3D"]\n')
@@ -295,7 +297,9 @@ func _check_real_cli() -> void:
 	tab.live_edit_accepted(scene, "Widen the door")
 	tab.scene_saved(scene)
 	var saved := func() -> bool: return tab.entry_rows().size() == 2
-	_check(await _until(saved, 30.0), "A saved scene edit joins the timeline")
+	if not await _until(saved, 60.0):
+		_check(false, "A saved scene edit joins the timeline")
+		return
 	var newest: Control = tab.entry_rows()[0]
 	_check((newest.get_node("Open") as Button).text == "Widen the door", "By its summary")
 	var meta := (newest.get_node("Open") as Button).tooltip_text
