@@ -101,13 +101,28 @@ class VariantOverrideArgument(BaseModel):
 #: The server's instructions: the same bytes for every agent of a role.
 WRITER_INSTRUCTIONS = (
     "discover_tools finds connected tools with their arguments; tool_schema gives a full schema when those are unclear. "
+    "read_tool runs a read-only tool (several at once); call_tool runs the rest. "
     "Mutations are staged; call submit_for_review when the change is complete. "
     "Never claim staged changes are accepted or saved."
 )
 READER_INSTRUCTIONS = (
     "discover_tools finds connected tools with their arguments; tool_schema gives a full schema when those are unclear. "
-    "This agent only reads: call_tool reaches read-only project tools."
+    "This agent only reads: read_tool (and call_tool) reach read-only project tools."
 )
+
+
+def _project_result(data: dict[str, Any]) -> CallToolResult:
+    """A project tool's result as the gateway sent it, with Joinery's notes."""
+    result = CallToolResult.model_validate(data)
+    if "details" in data:
+        result.content.append(
+            TextContent(type="text", text="Joinery: " + json.dumps(data["details"]))
+        )
+    if "joinery" in data:
+        result.content.append(
+            TextContent(type="text", text="Joinery: " + str(data["joinery"]))
+        )
+    return result
 
 
 def make_server(socket: Path, role: str | None = None) -> MCPServer[Any]:
@@ -589,27 +604,38 @@ def make_server(socket: Path, role: str | None = None) -> MCPServer[Any]:
         """Debugger agents only: run the project headless in Joinery's offline worker (no network, a throwaway copy) for a few seconds and return the errors and output it printed. scene: a res:// scene to run, or empty for the main scene."""
         return await rpc(socket, "reproduce", {"scene": scene})
 
+    # read_tool is call_tool for audited reads only. Marked read-only, an agent
+    # (Claude Code) runs several side by side and beside its other read-only
+    # calls; it runs a call_tool alone, so four validate_script calls through
+    # call_tool waited for one another. The gateway and the policy hook refuse
+    # anything that isn't a read (joinery.read_access).
+    @server.tool(annotations=ToolAnnotations(read_only_hint=True))
+    @tool_errors
+    async def read_tool(
+        server: str, tool: str, arguments: dict[str, Any]
+    ) -> CallToolResult:
+        """Run a read-only project tool (discover_tools marks them read: validate_script, read_file, inspect_document, ...). Calls run side by side, so send independent reads together. Anything else is refused: use call_tool."""
+        return _project_result(
+            await rpc(
+                socket,
+                "read",
+                {"server": server, "tool": tool, "arguments": arguments},
+            )
+        )
+
     @server.tool()
     @tool_errors
     async def call_tool(
         server: str, tool: str, arguments: dict[str, Any]
     ) -> CallToolResult:
-        """Operate a connected project tool; changes are staged, policy-checked, and require user review."""
-        data = await rpc(
-            socket,
-            "call",
-            {"server": server, "tool": tool, "arguments": arguments},
+        """Operate a connected project tool; changes are staged, policy-checked, and require user review. For a read-only tool, read_tool runs beside other calls."""
+        return _project_result(
+            await rpc(
+                socket,
+                "call",
+                {"server": server, "tool": tool, "arguments": arguments},
+            )
         )
-        result = CallToolResult.model_validate(data)
-        if "details" in data:
-            result.content.append(
-                TextContent(type="text", text="Joinery: " + json.dumps(data["details"]))
-            )
-        if "joinery" in data:
-            result.content.append(
-                TextContent(type="text", text="Joinery: " + str(data["joinery"]))
-            )
-        return result
 
     if role is not None:
         offered = roles.offered_tools(role)

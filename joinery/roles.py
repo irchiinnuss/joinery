@@ -272,10 +272,16 @@ REGISTRY_TOOLS: tuple[str, ...] = (
     "report_design",
     "report_diagnosis",
     "reproduce_error",
+    "read_tool",
     "call_tool",
 )
 #: Judged per call by what it calls: a read-only role reaches audited reads only.
 CALL_TOOL = "call_tool"
+#: call_tool for audited reads alone (joinery.read_access): marked read-only, so an
+#: agent may run several side by side, and refused for anything else.
+READ_TOOL = "read_tool"
+#: The registry tools that call a project tool, judged by the tool they call.
+CALL_TOOLS = frozenset({CALL_TOOL, READ_TOOL})
 
 
 def offered_tools(role: str) -> frozenset[str]:
@@ -286,7 +292,7 @@ def offered_tools(role: str) -> frozenset[str]:
         # drive_game is listed to the roles a project may let drive; the call is judged
         # against the project's own setting (may_drive).
         driving = {DRIVE_GAME} if role in MAY_DRIVE_ROLES else set()
-        return frozenset(spec(role).registry | {CALL_TOOL} | driving) & frozenset(
+        return frozenset(spec(role).registry | CALL_TOOLS | driving) & frozenset(
             REGISTRY_TOOLS
         )
     return frozenset(t for t in REGISTRY_TOOLS if registry_allowed(role, t))
@@ -537,9 +543,10 @@ def role_violation(
                     if may_drive(role, project)
                     else Verdict(Severity.DENY, NO_DRIVING)
                 )
-            # call_tool is judged by what it calls: only audited reads pass.
+            # call_tool and read_tool are judged by what they call: only audited
+            # reads pass.
             values = arguments or {}
-            if tool == "call_tool" and read_only(
+            if tool in CALL_TOOLS and read_only(
                 str(values.get("server", "")), str(values.get("tool", ""))
             ):
                 return None

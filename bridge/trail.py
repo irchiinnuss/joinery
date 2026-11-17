@@ -296,7 +296,7 @@ def file_name(path: object) -> str:
 def named_path(name: str, arguments: object = None) -> str:
     """The file a call names in its arguments ("" when none), as the agent gave it."""
     args = arguments if isinstance(arguments, dict) else {}
-    if tool_name(name).lower() == "call_tool" and isinstance(
+    if tool_name(name).lower() in {"call_tool", "read_tool"} and isinstance(
         args.get("arguments"), dict
     ):
         return _path(args["arguments"])
@@ -331,7 +331,7 @@ def describe(name: str, arguments: object = None) -> str:
     args = arguments if isinstance(arguments, dict) else {}
     bare = tool_name(name)
     key = bare.lower()
-    if key == "call_tool" and isinstance(args.get("tool"), str):
+    if key in {"call_tool", "read_tool"} and isinstance(args.get("tool"), str):
         inner = args.get("arguments")
         return app_line(
             str(args.get("server", "")),

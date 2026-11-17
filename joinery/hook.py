@@ -51,8 +51,10 @@ from joinery.policy import (
     url_violation,
     user_only_violation,
 )
-from joinery.read_access import read_only
+from joinery.read_access import not_a_read, read_only
 from joinery.roles import (
+    CALL_TOOLS,
+    READ_TOOL,
     ROLE_ENV,
     native_writer,
     read_only_command,
@@ -93,7 +95,13 @@ def _split_mcp(tool_name: str, explicit_server: str) -> tuple[str, str]:
     """
     if explicit_server:
         tool = tool_name
-        for prefix in (f"mcp__{explicit_server}__", f"mcp_{explicit_server}_"):
+        prefixes = [f"mcp__{explicit_server}__", f"mcp_{explicit_server}_"]
+        if explicit_server.replace("_", "-") == "joinery-registry":
+            # opencode may name it "joinery-registry_<tool>". No registry tool's
+            # own name starts with "joinery", so the prefix is unambiguous here
+            # (an app's tool may: inkscape's is "inkscape_extension").
+            prefixes.append(f"{explicit_server}_")
+        for prefix in prefixes:
             if tool.startswith(prefix):
                 tool = tool[len(prefix) :]
                 break
@@ -258,6 +266,22 @@ def staged_folders(event: Event, raw: dict[str, Any], role: str) -> Verdict | No
     return stage_violation(allowed, values, read_only=read_only, writes=writes)
 
 
+def read_tool_violation(event: Event) -> Verdict | None:
+    """read_tool is call_tool marked read-only, so an agent runs several at once: it
+    may name an audited read alone, for every role. The gateway refuses the rest too."""
+    if (
+        event.kind != "mcp"
+        or event.server.replace("_", "-") != "joinery-registry"
+        or event.tool != READ_TOOL
+    ):
+        return None
+    server = str(event.arguments.get("server", ""))
+    tool = str(event.arguments.get("tool", ""))
+    if read_only(server, tool):
+        return None
+    return Verdict(Severity.DENY, not_a_read(server, tool))
+
+
 def violation(raw: dict[str, Any]) -> Verdict | None:
     event = normalise_event(raw)
     role = os.environ.get(ROLE_ENV, "")
@@ -267,6 +291,9 @@ def violation(raw: dict[str, Any]) -> Verdict | None:
     folders = staged_folders(event, raw, role)
     if folders is not None:
         return folders
+    refused = read_tool_violation(event)
+    if refused is not None:
+        return refused
     if role:
         # Rule Zero first: a forbidden asset service stops every agent's turn,
         # whichever role tried it. Then what the role itself may do.
@@ -297,7 +324,7 @@ def violation(raw: dict[str, Any]) -> Verdict | None:
                 "inspect_game",
                 "search_project",
             }
-            if event.tool == "call_tool" and isinstance(values, dict):
+            if event.tool in CALL_TOOLS and isinstance(values, dict):
                 allowed = read_only(
                     str(values.get("server", "")), str(values.get("tool", ""))
                 )

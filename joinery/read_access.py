@@ -62,3 +62,11 @@ def read_only(server: str, tool: str) -> bool:
             and tool in FIRST_PARTY_READS
         )
     )
+
+
+def not_a_read(server: str, tool: str) -> str:
+    """Why read_tool refused a call: it reaches audited reads only."""
+    return (
+        f"{server}.{tool} is not a read-only tool; read_tool only reaches reads "
+        "(validate_script, read_file, inspect_document, ...). Call it with call_tool."
+    )

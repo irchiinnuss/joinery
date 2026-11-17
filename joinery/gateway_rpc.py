@@ -33,7 +33,7 @@ from joinery.gateway import ProjectGateway
 from joinery.mcp_runtime import PolicyStop
 from joinery.peer_review import notes_from
 from joinery.platform_support import private_directory
-from joinery.read_access import read_only
+from joinery.read_access import not_a_read, read_only
 from joinery.roles import (
     NO_DRIVING,
     READ_ONLY_ROLES,
@@ -50,6 +50,7 @@ COMPACTED = frozenset(
     {
         "inventory",
         "call",
+        "read",
         "submit",
         "precheck",
         "delegate",
@@ -113,6 +114,7 @@ def search_tools(data: dict[str, Any], query: str) -> dict[str, Any]:
                 "name": tool["name"],
                 "description": tool.get("description", "")[:DISCOVER_DESCRIPTION],
                 "args": tool_arguments(tool.get("inputSchema")),
+                **({"read": True} if read_only(tool["server"], tool["name"]) else {}),
             }
             for _, tool in listed
         ],
@@ -122,7 +124,7 @@ def search_tools(data: dict[str, Any], query: str) -> dict[str, Any]:
             else {}
         ),
         "total_matches": len(candidates),
-        "hint": "args: name: type, * required. Call call_tool with them; tool_schema gives the full schema when they are unclear. Search by application or operation to narrow results. Native document operations save, export, import and record provenance automatically. Call submit_for_review when the change is complete; Joinery checks it then and opens the review.",
+        "hint": "args: name: type, * required. Call call_tool with them, or read_tool for a tool marked read (it runs beside your other calls); tool_schema gives the full schema when they are unclear. Search by application or operation to narrow results. Native document operations save, export, import and record provenance automatically. Call submit_for_review when the change is complete; Joinery checks it then and opens the review.",
     }
 
 
@@ -371,7 +373,15 @@ class GatewayRPC:
                 data = connection.tools[str(params["tool"])].model_dump(
                     by_alias=True, exclude_none=True
                 )
-            elif method == "call":
+            elif method in {"call", "read"}:
+                if method == "read" and not read_only(
+                    str(params["server"]), str(params["tool"])
+                ):
+                    # read_tool is marked read-only for the agent, which may then
+                    # run it beside its other calls: only audited reads pass.
+                    raise ValueError(
+                        not_a_read(str(params["server"]), str(params["tool"]))
+                    )
                 if self.inspection_only and not read_only(
                     str(params["server"]), str(params["tool"])
                 ):
@@ -418,21 +428,26 @@ class GatewayRPC:
                 )
             elif method == "details":
                 paths = params.get("paths")
+                # Reads of files run off the event loop, so a large page or
+                # search never holds up the other requests this gateway serves.
                 if isinstance(paths, list) and paths:
-                    data = compact.details_many(
+                    data = await asyncio.to_thread(
+                        compact.details_many,
                         self.gateway.project,
                         str(params.get("ref", "")),
                         [str(p) for p in paths],
                     )
                 else:
-                    data = compact.details(
+                    data = await asyncio.to_thread(
+                        compact.details,
                         self.gateway.project,
                         str(params.get("ref", "")),
                         str(params.get("path", "") or ""),
                         int(params.get("offset", 0) or 0),
                     )
             elif method == "search":
-                data = project_search.search(
+                data = await asyncio.to_thread(
+                    project_search.search,
                     self.gateway.search_root(),
                     str(params.get("pattern", "")),
                     path=str(params.get("path", "") or ""),
@@ -702,7 +717,7 @@ class GatewayRPC:
                 data = self.task_status(str(params.get("id", "")))
             else:
                 raise ValueError(
-                    "The model interface supports inventory, schema, call, submit, propose_todo, todo_step, blockout, grow_level, make_variant, playtest, the checks, sound_audit, tidy_check, tidy_remove, rerecord_replay, save_design_doc and the running game's inspect_game and drive_game; no approval methods."
+                    "The model interface supports inventory, schema, call, read, submit, propose_todo, todo_step, blockout, grow_level, make_variant, playtest, the checks, sound_audit, tidy_check, tidy_remove, rerecord_replay, save_design_doc and the running game's inspect_game and drive_game; no approval methods."
                 )
             project = getattr(self.gateway, "project", None)
             if method in COMPACTED and isinstance(project, Path):
