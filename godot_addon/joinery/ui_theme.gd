@@ -362,15 +362,26 @@ static func numeric_font(context: Node) -> Font:
 	return font
 
 
-## Monospace font for code, raw diffs, CLI details and source previews: the editor "source"
-## font when available, otherwise a system monospace font.
-static func mono_font(context: Node) -> Font:
-	if context is Control and (context as Control).has_theme_font("source", "EditorFonts"):
-		return (context as Control).get_theme_font("source", "EditorFonts")
-	var font := SystemFont.new()
-	font.font_names = PackedStringArray(
-		["SF Mono", "Menlo", "Consolas", "DejaVu Sans Mono", "Liberation Mono", "monospace"]
-	)
+## Monospace font for code, raw diffs, CLI details and source previews: the editor's "source"
+## font when available, otherwise a system monospace font. Ligatures are off, so "->" or "!="
+## in code stays as typed.
+static func mono_font(_context: Node) -> Font:
+	var font := FontVariation.new()
+	var editor_theme := _editor_theme()
+	if editor_theme != null and editor_theme.get_font_list("EditorFonts").has("source"):
+		font.base_font = editor_theme.get_font("source", "EditorFonts")
+	else:
+		var system := SystemFont.new()
+		system.font_names = PackedStringArray(
+			["SF Mono", "Menlo", "Consolas", "DejaVu Sans Mono", "Liberation Mono", "monospace"]
+		)
+		font.base_font = system
+	var server := TextServerManager.get_primary_interface()
+	font.opentype_features = {
+		server.name_to_tag("liga"): 0,
+		server.name_to_tag("calt"): 0,
+		server.name_to_tag("dlig"): 0,
+	}
 	return font
 
 

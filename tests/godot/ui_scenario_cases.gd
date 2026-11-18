@@ -297,10 +297,10 @@ func _stream_long() -> void:
 	)
 	s.check(shown.contains("func _on_body_entered"), "The code block shows its code")
 	s.check(not shown.contains("```"), "Code fences don't show")
-	s.expect_bug(
-		not shown.contains("## What"), "Headings render as headings", "Markdown # is shown raw"
-	)
-	s.expect_bug(not shown.contains("*Use*"), "Italics render", "*text* is shown raw")
+	s.check(not shown.contains("## What"), "Headings render as headings")
+	s.check(not shown.contains("*Use*"), "Italics render")
+	s.check(not shown.contains("- `door.gd`"), "List items show without their dash")
+	s.check(not shown.contains("\n\n\n"), "No double blank gaps")
 	# Wrapped, never past the column: the path is one unbroken word.
 	var messages: Array = s.transcript().get("_messages")
 	var label: RichTextLabel = messages[-1]["label"]
@@ -313,6 +313,12 @@ func _stream_long() -> void:
 		)
 	)
 	s.check(label.get_content_width() <= label.size.x + 1.0, "The long path wraps")
+	var mono := label.get_theme_font("mono_font") as FontVariation
+	var liga := TextServerManager.get_primary_interface().name_to_tag("liga")
+	s.check(
+		mono != null and int(mono.opentype_features.get(liga, 1)) == 0,
+		"Code is mono with ligatures off: -> stays as typed"
+	)
 	scroll.scroll_vertical = 0
 	await s.shot("top")
 	scroll.scroll_vertical = int(bar.max_value)

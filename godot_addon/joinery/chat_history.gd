@@ -44,6 +44,7 @@ const REMEMBER := preload("chat_remember.gd")
 const EMPTY := preload("sidebar_empty.gd")
 const FOLLOW := preload("chat_follow.gd")
 const NOTICES := preload("chat_notices.gd")
+const MARKDOWN := preload("chat_markdown.gd")
 const NO_AGENT := "No agent connected"
 ## Notice kind -> [icon ("" for none), tint role].
 const NOTICE_ICONS := {
@@ -66,7 +67,6 @@ var _last_notice := ""
 var _dirty := false
 ## Keeps the end in view while the user is at the bottom (chat_follow.gd).
 var _follower := FOLLOW.new()
-var _bold := RegEx.new()
 var _text_scale := 1.0
 var _show_timings := true
 var _scaled: Array = []
@@ -81,7 +81,6 @@ var _caption_serial := 0
 
 
 func _ready() -> void:
-	_bold.compile("\\*\\*([^*\\n]+)\\*\\*")
 	horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	vertical_scroll_mode = ScrollContainer.SCROLL_MODE_RESERVE
 	follow_focus = true
@@ -177,6 +176,8 @@ func add_message(who: String, text: String) -> void:
 	inset.add_child(column)
 	var label := RichTextLabel.new()
 	_configure_text(label)
+	# A reply's blocks (paragraphs, headings, list items) sit SPACE.3 apart (chat_markdown.gd).
+	label.add_theme_constant_override("paragraph_separation", UI_THEME.space(self, 3))
 	REMEMBER.offer(label, remember_requested)
 	label.accessibility_name = who + " message"
 	column.add_child(label)
@@ -560,27 +561,9 @@ func _semibold(label: RichTextLabel) -> void:
 	label.add_theme_font_override("bold_font", UI_THEME.medium_font(self))
 
 
+## The reply's Markdown as BBCode (chat_markdown.gd), BBCode in it escaped.
 func _format(source: String) -> String:
-	# Escape BBCode before interpreting a small, safe Markdown subset.
-	var result := ""
-	var blocks := source.split("```")
-	for index: int in blocks.size():
-		if index % 2 == 1:
-			var block := blocks[index]
-			var newline := block.find("\n")
-			if newline >= 0:
-				block = block.substr(newline + 1)
-			result += "\n[code]" + block.replace("[", "[lb]") + "[/code]\n"
-		else:
-			var spans := blocks[index].split("`")
-			for part: int in spans.size():
-				var safe := spans[part].replace("[", "[lb]")
-				result += (
-					"[code]" + safe + "[/code]"
-					if part % 2 == 1
-					else _bold.sub(safe, "[b]$1[/b]", true)
-				)
-	return result
+	return MARKDOWN.format(source, get_theme_color("surface_raised", "Joinery"))
 
 
 func _process(_delta: float) -> void:
