@@ -633,8 +633,12 @@ func _sync() -> void:
 		_footer.set_mode("idle")
 	elif _busy:
 		_footer.set_mode("idle")  # The work shows in the chat only; the composer keeps Stop.
-	elif _review_pending:
-		_footer.set_mode("idle" if _card() != null and _card().review_row().visible else "review")
+	elif _review_pending:  # Shown on the card, or decided there and on its way: nothing waits.
+		var card := _card()
+		var shown: bool = (
+			card != null and (card.review_row().visible or not card.awaiting_decision())
+		)
+		_footer.set_mode("idle" if shown else "review")
 	else:
 		_footer.set_mode("idle")
 	_composer.set_locked(not command.is_empty())
@@ -944,7 +948,10 @@ func _open_review(media: Array) -> void:
 	var card := _card()
 	if card != null:
 		card.set_ready(media, _review)
-		card.review_row().visibility_changed.connect(_sync, CONNECT_REFERENCE_COUNTED)
+		# Deferred: an outcome hides the row before the card's state says it was decided.
+		card.review_row().visibility_changed.connect(
+			_sync, CONNECT_REFERENCE_COUNTED | CONNECT_DEFERRED
+		)
 	_command_popup.close()
 	_sync()
 	# The review opens by itself, once the user isn't typing.

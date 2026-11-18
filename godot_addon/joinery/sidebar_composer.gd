@@ -268,7 +268,13 @@ func _apply_placeholder() -> void:
 	if _status_line != null and _status_line.visible:
 		# The status reads where the placeholder would.
 		prompt.placeholder_text = ""
-		_status_line.modulate.a = 1.0 if prompt.text.is_empty() else 0.0
+		var faded := not prompt.text.is_empty()
+		_status_line.modulate.a = 0.0 if faded else 1.0
+		# Faded under typed text, its link takes no clicks meant for the text.
+		for button: Node in _status_line.find_children("*", "Button", true, false):
+			(button as Control).mouse_filter = (
+				Control.MOUSE_FILTER_IGNORE if faded else Control.MOUSE_FILTER_STOP
+			)
 	elif not _waiting.is_empty():
 		prompt.placeholder_text = _waiting
 	elif resting:

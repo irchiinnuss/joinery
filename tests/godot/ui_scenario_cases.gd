@@ -624,27 +624,34 @@ func _review(accept: bool) -> void:
 	# Until the host confirms, nothing may still ask for the review just decided.
 	var footer: Control = s.dock.get("_footer")
 	var asks := footer.is_visible_in_tree() and str(footer.call("text")).contains("review")
-	s.expect_bug(
+	s.check(
 		not asks,
-		"Once decided, nothing says it waits for review (footer: '%s')" % str(footer.call("text")),
-		"the optimistic outcome hides the card's review row while _review_pending is still true"
+		"Once decided, nothing says it waits for review (footer: '%s')" % str(footer.call("text"))
 	)
-	if asks:
-		await s.shot("contradiction")
-		s.prompt().text = "typing over the status line"
-		s.prompt().text_changed.emit()
-		await s.frames(2)
-		var hidden_button := false
-		for button: Button in footer.find_children("", "Button", true, false):
-			if button.is_visible_in_tree() and button.mouse_filter != Control.MOUSE_FILTER_IGNORE:
-				var alpha := footer.modulate.a * button.modulate.a
-				hidden_button = hidden_button or alpha < 0.05
-		s.expect_bug(
-			not hidden_button,
-			"A faded status line takes no clicks over typed text",
-			"its Show review button stays clickable at alpha 0"
-		)
-		s.prompt().text = ""
+	await s.shot("decided")
+	# The status line with its Show review link, faded under typed text, takes no clicks.
+	footer.call("set_mode", "review")
+	await s.frames(2)
+	s.prompt().text = "typing over the status line"
+	s.prompt().text_changed.emit()
+	await s.frames(2)
+	var hidden_button := false
+	for button: Button in footer.find_children("", "Button", true, false):
+		if button.is_visible_in_tree() and button.mouse_filter != Control.MOUSE_FILTER_IGNORE:
+			var alpha := footer.modulate.a * button.modulate.a
+			hidden_button = hidden_button or alpha < 0.05
+	s.check(not hidden_button, "A faded status line takes no clicks over typed text")
+	s.prompt().text = ""
+	s.prompt().text_changed.emit()
+	await s.frames(2)
+	var show_review: Button = null
+	for button: Button in footer.find_children("", "Button", true, false):
+		show_review = button
+	s.check(
+		show_review != null and show_review.mouse_filter != Control.MOUSE_FILTER_IGNORE,
+		"With the message box empty again, Show review takes clicks"
+	)
+	s.dock.call("_sync")
 	var settled := await s.wait_until(
 		func() -> bool: return not bool(s.dock.get("_review_pending")), 6000
 	)
