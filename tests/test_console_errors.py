@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -710,3 +711,117 @@ def test_the_cli_reads_and_sets_the_mode_and_metrics_count_errors(
     assert counts["seen"] == 1 and counts["accepted"] == 1
     assert cli.main(["metrics", "--project", str(tmp_path), "--errors"]) == 0
     assert "Errors seen: 1 (1 distinct)" in capsys.readouterr().out
+
+
+# --- the import cache --------------------------------------------------------------------
+
+RAKE = "res://art/props/leaf_rake.glb"
+BIN = "res://art/props/green_waste_bin.glb"
+
+
+def copy_of(res: str) -> str:
+    """Godot's imported copy of ``res``: named after the file and its path's MD5."""
+    digest = hashlib.md5(res.encode()).hexdigest()
+    return f"res://.godot/imported/{res.rsplit('/', 1)[-1]}-{digest}.scn"
+
+
+def import_lines(res: str) -> str:
+    """What Output shows when a scene loads ``res`` before its import ends: the panel
+    puts its icon (a space) and a thin space before the label."""
+    return (
+        f" \u2009ERROR: Cannot open file '{copy_of(res)}'.\n"
+        f" \u2009ERROR: Failed loading resource: {copy_of(res)}.\n"
+        f" \u2009ERROR: Failed loading resource: {res}.\n"
+    )
+
+
+def plant_import(root: Path, res: str, *, copy: bool, valid: bool = True) -> None:
+    """A model with its .import, and (``copy``) its imported copy under .godot."""
+    local = root / res.removeprefix("res://")
+    local.parent.mkdir(parents=True, exist_ok=True)
+    local.write_bytes(b"glTF")
+    imported = copy_of(res)
+    (local.parent / (local.name + ".import")).write_text(
+        '[remap]\n\nimporter="scene"\n'
+        + ("" if valid else "valid=false\n")
+        + f'path="{imported}"\n\n[deps]\n\nsource_file="{res}"\n'
+        + f'dest_files=["{imported}"]\n'
+    )
+    target = root / imported.removeprefix("res://")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if copy:
+        target.write_bytes(b"RSRC")
+    elif target.exists():
+        target.unlink()
+
+
+def test_import_cache_errors_name_the_file_they_are_about(tmp_path: Path) -> None:
+    plant_import(tmp_path, RAKE, copy=False)
+    entries = ce.parse(import_lines(RAKE))
+    assert [ce.import_source(e.message, tmp_path) for e in entries] == [RAKE] * 3
+    # A file the editor doesn't import, or one with no .import, is not import noise.
+    assert not ce.import_source("Failed loading resource: res://game/x.tscn.", tmp_path)
+    assert not ce.import_source(
+        "Failed loading resource: res://art/props/never_made.glb.", tmp_path
+    )
+    # Any other error naming an imported file is the game's as it is.
+    assert not ce.import_source(f"Invalid model in {RAKE}.", tmp_path)
+    # An imported copy no file in the project was made from.
+    gone = "res://.godot/imported/gone.glb-" + "0" * 32 + ".scn"
+    assert not ce.import_source(f"Cannot open file '{gone}'.", tmp_path)
+
+
+def test_import_cache_errors_go_once_the_file_is_imported(tmp_path: Path) -> None:
+    plant_import(tmp_path, RAKE, copy=True)
+    plant_import(tmp_path, BIN, copy=True)
+    entries = ce.parse(import_lines(BIN) + import_lines(RAKE) + NULL_AT)
+    assert len(entries) == 7
+    (left,) = ce.fold_imports(entries, tmp_path)
+    assert left.message.startswith("Invalid get index")
+
+
+def test_an_import_that_still_fails_is_one_finding_with_its_cause(
+    tmp_path: Path,
+) -> None:
+    plant_import(tmp_path, RAKE, copy=False)
+    (finding,) = ce.fold_imports(ce.parse(import_lines(RAKE)), tmp_path)
+    assert finding.kind == "error" and finding.where == RAKE
+    assert finding.message.startswith("leaf_rake.glb didn't import:")
+    # Each raw line is kept for the debugger.
+    assert finding.context.count("ERROR:") == 3
+    group = ce.Group(id="x", kind="error", message=finding.message, where=RAKE)
+    assert group.label() == finding.message
+    assert group.title().startswith("leaf_rake.glb didn't import")
+    assert ce.triage_entry(finding) == ""
+    # Godot marked the import failed: a damaged file says so.
+    plant_import(tmp_path, RAKE, copy=False, valid=False)
+    (damaged,) = ce.fold_imports(ce.parse(import_lines(RAKE)), tmp_path)
+    assert "may be damaged" in damaged.message
+    # The file itself is gone: a missing file still shows.
+    (tmp_path / "art/props/leaf_rake.glb").unlink()
+    (missing,) = ce.fold_imports(ce.parse(import_lines(RAKE)), tmp_path)
+    assert missing.message.startswith("leaf_rake.glb is missing")
+
+
+def test_output_repeats_and_thin_spaces_are_read_like_any_error() -> None:
+    (entry,) = ce.parse(" \u2009ERROR: (3) Failed loading resource: res://a.png.\n")
+    assert entry.message == "Failed loading resource: res://a.png."
+
+
+def test_the_fixer_counts_one_problem_per_file_that_didnt_import(
+    tmp_path: Path,
+) -> None:
+    desk = Desk(tmp_path, 'fix_errors = "auto"\n')
+    plant_import(tmp_path, RAKE, copy=False)
+    plant_import(tmp_path, BIN, copy=True)
+
+    async def go() -> None:
+        await desk.fixer.take_text("output", import_lines(BIN) + import_lines(RAKE))
+
+    run(go)
+    (row,) = desk.last()["groups"]
+    assert row["count"] == 1 and row["place"] == "leaf_rake.glb"
+    assert row["message"].startswith("leaf_rake.glb didn't import")
+    ((request, _task),) = desk.crew.started
+    assert "leaf_rake.glb didn't import" in request.error
+    assert copy_of(RAKE) in request.output

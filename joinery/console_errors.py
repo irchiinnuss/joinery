@@ -31,12 +31,13 @@ import argparse
 import fnmatch
 import hashlib
 import json
+import os
 import re
 import sys
 import time
 import tomllib
 from collections.abc import Iterable, Mapping
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -113,6 +114,7 @@ _CONSOLE = re.compile(
     r"^\s*(?P<label>USER SCRIPT ERROR|SCRIPT ERROR|USER ERROR|ERROR|USER WARNING|WARNING"
     r"|Parse Error):\s*(?P<message>.+)$"
 )
+_REPEATS = re.compile(r"^\(\d+\)\s+")
 # "res://player.gd:12 - Parse Error: Identifier "x" not declared…" (Output on save).
 _PARSE = re.compile(
     r"^\s*(?P<where>res://[^\s:]+:\d+)\s*-\s*Parse Error:\s*(?P<message>.+)$"
@@ -300,7 +302,8 @@ def parse(text: str, source: str = "output") -> list[Entry]:
         if console is not None:
             label = console.group("label")
             kind = "warning" if "WARNING" in label else "error"
-            message = console.group("message").strip()
+            # Output's "(3) " in front of a collapsed repeat is not part of the message.
+            message = _REPEATS.sub("", console.group("message").strip())
             if label == "Parse Error":
                 message = "Parse Error: " + message
             where = ""
@@ -495,6 +498,151 @@ def triage_entry(entry: Entry) -> str:
     )
 
 
+# --- the import cache ------------------------------------------------------------------
+#
+# A model, texture or sound is loaded from its imported copy under .godot/imported. A
+# change that adds or replaces one, then loads a scene that uses it before the editor
+# has re-imported it, prints three lines per file ("Cannot open file 'res://.godot/
+# imported/x.glb-<md5>.scn'", "Failed loading resource: …that copy…", "Failed loading
+# resource: res://art/x.glb") that mean nothing once the import ends. The sidebar holds
+# them until it does (sidebar_debug.gd); here they are read again from disk: dropped
+# when the imported copy is there now, otherwise one finding per file with its cause.
+
+_IMPORTED = re.compile(
+    r"res://\.godot/imported/(?P<file>[^\s'\"()/]+?)-(?P<hash>[0-9a-f]{32})\.\w+"
+)
+# Errors that mean a resource couldn't be read: only these, about a file the editor
+# imports, are import-cache errors. Any other error naming such a file stays as it is.
+_LOAD_FAILED = re.compile(
+    r"^(?:\(\d+\)\s+)?(?:Failed loading resource|Cannot open file|Failed to load resource"
+    r"|Resource file not found|No loader found for resource|Error loading resource)\b"
+)
+_RES_PATH = re.compile(r"res://[^\s'\"(),]+")
+_IMPORT_DEST = re.compile(
+    r'^(?:dest_files=\[(?P<list>[^\]]*)\]|path(?:\.\w+)?="(?P<one>[^"]+)")'
+)
+#: How the import of a file stands: its imported copy is there (``ok``), not yet
+#: (``pending``), Godot marked the import failed (``failed``), or the file itself is gone.
+IMPORT_OK, IMPORT_PENDING = "ok", "pending"
+IMPORT_FAILED, IMPORT_MISSING = "failed", "missing"
+
+
+def _local(project: Path, res: str) -> Path:
+    return project / res.removeprefix("res://")
+
+
+def _source_of_imported(project: Path, file: str, digest: str) -> str:
+    """The project file an imported copy was made from: Godot names the copy after the
+    file and the MD5 of its res:// path."""
+    # The file, or its .import when the file itself is gone.
+    names = {file, file + ".import"}
+    for folder, subfolders, files in os.walk(project):
+        subfolders[:] = [d for d in subfolders if not d.startswith(".")]
+        for name in names & set(files):
+            relative = (Path(folder) / name).relative_to(project).as_posix()
+            res = "res://" + relative.removesuffix(".import")
+            if hashlib.md5(res.encode("utf-8")).hexdigest() == digest:
+                return res
+    return ""
+
+
+def import_source(message: str, project: Path) -> str:
+    """The file (``res://art/props/rake.glb``) an import-cache error is about, or "".
+
+    One that names its imported copy under ``.godot/imported``, or a load failure of a
+    file the editor imports (it has a ``.import`` beside it)."""
+    found = _IMPORTED.search(message)
+    if found is not None:
+        return _source_of_imported(project, found.group("file"), found.group("hash"))
+    text = " ".join(message.split())
+    if not _LOAD_FAILED.match(text):
+        return ""
+    for hit in _RES_PATH.finditer(text):
+        res = hit.group(0).rstrip(".:'")
+        if res.startswith("res://.godot/"):
+            continue
+        if _local(project, res + ".import").is_file():
+            return res
+    return ""
+
+
+def import_state(project: Path, source: str) -> str:
+    """How the import of ``source`` stands now, read from its ``.import`` file."""
+    if not _local(project, source).is_file():
+        return IMPORT_MISSING
+    try:
+        text = _local(project, source + ".import").read_text(encoding="utf-8")
+    except OSError:
+        return IMPORT_PENDING
+    lines = [line.strip() for line in text.splitlines()]
+    if "valid=false" in lines:
+        return IMPORT_FAILED
+    # dest_files lists every copy the import writes; path= names them when it is absent.
+    listed: list[str] = []
+    named: list[str] = []
+    for line in lines:
+        found = _IMPORT_DEST.match(line)
+        if found is None:
+            continue
+        if found.group("list") is not None:
+            listed += re.findall(r'"([^"]+)"', found.group("list"))
+        else:
+            named.append(found.group("one"))
+    copies = listed or named
+    if not copies:
+        return IMPORT_PENDING
+    present = all(_local(project, c).is_file() for c in copies)
+    return IMPORT_OK if present else IMPORT_PENDING
+
+
+def import_finding(source: str, state: str) -> str:
+    """The one plain line an import-cache error becomes when it is real."""
+    name = source.rsplit("/", 1)[-1]
+    if state == IMPORT_MISSING:
+        return f"{name} is missing: the project uses {source} but the file isn't there"
+    if state == IMPORT_FAILED:
+        return f"{name} didn't import: Godot couldn't read it, the file may be damaged"
+    return f"{name} didn't import: Godot has no imported copy of it after a reimport"
+
+
+def fold_imports(entries: Iterable[Entry], project: Path) -> list[Entry]:
+    """Import-cache errors read again from disk: dropped when the file's imported copy
+    is there now (the editor finished importing it), otherwise one finding per file
+    with its cause, in place of the three lines Godot printed. Other errors pass."""
+    folded: list[Entry] = []
+    sources: dict[str, int] = {}
+    for entry in entries:
+        source = import_source(entry.message, project) if entry.kind != "test" else ""
+        if not source:
+            folded.append(entry)
+            continue
+        state = import_state(project, source)
+        if state == IMPORT_OK:
+            continue
+        if source in sources:
+            # Lines that share the cause are one finding: their text joins its context.
+            index = sources[source]
+            first = folded[index]
+            if entry.line and entry.line not in first.context:
+                context = (first.context + "\n" + entry.line).strip()
+                folded[index] = replace(first, context=context)
+            continue
+        sources[source] = len(folded)
+        finding = import_finding(source, state)
+        # The finding leads; the lines Godot printed follow for the debugger.
+        folded.append(
+            Entry(
+                "error",
+                finding,
+                source,
+                entry.source,
+                entry.context or entry.line,
+                finding,
+            )
+        )
+    return folded
+
+
 def short_message(message: str) -> str:
     """The error's words without the place Godot put in front: "!is_inside_tree()" for
     'scene/main/window.cpp:2138 - Condition "!is_inside_tree()" is true.'."""
@@ -549,6 +697,9 @@ class Group:
         """ "Invalid get index 'health' on null (player.gd:42)"."""
         place = short_where(self.where)
         text = self.message if len(self.message) <= 90 else self.message[:89] + "…"
+        if place and self.message.startswith(place + " "):
+            # "leaf_rake.glb didn't import: …" names its file already.
+            place = ""
         return text + (f" ({place})" if place else "")
 
     def title(self) -> str:
@@ -556,6 +707,8 @@ class Group:
         place = short_where(self.where) if _project_where(self.where) else ""
         place = place or engine_place(self.message, self.line, self.context)
         words = short_message(self.message)
+        if place and words.startswith(place + " "):
+            place = ""
         return f"{place} — {words}" if place else words
 
     def triage(self) -> str:

@@ -12,7 +12,9 @@ list starts fixes. ``"auto"`` starts them at once. Either way a fix is a debug t
 (bridge.crew): the debugger finds the cause and a worker stages the fix, which the
 user accepts or discards like any other change. Nothing is ever accepted here.
 
-No agent turn is spent on what isn't the game's: each new group is triaged first
+No agent turn is spent on what isn't the game's: errors from Godot's import cache
+being briefly out of date are read again from disk first
+(:func:`joinery.console_errors.fold_imports`), and each new group is triaged first
 (:func:`joinery.console_errors.triage`), and an editor message or a Joinery bug is
 listed as such at once. Errors that wait together go to one debugger turn (up to
 ``BATCH``), not one turn each in series.
@@ -162,6 +164,9 @@ class ErrorFixer:
         settings = self.settings()
         if settings.mode == "off":
             return
+        # Errors from a file still being imported: gone when it is imported now,
+        # otherwise one finding per file with its cause.
+        entries = ce.fold_imports(entries, self.project)
         now = self._wall()
         changed = False
         offer: ce.Group | None = None
