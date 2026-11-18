@@ -5,6 +5,8 @@ extends RefCounted
 ## provider's turns, by request, are [constant SCRIPT].
 
 const RUNNER := preload("ui_scenarios.gd")
+## Longer checks of one scenario's screen, kept apart so this file stays readable.
+const CHECKS := preload("ui_scenario_checks.gd")
 ## A reply long enough to scroll several screens: headings, a list, code, bold and a long path.
 const LONG_REPLY := (
 	"## What the door script does\n\n"
@@ -301,56 +303,7 @@ func _stream_long() -> void:
 	s.check(not shown.contains("*Use*"), "Italics render")
 	s.check(not shown.contains("- `door.gd`"), "List items show without their dash")
 	s.check(not shown.contains("\n\n\n"), "No double blank gaps")
-	# Wrapped, never past the column: the path is one unbroken word.
-	var messages: Array = s.transcript().get("_messages")
-	var column := scroll.get_global_rect()
-	var parts: Array = messages[-1]["parts"]
-	var inside := true
-	var wraps := true
-	var code: Array[RichTextLabel] = []
-	for part: Control in parts:
-		inside = inside and part.get_global_rect().end.x <= column.end.x + 1.0
-		if part.has_meta("joinery_code"):
-			code.append(part.get_meta("joinery_code"))
-		elif part is RichTextLabel:
-			var text := part as RichTextLabel
-			wraps = wraps and text.get_content_width() <= text.size.x + 1.0
-	s.check(inside, "The reply and its code stay inside the conversation")
-	s.check(wraps, "The long path wraps")
-	s.check(code.size() == 4, "Each code block is a box of its own (%d)" % code.size())
-	if code.is_empty():
-		return
-	var lines := code[0].get_line_count()
-	s.check(lines == 3, "Code keeps its lines: never wrapped mid-signature (%d lines)" % lines)
-	var box := code[0].get_parent() as ScrollContainer
-	var wider := code[0].get_combined_minimum_size().x > box.size.x
-	s.check(
-		not wider or box.get_h_scroll_bar().visible,
-		"Code wider than the conversation scrolls sideways"
-	)
-	var mono := code[0].get_theme_font("normal_font") as FontVariation
-	var liga := TextServerManager.get_primary_interface().name_to_tag("liga")
-	s.check(
-		mono != null and int(mono.opentype_features.get(liga, 1)) == 0,
-		"Code is mono with ligatures off: -> stays as typed"
-	)
-	# The wheel over a code block still scrolls the conversation.
-	var target: Control = code[1]
-	scroll.ensure_control_visible(target)
-	await s.frames(2)
-	var before := scroll.scroll_vertical
-	var wheel := InputEventMouseButton.new()
-	wheel.button_index = MOUSE_BUTTON_WHEEL_DOWN
-	wheel.pressed = true
-	wheel.factor = 1.0
-	wheel.position = target.get_global_rect().get_center()
-	wheel.global_position = wheel.position
-	s.tree.root.push_input(wheel)
-	await s.frames(3)
-	s.check(
-		scroll.scroll_vertical > before,
-		"The wheel over code scrolls the conversation (%d -> %d)" % [before, scroll.scroll_vertical]
-	)
+	await CHECKS.reply_parts(s, scroll)
 	scroll.scroll_vertical = 0
 	await s.shot("top")
 	scroll.scroll_vertical = int(bar.max_value)
@@ -595,7 +548,7 @@ func _rule_zero_stop() -> void:
 	await s.frames(4)
 	s.check(s.card_state() != "working", "The turn has ended (%s)" % s.card_state())
 	s.check(not s.visible_text().contains("Retry"), "No Retry offered around a policy stop")
-	await s.shot("stopped")
+	await CHECKS.policy_stop(s)
 
 
 ## One call is refused (an app not enabled): the reason shows and the turn goes on.

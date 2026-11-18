@@ -314,7 +314,7 @@ func finish_response() -> void:
 
 
 ## A line from Joinery itself, not a chat message. Kinds: success, rejected, stopped, info,
-## error. Consecutive identical notices are dropped.
+## error, divider, policy (a Rule Zero stop). Consecutive identical notices are dropped.
 func add_notice(text: String, kind := "info") -> void:
 	if text.is_empty() or text + kind == _last_notice:
 		return
@@ -324,8 +324,8 @@ func add_notice(text: String, kind := "info") -> void:
 	var row := HBoxContainer.new()
 	row.theme_type_variation = "JoineryRow"
 	row.accessibility_name = "Status: " + text
-	if kind == "divider":
-		_inset(_current_turn()).add_child(NOTICES.divider(text))
+	if kind in ["divider", "policy"]:
+		_inset(_current_turn()).add_child(NOTICES.special(kind, text, example_chosen.emit))
 		_dirty = true
 		return
 	var spec: Array = NOTICE_ICONS.get(kind, NOTICE_ICONS["info"])
@@ -350,10 +350,10 @@ func add_notice(text: String, kind := "info") -> void:
 ## reply, with Retry for the request. A policy stop is never retried (chat_notices.gd).
 func add_error(_who: String, text: String) -> void:
 	var shown := _log.size()
-	add_notice(text, "error")
+	var policy := text.begins_with(NOTICES.POLICY_STOP)
+	add_notice(text, "policy" if policy else "error")
 	var card := current_card()
-	var retry := card != null and _retry_allowed and not text.begins_with(NOTICES.POLICY_STOP)
-	if _log.size() == shown or not retry:
+	if _log.size() == shown or policy or card == null or not _retry_allowed:
 		return
 	NOTICES.retry(_inset(_current_turn()).get_child(-1), retry_requested.emit.bind(card))
 
