@@ -26,6 +26,11 @@ const ERRORS_CARD := preload("errors_card.gd")
 const FILE_SETTLE := preload("file_settle.gd")
 ## Seconds an error naming a file still being imported is held before it is checked again.
 const HOLD := 1.0
+## Seconds before a file that was imported again for a held error may be imported again.
+const REIMPORT_AGAIN := 60.0
+## What Output puts around a line's label besides plain spaces: its icon's stand-in and the
+## thin space before "ERROR:" (editor_log.cpp). strip_edges() and the regex's \s miss them.
+const WIDE_SPACES := ["\u2009", "\u00a0", "\u200b", "\ufffc", "\ufeff"]
 const UI_MOTION := preload("ui_motion.gd")
 ## Characters of new console text sent at once; a flood keeps its newest part.
 const SEND_CHARS := 60000
@@ -40,6 +45,9 @@ var output_source := Callable()
 var log_source := Callable()
 ## Returns the game's whole log as it stands; tests replace it. Empty: user://logs/godot.log.
 var game_log_source := Callable()
+## Imports files again (a PackedStringArray of res:// paths); tests replace it. Empty: the
+## editor's own reimport (file_settle.gd).
+var reimport := Callable()
 ## The Errors list (errors_card.gd), once the host has sent one.
 var card: Control
 ## The host's [agents] fix_errors: "ask", "auto" or "off".
@@ -60,8 +68,11 @@ var _listening: Object
 ## Fix tasks' events that came before the Errors card did.
 var _early: Array[Dictionary] = []
 ## Errors that name a file still being imported (file_settle.gd): {"text", "paths", "since"}.
-## Once imports settle, those whose files now load are dropped, the rest are reported.
+## Once imports settle, those whose files now load are dropped; for the rest each file is
+## imported again once, and only what still doesn't load is reported.
 var _held: Array[Dictionary] = []
+## Files imported again for a held error: res:// path -> when (msec).
+var _reimported: Dictionary = {}
 
 
 static func attach(sidebar: Control, list: Object) -> Node:
@@ -146,7 +157,7 @@ func take_output(added: String) -> void:
 	var held: Dictionary = {}
 	for raw: String in added.split("\n", false):
 		_context.append(raw)
-		var line := raw.strip_edges()
+		var line := plain(raw)
 		var error := _regex.search(line) != null
 		if not held.is_empty() and not error and raw.begins_with(" "):
 			# An error's own "at:" lines stay with it.
@@ -171,20 +182,56 @@ func take_output(added: String) -> void:
 		_last_error = found
 
 
-## Held import errors, once imports settle: dropped when their files load now, otherwise
-## reported as they were.
+## [param raw] without the spaces Output puts around it, wide ones too.
+static func plain(raw: String) -> String:
+	var line := raw
+	for space: String in WIDE_SPACES:
+		line = line.replace(space, " ")
+	return line.strip_edges()
+
+
+## Held import errors, once imports settle: dropped when their files load now. A file that
+## still doesn't load is imported again, once, and checked after that import; what still
+## fails then goes to the host in one report, which makes one finding per file of it.
 func release_held() -> void:
 	if _held.is_empty() or FILE_SETTLE.settling():
 		return
 	var now := Time.get_ticks_msec()
 	var waiting: Array[Dictionary] = []
+	var again := PackedStringArray()
+	var failed := PackedStringArray()
 	for held: Dictionary in _held:
+		var paths: Array[String] = held["paths"]
 		if now - int(held["since"]) < HOLD * 1000.0:
 			waiting.append(held)
-		elif not FILE_SETTLE.loads(held["paths"]):
-			_report("output", str(held["text"]) + "\n")
-			_last_error = str(held["text"]).split("\n")[0].strip_edges()
+			continue
+		if FILE_SETTLE.loads(paths):
+			for path: String in FILE_SETTLE.sources(paths):
+				_reimported.erase(path)
+			continue
+		var fresh := PackedStringArray()
+		for path: String in FILE_SETTLE.sources(paths):
+			var last := int(_reimported.get(path, -1))
+			if again.has(path) or last < 0 or now - last > REIMPORT_AGAIN * 1000.0:
+				fresh.append(path)
+		if not fresh.is_empty():
+			for path: String in fresh:
+				if not again.has(path):
+					again.append(path)
+				_reimported[path] = now
+			held["since"] = now
+			waiting.append(held)
+			continue
+		failed.append(str(held["text"]))
 	_held = waiting
+	if not again.is_empty():
+		if reimport.is_valid():
+			reimport.call(again)
+		else:
+			FILE_SETTLE.reimport(again)
+	if not failed.is_empty():
+		_report("output", "\n".join(failed) + "\n")
+		_last_error = plain(failed[0].split("\n")[0])
 
 
 func _report(source: String, text: String) -> void:

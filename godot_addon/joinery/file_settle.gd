@@ -23,6 +23,13 @@ static var recent := {}
 ## Scans still running.
 static var _busy := 0
 static var _paths := RegEx.create_from_string("res://[^\\s'\"(),]+")
+## Errors that mean a resource couldn't be read: only these hold a file that has a .import.
+static var _load_failed := RegEx.create_from_string(
+	(
+		"(Failed loading resource|Cannot open file|Failed to load resource|Resource file not found"
+		+ "|No loader found for resource|Error loading resource)"
+	)
+)
 
 
 ## Scans the project and returns once the editor has indexed and imported what it found.
@@ -158,18 +165,25 @@ static func settling() -> bool:
 
 
 ## The files an error line names that are still being imported: an imported copy under
-## .godot/imported, a file a change just wrote, or one the editor has not imported yet. Empty
-## when the error is not import noise.
+## .godot/imported, a file a change just wrote, one the editor has not imported yet, or (for
+## an error that a resource couldn't be read) a file the editor imports. Empty when the error
+## is not import noise.
 static func import_noise(line: String) -> Array[String]:
 	var found: Array[String] = []
+	var load_failed := _load_failed.search(line) != null
 	for hit: RegExMatch in _paths.search_all(line):
-		var path := hit.get_string().rstrip(".:")
+		var path := hit.get_string().rstrip(".:'")
 		var place := path.rfind(":")
 		if place > "res://".length() and path.substr(place + 1).is_valid_int():
 			path = path.left(place)
 		if found.has(path):
 			continue
-		if path.begins_with(IMPORTED) or recent.has(path) or _unimported(path):
+		if (
+			path.begins_with(IMPORTED)
+			or recent.has(path)
+			or _unimported(path)
+			or (load_failed and FileAccess.file_exists(path + ".import"))
+		):
 			found.append(path)
 	return found
 
@@ -181,11 +195,83 @@ static func loads(paths: Array[String]) -> bool:
 		if path.begins_with(IMPORTED):
 			if not FileAccess.file_exists(path):
 				return false
+		elif FileAccess.file_exists(path + ".import"):
+			if not FileAccess.file_exists(path) or not imported(path):
+				return false
 		elif not ResourceLoader.exists(path) or _unimported(path):
 			return false
 		elif path.get_extension() in ["tscn", "scn"] and not missing_dependencies(path).is_empty():
 			return false
 	return true
+
+
+## True when [param path] has no .import, or its .import says the import worked and every
+## copy it lists under .godot/imported is there.
+static func imported(path: String) -> bool:
+	if not FileAccess.file_exists(path + ".import"):
+		return true
+	var config := ConfigFile.new()
+	if config.load(path + ".import") != OK or not bool(config.get_value("remap", "valid", true)):
+		return false
+	var copies: Array = config.get_value("deps", "dest_files", [])
+	if copies.is_empty() and config.has_section_key("remap", "path"):
+		copies = [config.get_value("remap", "path")]
+	for copy: Variant in copies:
+		if not FileAccess.file_exists(str(copy)):
+			return false
+	return true
+
+
+## The files to import again so [param paths] load: each one the editor imports, and the file
+## each imported copy was made from. Godot names a copy after its file and the MD5 of its path.
+static func sources(paths: Array[String]) -> PackedStringArray:
+	var found := PackedStringArray()
+	for path: String in paths:
+		var source := path
+		if path.begins_with(IMPORTED):
+			source = source_of(path)
+		if not source.is_empty() and not found.has(source):
+			var known := FileAccess.file_exists(source + ".import") or _importable(source)
+			if FileAccess.file_exists(source) and known:
+				found.append(source)
+	return found
+
+
+## The project file the imported copy [param copy] was made from, or "" when none is.
+static func source_of(copy: String) -> String:
+	var name := copy.get_file()
+	var dash := name.rfind("-")
+	if dash < 0:
+		return ""
+	var file := name.left(dash)
+	var digest := name.substr(dash + 1).get_basename()
+	var folders: Array[String] = ["res://"]
+	while not folders.is_empty():
+		var folder: String = folders.pop_back()
+		var dir := DirAccess.open(folder)
+		if dir == null:
+			continue
+		var base := folder if folder.ends_with("/") else folder + "/"
+		for child: String in dir.get_directories():
+			if not child.begins_with("."):
+				folders.append(base + child)
+		for candidate: String in [file, file + ".import"]:
+			var path := base + candidate.trim_suffix(".import")
+			if dir.file_exists(candidate) and path.md5_text() == digest:
+				return path
+	return ""
+
+
+## Imports [param paths] again (the editor only).
+static func reimport(paths: PackedStringArray) -> void:
+	if paths.is_empty() or not Engine.is_editor_hint():
+		return
+	var files := EditorInterface.get_resource_filesystem()
+	if files.is_importing():
+		return
+	for path: String in paths:
+		files.update_file(path)
+	files.reimport_files(paths)
 
 
 static func _unimported(path: String) -> bool:
