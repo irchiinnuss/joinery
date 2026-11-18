@@ -20,7 +20,7 @@ extends Control
 const UI_THEME := preload("ui_theme.gd")
 ## Width the map assumes before it is laid out, and the tallest it draws, in theme units.
 const WIDTH_UNITS := 320.0
-const HEIGHT_UNITS := 180.0
+const HEIGHT_UNITS := 240.0
 ## How strong the unreached cells are: marked, without drowning the map in alarm.
 const MISSED_ALPHA := 0.72
 ## The heat layers, in drawing order.
@@ -33,7 +33,7 @@ const TIME_ALPHA := Vector2(0.18, 0.85)
 const MARGIN := 1
 ## Over the level's picture: the wash on reached ground, and the path's strength.
 const WALKED_ALPHA := 0.3
-const PATH_ALPHA := 0.9
+const PATH_ALPHA := 0.75
 
 ## The tallest the map may draw, in pixels (the card's room left); 0 for HEIGHT_UNITS.
 var max_height := 0.0:
@@ -408,14 +408,19 @@ func _draw_level(side: float, offset: Vector2, unit: float, missed: Color, heat:
 func _draw_path(side: float, offset: Vector2, unit: float) -> void:
 	if _path.size() < 2:
 		return
+	# A point every half cell at most: a long run reads as a route, not a scribble.
 	var points := PackedVector2Array()
 	for point: Vector2 in _path:
-		points.append(_point(point, side, offset))
+		var at := _point(point, side, offset)
+		if points.is_empty() or points[-1].distance_to(at) >= side * 0.5:
+			points.append(at)
+	if points.size() < 2:
+		return
 	var ink := UI_THEME.color(self, "accent")
 	ink.a = PATH_ALPHA
 	var halo := UI_THEME.color(self, "surface")
-	halo.a = 0.6
-	var width := maxf(1.5, unit * 1.75)
+	halo.a = 0.45
+	var width := maxf(1.0, unit * 1.25)
 	draw_polyline(points, halo, width + maxf(2.0, unit * 2.0), true)
 	draw_polyline(points, ink, width, true)
 
