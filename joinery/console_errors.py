@@ -70,12 +70,15 @@ OWN = ("addons/joinery", "joinery/playtest_bot/", "[Joinery]", "/.joinery/")
 #: Engine noise every run prints: never listed. The project adds its own with
 #: ``[agents] ignore_errors``.
 NOISE = (
-    "ObjectDB instances leaked at exit",
-    "resources still in use at exit",
+    # Godot's own teardown report as the process quits ("17 ObjectDB instances were
+    # leaked at exit", "1 RID allocations of type … were leaked at exit", "2 resources
+    # still in use at exit"): about the engine shutting down, never the game.
+    "leaked at exit",
+    "still in use at exit",
     "Pages in use exist at exit",
     "RID allocations of type",
     "Orphan StringName",
-    "was leaked at exit",
+    "Leaked instance:",
 )
 #: A VR game on a machine with no OpenXR runtime logs these while the engine starts,
 #: then plays on the desktop. They are expected there, never an error: but only when

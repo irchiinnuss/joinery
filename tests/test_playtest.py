@@ -105,8 +105,31 @@ def test_items_carry_repro_steps_with_the_seed() -> None:
     )
     item = playtest_report.build(bot, "", 0, options=OPTIONS)["items"][0]
     assert item["seed"] == 42
-    assert "--seed 42" in item["repro"] and "--seconds 120" in item["repro"]
-    assert "0:42" in item["repro"]
+    assert item["repro"] == "Replay seed 42 (2:00 run); watch around 0:42 of play."
+    # Plain words: only the user starts a playtest, so no command line to copy.
+    assert "joinery playtest" not in item["repro"]
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        (
+            "WARNING: 17 ObjectDB instances were leaked at exit (run with "
+            "`--verbose` for details)."
+        ),
+        "ERROR: 3 RID allocations of type 'N5GodotRID' were leaked at exit.",
+        "WARNING: 2 resources still in use at exit (run with --verbose for details).",
+        "ERROR: Pages in use exist at exit in PagedAllocator: N7Variant",
+        "WARNING: Leaked instance: Node:1234",
+    ],
+)
+def test_godots_exit_teardown_is_never_a_finding(line: str) -> None:
+    """Godot's own report as the headless run quits is about the engine shutting
+    down, not the game: never an item, never counted, never a Fix this."""
+    bot = _bot(log=[{"kind": "warning", "message": line.split(": ", 1)[1], "frame": 9}])
+    report = playtest_report.build(bot, line + "\n", 0, options=OPTIONS)
+    assert report["items"] == []
+    assert sum(report["counts"].values()) == 0
 
 
 def test_the_same_error_is_one_item_counted() -> None:

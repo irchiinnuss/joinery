@@ -139,12 +139,11 @@ def stamp(seconds: float) -> str:
 
 
 def repro(options: dict[str, Any], t: float | None, where: str = "") -> str:
-    """Steps to see it again: the exact command (the seed replays the same run), when, where."""
-    command = f"joinery playtest --project {options.get('project', '.')} --seed {options['seed']}"
-    command += f" --seconds {int(options['seconds'])}"
-    if options.get("scene"):
-        command += f" --scene {options['scene']}"
-    steps = [f"Run `{command}`"]
+    """How to see it again, in plain words: the seed replays the same run, when to
+    watch and where in the code. No command line: only the user starts a playtest."""
+    length = stamp(float(options["seconds"]))
+    scene = f" of {options['scene']}" if options.get("scene") else ""
+    steps = [f"Replay seed {options['seed']} ({length} run{scene})"]
     if t is not None:
         steps.append(f"watch around {stamp(t)} of play")
     if where:
