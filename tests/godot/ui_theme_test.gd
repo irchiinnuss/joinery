@@ -441,6 +441,31 @@ func _check_motion() -> void:
 	_check(target.modulate.a == 0.0, "The morph target waits for the landing")
 	await create_timer(UI_THEME.MOTION["base"] + UI_THEME.MOTION["fast"] + 0.1).timeout
 	_check(target.modulate.a == 1.0 and not source.visible, "The morph lands and hands over")
+	# A loading pulse runs only while it shows: a hidden loop would keep the editor redrawing.
+	var page := VBoxContainer.new()
+	themed.add_child(page)
+	var waiting := Panel.new()
+	page.add_child(waiting)
+	var pulse := UI_MOTION.breathe(waiting)
+	_check(pulse != null and pulse.is_running(), "A shown skeleton breathes")
+	page.hide()
+	_check(not pulse.is_running(), "A hidden page's skeleton stops breathing")
+	await create_timer(0.3).timeout
+	var resting := waiting.modulate.a
+	await create_timer(0.3).timeout
+	_check(waiting.modulate.a == resting, "A paused pulse changes nothing")
+	page.show()
+	_check(pulse.is_running(), "It breathes again once it shows")
+	var hidden := Panel.new()
+	hidden.hide()
+	page.add_child(hidden)
+	_check(not UI_MOTION.breathe(hidden).is_running(), "A skeleton that starts hidden waits")
+	# A fade-in later on the same node is not the pulse's to pause.
+	UI_MOTION.fade_in(hidden)
+	page.hide()
+	var fade: Tween = hidden.get_meta("_joinery_tween_presence")
+	_check(fade.is_running(), "A fade-in is not paused by the pulse's watch")
+	page.show()
 	_check(UI_THEME.set_pref("reduce_motion", "on") == OK, "Reduce motion")
 	_check(not UI_MOTION.is_enabled(), "Reduce motion turns every animation off")
 	_check(UI_THEME.set_pref("reduce_motion", "off") == OK, "Restore motion")

@@ -34,6 +34,8 @@ const PULSE_SCALE := 1.03
 const STAGGER_CAP := 10
 const _ENABLED_META := "joinery_motion_enabled"
 const _TWEEN_META := "_joinery_tween_"
+## The visibility_changed handler that pauses a hidden node's breathing ([method breathe]).
+const _BREATHE_FOLLOW := "_joinery_breathe_follow"
 const _BLUR := """
 shader_type canvas_item;
 uniform float amount : hint_range(0.0, 1.0) = 0.0;
@@ -502,6 +504,9 @@ static func attach_switch(check: CheckButton) -> void:
 
 ## Loading pulse: alpha between 0.6 and 1 over one second, until [method stop] or the node
 ## leaves the tree. Returns null when motion is off (the node then stays fully visible).
+## It pauses while the node is hidden (a closed page's skeleton, a panel in another tab): a
+## loop changes the canvas every frame, so a hidden one would keep the editor redrawing at
+## full rate while nothing on screen moves.
 static func breathe(node: CanvasItem) -> Tween:
 	var tween := _tween(node, "presence")
 	if tween == null:
@@ -511,7 +516,25 @@ static func breathe(node: CanvasItem) -> Tween:
 	tween.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	tween.tween_property(node, "modulate:a", 0.6, 0.5)
 	tween.tween_property(node, "modulate:a", 1.0, 0.5)
+	if not node.has_meta(_BREATHE_FOLLOW):
+		var follow := _follow_visibility.bind(node)
+		node.set_meta(_BREATHE_FOLLOW, follow)
+		node.visibility_changed.connect(follow)
+	_follow_visibility(node)
 	return tween
+
+
+## The breathing loop on [param node] runs only while the node shows.
+static func _follow_visibility(node: CanvasItem) -> void:
+	var tween: Variant = node.get_meta(_TWEEN_META + "presence", null)
+	if not tween is Tween or not (tween as Tween).is_valid():
+		return
+	if (tween as Tween).get_loops_left() != -1:
+		return  # Another presence animation (fade_in, cross-fade) ends on its own.
+	if node.is_visible_in_tree():
+		(tween as Tween).play()
+	else:
+		(tween as Tween).pause()
 
 
 ## Stop every Joinery animation on [param node] and restore its resting alpha and scale.

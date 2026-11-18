@@ -898,7 +898,6 @@ func _idle() -> void:
 	s.dock.visible = false
 	var hidden := await _redraws("idle_sidebar_hidden_frames_per_s")
 	s.dock.visible = true
-	# Only the sidebar's own share is held to a budget: the rest of the editor is not ours.
 	if OS.is_in_low_processor_usage_mode():
 		s.check(
 			drawn - hidden < 5.0,
@@ -907,6 +906,9 @@ func _idle() -> void:
 				% [drawn, hidden]
 			)
 		)
+		# Nor does the rest of Joinery: a loading pulse on a hidden page once kept the whole
+		# editor drawing about 100 frames a second.
+		s.check(hidden < 5.0, "Idle, the editor draws nothing (%.1f frames/s)" % hidden)
 
 
 ## Frames drawn per second over two quiet seconds, recorded as [param name].
