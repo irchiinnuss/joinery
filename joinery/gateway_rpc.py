@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from joinery import (
+    background,
     compact,
     design,
     design_doc_tool,
@@ -731,7 +732,7 @@ class GatewayRPC:
             self.stop_reason = str(exc)
             response = {"ok": False, "stop": True, "error": self.stop_reason}
             if first and self.on_stop is not None:
-                asyncio.ensure_future(self.on_stop(self.stop_reason))
+                background.spawn(self.on_stop(self.stop_reason), name="policy-stop")
         except (
             OSError,
             ValueError,

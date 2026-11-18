@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from bridge.protocol import Prompt
+from joinery import background
 from joinery import console_errors as ce
 from joinery.debugging import DebugRequest
 
@@ -407,7 +408,7 @@ class ErrorFixer:
 
     def _repump(self) -> None:
         with contextlib.suppress(RuntimeError):
-            asyncio.get_running_loop().create_task(self._pump_and_publish())
+            background.spawn(self._pump_and_publish(), name="error-fixer-pump")
 
     async def _pump_and_publish(self) -> None:
         before = self.running()

@@ -37,6 +37,7 @@ import os
 import time
 from typing import Any
 
+from joinery import background
 from joinery.runner import Result
 
 #: Requests one process serves before a fresh one starts.
@@ -337,7 +338,10 @@ class WarmBlender:
     def _schedule_idle(self) -> None:
         loop = asyncio.get_running_loop()
         self._idle = loop.call_later(
-            IDLE_SECONDS, lambda: loop.create_task(self.close())
+            IDLE_SECONDS,
+            lambda: background.spawn(
+                self.close(), name="warm-blender-close", loop=loop
+            ),
         )
 
     async def _abandon(self) -> None:
