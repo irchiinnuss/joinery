@@ -76,3 +76,19 @@ static func policy_stop(s: Variant) -> void:
 		s.check(s.prompt().text.contains("own tools"), "The next step waits in the message box")
 		s.check((s.transcript().get("_cards") as Array).size() == cards, "…and is not sent unasked")
 		s.prompt().text = ""
+
+
+## The change card's quiet buttons: Preview and Try other ways look alike, on one row.
+static func quiet_actions(s: Variant) -> void:
+	var row: Node = s.transcript().find_child("QuietActions", true, false)
+	var preview: Button = row.find_child("Preview", true, false) if row != null else null
+	var ways: Button = row.get_child(-1) if row != null else null
+	s.check(
+		(
+			preview != null
+			and ways != null
+			and preview.theme_type_variation == ways.theme_type_variation
+			and absf(preview.get_global_rect().position.y - ways.get_global_rect().position.y) < 1.0
+		),
+		"Preview and Try other ways are alike quiet buttons, side by side"
+	)

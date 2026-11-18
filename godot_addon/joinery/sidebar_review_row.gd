@@ -3,9 +3,9 @@ extends PanelContainer
 ## The change waiting for a decision, inside its chat card: the change large (its turntable or
 ## picture at 16:9 across the card, at most 360 px tall; before and after side by side, each
 ## labelled, when the change has a before picture), one caption line naming it
-## ("door.blend · +1 sound ›", the chevron opens the Review panel), and the decision row:
-## "Try other ways" quiet on the leading edge, Discard and Accept (the view's one accent) on the
-## trailing edge. In a narrow sidebar "Try other ways" takes its own line above the buttons. A
+## ("door.blend · +1 sound ›", the chevron opens the Review panel), one row of quiet buttons
+## ("Preview", "Ask to fix", "Try other ways"; it wraps in a narrow sidebar), and the decision
+## row: Discard and Accept (the view's one accent) on the trailing edge. A
 ## bigger change (several assets, many lines, a reviewer's warning) offers "Review 2 changes"
 ## instead, which brings the panel into view. Both go through the panel (review_panel.gd), so
 ## the decision looks and behaves the same wherever it is made. ⌘↩ accepts and ⌘⌫ discards
@@ -41,8 +41,8 @@ var _after_tag: Control
 var _line: Label
 var _details: Button
 var _decision: HBoxContainer
-## "Try other ways" on a line of its own, in a narrow sidebar.
-var _ways_line: HBoxContainer
+## The quiet buttons: the note's Preview and Ask to fix, then "Try other ways".
+var _quiet: HFlowContainer
 var _actions: HBoxContainer
 var _discard: Button
 var _accept: Button
@@ -141,36 +141,28 @@ func _init() -> void:
 				_review.call("ask_to_fix", path)
 	)
 	_facts.add_child(_note)
-	_ways_line = HBoxContainer.new()
-	_ways_line.theme_type_variation = "JoineryRow"
-	_ways_line.hide()
-	column.add_child(_ways_line)
-	_decision = HBoxContainer.new()
-	_decision.name = "Decision"
-	_decision.theme_type_variation = "JoineryRow"
-	# The buttons keep the trailing edge when "Try other ways" moves above them.
-	_decision.alignment = BoxContainer.ALIGNMENT_END
-	column.add_child(_decision)
-	ways = UI.quiet_link("Try other ways")
+	_quiet = HFlowContainer.new()
+	_quiet.name = "QuietActions"
+	STYLE.on_theme_overrides(
+		_quiet,
+		func() -> void:
+			_quiet.add_theme_constant_override("h_separation", UI_THEME.space(_quiet, 1))
+			_quiet.add_theme_constant_override("v_separation", UI_THEME.space(_quiet, 1))
+	)
+	column.add_child(_quiet)
+	# The note's buttons join this row, so all of them look and line up alike.
+	_note.links.reparent(_quiet, false)
+	ways = UI.quiet("Try other ways")
 	ways.accessibility_name = "Try other ways of this change"
 	ways.tooltip_text = "Make a few other versions side by side and keep the one you like"
 	ways.pressed.connect(func() -> void: other_ways_pressed.emit())
-	ways.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	# It takes the room the buttons leave, clipped rather than widen the sidebar; a layout too
-	# narrow for its words moves it to its own line ([method _fit_width]).
-	ways.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	ways.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	ways.clip_text = true
-	STYLE.hug_left(ways)
-	# Full text colour: a real option beside the decision, not a faded one.
-	STYLE.on_theme_overrides(
-		ways,
-		func() -> void:
-			var ink := ways.get_theme_color("text", "Joinery")
-			for key: String in ["font_color", "font_focus_color"]:
-				ways.add_theme_color_override(key, ink)
-	)
-	_decision.add_child(ways)
+	UI.bind_height(ways, "xs")
+	_quiet.add_child(ways)
+	_decision = HBoxContainer.new()
+	_decision.name = "Decision"
+	_decision.theme_type_variation = "JoineryRow"
+	_decision.alignment = BoxContainer.ALIGNMENT_END
+	column.add_child(_decision)
 	_actions = HBoxContainer.new()
 	_actions.name = "Actions"
 	STYLE.on_theme_overrides(
@@ -202,7 +194,6 @@ func _init() -> void:
 	for button: Button in ordered + [_open]:
 		UI.bind_height(button, "md")
 		_actions.add_child(button)
-	resized.connect(_fit_width)
 	hide()
 
 
@@ -250,9 +241,9 @@ func refresh(media: Array = []) -> void:
 	var owned: Array = glance.get("owned", []) if decidable else []
 	_note.show_items(owned, bool(glance.get("can_fix", false)))
 	_facts.visible = _line.get_parent().visible or _note.visible
+	_quiet.visible = ways.visible or _note.links.visible
 	var was := visible
 	visible = waiting and (_frame.visible or decidable)
-	_fit_width.call_deferred()
 	if visible and not was:
 		UI_MOTION.reveal(self)
 
@@ -381,25 +372,3 @@ func _fit_preview() -> void:
 	)
 	if absf(_frame.custom_minimum_size.y - tall) >= 1.0:
 		_frame.custom_minimum_size.y = tall
-
-
-## "Try other ways" beside the buttons when they fit on one line, above them when not.
-func _fit_width() -> void:
-	if not is_inside_tree() or not ways.visible:
-		_ways_line.hide()
-		return
-	var room := _decision.size.x
-	var gap := float(UI_THEME.space(self, 3))
-	var font := ways.get_theme_font("font")
-	var natural := (
-		font.get_string_size(ways.text, 0, -1, ways.get_theme_font_size("font_size")).x
-		+ ways.get_theme_stylebox("normal").get_minimum_size().x
-	)
-	var need := natural + gap + _actions.get_combined_minimum_size().x
-	var narrow := room > 0.0 and need > room
-	if narrow and ways.get_parent() == _decision:
-		ways.reparent(_ways_line, false)
-	elif not narrow and ways.get_parent() == _ways_line:
-		ways.reparent(_decision, false)
-		_decision.move_child(ways, 0)
-	_ways_line.visible = ways.get_parent() == _ways_line

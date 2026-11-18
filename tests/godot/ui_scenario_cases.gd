@@ -586,6 +586,7 @@ func _review(accept: bool) -> void:
 	)
 	s.check(ready, "The change waits for review")
 	await s.frames(4)
+	CHECKS.quiet_actions(s)
 	await s.shot("waiting")
 	var started := Time.get_ticks_usec()
 	if accept:
