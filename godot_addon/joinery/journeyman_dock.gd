@@ -629,8 +629,6 @@ func _sync() -> void:
 	var command: String = _slash.running()
 	if not command.is_empty():
 		_footer.set_mode("command", command)
-	elif _busy and _parked():
-		_footer.set_mode("idle")
 	elif _busy:
 		_footer.set_mode("idle")  # The work shows in the chat only; the composer keeps Stop.
 	elif _review_pending:  # Shown on the card, or decided there and on its way: nothing waits.
@@ -832,6 +830,8 @@ func show_timing(event: Dictionary) -> void:
 
 func append_agent_text(text: String, new_message: bool) -> void:
 	_on_sent()
+	if not _assistant_open and _busy and _card() != null:
+		_card().reply_started()
 	_turn().append_delta(PERSONA, text, new_message or not _assistant_open)
 	_assistant_open = true
 

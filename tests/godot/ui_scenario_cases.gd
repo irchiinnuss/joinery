@@ -244,6 +244,12 @@ func _stream_short() -> void:
 	var first_ms := (Time.get_ticks_usec() - started) / 1000.0
 	s.check(first, "The reply starts to show")
 	s.metric("send_to_first_words", first_ms, "ms")
+	await s.frames(2)
+	var live: PackedStringArray = s.card().call("visible_steps")
+	s.check(
+		not "Thinking through your request…" in live,
+		"Once words arrive, the live line no longer says it thinks: " + ", ".join(live)
+	)
 	await s.shot("streaming")
 	await s.wait_until(func() -> bool: return not timing.is_empty(), 8000)
 	await s.frames(4)

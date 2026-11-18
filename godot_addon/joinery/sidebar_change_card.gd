@@ -80,6 +80,8 @@ const APPS := ["Blender", "Krita", "GIMP", "Material Maker", "Surge XT", "SuperC
 const TOO_OLD := "Too old to revert"
 ## Step lines that only say the assistant is busy; the footer shows these, not the card.
 const GENERIC_STEPS := ["Thinking…", "Preparing your request…", "Sending…"]
+## The live line while the reply's words arrive ([method reply_started]).
+const WRITING := "Writing the reply…"
 ## Outcome kind -> [icon, tint role]. "auto" is a change Joinery kept without asking
 ## (`[agents] auto_accept`): a quiet line, "Accepted automatically", with Undo.
 const OUTCOMES := {
@@ -395,6 +397,13 @@ func add_step(text: String, detail := "") -> void:
 	_show_all_steps(false)
 	_steps.show()
 	_sync_activity()
+
+
+## The reply's first words: the live line says so ("Writing the reply…"), so "Thinking through
+## your request…" never stays on while the words arrive; the step before it gets its tick.
+func reply_started() -> void:
+	if state == "working":
+		add_step(WRITING)
 
 
 ## A test run as it goes (joinery/test_progress.py): the live line says the test it checks

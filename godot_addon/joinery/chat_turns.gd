@@ -227,6 +227,8 @@ func _show(turn: Dictionary, event: Dictionary) -> void:
 	var text := str(event.get("text", ""))
 	match str(event.get("kind", "")):
 		"message_delta":
+			if not turn["open"] and is_instance_valid(card) and str(card.get("state")) == "working":
+				card.call("reply_started")
 			view.call(
 				"append_delta",
 				PERSONA,
