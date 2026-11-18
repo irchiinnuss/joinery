@@ -140,6 +140,12 @@ _USER_TIDY = re.compile(
 _USER_ANSWERS = re.compile(r"\bjoinery\b(?:\s+\S+)*?\s+new\b.*\s--answers\b")
 
 
+#: A playtest is the user's choice (joinery.playtest_gate): an agent asked for one
+#: calls the gated ``playtest`` tool, never ``joinery playtest`` in its shell. Reading
+#: the recent runs' heatmap plays nothing.
+_USER_PLAYTEST = re.compile(r"\bjoinery\b(?:\s+\S+)*?\s+playtest\b(?!.*--heatmap\b)")
+
+
 _TIDY_FLAGS = ("--remove", "--yes", "--keep", "--unkeep", "--clear-caches")
 _IMPORT_FLAGS = ("--reference", "--design-doc")
 
@@ -191,6 +197,11 @@ _MESSAGES = {
         "Ask the user to add the file there, or to paste the document into the "
         "chat and ask you to save it: save_design_doc stages it for their review."
     ),
+    "playtest": (
+        "Playtests run only when the user asks for one, and then through the "
+        "playtest tool, not the shell. If playing the game would help, tell the "
+        "user they can run /playtest."
+    ),
     "answers": (
         "Answers given when a project is made count as the user's own approval of "
         "its look, so only the user passes them: in the new-project wizard, or "
@@ -219,6 +230,8 @@ def _guard(argv: tuple[str, ...]) -> str | None:
         return "import"
     if "new" in args and _flag(args[args.index("new") :], ("--answers",)):
         return "answers"
+    if "playtest" in args and not _flag(args, ("--heatmap",)):
+        return "playtest"
     return None
 
 
@@ -231,6 +244,7 @@ def _guard_text(segment: str) -> str | None:
         ("kits", _USER_KITS),
         ("import", _USER_IMPORT),
         ("answers", _USER_ANSWERS),
+        ("playtest", _USER_PLAYTEST),
     ):
         if pattern.search(segment):
             return name

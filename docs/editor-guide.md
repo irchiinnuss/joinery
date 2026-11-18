@@ -478,8 +478,8 @@ coins`. The playtester is your provider in the read-only `playtester` role (ADR
 - When the run is over the card shows one count per severity (**1 high · 2
   low · 1 note**) and each finding as a row. A row opens to what happened,
   where in the code, the seed and a screenshot of the moment. **Fix this** puts
-  a ready request in the message box, with the seed to check the fix with;
-  nothing is sent until you send it. **×** dismisses the card.
+  a plain request in the message box; nothing is sent until you send it. **×**
+  dismisses the card. The run changes nothing in your game.
 - The playtester's own report appears in the chat: bugs with repro steps,
   softlocks and balance notes, most serious first. Each fix it proposes is a
   line with **Ask Journeyman to fix**, which also only fills the message box.
@@ -491,11 +491,18 @@ coins`. The playtester is your provider in the read-only `playtester` role (ADR
   Each run's report and pictures stay in `.joinery/playtests/`, the last ten
   runs; the game's own saves and settings during a run go there too, never
   into your real ones.
-- Journeyman can play the game the same way with its `playtest` tool, for
-  example after changing how the player moves; its runs show on the same card.
+- The playtester only plays when you ask: `/playtest`, the card's own
+  buttons, or a request that asks for it in so many words ("playtest it",
+  "run the bot"). Journeyman never starts one by itself; when a run would
+  help it suggests `/playtest` instead.
 - `[agents] playtest_after_change = true` in `joinery.toml` starts the
   playtester after you accept a change to scripts or scenes (off by default).
   `playtest_minutes = 2` sets how long a run is.
+- **Settings > Playtester** turns it off for the project (`[agents]
+  playtester = false`): `/playtest` and its card are hidden and nothing plays
+  the game.
+- Godot's own messages as the run quits ("ObjectDB instances were leaked at
+  exit" and the like) are not about your game and are never findings.
 - Screenshots come from a second run of the same seed in a window that never
   takes focus. Where nothing can draw (Linux without a display) the report
   has no pictures.

@@ -44,6 +44,7 @@ from joinery import (
     metrics,
     played,
     playtest,
+    playtest_gate,
     project_commands,
     project_map,
     references,
@@ -1436,6 +1437,11 @@ def _parser() -> argparse.ArgumentParser:
             "fix-errors", help="show or change what happens to console errors"
         )
     )
+    playtest_gate.add_arguments(
+        commands.add_parser(
+            "playtester", help="show or turn on/off the playtester for a project"
+        )
+    )
     auto_accept.add_arguments(
         commands.add_parser(
             "auto-accept",
@@ -1985,6 +1991,8 @@ def main(argv: list[str] | None = None) -> int:
         return done_when.go_main(args)
     if args.command == "fix-errors":
         return console_errors.main(args)
+    if args.command == "playtester":
+        return playtest_gate.main(args)
     if args.command == "agents":
         if args.json:
             print(

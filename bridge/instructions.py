@@ -346,11 +346,12 @@ STEP_PROMPT = RolePrompt(
 
 #: When to play the game rather than reason about it.
 PLAYTEST_GUIDE = (
-    "To try the game, call playtest(minutes?, seed?, focus?): a bot plays it headless "
-    "and reports script errors, crashes, softlocks and balance notes with repro steps "
-    "and the seed. It changes nothing. Use it after gameplay changes when the user "
-    "asks whether the game works; replay a finding with its seed. The user starts the "
-    "playtester agent with /playtest. "
+    "Playtests are the user's choice: call playtest(minutes?, seed?, focus?) only when "
+    'the user\'s request asks for one in so many words ("playtest it", "run the '
+    'bot"); it refuses otherwise. Never start one to check your own work, to hunt a '
+    "warning or to confirm a fix. When playing the game would help, say in one line "
+    "that the user can run /playtest, and carry on. A bot plays headless and reports "
+    "crashes, script errors, softlocks and places it can't reach; it changes nothing. "
     "To hear which sounds a level lacks (footsteps, pickups, switches, ambience, UI), "
     "call sound_audit; make one with joinery-sound make_sound, several with one "
     "make_sounds call (they render side by side), then precheck once. The user starts the "
@@ -389,10 +390,12 @@ PLAYTEST_PROMPT = RolePrompt(
     "Keep it under 200 words, plain sentences, no headings beyond those three. Leave "
     "out sections with nothing in them. If a fresh run with another seed would help "
     "confirm something, say so instead of running it. "
+    'Leave out Godot\'s own messages when the game quits ("leaked at exit", '
+    '"still in use at exit"): they are not the game\'s. '
     "End with up to three lines that each start with 'Fix: ' followed by a request "
-    "Journeyman could act on, complete on its own (it won't see this report), naming "
-    "the file and the seed to check the fix with. Write no Fix lines when nothing "
-    "needs fixing.",
+    "Journeyman could act on, complete on its own (it won't see this report), in "
+    "plain words: what goes wrong, where in the game and in which file. No commands, "
+    "and don't ask for another playtest. Write no Fix lines when nothing needs fixing.",
     "minutes={minutes}\nfocus: {focus}",
 )
 
@@ -461,7 +464,7 @@ ECONOMY_GUIDE = (
     "for the node first) and never read a file you already read this turn unless it "
     "changed. The shell is for plain read-only commands only (rg, grep, sed -n, cat, ls, "
     "find, head, wc, git log/diff/show): no loops, awk, xargs or $( ). Godot runs only "
-    "through precheck, playtest and run_project; don't look for its binary. "
+    "through precheck and run_project (playtest when the user asks for one); don't look for its binary. "
     "discover_tools lists each tool's arguments: call tool_schema only when they are "
     "unclear, and only once per tool. game_brief, game_setup and art_direction are "
     "joinery-registry tools for read_tool. A tool discover_tools marks read "

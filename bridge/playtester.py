@@ -10,8 +10,11 @@ and the seed, softlocks, balance notes, each with a severity. Lines it starts wi
 ``Fix:`` become "Ask Journeyman to fix" follow-ups, which the user sends as a normal
 request.
 
-Any agent may call ``playtest`` (the lead, a task); every run shows on the sidebar's
-playtest card through ``playtest`` events tagged with ``playtest_id``:
+A playtest runs only when the user asks (``joinery.playtest_gate``): the lead and tasks
+get :meth:`Playtester.gated`, which refuses unless the user's request asks for a playtest
+in so many words, and nothing runs when the project turned the playtester off. Every run
+shows on the sidebar's playtest card through ``playtest`` events tagged with
+``playtest_id``:
 ``{state: starting|playing|writing|done|failed|stopped, elapsed, seconds, report,
 summary, followups, message}``. One playtest runs at a time.
 """
@@ -28,7 +31,7 @@ from typing import Any, Protocol
 
 from bridge.instructions import PLAYTEST_PROMPT
 from bridge.protocol import Done, Message, MessageDelta, Prompt
-from joinery import playtest, playtest_heat
+from joinery import playtest, playtest_gate, playtest_heat
 
 Emit = Callable[[dict[str, Any]], None]
 Runner = Callable[
@@ -39,6 +42,9 @@ GAMEPLAY_SUFFIXES = (".gd", ".tscn", ".tres", ".gdshader", ".cs")
 #: The playtester's own words, at most.
 REPORT_LIMIT = 12_000
 BUSY = "A playtest is already running; wait for its report."
+OFF_FOR_USER = (
+    "The playtester is off for this project. Turn it on in Settings > Playtester."
+)
 
 
 class PlaytestAgent(Protocol):
@@ -180,6 +186,31 @@ class Playtester:
         #: Told each report's items as it is made: its console errors join the
         #: sidebar's Errors list (bridge.error_fixer, ADR 0075).
         self.on_report: Callable[[list[dict[str, Any]]], Awaitable[None]] | None = None
+        #: The user's current request asks for a playtest (playtest_gate.asks): only
+        #: then may the lead call ``playtest``.
+        self.asked = False
+        #: Tasks that may call ``playtest``: those the lead started while the user's
+        #: request asked for one, and those the user started asking for one.
+        self.asked_tasks: set[str] = set()
+
+    def user_request(self, text: str) -> None:
+        """A new request from the user: does it ask for a playtest?"""
+        self.asked = playtest_gate.asks(text)
+
+    def gated(
+        self, allowed: Callable[[], bool]
+    ) -> Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]:
+        """The ``playtest`` tool for the lead or a task: it plays only when
+        ``allowed()`` says the user asked; otherwise the agent is told to suggest
+        /playtest. The playtester's own endpoint gets :meth:`tool` itself: it only
+        ever runs because the user started it."""
+
+        async def call(params: dict[str, Any]) -> dict[str, Any]:
+            if not allowed():
+                raise ValueError(playtest_gate.NOT_ASKED)
+            return await self.tool(params)
+
+        return call
 
     def busy(self) -> bool:
         return self.current is not None and self.current.state not in {
@@ -190,6 +221,8 @@ class Playtester:
 
     def start(self, focus: str = "", origin: str = "user") -> Run:
         """``/playtest``: the playtester plays and writes its report, in the background."""
+        if not playtest_gate.enabled(self.project):
+            raise ValueError(OFF_FOR_USER)
         if self.busy():
             raise ValueError(BUSY)
         run = Run(id=uuid.uuid4().hex[:12], origin=origin, focus=focus.strip()[:200])
@@ -200,7 +233,10 @@ class Playtester:
         return run
 
     async def tool(self, params: dict[str, Any]) -> dict[str, Any]:
-        """The ``playtest`` tool, for whichever agent calls it."""
+        """The ``playtest`` tool, as the playtester calls it (and, through
+        :meth:`gated`, the lead and tasks when the user asked)."""
+        if not playtest_gate.enabled(self.project):
+            raise ValueError(playtest_gate.OFF)
         if self._playing:
             raise ValueError(BUSY)
         checked = tool_params(params, playtest.config(self.project)["playtest_minutes"])

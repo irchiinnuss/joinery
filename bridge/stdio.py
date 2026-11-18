@@ -56,6 +56,7 @@ from joinery import (
     idle_runs,
     look_preview,
     playtest,
+    playtest_gate,
     session_summary,
 )
 from joinery.agents import display_name
@@ -684,7 +685,12 @@ async def _serve(
             bridge=lambda agent: role_bridge(agent, "playtester"),
             endpoint=lambda: role_endpoint(gateway, "playtester"),
         )
-        rpc_server.playtest = playtester.tool
+        # Agents play only when the user asked (joinery.playtest_gate): the lead while
+        # the user's request asks for a playtest, a task when it was started so.
+        player = playtester
+        rpc_server.playtest = player.gated(
+            lambda: player.asked and active is not None and not active.done()
+        )
         # The design check's agent pass reads in its own read-only role too.
         designer = Designer(
             project,
@@ -697,8 +703,11 @@ async def _serve(
 
         def task_endpoint(lane: ProjectGateway, stop: Any) -> GatewayRPC:
             endpoint = GatewayRPC(lane, stop, role="worker")
-            if playtester is not None:
-                endpoint.playtest = playtester.tool
+            if playtester is not None and crew is not None:
+                ids = [t.id for t in crew.tasks.values() if t.gateway is lane]
+                endpoint.playtest = player.gated(
+                    lambda: bool(ids) and ids[0] in player.asked_tasks
+                )
             if checks is not None:
                 endpoint.checks = checks.tool
             if sounder is not None:
@@ -722,6 +731,7 @@ async def _serve(
                 or playtester.busy()
                 or not gameplay_change(list(decision.get("changes", [])))
                 or not playtest.config(project)["playtest_after_change"]
+                or not playtest_gate.enabled(project)
             ):
                 return
             playtester.start(origin="after_change")
@@ -853,6 +863,9 @@ async def _serve(
                 prompt=task_prompt(),
                 targets=request["targets"],
             )
+            if playtester is not None and playtester.asked:
+                # The user asked this request for a playtest: its tasks may play.
+                playtester.asked_tasks.add(task.id)
             return {
                 "task_id": task.id,
                 "state": task.state,
@@ -1198,12 +1211,14 @@ async def _serve(
                     text = str(data.get("text", "")).strip()
                     if not text:
                         raise ValueError("Write what the task should do.")
-                    await crew.start(
+                    user_task = await crew.start(
                         chats.title_from(text),
                         text,
                         origin="user",
                         prompt=task_prompt(data),
                     )
+                    if playtester is not None and playtest_gate.asks(text):
+                        playtester.asked_tasks.add(user_task.id)
                 elif data.get("kind") == "idle":
                     # /idle, /idle now, /idle clear (ADR 0072).
                     action = str(data.get("action", "") or "")
@@ -1328,6 +1343,8 @@ async def _serve(
                         )
                     elif str(data.get("text", "")).strip():
                         rpc_server.stop_reason = ""
+                        if playtester is not None:
+                            playtester.user_request(str(data.get("text", "")))
                         active = asyncio.create_task(turn(data))
                 else:
                     raise ValueError("Unknown chat message.")

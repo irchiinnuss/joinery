@@ -36,7 +36,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from joinery import import_cache, playtest_heat, playtest_report
+from joinery import import_cache, playtest_gate, playtest_heat, playtest_report
 from joinery.catalog import ROOT
 
 BOT = Path(__file__).resolve().parent / "playtest_bot" / "bot.gd"
@@ -655,6 +655,13 @@ def main(args: argparse.Namespace) -> int:
         else:
             print("\n".join(playtest_heat.summary_lines(heat)))
         return 0
+    if not playtest_gate.enabled(project):
+        print(
+            "The playtester is off for this project: turn it on with "
+            "`joinery playtester --set on` or in Settings > Playtester.",
+            file=sys.stderr,
+        )
+        return 2
     if args.seconds is not None:
         seconds = float(args.seconds)
     elif args.minutes is not None:

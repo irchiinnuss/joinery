@@ -209,7 +209,7 @@ def test_the_playtester_plays_then_writes_a_report_with_followups(
         done = events[-1]
         assert done["playtest_id"] == run.id and done["origin"] == "user"
         assert done["report"]["counts"]["high"] == 1
-        assert done["report"]["items"][0]["repro"].startswith("Run `joinery playtest")
+        assert done["report"]["items"][0]["repro"].startswith("Replay seed 42")
         assert done["summary"].startswith("Bugs:")
         assert len(done["followups"]) == 2
         # The agent's tool call played with its own arguments, screenshots on.
@@ -495,3 +495,156 @@ def test_the_playtester_is_a_read_only_role_and_playtest_a_shared_read() -> None
     assert not registry_allowed("reviewer", "playtest")
     refused = role_violation("playtester", "bash", "", "", command="rm -rf game")
     assert refused is not None and "only plays" in refused.reason
+
+
+# --- Only when the user asks ------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "asked"),
+    [
+        ("Playtest it", True),
+        ("can you play-test the backyard for a minute?", True),
+        ("Fix the mower, then playtest the level", True),
+        ("run the bot on the lawn", True),
+        ("let the bot play for 3 minutes", True),
+        ("test-play the new level", True),
+        ("Make the mower louder", False),
+        ("Is the M0 done? Check it works", False),
+        ("Fix this problem the test bot found: the mower floats", False),
+        ("don't playtest it, just fix the script", False),
+        ("Fix the hedge without playtesting", False),
+        ("", False),
+    ],
+)
+def test_a_request_asks_for_a_playtest_only_in_so_many_words(
+    text: str, asked: bool
+) -> None:
+    from joinery import playtest_gate
+
+    assert playtest_gate.asks(text) is asked
+
+
+def test_the_lead_and_tasks_play_only_when_the_user_asked(tmp_path: Path) -> None:
+    async def go() -> None:
+        tester, events, engine, _agents = _playtester(tmp_path)
+        lead = tester.gated(lambda: tester.asked)
+        tester.user_request("Is the yard done? Check for errors")
+        with pytest.raises(ValueError, match="only when the user asks") as refused:
+            await lead({"minutes": 1})
+        assert "/playtest" in str(refused.value)
+        assert engine.calls == [] and events == []
+        tester.user_request("Playtest the yard for a minute")
+        assert (await lead({"minutes": 1}))["summary"].startswith("Played")
+        assert len(engine.calls) == 1
+        # The playtester's own endpoint runs because the user started it.
+        assert (await tester.tool({"minutes": 1}))["summary"]
+
+    asyncio.run(go())
+
+
+def test_a_project_can_turn_the_playtester_off(tmp_path: Path) -> None:
+    from joinery import playtest_gate
+
+    async def go() -> None:
+        tester, _events, engine, _agents = _playtester(tmp_path)
+        (tmp_path / "joinery.toml").write_text('[tools]\nenabled=["godot"]\n')
+        assert playtest_gate.enabled(tmp_path)
+        playtest_gate.set_enabled(tmp_path, False)
+        assert not playtest_gate.enabled(tmp_path)
+        assert "[tools]" in (tmp_path / "joinery.toml").read_text()
+        with pytest.raises(ValueError, match="off"):
+            tester.start()
+        with pytest.raises(ValueError, match="off"):
+            await tester.tool({})
+        tester.user_request("playtest it")
+        with pytest.raises(ValueError, match="off"):
+            await tester.gated(lambda: True)({})
+        assert engine.calls == []
+        playtest_gate.set_enabled(tmp_path, True)
+        assert playtest_gate.enabled(tmp_path)
+
+    asyncio.run(go())
+
+
+def test_the_playtester_switch_from_the_command_line(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from joinery import cli
+
+    (tmp_path / "joinery.toml").write_text('[agents]\nfix_errors = "auto"\n')
+    assert cli.main(["playtester", "--project", str(tmp_path), "--json"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"playtester": True}
+    assert (
+        cli.main(["playtester", "--project", str(tmp_path), "--json", "--set", "off"])
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out) == {"playtester": False}
+    text = (tmp_path / "joinery.toml").read_text()
+    assert 'fix_errors = "auto"' in text and "playtester = false" in text
+    assert cli.main(["playtest", "--project", str(tmp_path)]) == 2
+    assert "off for this project" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("command", "refused"),
+    [
+        ("uv run joinery playtest --project . --seed 702378 --seconds 180", True),
+        ("joinery playtest --project /games/yard --json", True),
+        ("joinery playtest --project . --heatmap --json", False),
+        ("joinery playtester --project . --json", False),
+        ("grep -n playtest bridge/playtester.py", False),
+    ],
+)
+def test_agents_cannot_start_a_playtest_from_the_shell(
+    command: str, refused: bool
+) -> None:
+    from joinery.policy import user_only_violation
+
+    verdict = user_only_violation(command)
+    assert (verdict is not None) is refused, command
+    if verdict is not None:
+        assert "/playtest" in verdict.reason
+
+
+def test_the_lead_playtests_only_for_a_request_that_asks(
+    host_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from bridge import stdio
+
+    engine = FakeEngine()
+    host = _host(host_project, monkeypatch, engine)
+    made: list[Any] = []
+    factory = stdio.GatewayRPC
+
+    def capture(*args: Any, **kwargs: Any) -> Any:
+        made.append(factory(*args, **kwargs))
+        return made[-1]
+
+    monkeypatch.setattr(stdio, "GatewayRPC", capture)
+    answers: list[str] = []
+
+    def plays(label: str) -> Any:
+        async def step(_lane: Any) -> AsyncIterator[Any]:
+            try:
+                result = await made[0].playtest({"minutes": 1})
+                answers.append(f"{label}: {result['summary'][:6]}")
+            except ValueError as exc:
+                answers.append(f"{label}: {exc}")
+            yield Done(ok=True)
+
+        return step
+
+    host.scripts = {"Check the yard": plays("check"), "Playtest": plays("asked")}
+    host.lines = [
+        (lambda _e: True, {"kind": "prompt", "text": "Check the yard", "chat_id": ""}),
+        (
+            lambda _e: len(answers) == 1,
+            {"kind": "prompt", "text": "Playtest the yard", "chat_id": ""},
+        ),
+        (lambda _e: len(answers) == 2, {"kind": "cancel_tasks"}),
+    ]
+    host.run()
+    assert answers[0].startswith("check: Playtests run only when the user asks")
+    assert answers[1] == "asked: Played"
+    assert len(engine.calls) == 1

@@ -58,7 +58,7 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Literal
 
-from joinery import playtest, playtest_report
+from joinery import playtest, playtest_gate, playtest_report
 
 Kind = Literal["reach", "no_errors", "test", "check", "look"]
 KINDS: tuple[str, ...] = ("reach", "no_errors", "test", "check", "look")
@@ -921,7 +921,9 @@ async def verify(
     playing = [c for c in todo.done_when if c.kind in {"reach", "no_errors"}]
     report: dict[str, Any] | None = None
     failure = ""
-    if playing and stage is not None and (stage / "project.godot").is_file():
+    if playing and not playtest_gate.enabled(project):
+        failure = "the playtester is off for this project"
+    elif playing and stage is not None and (stage / "project.godot").is_file():
         # As long as the longest no_errors asks; a place to reach gets a minute at least.
         seconds = max(
             [c.seconds for c in playing if c.kind == "no_errors"]
