@@ -11,10 +11,13 @@ extends Node
 ## sight (New chat while it works) says it finished in another chat.
 ##
 ## The notification runs the platform's own tool as a process with an argument list, never
-## through a shell, and never puts the text into a script's source: macOS `osascript` reads it
-## as the run handler's argv, Linux `notify-send` as its arguments (skipped when not installed),
-## Windows PowerShell builds a toast from environment variables with a fixed script. Clicking
-## it is best effort: the Dock bounce or taskbar flash brings the user back either way.
+## through a shell, and never puts the text into a script's source: on macOS the Joinery
+## notifier (JoineryNotifier.app, so the banner shows Joinery's name and icon) takes it as its
+## arguments, and `osascript` (shown as Script Editor) as the run handler's argv when there is
+## no notifier or it ends with an error; Linux `notify-send` as its arguments (skipped when
+## not installed), Windows PowerShell builds a toast from environment variables with a fixed
+## script. Clicking it is best effort: the Dock bounce or taskbar flash brings the user back
+## either way.
 ##
 ## One notification per kind each [constant SPACING_MSEC]; a newer one in that time replaces
 ## the waiting one. Two editor settings (also on Journeyman's settings page) turn it off, or
@@ -28,6 +31,7 @@ const NEEDS_YOU := ["review", "go", "input"]
 const SPACING_MSEC := 5000
 const MAX_CHARS := 120
 const POLICY_STOP := "Stopped by project policy:"
+const OSASCRIPT := "/usr/bin/osascript"
 ## The toast, built from JOINERY_NOTIFY_TITLE and JOINERY_NOTIFY_TEXT: never from its source.
 const TOAST := (
 	"[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, "
@@ -44,12 +48,21 @@ $toast = [Windows.UI.Notifications.ToastNotification]::new($xml)
 """
 )
 
+## The notifier app's executable, inside the release's Joinery.app or built by
+## `joinery notifier build` into the launcher's cache folder.
+const NOTIFIER_IN_APP := "../Helpers/JoineryNotifier.app/Contents/MacOS/JoineryNotifier"
+const NOTIFIER_CACHED := "Library/Caches/Joinery/JoineryNotifier.app/Contents/MacOS/JoineryNotifier"
+
 ## Preferences outside the editor (tests, the visual suite).
 static var _prefs_here := {}
 
-## Starts a process: (program: String, args: PackedStringArray, env: Dictionary) -> void.
-## Unset, the program starts in the background; tests record the call instead.
+## Starts a process: (program: String, args: PackedStringArray, env: Dictionary) -> int, its
+## process id (0 when none). Unset, the program starts in the background; tests record it.
 var runner := Callable()
+## (pid: int) -> int: a started process's exit code, -1 while it runs; unset, asks the OS.
+var exit_code := Callable()
+## () -> String: the notifier's executable, empty when there is none; unset, looks for it.
+var notifier := Callable()
 ## True while the user looks at the editor; unset, asks the display server.
 var focused := Callable()
 ## Bounces the Dock icon / flashes the taskbar; unset, asks the display server.
@@ -67,6 +80,8 @@ var _sent := {}
 ## kind -> [due msec, line]: one held back by the spacing.
 var _held := {}
 var _pids: Array[int] = []
+## pid of a notifier still running -> the osascript call to make if it fails.
+var _fallbacks := {}
 ## What this request came to.
 var _turn := {}
 
@@ -290,27 +305,63 @@ func _process(_delta: float) -> void:
 			if pref(ENABLED) and not _focused():
 				_send(kind, line)
 	# Starting a process leaves it to be reaped: asking whether it runs does that.
-	_pids = _pids.filter(func(pid: int) -> bool: return OS.is_process_running(pid))
+	_pids = _pids.filter(_running)
 	set_process(not _held.is_empty() or not _pids.is_empty())
+
+
+## Whether [param pid] still runs; a notifier that ended with an error hands over to osascript.
+func _running(pid: int) -> bool:
+	var code := _exit_code(pid)
+	if code == -1:
+		return true
+	var fallback: Array = _fallbacks.get(pid, [])
+	_fallbacks.erase(pid)
+	if code != 0 and not fallback.is_empty():
+		_start(fallback)
+	return false
+
+
+func _exit_code(pid: int) -> int:
+	if exit_code.is_valid():
+		return int(exit_code.call(pid))
+	if OS.is_process_running(pid):
+		return -1
+	return OS.get_process_exit_code(pid)
 
 
 func _send(kind: String, line: String) -> void:
 	_sent[kind] = _now()
-	var call := command(title(), line)
+	var heading := title()
+	var call := command(heading, line)
 	if call.is_empty():
 		return
-	if runner.is_valid():
-		runner.call(call[0], call[1], call[2])
+	var pid := _start(call)
+	if _system() != "macOS" or call[0] == OSASCRIPT:
 		return
-	var env: Dictionary = call[2]
-	for key: String in env:
-		OS.set_environment(key, env[key])
-	var pid := OS.create_process(call[0], call[1])
-	for key: String in env:
-		OS.unset_environment(key)
+	# The notifier: osascript says it instead if it fails to start or ends with an error.
+	if pid > 0:
+		_fallbacks[pid] = script_command(heading, line)
+	else:
+		_start(script_command(heading, line))
+
+
+## Starts [param call] ([program, args, env]); its process id, 0 when none started.
+func _start(call: Array) -> int:
+	var pid := 0
+	if runner.is_valid():
+		var started: Variant = runner.call(call[0], call[1], call[2])
+		pid = int(started) if started is int else 0
+	else:
+		var env: Dictionary = call[2]
+		for key: String in env:
+			OS.set_environment(key, env[key])
+		pid = OS.create_process(call[0], call[1])
+		for key: String in env:
+			OS.unset_environment(key)
 	if pid > 0:
 		_pids.append(pid)
 		set_process(true)
+	return pid
 
 
 ## "Journeyman — <project>".
@@ -325,23 +376,12 @@ func title() -> String:
 ## when it has no way to.
 func command(heading: String, line: String) -> Array:
 	var text := clean(line)
-	var system := platform if not platform.is_empty() else OS.get_name()
-	match system:
+	match _system():
 		"macOS":
-			var script := PackedStringArray(
-				[
-					"-e",
-					"on run argv",
-					"-e",
-					"display notification (item 2 of argv) with title (item 1 of argv)",
-					"-e",
-					"end run",
-					"--",
-					heading,
-					text,
-				]
-			)
-			return ["/usr/bin/osascript", script, {}]
+			var program := notifier_path()
+			if program.is_empty():
+				return script_command(heading, line)
+			return [program, PackedStringArray(["--", heading, text]), {}]
 		"Windows":
 			var encoded := Marshalls.raw_to_base64(TOAST.to_utf16_buffer())
 			var args := PackedStringArray(
@@ -357,6 +397,45 @@ func command(heading: String, line: String) -> Array:
 			var args := PackedStringArray(["--app-name=Godot", "--", heading, text])
 			return [program, args, {}]
 	return []
+
+
+## [program, args, env] for macOS's own osascript: the text is the run handler's argv.
+static func script_command(heading: String, line: String) -> Array:
+	var script := PackedStringArray(
+		[
+			"-e",
+			"on run argv",
+			"-e",
+			"display notification (item 2 of argv) with title (item 1 of argv)",
+			"-e",
+			"end run",
+			"--",
+			heading,
+			clean(line),
+		]
+	)
+	return [OSASCRIPT, script, {}]
+
+
+## The Joinery notifier's executable: the release's, next to the editor, else the one built in
+## the cache; empty when neither is there.
+func notifier_path() -> String:
+	if notifier.is_valid():
+		return str(notifier.call())
+	var beside := OS.get_executable_path().get_base_dir().path_join(NOTIFIER_IN_APP)
+	for path: String in [beside.simplify_path(), _home().path_join(NOTIFIER_CACHED)]:
+		if not path.is_empty() and FileAccess.file_exists(path):
+			return path
+	return ""
+
+
+static func _home() -> String:
+	var home := OS.get_environment("HOME")
+	return home if not home.is_empty() else "/nonexistent"
+
+
+func _system() -> String:
+	return platform if not platform.is_empty() else OS.get_name()
 
 
 ## [param text] on one line, without control characters, at most [constant MAX_CHARS] long.

@@ -2,7 +2,8 @@ extends SceneTree
 ## Desktop notifications: only while the editor is in the background, one line per request
 ## that ended (review, Go, a question or stop, finished, another chat finished), spaced out per
 ## kind, silent when turned off, and started as a program with arguments: no shell, and the
-## text never inside a script's source.
+## text never inside a script's source. On macOS the Joinery notifier when there is one, with
+## osascript taking over when it is missing, fails to start or ends with an error.
 
 const NOTIFY := preload("res://addons/joinery/desktop_notify.gd")
 const SETTING := preload("res://addons/joinery/notify_setting.gd")
@@ -44,6 +45,9 @@ var _calls: Array = []
 var _attention := 0
 var _focused := false
 var _now := 100_000
+var _next_pid := 1000
+## pid -> exit code the fake process ends with; -1 while it runs.
+var _exits := {}
 var _dock: FakeDock
 var _bridge: FakeBridge
 var _notify: Node
@@ -68,6 +72,8 @@ func _run() -> void:
 	_notify.set("attention", func() -> void: _attention += 1)
 	_notify.set("clock", func() -> int: return _now)
 	_notify.set("platform", "macOS")
+	_notify.set("notifier", func() -> String: return "")
+	_notify.set("exit_code", func(pid: int) -> int: return int(_exits.get(pid, 0)))
 	_notify.set("project_name", "Yard Day")
 	_bridge = FakeBridge.new()
 	_dock.add_child(_bridge)
@@ -76,6 +82,8 @@ func _run() -> void:
 	_check_spacing()
 	_check_settings()
 	_check_mac()
+	_check_notifier()
+	_check_notifier_found()
 	_check_linux()
 	_check_windows()
 	_check_clean()
@@ -86,8 +94,10 @@ func _run() -> void:
 	quit(1 if _failed else 0)
 
 
-func _record(program: String, args: PackedStringArray, env: Dictionary) -> void:
+func _record(program: String, args: PackedStringArray, env: Dictionary) -> int:
 	_calls.append([program, args, env])
+	_next_pid += 1
+	return _next_pid
 
 
 ## One request: [param events] as [signal, args…] in order, then done with [param ok].
@@ -244,6 +254,81 @@ func _check_mac() -> void:
 				"The script's source never holds the text"
 			)
 	_check(" ".join(args.slice(0, separator)).contains("item 2 of argv"), "Read from argv")
+
+
+func _check_notifier() -> void:
+	var app := "/Applications/Joinery.app/Contents/Helpers/JoineryNotifier.app/Contents/MacOS/"
+	var program := app + "JoineryNotifier"
+	_notify.set("notifier", func() -> String: return program)
+	var text := 'Say "hi" & quit" -- end tell'
+	var call: Array = _notify.call("command", "Journeyman — Yard Day", text)
+	_check(str(call[0]) == program, "macOS runs the Joinery notifier when there is one")
+	_no_shell(call, text)
+	_check(
+		call[1] == PackedStringArray(["--", "Journeyman — Yard Day", text]),
+		"The notifier takes the title and text as its arguments, after --"
+	)
+	_now += 60_000
+	var before := _calls.size()
+	_notify.call("notify", "finished", "Shown by Joinery")
+	_check(_calls.size() == before + 1 and _calls[-1][0] == program, "Sent through the notifier")
+	var pid := _next_pid
+	_exits[pid] = -1
+	_notify.call("_process", 0.0)
+	_check(_calls.size() == before + 1, "Nothing more while it runs")
+	_exits[pid] = 0
+	_notify.call("_process", 0.0)
+	_check(_calls.size() == before + 1, "Shown: no osascript after it")
+	_now += 60_000
+	_notify.call("notify", "finished", "Not allowed")
+	_exits[_next_pid] = 2
+	_notify.call("_process", 0.0)
+	_check(_calls.size() == before + 3, "An error from the notifier hands over to osascript")
+	_check(str(_calls[-1][0]) == "/usr/bin/osascript", "osascript takes over")
+	_check(_last_line() == "Not allowed" and _calls[-1][1][-2] == "Journeyman — Yard Day", "Same")
+	_notify.call("_process", 0.0)
+	_check(_calls.size() == before + 3, "Once: osascript has no fallback of its own")
+	_notify.set(
+		"runner",
+		func(p: String, a: PackedStringArray, e: Dictionary) -> int:
+			_calls.append([p, a, e])
+			return 0 if p == program else 7
+	)
+	_now += 60_000
+	_notify.call("notify", "finished", "Could not start")
+	_check(
+		_calls.size() == before + 5 and str(_calls[-1][0]) == "/usr/bin/osascript",
+		"A notifier that does not start hands over at once"
+	)
+	_notify.set("runner", _record)
+	_notify.set("notifier", func() -> String: return "")
+
+
+func _check_notifier_found() -> void:
+	var finder: Node = NOTIFY.new()
+	finder.set("platform", "macOS")
+	var saved := OS.get_environment("HOME")
+	var home := OS.get_user_data_dir().path_join("fake_home")
+	var cached := home.path_join(NOTIFY.NOTIFIER_CACHED)
+	DirAccess.make_dir_recursive_absolute(cached.get_base_dir())
+	OS.set_environment("HOME", home)
+	DirAccess.remove_absolute(cached)
+	_check(
+		finder.call("notifier_path") == "" or not finder.call("notifier_path").begins_with(home),
+		"No notifier in the cache: none found there"
+	)
+	var call: Array = finder.call("command", "T", "x")
+	_check(
+		str(call[0]) == "/usr/bin/osascript" or not str(call[0]).begins_with(home),
+		"Without it, osascript"
+	)
+	var fake := FileAccess.open(cached, FileAccess.WRITE)
+	fake.close()
+	var found := str(finder.call("notifier_path"))
+	_check(found == cached or found.contains("/Helpers/"), "The one built in the cache is found")
+	OS.set_environment("HOME", saved)
+	DirAccess.remove_absolute(cached)
+	finder.free()
 
 
 func _check_linux() -> void:
