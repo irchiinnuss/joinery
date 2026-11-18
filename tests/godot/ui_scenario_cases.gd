@@ -414,6 +414,7 @@ func _stop() -> void:
 	s.check(s.reply_shown().begins_with("Working through"), "What it said stays after Stop")
 	s.check(s.visible_text().contains("Stopped"), "The card says Stopped")
 	s.check(s.card_state() == "stopped", "The request ends stopped (%s)" % s.card_state())
+	await s.wait_until(func() -> bool: return not _mark(s.card()).is_empty(), 3000)
 	s.check(_mark(s.card()) == "stop", "Its mark is the stop, not a tick (%s)" % _mark(s.card()))
 	s.check(s.composer().get("send").is_visible_in_tree(), "Send is back after Stop")
 	await s.shot("stopped")
@@ -484,6 +485,8 @@ func _provider_error() -> void:
 	await s.wait_until(func() -> bool: return s.card_state() != "working", 4000)
 	await s.frames(4)
 	s.check(s.card_state() == "failed", "The request ends failed, not done (%s)" % s.card_state())
+	# The mark leads the timing line, which comes just after the turn ends.
+	await s.wait_until(func() -> bool: return not _mark(s.card()).is_empty(), 3000)
 	s.check(_mark(s.card()) == "error", "Its mark is the error, not a tick (%s)" % _mark(s.card()))
 	s.check(s.dock.get("connection_state") == "connected", "Still connected after one failed reply")
 	s.check(
