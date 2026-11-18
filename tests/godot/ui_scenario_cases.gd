@@ -437,12 +437,15 @@ func _keyboard() -> void:
 	s.key(KEY_TAB)
 	await s.frames(2)
 	var owner := s.tree.root.gui_get_focus_owner()
-	s.expect_bug(
-		owner != field,
-		"Tab leaves the message box (focus: %s)" % _focus_name(owner),
-		"Tab types a tab character: %s" % str(field.text.contains("\t"))
-	)
+	s.check(owner != field, "Tab leaves the message box (focus: %s)" % _focus_name(owner))
+	s.check(not field.text.contains("\t"), "Tab types no tab character")
 	await s.shot("tab")
+	field.grab_focus()
+	s.key(KEY_TAB, true)
+	await s.frames(2)
+	owner = s.tree.root.gui_get_focus_owner()
+	s.check(owner != field, "Shift+Tab leaves the message box too (focus: %s)" % _focus_name(owner))
+	field.grab_focus()
 	(s.composer().get("stop") as Button).pressed.emit()
 	await s.wait_until(func() -> bool: return s.card_state() != "working", 6000)
 

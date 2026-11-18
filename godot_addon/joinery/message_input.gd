@@ -40,6 +40,8 @@ var _restyling := false
 func _ready() -> void:
 	wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
 	scroll_fit_content_height = false
+	# Tab and Shift+Tab move the focus on (attach, view, Send); a chat message has no tabs.
+	tab_input_mode = false
 	text_changed.connect(_fit)
 	# text_changed fires only for typing; clear() and setting text fire text_set.
 	text_set.connect(_fit)
