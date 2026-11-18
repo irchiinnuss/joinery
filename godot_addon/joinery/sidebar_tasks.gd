@@ -49,6 +49,10 @@ const VARIANTS := preload("sidebar_variants.gd")
 const SCENE_VARIANT := preload("sidebar_scene_variant.gd")
 const UI_MOTION := preload("ui_motion.gd")
 const STYLE := preload("sidebar_style.gd")
+const UI_THEME := preload("ui_theme.gd")
+## Pixels the cards must fall under their share before a pinned action goes back to its card,
+## so it doesn't flicker on the edge.
+const PIN_SLACK := 8.0
 ## Seconds a finished task's card stays before it steps out.
 const LINGER := 4.0
 ## Seconds a ready change waits before its review opens: one Joinery keeps without asking
@@ -117,6 +121,15 @@ var _cards: Dictionary = {}
 var _console: Dictionary = {}
 var _main_busy := false
 var _offer: Control
+## The cards' area: their scroll, and under it the strip that keeps a card's primary action in
+## sight while the cards scroll ([method _fit]).
+var _area: Control
+var _scroll: ScrollContainer
+var _pin: MarginContainer
+## The action row now in [member _pin], and the card it belongs to.
+var _pinned: Control
+var _pinned_card: Control
+var _fitting := false
 
 
 static func attach(sidebar: Control, content: Control, before: Control) -> VBoxContainer:
@@ -124,29 +137,38 @@ static func attach(sidebar: Control, content: Control, before: Control) -> VBoxC
 	tasks.dock = sidebar
 	# The cards scroll on their own once they pass a share of the sidebar, so the chat above
 	# them keeps room and still scrolls.
+	var area := VBoxContainer.new()
+	area.name = "TaskArea"
+	area.add_theme_constant_override("separation", 0)
+	content.add_child(area)
+	content.move_child(area, before.get_index())
+	tasks._area = area
 	var scroll := ScrollContainer.new()
 	scroll.name = "TaskScroll"
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	# Wheel and touchpad scroll it; a bar would narrow the cards off the chat's edges.
+	# Wheel and touchpad scroll it; a bar would narrow the cards off the chat's edges, so the
+	# cards fade out at the edge that has more, as the transcript does.
 	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
 	scroll.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
-	content.add_child(scroll)
-	content.move_child(scroll, before.get_index())
+	STYLE.scroll_fade(scroll)
+	area.add_child(scroll)
+	tasks._scroll = scroll
 	tasks.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(tasks)
-	var fit := func() -> void:
-		# Never over a page shown in the conversation's place (Chats, Settings).
-		STYLE.show_part(scroll, tasks.visible)
-		var cap := sidebar.size.y * CARDS_SHARE
-		var need := tasks.get_combined_minimum_size().y
-		scroll.custom_minimum_size.y = minf(need, cap)
-		# Clip only while scrolling: a clip cuts the cards' shadows into a dark band.
-		scroll.clip_contents = need > cap
+	# While the cards scroll, the newest card's primary action (Go, Show all) waits here.
+	var pin := MarginContainer.new()
+	pin.name = "TaskPin"
+	pin.hide()
+	area.add_child(pin)
+	tasks._pin = pin
+	var fit: Callable = tasks._fit
 	tasks.minimum_size_changed.connect(fit)
 	tasks.visibility_changed.connect(fit)
+	pin.minimum_size_changed.connect(fit)
 	sidebar.resized.connect(fit)
-	# Agents' cards share the chat's centred column.
+	# Agents' cards share the chat's centred column, and so does their pinned action.
 	STYLE.centered_column(tasks)
+	STYLE.centered_column(pin)
 	var composer: Object = sidebar.get("_composer")
 	if composer != null and composer.has_signal("alongside"):
 		composer.connect("alongside", tasks.run_alongside)
@@ -565,3 +587,101 @@ func _sync() -> void:
 		composer.call("set_alongside", _main_busy and not parked and working < limit - 1)
 	if working_count() == 0 and is_instance_valid(_offer):
 		_drop_offer()
+
+
+## The cards take at most CARDS_SHARE of the sidebar, then scroll. While they do, the newest
+## card's primary action (its [code]pinned_actions()[/code] row: the to-do's Go, the playtest's
+## Show all) moves to the strip under them, so it is never cut off; it goes back once they fit.
+func _fit() -> void:
+	if _fitting or _scroll == null or dock == null:
+		return
+	_fitting = true
+	# Never over a page shown in the conversation's place (Chats, Settings).
+	STYLE.show_part(_area, visible)
+	var cap := dock.size.y * CARDS_SHARE
+	var row := _action_row()
+	var need := get_combined_minimum_size().y
+	if _pinned != null:
+		need += _pin.get_combined_minimum_size().y
+	var keep := _pinned != null and row == _pinned and need > cap - PIN_SLACK
+	var want: Control = row if need > cap or keep else null
+	if want != _pinned:
+		_unpin()
+		if want != null:
+			_pin_row(want)
+	var below := _pin.get_combined_minimum_size().y if _pinned != null else 0.0
+	var inner := get_combined_minimum_size().y
+	var room := maxf(cap - below, 0.0)
+	_scroll.custom_minimum_size.y = minf(inner, room)
+	# Clip only while scrolling: a clip cuts the cards' shadows into a dark band.
+	_scroll.clip_contents = inner > room
+	_fitting = false
+
+
+## The newest shown card's primary action row, if it has one to show.
+func _action_row() -> Control:
+	for index: int in range(get_child_count() - 1, -1, -1):
+		var each := get_child(index) as Control
+		if each == null or not each.visible or not each.has_method("pinned_actions"):
+			continue
+		var row: Variant = each.call("pinned_actions")
+		if row is Control and (row as Control).visible:
+			return row
+	return null
+
+
+func _pin_row(row: Control) -> void:
+	var card: Control = row.get_parent() as Control
+	while card != null and card.get_parent() != self:
+		card = card.get_parent() as Control
+	if card == null:
+		return
+	row.set_meta("_joinery_pin_home", [row.get_parent(), row.get_index()])
+	row.reparent(_pin, false)
+	_pinned = row
+	_pinned_card = card
+	# The action keeps the card's inner edge.
+	var box := card.get_theme_stylebox("panel")
+	var side := box.get_margin(SIDE_LEFT) if box != null else 0.0
+	_pin.add_theme_constant_override("margin_left", int(side))
+	_pin.add_theme_constant_override("margin_right", int(side))
+	_pin.add_theme_constant_override("margin_top", UI_THEME.space(self, 1))
+	_pin.add_theme_constant_override("margin_bottom", 0)
+	if not card.tree_exiting.is_connected(_on_pinned_card_exiting):
+		card.tree_exiting.connect(_on_pinned_card_exiting.bind(card))
+	STYLE.show_part(_pin, true)
+
+
+## The pinned row goes back where it was in its card.
+func _unpin() -> void:
+	var row := _pinned
+	_pinned = null
+	_pinned_card = null
+	if _pin != null:
+		STYLE.show_part(_pin, false)
+	if not is_instance_valid(row):
+		return
+	var home: Array = row.get_meta("_joinery_pin_home", [])
+	row.remove_meta("_joinery_pin_home")
+	var parent: Node = home[0] if home.size() == 2 else null
+	if not is_instance_valid(parent) or parent.is_queued_for_deletion():
+		row.queue_free()
+		return
+	row.reparent(parent, false)
+	parent.move_child(row, mini(int(home[1]), parent.get_child_count() - 1))
+
+
+func _on_pinned_card_exiting(card: Control) -> void:
+	if card != _pinned_card:
+		return
+	if card.is_queued_for_deletion():
+		# Its action leaves with it.
+		var row := _pinned
+		_pinned = null
+		_pinned_card = null
+		STYLE.show_part(_pin, false)
+		if is_instance_valid(row):
+			row.queue_free()
+	else:
+		_unpin.call_deferred()
+	_fit.call_deferred()

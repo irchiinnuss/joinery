@@ -793,11 +793,7 @@ func _todo() -> void:
 		var todo: Control = tasks.get("todo_card")
 		var go: Button = todo.get("go")
 		s.check(go.is_visible_in_tree(), "Go is there")
-		s.expect_bug(
-			s.on_screen(go),
-			"Go is on screen without scrolling",
-			"the cards' area scrolls with no scrollbar (sidebar_tasks.gd SHOW_NEVER)"
-		)
+		s.check(s.on_screen(go), "Go is on screen without scrolling")
 	await s.shot("waiting")
 
 
@@ -828,6 +824,8 @@ func _playtest() -> void:
 	s.chat.call("_handle", event)
 	await s.frames(4)
 	s.check(s.visible_text().contains("1 bug"), "The report counts by severity")
+	var more: Variant = (tasks.get("playtest") as Control).get("_more")
+	s.check(more is Button and s.on_screen(more), "Show all is on screen without scrolling")
 	await s.shot("report")
 
 

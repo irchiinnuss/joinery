@@ -214,6 +214,12 @@ func _notification(what: int) -> void:
 		_sync_live()
 
 
+## Go and Cancel, while they are offered: the sidebar keeps them in sight when the cards scroll
+## (sidebar_tasks.gd).
+func pinned_actions() -> Control:
+	return _footer if _footer.visible and not minimised else null
+
+
 ## The host's to-do event: {todo_id, state?, steps?, details?, step_states?, step?,
 ## done_when?, results?, summary?}. A step's progress alone ({step, step_states}) moves the
 ## rows on in place.

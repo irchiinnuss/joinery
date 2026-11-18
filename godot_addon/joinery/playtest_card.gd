@@ -739,6 +739,12 @@ func _notification(what: int) -> void:
 		_fit_map.call_deferred()
 
 
+## "Show all", while some findings are folded away: the sidebar keeps it in sight when the
+## cards scroll (sidebar_tasks.gd).
+func pinned_actions() -> Control:
+	return _more if _more.visible else null
+
+
 func _show_all() -> void:
 	var shown: Array = []
 	for child: Node in _items.get_children():
