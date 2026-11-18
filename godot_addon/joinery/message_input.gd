@@ -31,6 +31,9 @@ var caret_column: int:
 
 ## The sent-message history Up and Down go through.
 var recall := RECALL.new(self)
+## Called on Esc (after a menu open over the field had it first); returns true when it acted
+## (the composer stops a running reply), and only then is the key taken.
+var on_escape := Callable()
 var _restyling := false
 
 
@@ -63,7 +66,9 @@ func _gui_input(event: InputEvent) -> void:
 		accept_event()
 		return
 	if event is InputEventKey and event.pressed and not event.echo:
-		if event.keycode in [KEY_ENTER, KEY_KP_ENTER]:
+		if event.keycode == KEY_ESCAPE and on_escape.is_valid() and bool(on_escape.call()):
+			accept_event()
+		elif event.keycode in [KEY_ENTER, KEY_KP_ENTER]:
 			if event.shift_pressed:
 				insert_text_at_caret("\n")
 			else:

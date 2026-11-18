@@ -123,6 +123,7 @@ func _init() -> void:
 	prompt.accessibility_name = "Message to Journeyman"
 	prompt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	prompt.text_submitted.connect(_on_enter)
+	prompt.set("on_escape", _stop_by_key)
 	prompt.focus_entered.connect(_set_focus.bind(true))
 	prompt.focus_exited.connect(_set_focus.bind(false))
 	prompt.text_changed.connect(_sync_send)
@@ -321,6 +322,14 @@ func _place_status() -> void:
 	_status_line.add_theme_constant_override(
 		"margin_top", roundi(box.get_margin(SIDE_TOP) + maxf(0.0, (line_h - tall) / 2.0))
 	)
+
+
+## Esc in the message box stops a running reply, as Stop does. False when nothing runs.
+func _stop_by_key() -> bool:
+	if not stop.is_visible_in_tree() or stop.disabled:
+		return false
+	stop.pressed.emit()
+	return true
 
 
 ## Mark Stop as pressed and waiting for the reply to end.

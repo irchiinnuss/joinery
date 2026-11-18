@@ -427,11 +427,11 @@ func _keyboard() -> void:
 	s.check(field.has_focus(), "Focus stays in the message box while it streams")
 	s.key(KEY_ESCAPE)
 	await s.wait_ms(600)
-	s.expect_bug(
+	s.check(
 		s.card_state() != "working" or bool(s.composer().get("stop").disabled),
-		"Esc stops the reply",
-		"no Esc handler; only Stop does"
+		"Esc stops the reply (%s)" % s.card_state()
 	)
+	s.check(s.visible_text().contains("Stopped"), "After Esc the card says Stopped")
 	# Tab from the message box moves on (a TextEdit can keep Tab for itself).
 	field.grab_focus()
 	s.key(KEY_TAB)
