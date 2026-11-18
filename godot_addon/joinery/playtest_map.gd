@@ -264,8 +264,10 @@ func _crop() -> void:
 	if high.x < 0:
 		_view = Rect2i(0, 0, _cols, _rows)
 		return
-	low = Vector2i(maxi(low.x - MARGIN, 0), maxi(low.y - MARGIN, 0))
-	high = Vector2i(mini(high.x + MARGIN, _cols - 1), mini(high.y + MARGIN, _rows - 1))
+	# Over the level's picture the floor's own edge is the map's: no sky round it.
+	var margin := 0 if _picture != null else MARGIN
+	low = Vector2i(maxi(low.x - margin, 0), maxi(low.y - margin, 0))
+	high = Vector2i(mini(high.x + margin, _cols - 1), mini(high.y + margin, _rows - 1))
 	_view = Rect2i(low, high - low + Vector2i.ONE)
 
 
