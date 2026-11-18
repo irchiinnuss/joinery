@@ -142,6 +142,8 @@ var _error: Label
 var _summary: Button
 ## "✓" leading the status line once the work is done.
 var _done_mark: TextureRect
+## The state [method finish] ended the turn in ("done", "stopped" or "failed"), "" before.
+var _finished_as := ""
 ## "5 steps · 0:14 ›": the finished steps folded while the change waits (until the reply's
 ## timing line takes over).
 var _fold: Button
@@ -501,8 +503,9 @@ func set_elapsed(seconds: int) -> void:
 		_sync_activity()
 
 
-## The turn ended. [param outcome] is "done", "cancelled" or "failed". A request held by the
-## art gate stays held.
+## The turn ended. [param outcome] is "done", "cancelled" or "failed": the card ends "done",
+## "stopped" or "failed", and the mark leading its status line is the tick, the stop or the
+## error. A request held by the art gate stays held.
 func finish(outcome: String) -> void:
 	if state == "sending":
 		set_failed()
@@ -513,11 +516,12 @@ func finish(outcome: String) -> void:
 		_sync_activity()
 		return
 	_timer.hide()
-	_tick_current(
-		"success" if outcome == "done" else "stopped" if outcome == "cancelled" else "error"
-	)
+	var kind := "success" if outcome == "done" else "stopped" if outcome == "cancelled" else "error"
+	_tick_current(kind)
 	if state == "working":
-		state = "done"
+		state = {"success": "done", "stopped": "stopped"}.get(kind, "failed")
+		_finished_as = state
+		STYLE.set_glyph(_done_mark, OUTCOMES[kind][0], OUTCOMES[kind][1])
 	_sync_activity()
 
 
@@ -849,7 +853,8 @@ func _sync_activity() -> void:
 	_place_timer()
 	var timed := _summary != null and _summary.visible
 	var clock := _timer.visible and _timer.get_parent() == _status
-	_done_mark.visible = _fold.visible or (timed and state in ["accepted", "done"])
+	var ended := state in ["accepted", "done"] or state == _finished_as
+	_done_mark.visible = _fold.visible or (timed and ended)
 	_joiner.visible = _apps.visible and (timed or clock or _fold.visible)
 	_status.visible = _sending.visible or _apps.visible or clock or timed or _fold.visible
 	_progress.visible = _any_visible(_progress)

@@ -403,6 +403,8 @@ func _stop() -> void:
 	await s.frames(4)
 	s.check(s.reply_shown().begins_with("Working through"), "What it said stays after Stop")
 	s.check(s.visible_text().contains("Stopped"), "The card says Stopped")
+	s.check(s.card_state() == "stopped", "The request ends stopped (%s)" % s.card_state())
+	s.check(_mark(s.card()) == "stop", "Its mark is the stop, not a tick (%s)" % _mark(s.card()))
 	s.check(s.composer().get("send").is_visible_in_tree(), "Send is back after Stop")
 	await s.shot("stopped")
 
@@ -445,6 +447,14 @@ func _keyboard() -> void:
 	await s.wait_until(func() -> bool: return s.card_state() != "working", 6000)
 
 
+## The icon leading a finished card's status line ("success", "stop", "error"), "" when none.
+func _mark(card: Control) -> String:
+	var mark: TextureRect = card.get("_done_mark") if card != null else null
+	if mark == null or not mark.is_visible_in_tree():
+		return ""
+	return str(mark.get_meta("_joinery_glyph", ""))
+
+
 func _focus_name(control: Control) -> String:
 	return "none" if control == null else s.control_name(control)
 
@@ -460,11 +470,8 @@ func _provider_error() -> void:
 	s.check(said, "The provider's error is shown")
 	await s.wait_until(func() -> bool: return s.card_state() != "working", 4000)
 	await s.frames(4)
-	s.expect_bug(
-		s.card_state() == "failed",
-		"The request ends failed, not done (%s)" % s.card_state(),
-		"done arrives before timing, so the card finishes as done with a green check"
-	)
+	s.check(s.card_state() == "failed", "The request ends failed, not done (%s)" % s.card_state())
+	s.check(_mark(s.card()) == "error", "Its mark is the error, not a tick (%s)" % _mark(s.card()))
 	s.check(s.dock.get("connection_state") == "connected", "Still connected after one failed reply")
 	s.check(
 		not s.notifications.is_empty(),
@@ -519,7 +526,7 @@ func _network_drop() -> void:
 	var text := s.visible_text()
 	s.check(text.contains("Reconnect"), "It offers Reconnect: " + text.left(200))
 	s.check(s.reply_shown().begins_with("Starting"), "The words that came stay")
-	s.check(s.card_state() != "working", "The card stops working (%s)" % s.card_state())
+	s.check(s.card_state() == "failed", "The cut-off request ends failed (%s)" % s.card_state())
 	s.check(not s.composer().get("stop").visible, "Stop goes when nothing can be stopped")
 	await s.shot("lost")
 

@@ -64,6 +64,7 @@ const DISCARDED := "Discarded"
 const BRIEF := preload("res://addons/joinery/sidebar_brief.gd")
 const FILE_OPEN := preload("res://addons/joinery/sidebar_file_open.gd")
 const NOTIFY := preload("res://addons/joinery/desktop_notify.gd")
+const WORDS := preload("res://addons/joinery/sidebar_turn_words.gd")
 ## Minimum dock width in font sizes: in Joinery's layout, the whole visible sidebar.
 const MIN_EM := 26
 ## The same below the Inspector (classic layout): a wider shared column crowds a laptop screen.
@@ -660,6 +661,7 @@ func _request_cancel() -> void:
 		cancel_requested.emit()
 		return
 	_progress = "Stopping…"
+	_outcome = "cancelled"
 	_composer.stopping()
 	_sync()
 	cancel_requested.emit()
@@ -838,11 +840,14 @@ func show_agent_message(text: String, error := false) -> void:
 		_turn().add_notice(text, "error")
 		return
 	_on_sent()
-	finish_agent_response(false)
+	finish_agent_response(true)
 	_turn().call("add_error" if error else "add_message", PERSONA, text)
 
 
-func finish_agent_response(_ok: bool) -> void:
+## The reply is over; a turn that ends not [param ok] finishes its card as failed.
+func finish_agent_response(ok: bool) -> void:
+	if not ok and _busy and _outcome == "done":
+		_outcome = "failed"
 	_turn().finish_response()
 	_assistant_open = false
 
@@ -903,7 +908,7 @@ func hide_edit_review(message: String = "", kind := "info") -> void:
 	var was_pending := _review_pending
 	_review_pending = false
 	_opener.cancel()
-	var decided := _decision_kind(message, kind)
+	var decided := WORDS.decision_kind(message, kind)
 	if decided == "rejected":
 		message = DISCARDED
 	if decided in ["success", "rejected"] and was_pending and _review.has_method("show_result"):
@@ -916,7 +921,7 @@ func hide_edit_review(message: String = "", kind := "info") -> void:
 	if decided == "success" and was_pending:
 		refresh_revertible()
 	if not message.is_empty():
-		finish_agent_response(false)
+		finish_agent_response(true)
 		_turn().add_decision(message, decided, _card() if was_pending else null)
 	_resume_held()
 	_drain()
@@ -986,15 +991,3 @@ func _make_review() -> Control:
 func _review_call(method: String, arguments: Array) -> void:
 	if is_instance_valid(_review) and _review.has_method(method):
 		_review.callv(method, arguments)
-
-
-## Kind of a decision message; older callers pass only the message.
-static func _decision_kind(message: String, kind: String) -> String:
-	if kind != "info":
-		return kind
-	var lower := message.to_lower()
-	if lower.contains("accepted"):
-		return "success"
-	if lower.contains("rejected") or lower.contains("discarded"):
-		return "rejected"
-	return "info"
