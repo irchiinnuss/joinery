@@ -4,7 +4,8 @@ extends SceneTree
 ## user's bubble, the reply, the review row, a check card and the composer share the same left
 ## and right edge; the transcript's scrollbar sits in the gutter, and the header row starts
 ## SPACE.1 under the top edge. In a sidebar wider than MAX_W.column (1000 px) the conversation,
-## its cards and the composer share one centred column of that width instead. Chips with long
+## its cards, the composer and the header (its title, icons and notice) share one centred column
+## of that width instead. Chips with long
 ## names end in an ellipsis (a file name in the middle) inside the gutter instead of widening
 ## the sidebar, and Settings' reviewer Model field shows "Same as
 ## Journeyman" uncut, and "Older versions" beside or above its choice uncut. Settings' rows start
@@ -151,7 +152,8 @@ func _measure(width: int) -> void:
 		"The transcript's scrollbar sits in the gutter, past the content (%d px)" % width
 	)
 
-	# The header: its row starts SPACE.1 under the top; the last icon's glyph ends on the edge.
+	# The header: its row starts SPACE.1 under the top; the last icon's glyph ends on the column's
+	# edge, and the title starts on it.
 	var row: HBoxContainer = header.get("row")
 	_check(
 		absf(row.get_global_rect().position.y - dock.position.y - _theme.space(chat, 1)) <= 1.0,
@@ -164,12 +166,16 @@ func _measure(width: int) -> void:
 	if trailing != null:
 		var glyph := trailing.get_global_rect().end.x - float(_style.icon_inset(trailing))
 		_check(
-			absf(glyph - right) <= 1.0,
-			"The last header icon ends at %.0f, gutter at %.0f (%d px)" % [glyph, right, width]
+			absf(glyph - column_right) <= 1.0,
+			(
+				"The last header icon ends at %.0f, column at %.0f (%d px)"
+				% [glyph, column_right, width]
+			)
 		)
 	else:
 		_check(false, "The header shows its icon buttons (%d px)" % width)
-	_both(header.get("notice").get("_panel"), left, right, "The setup notice", width)
+	_on(header.get("title"), "left", column_left, "The header's title", width)
+	_both(header.get("notice").get("_panel"), column_left, column_right, "The setup notice", width)
 
 	# The conversation: the bubble, the reply and the review row on the same edges.
 	_both(card.get("_bubble"), column_left, column_right, "The user's bubble", width)

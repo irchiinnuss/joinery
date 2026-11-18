@@ -336,6 +336,7 @@ func _layout_checks(state: String) -> void:
 		var rect := control.get_global_rect()
 		if rect.end.x > bounds.end.x + 1.0 or rect.position.x < bounds.position.x - 1.0:
 			check(false, "%s: %s stays inside the sidebar" % [state, control_name(control)])
+	_header_aligned(state)
 	for first: int in interactive.size():
 		for second: int in range(first + 1, interactive.size()):
 			var a := interactive[first]
@@ -347,6 +348,39 @@ func _layout_checks(state: String) -> void:
 				check(
 					false, "%s: %s and %s don't overlap" % [state, control_name(a), control_name(b)]
 				)
+
+
+## The header's title starts, and its row ends, on the composer's edges: in a wide sidebar both
+## share the chat's centred column.
+func _header_aligned(state: String) -> void:
+	var header: Variant = dock.get("_header")
+	var box := composer()
+	if not header is Control or not (header as Control).is_visible_in_tree():
+		return
+	if box == null or not box.is_visible_in_tree():
+		return
+	var title: Control = (header as Control).get("title")
+	var row: Control = (header as Control).get("row")
+	var edges := box.get_global_rect()
+	var inset := (row.get_parent() as Control).get_global_rect()
+	var aligned := (
+		absf(title.get_global_rect().position.x - edges.position.x) <= 1.5
+		and absf(inset.end.x - edges.end.x) <= 1.5
+	)
+	if not aligned:
+		check(
+			false,
+			(
+				"%s: the header lines up with the composer (title %.0f-%.0f, composer %.0f-%.0f)"
+				% [
+					state,
+					title.get_global_rect().position.x,
+					inset.end.x,
+					edges.position.x,
+					edges.end.x
+				]
+			)
+		)
 
 
 ## The part of [param control] on screen: its rect cut by every scrolling or clipping parent.

@@ -37,6 +37,7 @@ const UI_THEME := preload("ui_theme.gd")
 const UI_MOTION := preload("ui_motion.gd")
 const UI := preload("ui_components.gd")
 const STYLE := preload("sidebar_style.gd")
+const COLUMN := preload("sidebar_column.gd")
 const INDICATOR := preload("activity_indicator.gd")
 const USAGE_SCRIPT := preload("usage_meter.gd")
 const NOTICE_SCRIPT := preload("setup_notice.gd")
@@ -80,9 +81,18 @@ var _state := "connected"
 
 func _init() -> void:
 	theme_type_variation = "JoineryRow"
+	# The header shares the chat's centred column (sidebar_column.gd), so in a wide sidebar the
+	# title and the menu line up with the transcript and the composer under them.
+	var centred: Container = COLUMN.new()
+	centred.name = "Column"
+	centred.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(centred)
+	var parts := VBoxContainer.new()
+	parts.theme_type_variation = "JoineryRow"
+	centred.add_child(parts)
 	var stack := VBoxContainer.new()
 	stack.theme_type_variation = "JoineryTight"
-	add_child(stack)
+	parts.add_child(stack)
 	# The row's trailing icon buttons pad their glyphs; reach past the gutter by that padding,
 	# so the last glyph ends on the same edge as the text and boxes below.
 	var inset := MarginContainer.new()
@@ -132,7 +142,7 @@ func _init() -> void:
 			_banner_gap.add_theme_constant_override("margin_top", gap)
 			_banner_gap.add_theme_constant_override("margin_bottom", gap)
 	)
-	add_child(_banner_gap)
+	parts.add_child(_banner_gap)
 	_banner = PanelContainer.new()
 	STYLE.on_theme_overrides(_banner, _restyle_banner)
 	_banner.hide()
@@ -156,7 +166,7 @@ func _init() -> void:
 	_banner_action.pressed.connect(_fix)
 	column.add_child(_banner_action)
 	notice = NOTICE_SCRIPT.new()
-	add_child(notice)
+	parts.add_child(notice)
 	_banner_links = HBoxContainer.new()
 	_banner_links.theme_type_variation = "JoineryRow"
 	column.add_child(_banner_links)
