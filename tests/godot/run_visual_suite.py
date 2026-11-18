@@ -553,8 +553,10 @@ def testbed_editor(
     marker: str,
     capture: Path,
     logs: Path,
+    extra_env: dict[str, str] | None = None,
 ) -> None:
-    """Run `script` as an editor plugin in a disposable copy of the testbed."""
+    """Run `script` as an editor plugin in a disposable copy of the testbed; `extra_env`
+    is added to the isolated environment (run_ui_scenarios.py's scripted chat host)."""
     with scratch_folder("joinery-visual-editor-") as directory:
         temporary = Path(directory)
         project = temporary / "project"
@@ -589,6 +591,7 @@ def testbed_editor(
         (project / "project.godot").write_text(settings)
         env = isolated_environment(temporary, ROOT, capture)
         env["JOINERY_VISUAL_THEME"] = theme
+        env.update(extra_env or {})
         binary = isolated_editor(engine_binary(), temporary)
         seed_theme(binary, theme)
         base = [str(binary), "--path", str(project), "--audio-driver", "Dummy"]
