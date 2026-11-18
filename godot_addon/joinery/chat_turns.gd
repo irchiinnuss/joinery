@@ -246,7 +246,7 @@ func _show(turn: Dictionary, event: Dictionary) -> void:
 		"progress":
 			if is_instance_valid(card) and str(card.get("state")) == "working":
 				card.call("add_step", text)
-		"trail", "tests":
+		"trail", "tests", "tool_activity":
 			if is_instance_valid(card) and str(card.get("state")) == "working":
 				card.call("add_tests" if event.get("kind") == "tests" else "add_trail", event)
 		"file_preview":

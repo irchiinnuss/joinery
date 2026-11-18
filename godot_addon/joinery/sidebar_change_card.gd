@@ -144,6 +144,8 @@ var _summary: Button
 var _done_mark: TextureRect
 ## The state [method finish] ended the turn in ("done", "stopped" or "failed"), "" before.
 var _finished_as := ""
+## The "Not run: …" lines of calls the project's gate refused ([method _refuse]).
+var _refused: Array[String] = []
 ## "5 steps · 0:14 ›": the finished steps folded while the change waits (until the reply's
 ## timing line takes over).
 var _fold: Button
@@ -408,10 +410,14 @@ func add_tests(event: Dictionary) -> void:
 
 
 ## A line of the work trail from the host: {id, text, state, note, file, added, removed,
-## picture} (bridge/trail.py). Apps it names join the status line.
+## picture} (bridge/trail.py). Apps it names join the status line. A call the project's gate
+## refused ({kind: "tool_activity", allowed: false, reason, call_id}) goes to [method _refuse].
 func add_trail(event: Dictionary) -> void:
 	if state in ["sending", "failed"]:
 		set_sent()
+	if event.get("kind") == "tool_activity":
+		_refuse(event)
+		return
 	_note_apps(str(event.get("text", "")), str(event.get("id", "")), str(event.get("state", "")))
 	_steps.add_call(event)
 	if _fold.visible or _summary != null:
@@ -419,6 +425,30 @@ func add_trail(event: Dictionary) -> void:
 		return
 	_show_all_steps(false)
 	_steps.visible = _steps.has_lines()
+	_sync_activity()
+
+
+## A refused call never reads as done: its line ends with the stop mark, and one quiet line on
+## the card says why ("Not run: Krita isn't enabled for this project. …"). It stays in sight
+## when the steps fold; the same reason is said once.
+func _refuse(event: Dictionary) -> void:
+	if bool(event.get("allowed", true)):
+		return
+	_steps.refuse(str(event.get("call_id", "")))
+	var reason := str(event.get("reason", "")).strip_edges()
+	var line := "Not run: " + reason if not reason.is_empty() else "A step was not run"
+	if line in _refused:
+		_sync_activity()
+		return
+	_refused.append(line)
+	var row := _row(_progress)
+	row.name = "Refused"
+	row.accessibility_name = line
+	var mark := _icon("stop", "text_muted")
+	mark.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	row.add_child(mark)
+	row.add_child(UI.label(line, "JoineryCaption", true))
+	UI_MOTION.fade_in(row)
 	_sync_activity()
 
 

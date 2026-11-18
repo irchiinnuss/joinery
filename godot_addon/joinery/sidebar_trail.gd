@@ -183,6 +183,18 @@ func add_tests(event: Dictionary) -> void:
 	_sync_live()
 
 
+## The project's gate refused the call [param id]: running or already ended, its line ends
+## with the stop mark and its own words (never "Opened …" with a tick). The card says why.
+func refuse(id: String) -> void:
+	var row := _find(id)
+	if row == null:
+		return
+	_set_live(row, true)
+	_end(row, "stopped")
+	_words(row).text = settled(str(row.get_meta("said", "")))
+	_sync_live()
+
+
 ## Progress while a call runs goes under its line ("Importing the result into Godot"). False
 ## when no call is live, so [param text] becomes a line of its own.
 func on_progress(text: String) -> bool:

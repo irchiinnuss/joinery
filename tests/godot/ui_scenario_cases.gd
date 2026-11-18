@@ -569,11 +569,16 @@ func _denied_call() -> void:
 	s.check(s.reply_shown().contains("couldn't open"), "The turn goes on after the refusal")
 	var badge: Control = s.card().find_child("Krita", true, false)
 	s.check(badge == null or not badge.is_visible_in_tree(), "No Krita badge: Krita did nothing")
-	s.expect_bug(
-		text.contains("isn't enabled for this project"),
-		"The refusal's reason is shown",
-		"tool_activity events are dropped by chat_bridge.gd"
-	)
+	s.check(text.contains("isn't enabled for this project"), "The refusal's reason is shown")
+	s.check(text.contains("Not run: Krita"), "It says the step was not run: " + text.left(240))
+	var refused: Control = null
+	for row: Node in s.card().find_child("History", true, false).get_children():
+		if str(row.get_meta("trail_id", "")) == "k":
+			refused = row as Control
+	var end := str(refused.get_meta("end", "")) if refused != null else "none"
+	var words := str((refused.get_node("Line/Words") as Label).text) if refused != null else ""
+	s.check(end == "stopped", "The refused step ends with the stop mark (%s)" % end)
+	s.check(not words.begins_with("Opened"), "The refused step never reads as done: " + words)
 	await s.shot("done")
 
 

@@ -606,6 +606,9 @@ func _handle(event: Dictionary) -> void:
 			status_changed.emit("working", str(event.get("text", "")))
 		"trail":
 			trail_event.emit(event)
+		"tool_activity":  # A call the gate refused joins the trail with its reason.
+			if not bool(event.get("allowed", true)):
+				trail_event.emit(event)
 		"tests":
 			tests_event.emit(event)
 		"execution":
