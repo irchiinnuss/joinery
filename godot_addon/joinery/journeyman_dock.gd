@@ -55,8 +55,8 @@ const SUGGESTIONS := preload("res://addons/joinery/sidebar_suggestions.gd")
 const OPENER := preload("res://addons/joinery/review_opener.gd")
 const REVIEW_PATH := "res://addons/joinery/review_panel.gd"
 const REVIEW_WAIT := "Next message…"
-## While another chat is working, a message sent here waits for it: the queue's heading, and
-## the message box's shorter hint.
+## While another chat works and no agent is free (chat_turns.gd), a message sent here waits:
+## the queue's heading, and the message box's shorter hint.
 const OTHER_WAIT := "Sends when the other chat finishes"
 const OTHER_HINT := "Waits for the other chat…"
 const PERSONA := "Journeyman"
@@ -402,8 +402,10 @@ func _on_submit(text: String) -> void:
 	var entry := text.strip_edges()
 	if entry.is_empty():
 		return
-	if _occupied() and _transcript.queue.waits(entry):
-		_enqueue(entry)
+	var own: bool = _chats.turns.busy_in(_transcript)
+	if (own or _occupied()) and _transcript.queue.waits(entry):
+		if own or not _chats.turns.send_typed(_transcript, entry, target_snapshot()):
+			_enqueue(entry)
 		return
 	_command_popup.close()
 	_prompt.clear()
@@ -435,7 +437,8 @@ func _occupied() -> bool:
 
 func _enqueue(entry: String) -> void:
 	_command_popup.close()
-	_transcript.queue.heading.text = OTHER_WAIT if _parked() else "Queued"
+	var other := _parked() and not _chats.turns.busy_in(_transcript)
+	_transcript.queue.heading.text = OTHER_WAIT if other else "Queued"
 	if not _transcript.queue.push(entry, target_snapshot()):
 		show_status("The queue is full. Remove a message or wait for a reply.", 4.0)
 		return
@@ -455,9 +458,12 @@ func _drain() -> void:
 	var card := _card()
 	var gated: bool = card != null and card.gated()
 	var queue := _transcript.queue
-	if queue.size_queued() == 0 or queue.paused or _occupied() or gated:
+	if queue.size_queued() == 0 or queue.paused or gated or _chats.turns.busy_in(_transcript):
 		return
 	if connection_state != "connected" or not _slash.running().is_empty():
+		return
+	if _occupied():  # Journeyman works in another chat: it may start once an agent is free.
+		_chats.turns.drain(_transcript)
 		return
 	var next := queue.take()
 	var entry := str(next["text"])
@@ -509,8 +515,8 @@ func _on_card_failed(reason: String) -> void:
 
 ## Stop takes Send's slot while Journeyman works or a request is on its way to it.
 func _sync_send_slot() -> void:
-	var card := _card()
-	_composer.set_busy(not _parked() and (_busy or (card != null and card.state == "sending")))
+	var sending: bool = _card() != null and _card().state == "sending"
+	_composer.set_busy(_chats.turns.busy_in(_transcript) or not _parked() and (_busy or sending))
 	_composer.set_placeholder(_waiting_placeholder())
 
 
@@ -636,15 +642,17 @@ func _sync() -> void:
 
 ## While Send would queue, the message box says so.
 func _waiting_placeholder() -> String:
-	if _parked() and _occupied():
-		return OTHER_HINT
-	if _review_pending:
+	if _parked() and _occupied() and not _chats.turns.busy_in(_transcript):
+		return "" if _chats.turns.can_start(_transcript) else OTHER_HINT
+	if _review_pending or _chats.turns.busy_in(_transcript):
 		return REVIEW_WAIT
 	return REVIEW_WAIT if _occupied() and connection_state == "connected" else ""
 
 
 func _request_cancel() -> void:
 	_transcript.queue.pause()
+	if _chats.turns.stop_in(_transcript):  # This chat's own turn, beside the other: only it.
+		return
 	var card := _card()
 	if not _busy and card != null and card.state == "sending":
 		# Stopped before Journeyman took it: the request stays here, ready to Retry.

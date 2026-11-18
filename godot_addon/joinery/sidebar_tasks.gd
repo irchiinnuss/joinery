@@ -220,6 +220,19 @@ func working_count() -> int:
 	return count
 
 
+## Agents at work beside Journeyman's own request: the tasks, and messages from other chats
+## running as their chat's own turn (chat_turns.gd). They share the project's [agents] parallel.
+func agents_count() -> int:
+	var turns := _chat_turns()
+	return working_count() + (int(turns.call("working_count")) if turns != null else 0)
+
+
+func _chat_turns() -> Object:
+	var chats: Variant = dock.get("_chats") if dock != null else null
+	var turns: Variant = chats.get("turns") if chats is Object else null
+	return turns if turns is Object else null
+
+
 ## Journeyman's own request started or ended: the header count and "Run alongside" follow it.
 func set_main_busy(busy: bool) -> void:
 	_main_busy = busy
@@ -231,6 +244,15 @@ func set_main_busy(busy: bool) -> void:
 ## One event from a task (chat_bridge.gd's task_event).
 func on_event(event: Dictionary) -> void:
 	var id := str(event.get("task_id", ""))
+	var turns := _chat_turns()
+	if turns != null and turns.call("take", event):
+		# Another chat's own turn: it shows in that chat, never as a card.
+		_sync()
+		return
+	if event.get("kind") == "task" and dock != null:
+		# An agent may have come free: a message waiting in the chat on screen may start.
+		dock.call_deferred("_drain")
+		dock.call_deferred("_sync")
 	if variants != null and variants.call("take", event):
 		_sync()
 		return
@@ -530,7 +552,7 @@ func _has_variants() -> bool:
 
 
 func _sync() -> void:
-	var working := working_count()
+	var working := agents_count()
 	var testing := is_instance_valid(playtest) and bool(playtest.call("working"))
 	var header: Object = dock.get("_header") if dock != null else null
 	if header != null and header.has_method("show_agents"):
@@ -538,6 +560,8 @@ func _sync() -> void:
 	var composer: Object = dock.get("_composer") if dock != null else null
 	if composer != null and composer.has_method("set_alongside"):
 		var limit := int(bridge.get("parallel")) if bridge != null else 1
-		composer.call("set_alongside", _main_busy and working < limit - 1)
-	if working == 0 and is_instance_valid(_offer):
+		# In another chat Send itself starts at once (chat_turns.gd): nothing to run alongside.
+		var parked := dock != null and bool(dock.call("_parked"))
+		composer.call("set_alongside", _main_busy and not parked and working < limit - 1)
+	if working_count() == 0 and is_instance_valid(_offer):
 		_drop_offer()

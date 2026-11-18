@@ -20,9 +20,16 @@ extends Node
 ## keeps running out of sight: its conversation view is kept as it is and goes on taking the
 ## replies, steps and change ([member _kept]); its change still opens for review. The Chats
 ## page marks it with a dot, and opening it again brings back that same view, live, with Stop.
-## The host runs one request at a time, so a message sent from another chat meanwhile waits
-## in that chat's queue ("Sends when the other chat finishes") and goes out after it; two
-## requests never edit the open scene at once.
+##
+## A message sent from another chat meanwhile starts at once as that chat's own turn, beside
+## the first, while the project has an agent free ([agents] parallel, ADR 0036): the host runs
+## it as a chat task that continues that chat's session and saves the turn in that chat
+## (chat_turns.gd, [member turns]). Its replies, steps, Stop and change show in its own view,
+## kept out of sight the same way when the user goes elsewhere, with its own dot on the Chats
+## page; its change is its own row in the Review tab. Only when every agent is busy (or with
+## parallel = 1) does the message wait in that chat's queue ("Sends when the other chat
+## finishes") and go out once one is free. A message in a chat whose own turn is still working
+## waits in its queue as always. One agent at a time owns the scene on screen (ADR 0036).
 
 const TASKS := preload("sidebar_tasks.gd")
 const VARIANTS := preload("sidebar_variants.gd")
@@ -35,6 +42,7 @@ const COMMAND_SCRIPT := preload("command_job.gd")
 const SLASH := preload("slash_commands.gd")
 const ATTACHMENTS := preload("chat_attachments.gd")
 const REWIND := preload("chat_rewind.gd")
+const TURNS := preload("chat_turns.gd")
 const PERSONA := "Journeyman"
 const DISCARDED := "Discarded"
 const QUEUED := "Send or remove this chat's queued message first."
@@ -69,6 +77,8 @@ var project := ""
 var runner := Callable()
 ## Rewind and branch from a request (chat_rewind.gd).
 var rewinder: REWIND
+## Messages from other chats running beside the one Journeyman works in (chat_turns.gd).
+var turns: TURNS
 ## The chat the next message continues ("" starts a new one).
 var _current_id := ""
 var _bridge: Node
@@ -133,6 +143,7 @@ func _build(header_row: Control, content: Control) -> void:
 	content.move_child(past_bar, box.get_index())
 	dock.child_entered_tree.connect(_on_dock_child)
 	rewinder = REWIND.new(self)
+	turns = TURNS.new(dock, self)
 	_hook(_transcript)
 	if dock.has_signal("review_closed"):
 		dock.connect("review_closed", _mark_working)
@@ -203,7 +214,7 @@ func restore_latest() -> void:
 
 ## The Chats page, with this project's chats; the one Journeyman works in has a dot.
 func open_list() -> void:
-	page.show_chats(STORE.list(project), _current_id, -1, working_id())
+	page.show_chats(STORE.list(project), _current_id, -1, working_ids())
 	page.set_open(true)
 
 
@@ -503,10 +514,32 @@ func working_id() -> String:
 	return _current_id if turn == _transcript and not viewing else ""
 
 
-## The dot on the Chats page follows the work.
+## Every chat at work: the one Journeyman works in and those running beside it.
+func working_ids() -> PackedStringArray:
+	var ids := turns.chat_ids() if turns != null else PackedStringArray()
+	var main := working_id()
+	if not main.is_empty() and not ids.has(main):
+		ids.insert(0, main)
+	return ids
+
+
+## The dots on the Chats page follow the work.
 func _mark_working() -> void:
 	if page.visible:
-		page.set_working(working_id())
+		page.set_working(working_ids())
+
+
+## A message from a new chat ([param view]) started there and the host named the chat.
+func chat_named(view: Control, chat_id: String) -> void:
+	if view == _transcript:
+		_set_current(chat_id)
+		if not viewing:
+			shown_id = chat_id
+		return
+	for id: String in _kept.keys():
+		if _kept[id] == view and id != chat_id:
+			_kept[chat_id] = view
+			_kept.erase(id)
 
 
 ## Messages queued in a chat Journeyman is not working in go out only from the screen, so that
@@ -537,6 +570,8 @@ func _leave(next: Control = null) -> void:
 	var old := _transcript
 	var turn: Variant = dock.call("_turn")
 	var keep: bool = turn == old and (bool(dock.call("_occupied")) or _queued(old))
+	# Another chat's own turn works or its change waits there (chat_turns.gd).
+	keep = keep or turns.holds(old)
 	if keep:
 		old.set_meta(CHANGES_META, _changes.duplicate())
 		_kept[_current_id] = old
@@ -581,7 +616,7 @@ func _prune() -> void:
 	var working := bool(dock.call("_occupied"))
 	for id: String in _kept.keys():
 		var view: Control = _kept[id]
-		if not (view == turn and working) and not _queued(view):
+		if not (view == turn and working) and not _queued(view) and not turns.holds(view):
 			_kept.erase(id)
 			view.queue_free()
 

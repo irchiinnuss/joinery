@@ -263,6 +263,18 @@ func add_request(text: String, targets: Array = []) -> Control:
 	return card
 
 
+## Take back a request that never started, with its turn (it waits in the queue, chat_turns.gd).
+func remove_request(card: Control) -> void:
+	_cards.erase(card)
+	for message: Dictionary in _messages.duplicate():
+		if message.get("panel") == card:
+			_messages.erase(message)
+	if card.get_parent() == _turn:
+		_turn = null
+	card.get_parent().queue_free()
+	_dirty = true
+
+
 ## Whether unsent cards offer Retry (not while a connection banner owns the fix).
 func set_retry_allowed(on: bool) -> void:
 	_retry_allowed = on

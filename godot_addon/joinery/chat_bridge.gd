@@ -50,7 +50,9 @@ signal usage_received(event: Dictionary)
 signal chat_changed(event: Dictionary)
 ## Anything from a parallel task (ADR 0036), tagged with its task_id: its state ({kind: "task",
 ## state, title, step, apps, transaction_id, message…}), its steps, its words and its change.
-## None of these reach the signals above, which belong to Journeyman's own request.
+## None of these reach the signals above, which belong to Journeyman's own request. A message
+## sent from another chat runs as a task too (origin "chat", with its chat_id and ref), and
+## {kind: "chat_wait", ref, full} says it couldn't start (chat_turns.gd).
 signal task_event(event: Dictionary)
 ## The user asked to see a task's change ([param transaction_id]) in the Review tab.
 signal task_review(transaction_id: String)
@@ -118,6 +120,8 @@ var _error_detail := ""
 var _selection: Dictionary = {"mode": "auto", "model": "", "effort": ""}
 ## True from a request's send until its done (or the connection ends).
 var _busy := false
+## Messages sent from other chats so far ([method start_chat_task]).
+var _refs := 0
 ## The model's display name from the latest execution event, for usage events.
 var _model_name := ""
 
@@ -240,6 +244,37 @@ func start_task(text: String, targets: Array, extra := {}) -> bool:
 		line.merge(extra, true)
 	_job.send_line(JSON.stringify(line))
 	return true
+
+
+## Run [param text], sent from the chat [param chat] ("" for a new one), now as that chat's own
+## turn beside the one Journeyman works in (chat_turns.gd). Returns the line's ref, which the
+## host's task events carry back, or "" when not connected.
+func start_chat_task(chat: String, text: String, targets: Array) -> String:
+	if _job == null or not _connected:
+		return ""
+	var scene_targets: Array = []
+	var images: Array[String] = []
+	for target: Variant in targets:
+		if ATTACHMENTS.is_attachment(target):
+			images.append(str(target["path"]))
+		else:
+			scene_targets.append(target)
+	_refs += 1
+	var ref := "%d-%d" % [Time.get_ticks_usec(), _refs]
+	var line := {
+		"kind": "chat_task",
+		"ref": ref,
+		"chat_id": chat,
+		"text": text,
+		"targets": scene_targets.duplicate(true),
+		"selection": _selection.duplicate(),
+		"editor_context":
+		context_provider.call(scene_targets) if context_provider.is_valid() else {},
+	}
+	if not images.is_empty():
+		line["attachments"] = images
+	_job.send_line(JSON.stringify(line))
+	return ref
 
 
 ## Debug a player's bug report [param report_id] ("/debug report <id>"): the chat host
@@ -519,7 +554,7 @@ func _process(_delta: float) -> void:
 
 
 func _handle(event: Dictionary) -> void:
-	if not str(event.get("task_id", "")).is_empty():
+	if not str(event.get("task_id", "")).is_empty() or event.get("kind") == "chat_wait":
 		task_event.emit(event)
 		return
 	if not str(event.get("playtest_id", "")).is_empty():
