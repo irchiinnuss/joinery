@@ -852,6 +852,8 @@ func _console_errors() -> void:
 	var text := s.visible_text()
 	s.check(text.contains("jump"), "The error shows in the sidebar")
 	s.check(text.contains("Fix"), "It offers to fix it: " + text.right(160))
+	s.check(text.count("jump") == 1, "One place to act on it, not two (%d)" % text.count("jump"))
+	s.check(not text.contains("Debug"), "One verb for it: Fix")
 	await s.shot("offer")
 
 

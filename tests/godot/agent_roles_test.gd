@@ -188,25 +188,22 @@ func _debugging() -> void:
 	}
 	var listed := {"kind": "errors", "mode": "ask", "groups": [group], "offer": group}
 	backend.call("_handle", listed)
-	_check(
-		str(watcher.call("offer_text")).begins_with("Godot reported an error: Invalid call."),
-		"A new error is offered: %s" % watcher.call("offer_text")
-	)
 	backend.call("_handle", listed)
-	_check(
-		(transcript.call("offer_texts") as PackedStringArray).size() == 1,
-		"One offer at a time, each error once"
-	)
 	var list_card: Control = tasks.get("errors_card")
 	_check(list_card != null and list_card.visible, "The Errors card lists it")
 	if list_card != null:
 		_check((list_card.call("row_texts") as PackedStringArray).size() == 1, "One row per error")
 		_check(str(list_card.get("headline").text) == "1 console error", "Its headline counts")
-	_check(_button(dock, "Always fix errors like this") != null, "The offer can turn on auto")
-	var debug := _button(dock, "Debug")
-	_check(debug != null, "Debug starts it")
-	if debug != null:
-		debug.pressed.emit()
+		_check(_button(list_card, "Fix") != null, "Its row offers Fix")
+	# One place to act on it: the card. The conversation offers nothing beside it.
+	_check(str(watcher.call("offer_text")).is_empty(), "Listed, the error is not offered twice")
+	_check(
+		(transcript.call("offer_texts") as PackedStringArray).is_empty(), "No second offer in chat"
+	)
+	_check(_button(dock, "Debug") == null, "One verb for it: Fix, never Debug")
+	_check(_button(dock, "Always fix errors like this") != null, "The card can turn on auto")
+	# /debug sends the error with what is around it.
+	watcher.call("debug", "", group)
 	var started := _sent(job, "debug_start")
 	_check(str(started.get("error", "")) == _error, "The error line goes to the host")
 	_check(str(started.get("group_id", "")) == "g1", "With the error it fixes")
@@ -214,21 +211,21 @@ func _debugging() -> void:
 		str(started.get("output", "")).contains("res://player.gd:12"), "With the Output around it"
 	)
 	_check(str(started.get("log", "")) == "game log tail", "And the game's log")
-	_check(str(watcher.call("offer_text")).is_empty(), "The offer steps out")
 
-	# "Always fix errors like this": the project switches to auto, starting with this one.
+	# "Always fix errors like this": the project switches to auto, starting with the first that
+	# waits.
 	var second := group.duplicate()
 	second.merge({"id": "g2", "label": "Node not found (hud.gd:7)", "place": "hud.gd:7"}, true)
 	backend.call(
 		"_handle", {"kind": "errors", "mode": "ask", "groups": [group, second], "offer": second}
 	)
 	var always := _button(dock, "Always fix errors like this")
-	_check(always != null, "Each new error is offered")
+	_check(always != null and always.is_visible_in_tree(), "Ask: the card offers auto")
 	if always != null:
 		always.pressed.emit()
 	var mode := _sent(job, "errors_mode")
 	_check(
-		str(mode.get("mode", "")) == "auto" and str(mode.get("group_id", "")) == "g2",
+		str(mode.get("mode", "")) == "auto" and str(mode.get("group_id", "")) == "g1",
 		"Auto is saved and this error fixed: %s" % mode
 	)
 	# In auto nothing is offered; Fix on a row, Ignore and Fix all go to the host.

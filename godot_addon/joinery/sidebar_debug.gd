@@ -10,9 +10,11 @@ extends Node
 ## Every second the editor's Output panel and the game's log are read, and what they gained goes
 ## to the host, which groups the errors (same message and place: one row with a count), drops
 ## Joinery's own and known noise, and sends back the list (errors_card.gd). With
-## [agents] fix_errors = "ask" (the default) each new error is offered once, one offer at a time
-## ("Godot reported an error: … Debug / Always fix errors like this / Dismiss"); with "auto"
-## the host starts the fixes itself, and each is still a change the user reviews.
+## [agents] fix_errors = "ask" (the default) each new error is offered once, in one place: its
+## row on the Errors card (Fix, and "Always fix errors like this"), or, while that card is not
+## shown, one line in the conversation ("Godot reported an error: … Fix / Always fix errors like
+## this / Dismiss"). With "auto" the host starts the fixes itself, and each is still a change
+## the user reviews.
 
 ## Seconds between reads of the Output panel.
 const POLL := 1.0
@@ -247,10 +249,17 @@ func _report(source: String, text: String) -> void:
 func on_errors(event: Dictionary) -> void:
 	mode = str(event.get("mode", mode))
 	_show_card(event)
+	# One place to act on an error: while the Errors card lists it, the card's Fix is the offer.
+	var listed := is_instance_valid(card) and card.visible
 	var offer: Variant = event.get("offer", {})
-	if mode == "ask" and offer is Dictionary and not (offer as Dictionary).is_empty():
+	if (
+		mode == "ask"
+		and not listed
+		and offer is Dictionary
+		and not (offer as Dictionary).is_empty()
+	):
 		_offer_debug(offer)
-	elif mode != "ask":
+	elif mode != "ask" or listed:
 		_drop_offer()
 
 
@@ -260,7 +269,7 @@ func last_error() -> String:
 
 
 ## "/debug [what goes wrong]", "/debug report <id>" (a player's bug report, read by
-## `joinery reports`), or Debug on the offer ([param group] is the offered error).
+## `joinery reports`), or Fix on the offer ([param group] is the offered error).
 func debug(details := "", group: Dictionary = {}) -> void:
 	var words := details.strip_edges().split(" ", false)
 	if words.size() == 2 and words[0] == "report":
@@ -305,7 +314,7 @@ func offer_text() -> String:
 	return str(_offer.get_meta("joinery_offer", "")) if is_instance_valid(_offer) else ""
 
 
-## One quiet offer for a new error group: Debug, Always fix errors like this, or Dismiss.
+## One quiet offer for a new error group: Fix, Always fix errors like this, or Dismiss.
 func _offer_debug(group: Dictionary) -> void:
 	var id := str(group.get("id", ""))
 	if _offered.has(id) or is_instance_valid(_offer):
@@ -324,7 +333,7 @@ func _offer_debug(group: Dictionary) -> void:
 			"add_offer",
 			"Godot reported %s: %s" % [kind, short],
 			[
-				["Debug", debug.bind("", group)],
+				["Fix", debug.bind("", group)],
 				["Always fix errors like this", _always_fix.bind(group)],
 				["Dismiss", _drop_offer],
 			]
@@ -358,6 +367,7 @@ func _show_card(event: Dictionary) -> void:
 			return
 		card = ERRORS_CARD.new()
 		card.connect("fix_requested", _fix)
+		card.connect("always_fix_requested", func(id: String) -> void: _always_fix({"id": id}))
 		card.connect("ignore_requested", _ignore)
 		card.connect("review_requested", _review)
 		card.connect("stop_requested", _stop)

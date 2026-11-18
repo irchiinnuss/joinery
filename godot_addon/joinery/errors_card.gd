@@ -10,9 +10,13 @@ extends PanelContainer
 ## "Fix" on a row, or "Fix all" when the project asks first ([agents] fix_errors = "ask"),
 ## starts the debugger and a worker; the fix is a normal change the user reviews. The host sends
 ## the whole list each time it changes (chat_bridge.gd's errors_event); the fix task's own events
-## come here too ([method track]), so it needs no card of its own.
+## come here too ([method track]), so it needs no card of its own. While the project asks first,
+## "Always fix errors like this" under the rows turns on fixing them without asking; the
+## conversation never offers the same error a second time while this card shows it.
 
 signal fix_requested(ids: Array)
+## "Always fix errors like this": [param id] is the error to start with.
+signal always_fix_requested(id: String)
 signal ignore_requested(id: String, ignore: bool)
 signal review_requested(transaction_id: String)
 signal stop_requested(task_id: String)
@@ -54,6 +58,8 @@ const SETTLED := ["fixed", "explained", "editor", "joinery", "ignored"]
 var mode := "ask"
 var headline: Label
 var fix_all: Button
+## "Always fix errors like this", while the project asks first and an error waits.
+var always: Button
 var _rows: VBoxContainer
 var _more: Button
 var _groups: Array = []
@@ -119,6 +125,15 @@ func _init() -> void:
 	_more.pressed.connect(_toggle_more)
 	_more.hide()
 	column.add_child(_more)
+	always = UI.quiet_link("Always fix errors like this")
+	always.name = "AlwaysFix"
+	always.tooltip_text = "Fix new console errors without asking; each fix is still yours to review"
+	UI.bind_height(always, "xs")
+	always.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	STYLE.hug_left(always)
+	always.pressed.connect(_on_always)
+	always.hide()
+	column.add_child(always)
 	set_process(false)
 
 
@@ -209,6 +224,7 @@ func _render() -> void:
 		if str(group.get("status", "")) in ["open", "stopped"]:
 			fixable += 1
 	fix_all.visible = mode == "ask" and fixable > 1
+	always.visible = mode == "ask" and fixable > 0
 	_close.visible = count == 0
 	for row: Node in _rows.get_children():
 		row.queue_free()
@@ -445,6 +461,14 @@ func _on_fix_all() -> void:
 			ids.append(str(group.get("id", "")))
 	fix_requested.emit(ids)
 	get_tree().create_timer(1.0).timeout.connect(func() -> void: fix_all.disabled = false)
+
+
+## Starts with the first error still waiting for a fix.
+func _on_always() -> void:
+	for group: Dictionary in _groups:
+		if str(group.get("status", "")) in ["open", "stopped"]:
+			always_fix_requested.emit(str(group.get("id", "")))
+			return
 
 
 func _on_ignore(id: String, row: Control) -> void:
