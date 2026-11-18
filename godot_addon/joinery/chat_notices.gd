@@ -11,6 +11,8 @@ const UI_THEME := preload("ui_theme.gd")
 const UI_MOTION := preload("ui_motion.gd")
 const UI := preload("ui_components.gd")
 const STYLE := preload("sidebar_style.gd")
+## How a Rule Zero stop starts (bridge/stdio.py's policy_stop).
+const POLICY_STOP := "Stopped by project policy: "
 
 
 ## A centred faint [param text] between two hairlines.
@@ -78,3 +80,15 @@ static func expandable(row: HBoxContainer, label: Label, head: String, rest: Str
 			if is_instance_valid(detail) and detail.get_parent() == null:
 				detail.free()
 	)
+
+
+## "Retry" at the end of an error notice's [param row], like the card's own Retry.
+static func retry(row: Control, pressed: Callable) -> void:
+	var button := UI.link("Retry")
+	button.name = "Retry"
+	button.tooltip_text = "Send this request again"
+	button.accessibility_name = button.tooltip_text
+	button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	UI.bind_height(button, "xs")
+	button.pressed.connect(pressed)
+	row.add_child(button)

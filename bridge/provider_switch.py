@@ -19,6 +19,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
 
+from bridge.turn_runner import limit_notice
 from joinery.agents import get
 from joinery.fallback import candidates, continue_text, setting
 
@@ -77,23 +78,21 @@ class ProviderSwitch:
 
     async def offer(self, reason: str) -> tuple[CarryBridge, str] | None:
         """Offer another signed-in agent; open it if the user (or the project) says
-        so. Returns its bridge and first prompt, or None. ``reason`` is the
-        provider's own words, already shown in the transcript."""
-        del reason
-        stopped = name_of(self.current)
+        so. Returns its bridge and first prompt, or None after saying, in one line,
+        which limit ended the request and what the user can do. ``reason`` is the
+        provider's own words."""
         found = await asyncio.to_thread(candidates, self.current, self.ready)
         choices = [c for c in found if c["id"] not in self.tried]
         if not choices:
             self.emit(
-                {
-                    "kind": "notice",
-                    "level": "warn",
-                    "text": f"{stopped} ran out of quota, and no other agent is signed "
-                    "in to carry the request on. Sign one in under Settings, then ask "
-                    "again.",
-                }
+                limit_notice(
+                    reason,
+                    "No other agent is signed in to carry it on. Sign one in under "
+                    "Settings, then ask again.",
+                )
             )
             return None
+        stopped = name_of(self.current)
         ids = {c["id"] for c in choices}
         automatic = setting(self.project)
         chosen = automatic if automatic in ids else ""
@@ -101,6 +100,7 @@ class ProviderSwitch:
             chosen = await self._ask(stopped, choices[0])
             if chosen not in ids:
                 self.emit({"kind": "provider_switch", "state": "declined"})
+                self.emit(limit_notice(reason))
                 return None
         other = self.make_bridge(chosen)
         try:
@@ -115,6 +115,7 @@ class ProviderSwitch:
                     "text": f"{name_of(chosen)} could not start: {exc}",
                 }
             )
+            self.emit(limit_notice(reason))
             return None
         self.carried.append(other)
         self.tried.add(chosen)

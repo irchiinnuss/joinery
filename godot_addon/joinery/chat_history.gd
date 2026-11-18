@@ -346,6 +346,18 @@ func add_notice(text: String, kind := "info") -> void:
 	_dirty = true
 
 
+## The request failed ([param text] is why): one line in the error style, never as [param _who]'s
+## reply, with Retry for the request. A policy stop is never retried (chat_notices.gd).
+func add_error(_who: String, text: String) -> void:
+	var shown := _log.size()
+	add_notice(text, "error")
+	var card := current_card()
+	var retry := card != null and _retry_allowed and not text.begins_with(NOTICES.POLICY_STOP)
+	if _log.size() == shown or not retry:
+		return
+	NOTICES.retry(_inset(_current_turn()).get_child(-1), retry_requested.emit.bind(card))
+
+
 ## The outcome of a review or a turn ("Change accepted", "Stopped"). It is shown on
 ## [param card] when that card is waiting for it, otherwise as a notice.
 func add_decision(text: String, kind: String, card: Control) -> void:

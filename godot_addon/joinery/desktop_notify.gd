@@ -150,6 +150,7 @@ func listen(bridge: Object) -> void:
 		"busy_changed": _on_busy,
 		"message_delta": _on_delta,
 		"message_received": _on_message,
+		"error_received": _on_notice.bind("error"),
 		"notice": _on_notice,
 		"turn_state": _on_turn_state,
 		"file_preview": _on_preview,

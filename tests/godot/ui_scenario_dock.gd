@@ -102,6 +102,7 @@ func _wire(dock: Control, chat: Node) -> void:
 	}
 	for signal_name: String in links:
 		chat.connect(signal_name, Callable(dock, links[signal_name]))
+	chat.connect("error_received", Callable(dock, "show_agent_message").bind(true))
 	dock.connect("prompt_submitted", Callable(chat, "submit"))
 	dock.connect("cancel_requested", Callable(chat, "cancel_turn"))
 	var review := {}

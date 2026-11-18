@@ -174,15 +174,17 @@ def left_notice(result: SubmitResult) -> dict[str, Any] | None:
     return {"kind": "notice", "level": level, "text": text, "about": LEFT_CHANGE}
 
 
-def limit_notice(words: str) -> dict[str, Any]:
+def limit_notice(words: str, next_step: str = "") -> dict[str, Any]:
     """Joinery's own line when a usage or rate limit ended the turn: which limit,
-    when it lifts if the provider said, and the provider's words. ``joinery run``
-    takes it as the run's error (``about`` = PROVIDER_ERROR)."""
+    when it lifts if the provider said, the provider's words and ``next_step``
+    (what the user can do). It is the one place the limit is said: the provider's
+    own quota message is not shown besides it. ``joinery run`` takes it as the
+    run's error (``about`` = PROVIDER_ERROR)."""
     kind, reset, line = provider_error(words)
     return {
         "kind": "notice",
         "level": "warn",
-        "text": line,
+        "text": f"{line} {next_step}" if next_step else line,
         "about": PROVIDER_ERROR,
         "error_kind": kind,
         "resets": reset,
@@ -290,8 +292,8 @@ async def _stream(
     except RuntimeError as exc:
         if not is_quota(str(exc)):
             raise
+        # Said once, by the limit line or the switch to another agent (_carry_on).
         controller.quota = str(exc)
-        emit(Message(text=str(exc), level="warn").model_dump())
         return False, None
 
 
@@ -312,7 +314,9 @@ async def _events(
             and event.level != "info"
             and is_quota(event.text)
         ):
+            # Said once, by the limit line or the switch to another agent (_carry_on).
             controller.quota = event.text
+            continue
         if isinstance(event, Execution):
             timing.model, timing.effort, timing.mode = (
                 event.model,
@@ -734,13 +738,13 @@ async def _carry_on(
     """The provider stopped on a usage or quota limit: offer another agent and, if
     the user takes it (or the project names one), let it carry the turn on with the
     change staged so far. Returns its ``Done.ok`` and the bridge the turn now uses;
-    without a fallback the turn ends as it would have, saying why (``limit_notice``)."""
+    without a fallback the turn ends as it would have, saying why (``limit_notice``).
+    A fallback that carries nothing on has said why itself."""
     reason = ""
     while controller.quota and fallback is not None:
         reason, controller.quota = controller.quota, ""
         offered = await fallback(reason)
         if offered is None:
-            emit(limit_notice(reason))
             return False, bridge
         bridge, text = offered
         # Token totals are per provider session; the new one starts from zero.

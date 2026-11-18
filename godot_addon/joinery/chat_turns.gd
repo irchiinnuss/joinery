@@ -237,7 +237,7 @@ func _show(turn: Dictionary, event: Dictionary) -> void:
 		"message":
 			turn["open"] = false
 			if str(event.get("level", "info")) == "warn":
-				view.call("add_notice", text, "error")
+				view.call("add_error", PERSONA, text)
 			elif not text.is_empty():
 				view.call("add_message", PERSONA, text)
 		"notice":

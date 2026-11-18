@@ -226,11 +226,7 @@ func _exit_tree() -> void:
 
 
 func _notification(what: int) -> void:
-	if (
-		what == NOTIFICATION_PREDELETE
-		and is_instance_valid(_review)
-		and _review.get_parent() == null
-	):
+	if what == NOTIFICATION_PREDELETE and is_instance_valid(_review) and not _review.get_parent():
 		_review.free()
 
 
@@ -497,8 +493,12 @@ func _send_request(card: Control) -> void:
 
 
 func _retry(card: Control) -> void:
-	if not _occupied():
+	if _occupied():
+		return
+	if card.state == "failed":  # Not sent: the same card goes again.
 		_send_request(card)
+	else:  # It ran and failed: ask again, as a new request.
+		_start_request(card.request, card.targets)
 
 
 ## A request that never reached the assistant. When the connection went with it, every
@@ -830,7 +830,7 @@ func append_agent_text(text: String, new_message: bool) -> void:
 	_assistant_open = true
 
 
-func show_agent_message(text: String) -> void:
+func show_agent_message(text: String, error := false) -> void:
 	var card := _card()
 	if card != null and card.state == "sending" and _bridge != null:
 		# Before the bridge sent the request, anything it says is a delivery failure.
@@ -839,7 +839,7 @@ func show_agent_message(text: String) -> void:
 		return
 	_on_sent()
 	finish_agent_response(false)
-	_turn().add_message(PERSONA, text)
+	_turn().call("add_error" if error else "add_message", PERSONA, text)
 
 
 func finish_agent_response(_ok: bool) -> void:

@@ -517,7 +517,18 @@ func _provider_error() -> void:
 		not s.notifications.is_empty(),
 		"In the background, a failed request tells the desktop (%s)" % " / ".join(s.notifications)
 	)
+	s.check(not s.reply_shown().contains("HTTP 500"), "The error isn't shown as a reply")
+	s.check(s.visible_text().count("HTTP 500") == 1, "The error is said once")
+	var retry: Button = s.transcript().find_child("Retry", true, false)
+	s.check(retry != null and s.on_screen(retry), "The error offers Retry")
 	await s.shot("failed")
+	if retry != null:
+		await s.click(retry)
+		var again := await s.wait_until(
+			func() -> bool: return (s.transcript().get("_cards") as Array).size() == 2, 4000
+		)
+		s.check(again, "Retry asks again, as a new request")
+		await s.wait_until(func() -> bool: return s.card_state() != "working", 4000)
 
 
 ## A usage limit: say which, and offer to carry on with another agent.
@@ -536,6 +547,9 @@ func _rate_limit() -> void:
 		offered, "A quota stop offers another agent, or says how: " + s.visible_text().right(200)
 	)
 	s.check(s.visible_text().contains("usage limit"), "It says it was the usage limit")
+	var said := s.visible_text().count("You've hit your usage limit")
+	s.check(said == 1, "The usage limit is said once (%d times)" % said)
+	s.check(s.reply_shown().is_empty(), "The limit isn't shown as a reply")
 	await s.shot("offer")
 
 

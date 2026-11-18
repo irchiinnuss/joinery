@@ -224,9 +224,7 @@ func _connect_chat(settings: EditorSettings) -> void:
 	_chat = CHAT_SCRIPT.new()
 	_chat.context_provider = _editor_context
 	_review_tab.follow(_chat)
-	_chat.task_review.connect(
-		func(_id: String) -> void: make_bottom_panel_item_visible(_review_tab)
-	)
+	_chat.task_review.connect(make_bottom_panel_item_visible.bind(_review_tab).unbind(1))
 	_chat.editor_action.connect(_on_editor_action)
 	_flow = FLOW_SCRIPT.new()
 	add_child(_flow)
@@ -240,6 +238,7 @@ func _connect_chat(settings: EditorSettings) -> void:
 	_link(_chat.busy_changed, "set_chat_busy")
 	_link(_chat.message_delta, "append_agent_text")
 	_chat.message_received.connect(_on_chat_message)
+	_chat.error_received.connect(_on_chat_message.bind(true))
 	_link(_chat.completed, "finish_agent_response")
 	_link(_chat.models_received, "set_model_options")
 	_link(_chat.execution_changed, "show_execution")
@@ -400,11 +399,11 @@ func _review_failed(message: String) -> void:
 		_call_dock("show_agent_message", [message])
 
 
-func _on_chat_message(text: String) -> void:
+func _on_chat_message(text: String, error := false) -> void:
 	if _deciding:
 		_review_failed(text)
 		return
-	_call_dock("show_agent_message", [text])
+	_call_dock("show_agent_message", [text, error])
 
 
 func _on_chat_state(state: String, detail: String) -> void:

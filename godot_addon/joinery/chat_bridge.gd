@@ -6,6 +6,8 @@ extends Node
 signal status_changed(state: String, detail: String)
 signal busy_changed(busy: bool)
 signal message_received(text: String)
+## The request failed: the provider's or the host's error (a "warn" message), not a reply.
+signal error_received(text: String)
 signal message_delta(text: String, new_message: bool)
 ## A line of Journeyman's work trail (bridge/trail.py): {id, text, state: running|done|failed,
 ## note: tool|thought, file, added, removed, picture}. The same for every agent.
@@ -595,7 +597,11 @@ func _handle(event: Dictionary) -> void:
 		"message":
 			if not str(event.get("details", "")).is_empty():
 				print("[Joinery] %s:\n%s" % [_display_name(), event["details"]])
-			message_received.emit(str(event.get("text", "")))
+			var said := str(event.get("text", ""))
+			if event.get("level") == "warn":
+				error_received.emit(said)
+			else:
+				message_received.emit(said)
 		"progress":
 			status_changed.emit("working", str(event.get("text", "")))
 		"trail":
