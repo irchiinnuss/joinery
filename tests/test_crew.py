@@ -1792,3 +1792,43 @@ def test_a_chat_task_is_recorded_only_in_its_own_chat(tmp_path: Path) -> None:
         recorder.observe(event)
     _, entries = chats.read(tmp_path, recorder.chat_id)
     assert [e["type"] for e in entries] == ["user"]
+
+
+def test_stopping_this_chats_work_leaves_another_chats_turn_running(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    host = HostTest(project, monkeypatch)
+    never = asyncio.Event()
+    go_on = asyncio.Event()
+
+    async def stuck(_lane: ProjectGateway) -> AsyncIterator[Any]:
+        await never.wait()
+        yield Done(ok=True)
+
+    async def answer(_lane: ProjectGateway) -> AsyncIterator[Any]:
+        await go_on.wait()
+        yield Message(text="Lamps are warm white.")
+        yield Done(ok=True)
+
+    def stopped(events: list[dict[str, Any]]) -> bool:
+        if any(e.get("kind") == "done" and not e.get("task_id") for e in events):
+            go_on.set()
+        return False
+
+    host.scripts = {"Make a level": stuck, "What colour": answer}
+    host.lines = [
+        (lambda _e: True, {"kind": "prompt", "text": "Make a level", "chat_id": ""}),
+        (
+            lambda e: any(x.get("kind") == "progress" for x in e),
+            {"kind": "chat_task", "text": "What colour are the lamps?", "ref": "r"},
+        ),
+        (
+            lambda e: any(x.get("kind") == "task" for x in e),
+            {"kind": "cancel", "all": True},
+        ),
+        (stopped, {}),
+    ]
+    host.run()
+    assert host.task("stopped") is None
+    done = host.task("done")
+    assert done is not None and done["origin"] == "chat"

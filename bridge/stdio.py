@@ -1168,10 +1168,11 @@ async def _serve(
                     # The answer to "Continue with <agent>" (ADR 0080): an agent, or "".
                     switch.answer(str(data.get("agent", "") or ""))
                 elif data.get("kind") == "cancel_tasks":
-                    await crew.stop_all()
+                    # This chat's tasks; another chat's turn has its own Stop.
+                    await crew.stop_all(chats=False)
                 elif data.get("kind") == "cancel":
                     if data.get("all"):
-                        await crew.stop_all()
+                        await crew.stop_all(chats=False)
                     if specialists is not None:
                         await specialists.close()
                     if active is not None and not active.done():

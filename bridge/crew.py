@@ -884,9 +884,13 @@ class Crew:
             job.cancel()
             await asyncio.gather(job, return_exceptions=True)
 
-    async def stop_all(self) -> int:
-        """Stop every task still working or waiting; returns how many were stopped."""
-        running = self.queued() + self.working()
+    async def stop_all(self, chats: bool = True) -> int:
+        """Stop every task still working or waiting; returns how many were stopped.
+        Without ``chats``, the turns of other chats (chat tasks) go on: the user
+        stopped this chat's work, not theirs. A Rule Zero stop stops them too."""
+        running = [
+            t for t in self.queued() + self.working() if chats or t.recorder is None
+        ]
         await asyncio.gather(
             *(self.stop(task.id) for task in running), return_exceptions=True
         )
