@@ -109,6 +109,39 @@ conclude "not a game error", and the feed showed each error three times.
    its current step and timer while fixing, and the cause behind a
    disclosure. Fixed, explained and triaged rows stay listed for ten minutes.
 
+## Amendment (2026-11-18): the import cache briefly out of date
+
+An accepted change that adds or replaces a model, texture or sound, then loads a
+scene that uses it before the editor has re-imported it, prints three lines per
+file ("Cannot open file 'res://.godot/imported/x.glb-<md5>.scn'", "Failed loading
+resource" for that copy and for `res://…/x.glb`). They meant nothing a few seconds
+later, yet each went to a debugger turn. The sidebar already held lines naming a
+file still being imported, but Output starts an error line with its icon and a
+thin space (U+2009) that `strip_edges()` and the regex's `\s` miss, so no Output
+line was read as an error and none was held.
+
+1. **Held while it imports** (`sidebar_debug.gd`, `file_settle.gd`). Output lines
+   are read without Output's wide spaces. An error naming a copy under
+   `.godot/imported`, a file a change just wrote, or (for a load failure) a file
+   that has a `.import` is held while the editor scans or imports and for ten
+   seconds after a change's files land.
+2. **Checked again, imported again once.** Once imports settle, a held error whose
+   file's imported copies are all there now is dropped. A file that still has none
+   is imported again (`reimport_files`), once a minute at most, and checked after
+   that import. What still fails then goes to the host in one report.
+3. **One finding per file** (`console_errors.fold_imports`, in the host). The
+   host reads each such line against the disk too (the game's log is never held):
+   dropped when the imported copy is there, otherwise the lines about one file are
+   one group with the cause in plain words: "leaf_rake.glb didn't import: Godot has
+   no imported copy of it after a reimport", "… Godot couldn't read it, the file
+   may be damaged" (`valid=false` in its `.import`), or "… is missing" (the file is
+   gone). The raw lines are its context for the debugger.
+4. **Real errors stay.** Only load failures and lines naming `.godot/imported` are
+   folded; any other error naming an imported file, a load failure of a file with
+   no `.import` (a genuinely missing file), or a copy no project file was made
+   from is listed as it was printed. Output's "(3) " repeat count is no longer part
+   of a message.
+
 ## Consequences
 
 - With the default nothing changes for a user who never touches the setting,
