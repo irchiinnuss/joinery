@@ -90,12 +90,17 @@ CASES = {
     "update_dialog_test.gd": "update dialog: ok",
     "setup_notice_test.gd": "setup notice: ok",
     "departures_test.gd": "departures: ok",
+    # The sidebar end to end against the real chat host and a scripted provider, headless:
+    # one width and theme (run_ui_scenarios.py runs every width with screenshots).
+    "ui_scenario_dock.gd": "ui scenarios dock: ok",
     "played_test.gd": "played: ok",
     # Last: it puts the shared disposable project under git.
     "timeline_test.gd": "timeline: ok",
     # After the timeline: it shares the same project through a local bare remote.
     "team_test.gd": "team: ok",
 }
+#: Seconds a case may take when 120 is not enough.
+SLOW = {"ui_scenario_dock.gd": 420}
 #: Cases that need a game made from a blueprint (the real `joinery feature` CLI runs there).
 GAME_CASES = {"sidebar_feature_test.gd"}
 GAME_BLUEPRINT = "top-down"
@@ -200,7 +205,7 @@ def _run(selected: list[str], temporary: Path) -> int:
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=120,
+            timeout=SLOW.get(Path(argv[-1]).name, 120),
             check=False,
         )
         output = result.stdout + result.stderr

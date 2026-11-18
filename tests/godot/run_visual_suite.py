@@ -8,7 +8,8 @@ All screenshots land in one directory (default ``out/visual``) together with
 walks its visible controls and prints ``UI-CHECK <screen> <kind> <node> <detail>``
 lines for clipped text, low contrast, overflow and small targets. Any finding
 fails the run unless ``--report-only`` is given. A missing capture or a broken
-harness always fails it.
+harness always fails it. The sidebar's end-to-end UI scenarios (run_ui_scenarios.py)
+run as the ``scenarios`` harness; ``--only scenarios`` runs them alone.
 """
 
 from __future__ import annotations
@@ -628,6 +629,29 @@ def classic_view(theme: str, capture: Path, logs: Path) -> Harness:
     return harness
 
 
+def scenarios(themes: list[str], capture: Path, logs: Path) -> Harness:
+    """The sidebar's end-to-end UI scenarios (run_ui_scenarios.py) at every width: their
+    screenshots join the suite's, and a failed check fails the harness."""
+    from run_ui_scenarios import collect, dock
+
+    options = argparse.Namespace(
+        scenarios=os.environ.get("JOINERY_SCENARIOS", ""),
+        widths="",
+        themes=themes,
+        headless=False,
+        timeout=1800,
+    )
+    harness, output = dock(capture, logs, options)
+    checks, _ = collect(output)
+    harness.captures = sorted(path.name for path in capture.glob("scn-*.png"))
+    failed = sorted(
+        {f"{c['scenario']}: {c['what']}" for c in checks if c["state"] == "fail"}
+    )
+    harness.errors = [error for error in harness.errors if error != "exit code 1"]
+    harness.errors += [f"scenario check failed: {line}" for line in failed]
+    return harness
+
+
 def legacy(name: str, capture: Path, logs: Path) -> Harness:
     script, expected = LEGACY[name]
     harness = Harness(f"legacy-{name}")
@@ -671,6 +695,7 @@ def plan(args: argparse.Namespace) -> list[tuple[str, Callable[[Path, Path], Har
     for theme in args.themes:
         jobs.append((f"editor-{theme}", partial(editor, theme)))
     jobs.append(("layouts", layouts))
+    jobs.append(("scenarios", partial(scenarios, list(args.themes))))
     for theme in args.themes:
         jobs.append((f"classic-view-{theme}", partial(classic_view, theme)))
     if not args.skip_legacy:
