@@ -111,6 +111,7 @@ def editor(
             "ui_checks.gd",
             "ui_scenarios.gd",
             "ui_scenario_cases.gd",
+            "ui_scenario_checks.gd",
             "playtest_fixture.gd",
         ],
         "ui scenarios editor:",
