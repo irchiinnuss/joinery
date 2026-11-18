@@ -44,6 +44,7 @@ const MEMORY := preload("sidebar_memory.gd")
 const MIX := preload("sidebar_mix.gd")
 const COMMANDS := preload("sidebar_commands.gd")
 const PLAYTEST_CARD := preload("playtest_card.gd")
+const PLAYTESTER := preload("playtester_setting.gd")
 const VARIANTS := preload("sidebar_variants.gd")
 const SCENE_VARIANT := preload("sidebar_scene_variant.gd")
 const UI_MOTION := preload("ui_motion.gd")
@@ -340,6 +341,9 @@ func offer_stop_all() -> void:
 func start_playtest(focus: String) -> void:
 	if bridge == null or not bridge.has_method("start_playtest"):
 		return
+	if not PLAYTESTER.enabled():
+		dock.call("show_status", "The playtester is off. Turn it on in Settings.", 4.0)
+		return
 	if is_instance_valid(playtest) and playtest.call("working"):
 		dock.call("show_status", "A playtest is already running.", 3.0)
 		return
@@ -351,6 +355,9 @@ func start_playtest(focus: String) -> void:
 
 ## One event from a playtest (chat_bridge.gd's playtest_event).
 func on_playtest(event: Dictionary) -> void:
+	if not PLAYTESTER.enabled() and not is_instance_valid(playtest):
+		# Turned off for the project: no card (the host plays nothing then either).
+		return
 	var id := str(event.get("playtest_id", ""))
 	var card := playtest
 	if not is_instance_valid(card) or not str(card.get("playtest_id")) in ["", id]:

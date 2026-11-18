@@ -75,6 +75,7 @@ CASES = {
     "variants_test.gd": "variants: ok",
     "complex_models_setting_test.gd": "complex models setting: ok",
     "fix_errors_setting_test.gd": "fix errors setting: ok",
+    "playtester_setting_test.gd": "playtester setting: ok",
     "auto_accept_setting_test.gd": "auto accept setting: ok",
     "todo_go_setting_test.gd": "todo go setting: ok",
     "desktop_notify_test.gd": "desktop notify: ok",

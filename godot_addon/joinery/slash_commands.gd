@@ -68,6 +68,7 @@ signal project_command_requested(command: String, words: PackedStringArray)
 const COMMAND_SCRIPT := preload("command_job.gd")
 const REPLAY_RECORD := preload("replay_record.gd")
 const SCENE_FINDER := preload("scene_finder.gd")
+const PLAYTESTER := preload("playtester_setting.gd")
 const RECORDING := (
 	"Recording this play to user://joinery_replays/. "
 	+ "Keep it as a test with: joinery replay add <file>"
@@ -161,9 +162,13 @@ static func resolve(entry: String) -> String:
 	return found[0] if found.size() == 1 else ""
 
 
-## The sidebar's own commands, then the project's ("/new-enemy").
+## The sidebar's own commands, then the project's ("/new-enemy"); /playtest only while the
+## project has the playtester on.
 static func all_commands() -> Dictionary:
 	var merged := COMMANDS.duplicate()
+	# A project that turned the playtester off doesn't offer it (Settings > Playtester).
+	if not PLAYTESTER.enabled():
+		merged.erase("/playtest")
 	for command: String in project:
 		if not merged.has(command):
 			merged[command] = project[command]

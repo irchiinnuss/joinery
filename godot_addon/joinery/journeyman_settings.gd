@@ -26,6 +26,7 @@ const REVIEWER_SETTING := preload("reviewer_setting.gd")
 const DESIGN_SETTING := preload("design_setting.gd")
 const COMPLEX_MODELS_SETTING := preload("complex_models_setting.gd")
 const FIX_ERRORS_SETTING := preload("fix_errors_setting.gd")
+const PLAYTESTER_SETTING := preload("playtester_setting.gd")
 const AGENT_SETTING := preload("agent_setting.gd")
 const AUTO_ACCEPT_SETTING := preload("auto_accept_setting.gd")
 const TODO_GO_SETTING := preload("todo_go_setting.gd")
@@ -469,6 +470,8 @@ func _build_advanced() -> void:
 	agents.body.add_child(COMPLEX_MODELS_SETTING.new())
 	# Console errors fixed on their own, or offered first (`[agents] fix_errors`).
 	agents.body.add_child(FIX_ERRORS_SETTING.new())
+	# The playtester on or off for the project (`[agents] playtester`).
+	agents.body.add_child(PLAYTESTER_SETTING.new())
 	# The design check after every N accepted changes (`[agents] design_check_every`).
 	var design: Control = DESIGN_SETTING.new()
 	agents.body.add_child(design)
