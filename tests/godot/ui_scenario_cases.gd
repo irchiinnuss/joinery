@@ -732,7 +732,7 @@ func _two_chats() -> void:
 	await s.wait_until(func() -> bool: return s.card_state() == "done", 6000)
 	# Back to the first chat: still working, its reply live, with Stop.
 	var page: Variant = sessions.get("page")
-	sessions.call("open_chat", _working_chat(sessions))
+	sessions.call("open_chat", _working_chat(sessions, first_view))
 	await s.frames(4)
 	s.check(s.transcript() == first_view, "Opening the first chat brings back its live view")
 	s.check(s.reply_shown().contains("Working through"), "Its reply is there")
@@ -744,10 +744,13 @@ func _two_chats() -> void:
 	await s.wait_until(func() -> bool: return s.dock.get("_busy") == false, 6000)
 
 
-func _working_chat(sessions: Node) -> String:
+## The kept chat showing [param view]; in the editor, an earlier scenario's chat with messages
+## still queued is kept too.
+func _working_chat(sessions: Node, view: Control) -> String:
 	var kept: Dictionary = sessions.get("_kept")
 	for id: String in kept:
-		return id
+		if kept[id] == view:
+			return id
 	return ""
 
 
@@ -765,7 +768,7 @@ func _switch_mid_stream() -> void:
 	await s.shot("other-chat")
 	await s.wait_until(func() -> bool: return s.dock.get("_busy") == false, 20000)
 	s.check(s.reply_shown().is_empty(), "The reply never leaks into the chat on screen")
-	sessions.call("open_chat", _working_chat(sessions))
+	sessions.call("open_chat", _working_chat(sessions, first_view))
 	await s.frames(4)
 	if s.transcript() == first_view:
 		s.check(
