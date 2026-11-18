@@ -1367,6 +1367,10 @@ class HostTest:
         ] = []
         self.scripts: dict[str, Step] = {}
         self.cancelled: list[str] = []
+        #: Provider sessions that can be resumed, and the prompts each agent heard.
+        self.sessions: set[str] = set()
+        self.resumed: list[tuple[str, str]] = []
+        self.prompts: list[tuple[str, Prompt]] = []
         test = self
 
         class FakeBridge:
@@ -1377,8 +1381,12 @@ class HostTest:
                 self.lane: ProjectGateway | None = None
                 self.role = role
 
-            async def resume(self, _handle: str) -> bool:
-                return False
+            async def resume(self, handle: str) -> bool:
+                test.resumed.append((self.role, handle))
+                if handle not in test.sessions:
+                    return False
+                self.handle = handle
+                return True
 
             async def new_session(self) -> None:
                 return None
@@ -1398,6 +1406,7 @@ class HostTest:
                     yield Message(text='{"notes": []}')
                     yield Done(ok=True)
                     return
+                test.prompts.append((self.role, prompt))
                 key = next(k for k in test.scripts if k in prompt.text)
                 lane = self.lane or test.gateway
                 assert lane is not None
@@ -1570,3 +1579,216 @@ def test_stop_with_all_stops_the_tasks_too(
     stopped = host.task("stopped")
     assert stopped is not None and stopped["title"] == "Make a lamp"
     assert host.cancelled.count("main") >= 1
+
+
+# --- A message from another chat ----------------------------------------------------
+
+
+def test_a_message_from_another_chat_runs_at_once_as_that_chats_turn(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from bridge.instructions import CHAT_TASK_RULES
+    from joinery import chats
+
+    other = chats.create(project, "Lamps", "codex")
+    chats.append(project, other, {"type": "user", "text": "Make the lamps flicker"})
+    chats.update(project, other, handle="thread-lamps")
+    host = HostTest(project, monkeypatch)
+    host.sessions = {"thread-lamps"}
+    release = asyncio.Event()
+
+    async def main(lane: ProjectGateway) -> AsyncIterator[Any]:
+        await write(lane, "notes/level.txt", "level\n")
+        await release.wait()
+        yield Done(ok=True)
+
+    host.scripts = {
+        "Make a lamp": makes("notes/lamp.txt", "lamp\n"),
+        "Make a level": main,
+    }
+    host.lines = [
+        (lambda _e: True, {"kind": "prompt", "text": "Make a level", "chat_id": ""}),
+        (
+            lambda e: any(x.get("kind") == "progress" for x in e),
+            {
+                "kind": "chat_task",
+                "text": "Make a lamp",
+                "chat_id": other,
+                "ref": "r1",
+                "targets": [],
+            },
+        ),
+    ]
+
+    decided: list[str] = []
+
+    def decide(_events: list[dict[str, Any]]) -> bool:
+        review = host.task("in_review")
+        if review is not None and not decided:
+            decided.append(review["transaction_id"])
+            host.lines.append(
+                (
+                    lambda _e: True,
+                    {
+                        "kind": "decision",
+                        "transaction_id": review["transaction_id"],
+                        "accept": True,
+                    },
+                )
+            )
+        return False
+
+    def finish(_events: list[dict[str, Any]]) -> bool:
+        if host.task("accepted") is not None:
+            release.set()
+        return False
+
+    host.lines += [(decide, {}), (finish, {})]
+    host.run()
+
+    started = host.task("working")
+    assert started is not None
+    assert started["origin"] == "chat"
+    assert started["chat_id"] == other and started["ref"] == "r1"
+    # It started while the open chat's own request was still working.
+    first_done = next(i for i, e in enumerate(host.events) if e.get("kind") == "done")
+    assert host.events.index(started) < first_done
+    # Its agent continued the other chat's own provider session, as that chat's turn.
+    assert ("worker", "thread-lamps") in host.resumed
+    role, heard = next((r, p) for r, p in host.prompts if "Make a lamp" in p.text)
+    assert role == "worker" and heard.rules == CHAT_TASK_RULES
+    # Everything it said is tagged with its chat, so the sidebar shows it there.
+    said = [e for e in host.events if e.get("task_id") == started["task_id"]]
+    assert any(e.get("kind") == "message" for e in said)
+    untagged = [e for e in said if e.get("chat_id") != other]
+    assert not untagged, untagged
+    timing = next(e for e in said if e.get("kind") == "timing")
+    assert timing["outcome"] == "done"
+    # Its change was decided on its own, and the project has it.
+    accepted = host.task("accepted")
+    assert accepted is not None and accepted["chat_id"] == other
+    assert (project / "notes/lamp.txt").read_text() == "lamp\n"
+    assert not (project / "notes/level.txt").exists()
+    # The other chat's saved file has the turn, not the open chat's.
+    meta, entries = chats.read(project, other)
+    kinds = [e["type"] for e in entries]
+    assert [e["text"] for e in entries if e["type"] == "user"] == [
+        "Make the lamps flicker",
+        "Make a lamp",
+    ]
+    assert "agent" in kinds and "turn" in kinds and "task" not in kinds
+    changes = [e for e in entries if e["type"] == "change"]
+    assert [c["state"] for c in changes] == ["review", "accepted"]
+    assert meta["handle"] == "thread-lamps"
+    opened = [e for e in host.events if e.get("kind") == "chat" and e.get("task_id")]
+    assert opened and opened[0]["chat_id"] == other
+    assert opened[0]["mode"] == "resumed"
+
+
+def test_a_message_from_a_new_chat_names_its_chat(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from joinery import chats
+
+    host = HostTest(project, monkeypatch)
+    release = asyncio.Event()
+
+    async def main(_lane: ProjectGateway) -> AsyncIterator[Any]:
+        await release.wait()
+        yield Done(ok=True)
+
+    async def answer(_lane: ProjectGateway) -> AsyncIterator[Any]:
+        yield Message(text="Lamps are warm white here.")
+        yield Done(ok=True)
+
+    def finish(events: list[dict[str, Any]]) -> bool:
+        if any(e.get("kind") == "task" and e["state"] == "done" for e in events):
+            release.set()
+        return False
+
+    host.scripts = {"What colour": answer, "Make a level": main}
+    host.lines = [
+        (lambda _e: True, {"kind": "prompt", "text": "Make a level", "chat_id": ""}),
+        (
+            lambda e: any(x.get("kind") == "progress" for x in e),
+            {"kind": "chat_task", "text": "What colour are the lamps?", "ref": "r2"},
+        ),
+        (finish, {}),
+    ]
+    host.run()
+    named = [
+        e
+        for e in host.events
+        if e.get("kind") == "task" and e.get("origin") == "chat" and e["chat_id"]
+    ]
+    assert named, "The new chat is named on its task"
+    chat_id = named[0]["chat_id"]
+    assert named[0]["ref"] == "r2"
+    new = next(e for e in host.events if e.get("kind") == "chat" and e.get("task_id"))
+    assert new["mode"] == "new" and new["chat_id"] == chat_id
+    meta, entries = chats.read(project, chat_id)
+    assert meta["title"] == "What colour are the lamps?"
+    assert [e["type"] for e in entries if e["type"] in {"user", "agent"}] == [
+        "user",
+        "agent",
+    ]
+    done = host.task("done")
+    assert done is not None and done["chat_id"] == chat_id
+
+
+def test_a_message_from_another_chat_waits_when_every_turn_is_taken(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from bridge.crew import NO_FREE_TURN
+
+    (project / "joinery.toml").write_text(
+        '[tools]\nenabled=["godot"]\n[agents]\nparallel = 1\n'
+    )
+    host = HostTest(project, monkeypatch)
+    release = asyncio.Event()
+
+    async def main(_lane: ProjectGateway) -> AsyncIterator[Any]:
+        await release.wait()
+        yield Done(ok=True)
+
+    def waited(events: list[dict[str, Any]]) -> bool:
+        if any(e.get("kind") == "chat_wait" for e in events):
+            release.set()
+        return False
+
+    host.scripts = {"Make a level": main, "Make a lamp": main}
+    host.lines = [
+        (lambda _e: True, {"kind": "prompt", "text": "Make a level", "chat_id": ""}),
+        (
+            lambda e: any(x.get("kind") == "progress" for x in e),
+            {"kind": "chat_task", "text": "Make a lamp", "chat_id": "b", "ref": "r3"},
+        ),
+        (waited, {}),
+    ]
+    host.run()
+    wait = next(e for e in host.events if e.get("kind") == "chat_wait")
+    assert wait == {
+        "kind": "chat_wait",
+        "chat_id": "b",
+        "ref": "r3",
+        "text": NO_FREE_TURN,
+        "full": True,
+    }
+    assert host.task("working") is None
+
+
+def test_a_chat_task_is_recorded_only_in_its_own_chat(tmp_path: Path) -> None:
+    from bridge.chat_record import ChatRecorder
+    from joinery import chats
+
+    (tmp_path / "project.godot").write_text("config_version=5\n")
+    recorder = ChatRecorder(tmp_path, "codex")
+    recorder.begin({"text": "Make a level"}, ())
+    for event in (
+        {"kind": "task", "task_id": "t1", "state": "working", "chat_id": "b"},
+        {"kind": "message", "text": "Lamp made.", "task_id": "t1", "chat_id": "b"},
+        {"kind": "timing", "outcome": "done", "task_id": "t1", "chat_id": "b"},
+    ):
+        recorder.observe(event)
+    _, entries = chats.read(tmp_path, recorder.chat_id)
+    assert [e["type"] for e in entries] == ["user"]

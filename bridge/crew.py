@@ -12,6 +12,13 @@ Nothing here knows which provider runs: the same scheduler serves Codex, Claude
 Code, Gemini CLI and opencode, and every task's provider runs the same policy hook
 as the chat's own, reporting a Rule Zero stop to the task's gateway endpoint.
 
+A *chat task* is the user's own request in another chat, sent while a turn is at
+work in the open one (:meth:`Crew.start_chat`). It runs like any task, but it
+continues that chat: its own recorder resumes the chat's provider session (or primes
+a fresh one with the chat's summary), records the turn in that chat's saved file and
+keeps the session's handle there, and its events carry the chat's id so the sidebar
+shows them in that chat's own view.
+
 A *scripted* task (``start_scripted``, "Make it match") has no provider of its own:
 Joinery already knows the typed calls that make its change, so it runs them through
 the task's lane and submits. The change is checked, read by the reviewer agent and
@@ -29,7 +36,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
-from bridge.instructions import DEBUG_FIX_PROMPT, TASK_PROMPT
+from bridge.instructions import CHAT_TASK_RULES, DEBUG_FIX_PROMPT, TASK_PROMPT
 from bridge.protocol import Prompt
 from bridge.turn_runner import run_turn
 from joinery import agents
@@ -52,6 +59,11 @@ LiveEdit = Callable[
 #: The states a task card shows; the last five are final.
 WORKING, IN_REVIEW, QUEUED = "working", "in_review", "queued"
 FINAL = frozenset({"accepted", "discarded", "done", "failed", "stopped"})
+#: Why a message from another chat can't start now: the sidebar queues it instead.
+NO_FREE_TURN = (
+    "Every agent this project allows at once is working. The message waits for one "
+    "to finish."
+)
 
 
 class TaskBridge(Protocol):
@@ -70,6 +82,22 @@ class TaskBridge(Protocol):
     async def close(self) -> None: ...
 
 
+class ChatTurn(Protocol):
+    """The saved chat a chat task continues (bridge.chat_record.ChatRecorder)."""
+
+    chat_id: str
+
+    async def switch(self, chat_id: str, sessions: Any) -> dict[str, Any] | None: ...
+
+    def begin(
+        self, data: dict[str, Any], attachments: tuple[str, ...]
+    ) -> tuple[str, dict[str, Any] | None]: ...
+
+    def observe(self, event: dict[str, Any]) -> None: ...
+
+    def finish(self, sessions: Any, context: int = 0) -> None: ...
+
+
 class TaskEndpoint(Protocol):
     """The task's own gateway endpoint (joinery.gateway_rpc.GatewayRPC, worker=True)."""
 
@@ -85,7 +113,7 @@ class Task:
     id: str
     title: str
     request: str
-    origin: Literal["user", "lead", "debug", "match"]
+    origin: Literal["user", "lead", "debug", "match", "chat"]
     gateway: ProjectGateway
     controller: TurnController
     #: The agent role at work now (joinery.roles): a debug task is a debugger, then
@@ -116,6 +144,13 @@ class Task:
     variant: int = 0
     #: The prompt a queued task starts from once a turn is free.
     work: Prompt | None = None
+    #: A chat task (:meth:`Crew.start_chat`): the chat it continues ("" until a new
+    #: chat is named), its recorder, the sidebar's line, and the sidebar's own name
+    #: for the message (``ref``).
+    chat: str = ""
+    recorder: ChatTurn | None = None
+    line: dict[str, Any] = field(default_factory=dict)
+    ref: str = ""
     _reply: list[str] = field(default_factory=list)
 
     def event(self) -> dict[str, Any]:
@@ -151,6 +186,7 @@ class Task:
                 if self.group
                 else {}
             ),
+            **({"chat_id": self.chat, "ref": self.ref} if self.recorder else {}),
         }
 
 
@@ -308,6 +344,36 @@ class Crew:
         task.job = asyncio.create_task(self._run(task, work))
         return task
 
+    async def start_chat(
+        self,
+        chat_id: str,
+        line: dict[str, Any],
+        *,
+        prompt: Prompt,
+        recorder: ChatTurn,
+        title: str = "",
+    ) -> Task:
+        """Run the user's message ``line`` from the chat ``chat_id`` ("" for a new
+        chat) now, beside the turn at work in another chat. Raises
+        :data:`NO_FREE_TURN` when every turn is taken (the sidebar queues it), or
+        in plain words when it can't start for another reason."""
+        text = str(line.get("text", "")).strip()
+        if not text:
+            raise ValueError("Write what Journeyman should do.")
+        if self.limit <= 1 or self.capacity() <= 0:
+            raise ValueError(NO_FREE_TURN)
+        if chat_id and any(
+            t.chat == chat_id and t.state == WORKING for t in self.tasks.values()
+        ):
+            raise ValueError("Journeyman is still working in this chat.")
+        task = self._prepare(title or text, text, "chat", prompt)
+        task.chat, task.recorder, task.line = chat_id, recorder, dict(line)
+        task.ref = str(line.get("ref", "") or "")
+        self.tasks[task.id] = task
+        self.emit(task.event())
+        task.job = asyncio.create_task(self._run(task, prompt))
+        return task
+
     async def start_scripted(
         self,
         title: str,
@@ -449,7 +515,7 @@ class Crew:
         self,
         title: str,
         request: str,
-        origin: Literal["user", "lead", "debug", "match"],
+        origin: Literal["user", "lead", "debug", "match", "chat"],
         prompt: Prompt,
         targets: list[str] | tuple[str, ...] = (),
         *,
@@ -467,7 +533,7 @@ class Crew:
         self,
         title: str,
         request: str,
-        origin: Literal["user", "lead", "debug", "match"],
+        origin: Literal["user", "lead", "debug", "match", "chat"],
         prompt: Prompt,
         targets: list[str] | tuple[str, ...] = (),
         *,
@@ -507,7 +573,7 @@ class Crew:
             task.role, task.error, task.step = "debugger", error, "Reading the error…"
         holder.append(task)
         lane.progress = lambda text: self._progress(task, text)
-        lane.tests_report = lambda event: self.emit({**event, "task_id": task.id})
+        lane.tests_report = lambda event: self._tagged(task, event)
         live = self._live
         if live is not None and not group:
             # Once the main request is idle, a task may change the scene on screen.
@@ -624,6 +690,8 @@ class Crew:
             agent = task.agent = self._bridge(self.agent)
             agent.bind_gateway(endpoint.path)
             await agent.connect(lane.project, self.profile)
+            if task.recorder is not None:
+                prompt = await self._open_chat(task, agent, prompt)
             outcome = await run_turn(
                 task.controller,
                 agent,
@@ -653,12 +721,39 @@ class Crew:
                 await task.controller.cancel("failed")
         finally:
             lane.timing = None
+            if task.recorder is not None:
+                # The chat's turn ends as the chat's own does: timed, its provider
+                # session kept so the chat goes on from it.
+                self._emit(task, timing.report(outcome))
+                if agent is not None:
+                    with contextlib.suppress(Exception):
+                        task.recorder.finish(agent, task.controller.meter.used)
             if agent is not None:
                 with contextlib.suppress(Exception):
                     await agent.close()
             with contextlib.suppress(Exception):
                 await endpoint.close()
         await self._conclude(task, outcome)
+
+    async def _open_chat(self, task: Task, agent: TaskBridge, prompt: Prompt) -> Prompt:
+        """A chat task's chat: its provider session resumed (or a fresh one primed
+        with the chat's summary), the message recorded in it, and the prompt its
+        agent hears."""
+        recorder = task.recorder
+        assert recorder is not None
+        switched = await recorder.switch(task.chat, agent)
+        if switched is not None:
+            self._emit(task, switched)
+        text, started = recorder.begin(task.line, prompt.attachments)
+        if recorder.chat_id != task.chat:
+            # A new chat was just named: the sidebar files its view under it.
+            task.chat = recorder.chat_id
+            self.emit(task.event())
+        if started is not None:
+            self._emit(task, started)
+        return prompt.model_copy(
+            update={"text": text, "rules": CHAT_TASK_RULES, "primer": ""}
+        )
 
     async def _conclude(self, task: Task, outcome: str) -> None:
         """A task's turn is over: in review, or final with its lane closed."""
@@ -706,11 +801,20 @@ class Crew:
             reply = "".join(task._reply).strip()
             if reply and not task.message:
                 task.message = reply.splitlines()[-1][:300]
-        self.emit({**event, "task_id": task.id})
+        self._tagged(task, event)
+
+    def _tagged(self, task: Task, event: dict[str, Any]) -> None:
+        """Out to the sidebar with the task's id; a chat task's also with its chat's,
+        and recorded in that chat as that chat's own turn."""
+        if task.recorder is None:
+            self.emit({**event, "task_id": task.id})
+            return
+        task.recorder.observe(event)
+        self.emit({**event, "task_id": task.id, "chat_id": task.chat})
 
     def _progress(self, task: Task, text: str) -> None:
         task.step = text
-        self.emit({"kind": "progress", "text": text, "task_id": task.id})
+        self._tagged(task, {"kind": "progress", "text": text})
         tx = task.gateway.transaction
         tools = list(tx.tools) if tx is not None else []
         if tools != task.apps:
@@ -734,6 +838,9 @@ class Crew:
             await self._finish(task)
         # Otherwise the lane closes when its agent is done (_run).
         self.emit(task.event())
+        if task.recorder is not None:
+            task.recorder.observe(decision)
+            return {**decision, "task_id": task.id, "chat_id": task.chat}
         return {**decision, "task_id": task.id}
 
     async def _auto_decide(self, transaction_id: str) -> dict[str, Any]:

@@ -189,6 +189,17 @@ TASK_PROMPT = RolePrompt(
     "Your task:\n{request}",
 )
 
+#: A message the user sent from another chat while a turn works in the open one: a
+#: turn of that chat, run beside the other (ADR 0036, chat tasks).
+CHAT_TASK_RULES = (
+    "You are one of several Journeyman agents working on this project at the same "
+    "time; this conversation is one chat, and another chat's request is being worked "
+    "on beside it. Answer the user's message as you would on your own. Don't call "
+    "start_task or start_variants. Change staged files: the scene on screen belongs "
+    "to the other chat's request while it works. If a tool says a file is being "
+    "changed by another task, leave that file alone and say so in one line."
+)
+
 #: Building a level from the user's sketch (ADR 0043).
 BLOCKOUT_GUIDE = (
     "When the user shows a level sketch (or a top-down screenshot) and asks to build "

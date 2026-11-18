@@ -265,6 +265,10 @@ class ChatRecorder:
         if kind == "variants":
             self._observe_variants(event)
             return
+        if event.get("task_id") and "chat_id" in event:
+            # A turn running in another chat beside this one (a chat task): that
+            # chat's own recorder keeps it, so it is never this chat's.
+            return
         if event.get("task_id"):
             self._observe_task(event)
             return

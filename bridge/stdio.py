@@ -27,7 +27,7 @@ from bridge import (
 )
 from bridge.chat_record import ChatRecorder
 from bridge.check_runner import Checks
-from bridge.crew import Crew
+from bridge.crew import NO_FREE_TURN, Crew
 from bridge.designer import Designer
 from bridge.error_fixer import ErrorFixer
 from bridge.host import Bridge
@@ -1219,6 +1219,38 @@ async def _serve(
                     )
                     if playtester is not None and playtest_gate.asks(text):
                         playtester.asked_tasks.add(user_task.id)
+                elif data.get("kind") == "chat_task":
+                    # A message sent from another chat while this one works: it
+                    # runs now as that chat's own turn, beside this one, when a turn
+                    # is free; otherwise the sidebar queues it as before.
+                    chat_id = str(data.get("chat_id", "") or "")
+                    try:
+                        if chat_id and chat_id == recorder.chat_id:
+                            raise ValueError(
+                                "Journeyman is still working in this chat."
+                            )
+                        chat_turn = await crew.start_chat(
+                            chat_id,
+                            data,
+                            prompt=task_prompt(data),
+                            recorder=ChatRecorder(project, agent_id, profile_id),
+                            title=chats.title_from(str(data.get("text", ""))),
+                        )
+                        if playtester is not None and playtest_gate.asks(
+                            str(data.get("text", ""))
+                        ):
+                            playtester.asked_tasks.add(chat_turn.id)
+                    except ValueError as exc:
+                        emit(
+                            {
+                                "kind": "chat_wait",
+                                "chat_id": chat_id,
+                                "ref": str(data.get("ref", "") or ""),
+                                "text": str(exc),
+                                # Every turn is taken: it simply waits its turn.
+                                "full": str(exc) == NO_FREE_TURN,
+                            }
+                        )
                 elif data.get("kind") == "idle":
                     # /idle, /idle now, /idle clear (ADR 0072).
                     action = str(data.get("action", "") or "")
