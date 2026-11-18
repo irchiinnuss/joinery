@@ -551,10 +551,11 @@ func _blocked() -> bool:
 	return false
 
 
-## Journeyman is working (in any chat), a change waits for review, or messages wait to go:
-## rewinding and branching wait (chat_rewind.gd).
+## Journeyman is working (in any chat, a chat's own turn beside another's included), a change
+## waits for review, or messages wait to go: rewinding and branching wait (chat_rewind.gd).
 func _occupied() -> bool:
-	return bool(dock.call("_occupied")) or _queued(_transcript)
+	var beside := turns != null and turns.working_count() > 0
+	return bool(dock.call("_occupied")) or _queued(_transcript) or beside
 
 
 static func _queued(view: Control) -> bool:
