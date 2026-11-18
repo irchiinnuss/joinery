@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import os
+import plistlib
 import shutil
 import stat
 import subprocess
@@ -71,6 +72,15 @@ def verify(archive: Path) -> dict[str, object]:
             binary = runtime.parent.parent / "MacOS/Godot"
             launcher = runtime.parent.parent / "MacOS/Joinery"
             assert (runtime.parent / "Joinery.icns").read_bytes()[:4] == b"icns"
+            # Notifications show as Joinery only through this helper (desktop_notify.gd).
+            notifier = runtime.parent.parent / "Helpers/JoineryNotifier.app/Contents"
+            info = plistlib.loads((notifier / "Info.plist").read_bytes())
+            assert info["CFBundleIdentifier"] == "org.joinery.notifier"
+            assert info["LSUIElement"] is True
+            assert (
+                binary_target(notifier / "MacOS/JoineryNotifier") == manifest["target"]
+            )
+            assert (notifier / "Resources/Joinery.icns").read_bytes()[:4] == b"icns"
         else:
             binary = next(
                 p

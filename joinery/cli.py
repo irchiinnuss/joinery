@@ -1131,6 +1131,37 @@ def _parser() -> argparse.ArgumentParser:
     package_cmd.add_argument(
         "--binary", type=Path, help="package this measured editor binary"
     )
+    package_cmd.add_argument(
+        "--notifier",
+        type=Path,
+        help="a built JoineryNotifier.app for the macOS bundle's Contents/Helpers",
+    )
+    notifier_cmd = commands.add_parser(
+        "notifier",
+        help="build or try the macOS helper that shows notifications as Joinery",
+    )
+    notifier_actions = notifier_cmd.add_subparsers(dest="action", required=True)
+    notifier_build = notifier_actions.add_parser(
+        "build", help="compile and sign JoineryNotifier.app (ad hoc by default)"
+    )
+    notifier_build.add_argument(
+        "--output",
+        type=Path,
+        help="folder for JoineryNotifier.app; default ~/Library/Caches/Joinery, "
+        "where the editor looks",
+    )
+    notifier_build.add_argument(
+        "--identity", default="-", help="codesign identity; '-' signs ad hoc"
+    )
+    notifier_build.add_argument(
+        "--arch", default="", help="arm64 or x86_64; default this Mac's"
+    )
+    notifier_send = notifier_actions.add_parser(
+        "send", help="show one notification through the built notifier"
+    )
+    notifier_send.add_argument("title")
+    notifier_send.add_argument("body")
+    notifier_send.add_argument("--app", type=Path, help="a JoineryNotifier.app")
     launch_cmd = commands.add_parser(
         "launch",
         help="start Joinery from its project manager, or safely update and open a closed project",
@@ -1722,6 +1753,25 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(diagnostic_report(args.project.resolve())))
         return 0
 
+    if args.command == "notifier":
+        from joinery import notifier
+
+        try:
+            if args.action == "build":
+                app = notifier.build(
+                    args.output or notifier.CACHE,
+                    identity=args.identity,
+                    arch=args.arch,
+                )
+                print(json.dumps({"built": str(app)}))
+                return 0
+            code = notifier.send(args.title, args.body, args.app)
+            print(json.dumps({"shown": code == 0, "exit": code}))
+            return code
+        except (OSError, ValueError) as exc:
+            print(json.dumps({"error": str(exc)}))
+            return 1
+
     if args.command in {"package", "launch"}:
         from joinery.distribution import launch, package
 
@@ -1732,6 +1782,7 @@ def main(argv: list[str] | None = None) -> int:
                     desktop=args.desktop,
                     target=args.target,
                     binary=args.binary,
+                    notifier=args.notifier,
                 )
                 if args.command == "package"
                 else launch(args.project)

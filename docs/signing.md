@@ -61,12 +61,21 @@ is treated as absent, so a half-finished setup never breaks a release.
 | `APPLE_APP_PASSWORD` | The app-specific password from step 3 |
 
 The `macos-sign` job (macOS runner, tags only) imports the certificate into a
-throwaway keychain, signs `Contents/MacOS/Godot` and then the bundle with the
+throwaway keychain, signs `Contents/MacOS/Godot`, then
+`Contents/Helpers/JoineryNotifier.app` (the helper that shows desktop notifications
+as Joinery, without the editor's entitlements), and then the bundle with the
 hardened runtime, a secure timestamp and `release/macos-entitlements.plist`
 (Godot's editor entitlements, without the camera), submits the app to
 `notarytool` and waits, staples the ticket, checks it with `spctl`, re-zips it with
 `ditto` (which keeps the signature) and rewrites the `.sha256`. The Sigstore
 signature is made afterwards, over the signed archive.
+
+Without the accounts the notifier is ad-hoc signed like the rest of the app
+(`native.yml` builds it with `joinery notifier build` and packages it with
+`joinery package --notifier`). A source checkout builds its own into
+`~/Library/Caches/Joinery` with `uv run joinery notifier build`; the editor uses
+whichever it finds and otherwise falls back to `osascript`, whose notifications
+show as Script Editor. macOS asks once whether Joinery may show notifications.
 
 To rehearse the macOS step locally without an account (ad-hoc, no notarization):
 

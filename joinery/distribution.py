@@ -263,14 +263,25 @@ def _launcher(binary: str, *, macos: bool = False) -> bytes:
 
 
 def package(
-    output: Path, *, desktop: bool = False, target: str = "", binary: Path | None = None
+    output: Path,
+    *,
+    desktop: bool = False,
+    target: str = "",
+    binary: Path | None = None,
+    notifier: Path | None = None,
 ) -> dict[str, Any]:
-    """Package on the target host; its binary must execute and identify itself."""
+    """Package on the target host; its binary must execute and identify itself.
+
+    ``notifier`` is a built JoineryNotifier.app (``joinery notifier build``) that a
+    macOS desktop bundle carries in ``Contents/Helpers``.
+    """
     output = output.resolve()
     binary = (binary or engine_binary()).resolve()
     actual_target = binary_target(binary)
     if target and target != actual_target:
         raise ValueError(f"Requested {target}, but the executable is {actual_target}.")
+    if notifier is not None and not (desktop and actual_target.startswith("macos-")):
+        raise ValueError("The notifier goes only into a macOS desktop bundle.")
     version = subprocess.run(
         [str(binary), "--version"], capture_output=True, text=True, check=True
     ).stdout.strip()
@@ -301,6 +312,13 @@ def package(
         entries["Joinery.app/Contents/Resources/Joinery.icns"] = _Entry(
             _icon("joinery.icns")
         )
+        if notifier is not None:
+            from joinery.notifier import bundle_files
+
+            if not (notifier / "Contents/Info.plist").is_file():
+                raise ValueError(f"{notifier} is not a built JoineryNotifier.app.")
+            for name, path in bundle_files(notifier).items():
+                entries[name] = _Entry(path, os.access(path, os.X_OK))
         entries["Joinery.app/Contents/Info.plist"] = _Entry(
             plistlib.dumps(
                 {

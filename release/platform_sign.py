@@ -23,6 +23,8 @@ from collections.abc import Mapping
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+# Built by `joinery notifier build` and packaged by `joinery package --notifier`.
+NOTIFIER = "Contents/Helpers/JoineryNotifier.app"
 
 MACOS_SECRETS = (
     "APPLE_CERT_P12",
@@ -128,7 +130,8 @@ def sign_macos(archive: Path, *, identity: str, notarize: bool) -> None:
         common = ["codesign", "--force", "--sign", identity]
         if identity != "-":
             common += ["--timestamp", "--options", "runtime"]
-        # Inside out: the engine binary first, then the bundle seals the rest.
+        # Inside out: the engine binary and the notifier first, then the bundle seals
+        # the rest. The notifier needs none of the editor's entitlements.
         _run(
             [
                 *common,
@@ -137,6 +140,9 @@ def sign_macos(archive: Path, *, identity: str, notarize: bool) -> None:
                 str(app / "Contents/MacOS/Godot"),
             ]
         )
+        notifier = app / NOTIFIER
+        if notifier.is_dir():
+            _run([*common, str(notifier)])
         _run([*common, "--entitlements", str(entitlements), str(app)])
         _run(["codesign", "--verify", "--deep", "--strict", "--verbose=2", str(app)])
         if notarize:

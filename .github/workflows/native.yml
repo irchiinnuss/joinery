@@ -319,11 +319,16 @@ jobs:
                   output.write(lines)
           print(lines, end='')
           PY
+      - name: Build the notifier that shows notifications as Joinery
+        if: runner.os == 'macOS'
+        # Ad hoc here like the rest of the app; release.yml re-signs it with the Developer ID.
+        run: uv run joinery notifier build --output out/notifier --arch "${{ matrix.target == 'macos-x86_64' && 'x86_64' || 'arm64' }}"
       - name: Package the measured editor without CI graphics DLLs
         env:
           JOINERY_ARCHIVE: out/packages/Joinery-${{ steps.release_version.outputs.version }}-${{ matrix.target }}.${{ matrix.archive }}
+          JOINERY_NOTIFIER: ${{ runner.os == 'macOS' && 'out/notifier/JoineryNotifier.app' || '' }}
         run: |
-          uv run joinery package --desktop --binary "$JOINERY_RELEASE_ENGINE" --target "${{ matrix.target }}" --output "$JOINERY_ARCHIVE"
+          uv run joinery package --desktop --binary "$JOINERY_RELEASE_ENGINE" --target "${{ matrix.target }}" --output "$JOINERY_ARCHIVE" ${JOINERY_NOTIFIER:+--notifier "$JOINERY_NOTIFIER"}
           uv run python release/verify_bundle.py "$JOINERY_ARCHIVE" | tee out/native-evidence/bundle.json
       - name: Export the portable fixture for all desktop runtimes once
         if: runner.os == 'macOS'
