@@ -214,7 +214,7 @@ func caption_texts() -> PackedStringArray:
 func _render() -> void:
 	var count := open_count()
 	headline.text = (
-		"Nothing to fix"
+		_settled_headline()
 		if count == 0
 		else "1 console error" if count == 1 else "%d console errors" % count
 	)
@@ -246,6 +246,21 @@ func _render() -> void:
 	_more.visible = hidden > 0
 	_more.text = "Show fewer" if _open else "Show all %d" % _groups.size()
 	_refresh_live()
+
+
+## The headline once nothing is left to deal with, saying what happened to the rows under it:
+## "Fixed 1 error", "Fixed 2 of 3 errors", or "Nothing left to fix" when none needed a fix.
+func _settled_headline() -> String:
+	var fixed := 0
+	for group: Dictionary in _groups:
+		if str(group.get("status", "")) == "fixed":
+			fixed += 1
+	if fixed == 0:
+		return "Nothing left to fix" if not _groups.is_empty() else "Nothing to fix"
+	var noun := "error" if _groups.size() == 1 else "errors"
+	if fixed == _groups.size():
+		return "Fixed %d %s" % [fixed, noun]
+	return "Fixed %d of %d %s" % [fixed, _groups.size(), noun]
 
 
 ## One error: [mark] title / caption · action [›], and the cause under it when open.

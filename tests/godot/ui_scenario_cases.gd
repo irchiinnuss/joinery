@@ -884,6 +884,9 @@ func _auto_fix() -> void:
 	group["status"] = "fixed"
 	s.chat.call("_handle", {"kind": "errors", "mode": "auto", "groups": [group]})
 	await s.frames(4)
+	if errors is Control:
+		var headline := str((errors as Control).get("headline").text)
+		s.check(headline == "Fixed 1 error", "The headline says what happened: " + headline)
 	await s.shot("fixed")
 
 
