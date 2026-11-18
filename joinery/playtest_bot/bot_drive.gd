@@ -35,6 +35,14 @@ const EXTRAS: Array[StringName] = [&"jump", &"interact", &"attack", &"dash", &"s
 const LOOKS: Array[StringName] = [&"look_left", &"look_right", &"look_up", &"look_down"]
 ## How near counts as reaching a goal.
 const REACH_3D := 1.6
+## 3D: frames at most spent turning the view to a goal before pressing interact (a first-person
+## game interacts with what the view points at), and how close the aim must get (radians).
+const FACE_FRAMES := 45
+const FACE_YAW := 0.12
+const FACE_PITCH := 0.25
+## 3D: the next place on the way is this much higher than the player's feet: jump onto it (a
+## step a character body won't climb, a crate, a ledge).
+const LEDGE := 0.35
 const REACH_2D := 48.0
 ## Frames after the player appears before the level is mapped (it may still be loading).
 const MAP_AFTER := 30
@@ -73,6 +81,8 @@ var _done_targets: Dictionary = {}
 var _skip_until: Dictionary = {}
 var _last_at: Vector3 = Vector3.ZERO
 var _still: int = 0
+## Frames spent turning to face the goal in reach (3D), -1 while not.
+var _facing: int = -1
 var _others: Array[StringName] = []
 var _map_at: int = -1
 var _reach_nodes: Dictionary = {}
@@ -214,10 +224,12 @@ func _walk(frame: int) -> void:
 			cover.call(&"route", _where(_player), _aim(_target)) if mapped else _aim(_target)
 		)
 		direction = _toward_point(aim)
+		_jump_onto(aim, frame)
 	elif mapped:
 		var aim: Variant = cover.call(&"explore", _where(_player), frame, rng)
 		if aim is Vector3:
 			direction = _toward_point(aim)
+			_jump_onto(aim, frame)
 			# Following the map: steer again soon, cell by cell.
 			_segment_end = mini(_segment_end, frame + rng.randi_range(20, 45))
 	if direction == Vector2.ZERO:
@@ -237,6 +249,15 @@ func _walk(frame: int) -> void:
 		_hold(forward)
 	elif direction.y < -0.35:
 		_hold(back)
+
+
+## 3D: the next place on the way is a step up the player won't walk: jump as it sets off.
+func _jump_onto(aim: Vector3, frame: int) -> void:
+	if style != "3d" or not _player is Node3D:
+		return
+	var at := _where(_player)
+	if aim.y - at.y > LEDGE and _flat_distance(aim, at) < 3.5:
+		tap(&"jump", frame, rng.randi_range(10, 18))
 
 
 ## Direction to [param point] in input terms (x right, y forward/up), unit length or zero.
@@ -564,6 +585,8 @@ func _check_target(frame: int) -> void:
 		return
 	var reach := REACH_3D if _player is Node3D else REACH_2D
 	if _aim(_target).distance_to(_where(_player)) <= reach:
+		if not _faced(_aim(_target), frame):
+			return
 		_done_targets[_target.get_instance_id()] = true
 		goals_reached += 1
 		tap(&"interact", frame)
@@ -572,6 +595,27 @@ func _check_target(frame: int) -> void:
 		# Unreachable for now: try something else, come back later.
 		_skip_until[_target.get_instance_id()] = frame + 1800
 		_target = null
+
+
+## 3D, with look actions: turns the view to [param point] for a moment, standing still, so
+## the interact press reaches what a first-person game's view ray points at. True once it is
+## faced (or turning isn't possible, or took too long).
+func _faced(point: Vector3, frame: int) -> bool:
+	if style != "3d" or fighter == null or not InputMap.has_action(&"look_left"):
+		return true
+	if _facing < 0:
+		_facing = 0
+		for action: StringName in MOVES_3D:
+			_release(action)
+	_facing += 1
+	var error: Vector2 = fighter.call(&"look_toward", point)
+	if _facing < FACE_FRAMES and (absf(error.x) > FACE_YAW or absf(error.y) > FACE_PITCH):
+		# Not a new direction to walk while turning: the segment waits.
+		_segment_end = maxi(_segment_end, frame + 2)
+		return false
+	fighter.call(&"look_toward", Vector3.INF)
+	_facing = -1
+	return true
 
 
 ## Holding a direction and going nowhere: jump and pick another way.

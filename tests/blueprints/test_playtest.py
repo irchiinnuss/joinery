@@ -117,7 +117,7 @@ def test_a_seeded_run_finds_the_planted_faults_and_replays_exactly(
     assert lock["severity"] == "high" and lock["t"] == 5.0
     assert "couldn't move" in lock["detail"]
     assert kinds["hitch"]["t"] == 4.0
-    assert "--seed 11" in lock["repro"]
+    assert lock["repro"].startswith("Replay seed 11")
     # A custom game without the game core is still played, by its input map.
     assert first["style"] == "topdown" and first["core"] is False
     again = _play(project, 30, seed=11, softlock=8)

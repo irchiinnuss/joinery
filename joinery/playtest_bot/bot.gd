@@ -39,6 +39,7 @@ const SCRIPTS := [
 	"bot_cover.gd",
 	"bot_frame.gd",
 	"bot_fight.gd",
+	"bot_map.gd",
 ]
 const SAVE_SLOT := 2
 ## Saved values whose key holds one of these are angles in radians, compared round the circle.
@@ -84,6 +85,8 @@ var logger: Object
 var watch: RefCounted
 var drive: RefCounted
 var cover: RefCounted
+## The windowed replay's render of the level from above (bot_map.gd), for the card's map.
+var mapper: RefCounted
 var game: Node
 var events_node: Node
 var menus: Node
@@ -125,6 +128,8 @@ func _initialize() -> void:
 	drive.set(&"focus", focus)
 	drive.set(&"reach", reach)
 	cover = (load(base.path_join(SCRIPTS[5])) as GDScript).new(self)
+	if not shots.is_empty() and DisplayServer.get_name() != "headless":
+		mapper = (load(base.path_join(SCRIPTS[8])) as GDScript).new()
 	drive.set(&"cover", cover)
 	if route.is_empty() and not media:
 		fighter = (load(base.path_join(SCRIPTS[7])) as GDScript).new(
@@ -228,11 +233,20 @@ func _tick(play: bool) -> void:
 		_finding(item)
 		if item["kind"] == "softlock" and walker == null:
 			await _recover()
+	if mapper != null and not bool(mapper.get(&"done")):
+		if bool(cover.get(&"built")) and _player != null:
+			mapper.call(&"start", root, cover, _player, out_dir)
+		mapper.call(&"step")
 	if shots.has(frame):
 		_shot(str(shots[frame]))
-		# The replay plays the whole run's plan (its checks fall at the same frames)
-		# and stops once the last picture is taken.
-		if frame >= int(shots.keys().max()):
+	# The replay plays the whole run's plan (its checks fall at the same frames) and stops
+	# once the last picture is taken, and the level's picture from above (a while at most).
+	if not shots.is_empty() and frame >= int(shots.keys().max()):
+		if (
+			mapper == null
+			or bool(mapper.get(&"done"))
+			or frame > int(shots.keys().max()) + fps * 10
+		):
 			_finish()
 	if frame % fps == 0:
 		print("PLAYTEST " + JSON.stringify({"t": frame / fps, "frame": frame}))

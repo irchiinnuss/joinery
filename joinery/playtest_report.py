@@ -365,8 +365,20 @@ def coverage_summary(raw: dict[str, Any], options: dict[str, Any]) -> dict[str, 
         "grid": rows,
         "unreached": unreached,
         "areas": areas,
+        "path": _path(raw.get("path")),
         "map": "",
     }
+
+
+def _path(raw: Any) -> list[list[float]]:
+    """The player's path as [[col, row], …] in cells, kept only when well formed."""
+    return [
+        [float(point[0]), float(point[1])]
+        for point in (raw if isinstance(raw, list) else [])
+        if isinstance(point, list)
+        and len(point) == 2
+        and all(isinstance(v, int | float) for v in point)
+    ]
 
 
 def _areas(raw: Any) -> list[dict[str, Any]]:

@@ -408,12 +408,37 @@ def _screenshots(
         return
     taken = replay_shots(options, frames, out / "shots", (binary, extra))
     report["screenshots"] = [str(p) for p in taken.values() if p.is_file()]
+    level_picture(report, out / "shots")
     for item in report["items"]:
         if item.get("t") is None:
             continue
         nearest = min(frames, key=lambda f: abs(f - int(float(item["t"]) * 60)))
         if taken[nearest].is_file() and abs(nearest - float(item["t"]) * 60) <= 60:
             item["shot"] = str(taken[nearest])
+
+
+def level_picture(report: dict[str, Any], shots: Path) -> None:
+    """The replay's render of a 3D level from above (bot_map.gd), under the map: the
+    picture and the ground rectangle it shows, in the grid's cells."""
+    coverage = report.get("coverage") or {}
+    picture = shots / "level.png"
+    if not coverage or not picture.is_file():
+        return
+    try:
+        shown = json.loads((shots / "level.json").read_text(encoding="utf-8"))
+        x, z = (float(v) for v in shown["origin"])
+        w, h = (float(v) for v in shown["size"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return
+    cell = float(coverage.get("cell") or 1)
+    ox, oz = (float(v) for v in coverage.get("origin") or [0, 0])
+    coverage["picture"] = str(picture)
+    coverage["picture_rect"] = [
+        round((x - ox) / cell, 3),
+        round((z - oz) / cell, 3),
+        round(w / cell, 3),
+        round(h / cell, 3),
+    ]
 
 
 def replay_shots(

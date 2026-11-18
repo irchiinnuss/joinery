@@ -4,13 +4,16 @@ extends RefCounted
 ## game's own physics, and every choice from the bot's seeded generator.
 ##
 ## The grid lies on the ground plane (x and z in 3D, x and y in 2D). A cell is navigable when
-## the player could stand there and get there from where it started: in 3D a floor under the
-## cell (a downward ray) with room above it, joined to its neighbours by a step or a short
-## jump; top-down an empty cell joined to the start; side-on an empty cell with ground a few
-## cells below it, joined to the start in any direction. Every cell the player really stands
-## in counts as navigable too. The bot walks toward the nearest unvisited cell along the grid
-## (a breadth-first search), gives a cell up for a while when it doesn't get there, and
-## reports the share it reached and a picture of the map with the unreached cells marked.
+## the player could stand there and get there from where it started: in 3D a floor in the cell
+## (a downward ray at its centre or a quarter of the way to a corner) where the player's own
+## collision shape fits, on the level's navigation mesh when the player's start is on one, joined
+## to its neighbours by a step or a short jump; walls, hedges and props the player can't stand in
+## never count, nor does ground beyond a fence; top-down an empty cell joined to the start;
+## side-on an empty cell with ground a few cells below it, joined to the start in any direction.
+## Every cell the player really stands in counts as navigable too. The bot walks toward the
+## nearest unvisited cell along the grid (a breadth-first search), gives a cell up for a while
+## when it doesn't get there, and reports the share it reached, its path and a picture of the
+## map with the unreached cells marked.
 
 const CELL_3D := 2.0
 const CELL_2D := 64.0
@@ -38,6 +41,20 @@ const WALL_LIFTS: Array[float] = [0.7, 1.5]
 const MAP_WIDTH := 320
 ## Named areas of the level kept for the map (rooms, zones), at most.
 const MAX_AREAS := 48
+## 3D: where in a cell the floor is looked for, as fractions of the cell from its centre (the
+## centre first): a cell a wall or a hedge half fills still has a spot to stand.
+const SPOTS: Array[Vector2] = [
+	Vector2.ZERO,
+	Vector2(-0.25, -0.25),
+	Vector2(0.25, -0.25),
+	Vector2(-0.25, 0.25),
+	Vector2(0.25, 0.25)
+]
+## 3D: how far from the navigation mesh a spot may be and still count as walkable.
+const NAV_SLACK := 0.75
+## The player's path kept for the map: a point every this many frames, at most this many.
+const PATH_EVERY := 15
+const PATH_MAX := 900
 
 ## "3d", "topdown" or "side" once built ("" before).
 var mode: String = ""
@@ -59,8 +76,18 @@ var built: bool = false
 ## The level's named areas on the ground plane: {name: Rect2} (world units).
 var areas: Dictionary = {}
 
+## The player's path on this level, on the ground plane (world units), oldest first.
+var path: PackedVector2Array = PackedVector2Array()
+
 var _tree: SceneTree
 var _floor: PackedFloat32Array = PackedFloat32Array()
+## 3D, per cell: where in it the player can stand (ground plane), NAN when only the centre is
+## known.
+var _spots: PackedVector2Array = PackedVector2Array()
+## 3D: the level's navigation map, when the player's start is on its mesh (else unused).
+var _nav: RID = RID()
+## 3D: the player's collision shapes, posed for standing (see _stance_of).
+var _stance: Array = []
 ## 3D, per cell: a bit per way out that a wall or a shut door blocks (DIRS order; +4 for the
 ## short jump over the next cell).
 var _walls: PackedByteArray = PackedByteArray()
@@ -110,8 +137,10 @@ func build(player: Node, style: String) -> void:
 	var spent: Dictionary = {}
 	var floors: Array[Vector2] = []
 	var heights: Array[float] = []
+	var spots: Array[Vector2] = []
 	if not (key == _key and built):
 		began = at
+		path = PackedVector2Array()
 	if key == _key and built:
 		for index: int in visited.size():
 			var centre := origin + Vector2(index % cols + 0.5, index / cols + 0.5) * cell
@@ -122,6 +151,7 @@ func build(player: Node, style: String) -> void:
 			if navigable[index] != 0:
 				floors.append(centre)
 				heights.append(_floor[index])
+				spots.append(_spots[index] if index < _spots.size() else Vector2(NAN, NAN))
 	cell = size
 	origin = corner
 	cols = wide
@@ -151,6 +181,7 @@ func build(player: Node, style: String) -> void:
 		if index >= 0 and navigable[index] == 0:
 			navigable[index] = 1
 			_floor[index] = heights[item]
+			_spots[index] = spots[item]
 	built = true
 
 
@@ -165,6 +196,13 @@ func visit(at: Vector3, frame: int) -> void:
 	dwell[here] += 1
 	if visited[here] == 0:
 		visited[here] = frame + 1
+	var flat := _plane(at)
+	if (
+		frame % PATH_EVERY == 0
+		and path.size() < PATH_MAX
+		and (path.is_empty() or path[-1].distance_to(flat) >= cell * 0.2)
+	):
+		path.append(flat)
 	if here == _goal:
 		_goal = -1
 	if here != _last_cell:
@@ -276,6 +314,7 @@ func reprobe(player: Node, at: Vector3, radius: float) -> void:
 		return
 	var centre := _cell_of(_plane(at))
 	var reach := ceili(radius / cell)
+	_stance = _stance_of(player)
 	var player_y := _where(player).y
 	var area: Array[int] = []
 	for dx: int in range(-reach, reach + 1):
@@ -287,10 +326,7 @@ func reprobe(player: Node, at: Vector3, radius: float) -> void:
 			area.append(index)
 			if navigable[index] != 0:
 				continue
-			var middle := origin + (Vector2(at_cell) + Vector2(0.5, 0.5)) * cell
-			var height: Variant = _floor_at(player, middle, player_y)
-			if height is float:
-				_floor[index] = height
+			_probe_cell(player, index, player_y)
 	# What was a shut door is a doorway now: look for the walls around here again.
 	var open := PackedByteArray()
 	open.resize(cols * rows)
@@ -353,7 +389,17 @@ func summary() -> Dictionary:
 		"grid": lines,
 		"dwell": spent,
 		"areas": _area_cells(),
+		"path": _path_cells(),
 	}
+
+
+## The player's path as [[col, row], …] in cells (fractions kept), for the map.
+func _path_cells() -> Array:
+	var found: Array = []
+	for point: Vector2 in path:
+		var at := (point - origin) / cell
+		found.append([snappedf(at.x, 0.01), snappedf(at.y, 0.01)])
+	return found
 
 
 ## The map as a picture: reached cells teal, unreached cells red, the start white, the rest
@@ -460,19 +506,21 @@ func _map(player: Node) -> void:
 	_floor = PackedFloat32Array()
 	_floor.resize(cols * rows)
 	_floor.fill(NAN)
+	_spots = PackedVector2Array()
+	_spots.resize(cols * rows)
+	_spots.fill(Vector2(NAN, NAN))
 	var open := PackedByteArray()
 	open.resize(cols * rows)
 	var player_y := _where(player).y
+	_nav = _player_navigation(player) if mode == "3d" else RID()
+	_stance = _stance_of(player) if mode == "3d" else []
 	for row: int in rows:
 		for col: int in cols:
 			var index := row * cols + col
 			var centre := origin + Vector2(col + 0.5, row + 0.5) * cell
 			match mode:
 				"3d":
-					var height: Variant = _floor_at(player, centre, player_y)
-					if height is float:
-						open[index] = 1
-						_floor[index] = height
+					open[index] = 1 if _probe_cell(player, index, player_y) else 0
 				"topdown":
 					open[index] = 1 if _free_2d(player, centre) else 0
 				_:
@@ -691,8 +739,53 @@ func _climbable(a: int, b: int) -> bool:
 # --- Probing the level ------------------------------------------------------------------------
 
 
+## 3D: looks for a spot in cell [param index] where the player can stand (its centre first,
+## then a quarter of the way to each corner), and keeps its floor height and place. False when
+## the cell has none: a wall, a hedge or a prop fills it, or there is no floor.
+func _probe_cell(player: Node, index: int, player_y: float) -> bool:
+	var centre := origin + Vector2(index % cols + 0.5, index / cols + 0.5) * cell
+	for offset: Vector2 in SPOTS:
+		var spot := centre + offset * cell
+		var height: Variant = _floor_at(player, spot, player_y)
+		if height is float and _on_navigation(Vector3(spot.x, height, spot.y)):
+			_floor[index] = height
+			_spots[index] = spot
+			return true
+	return false
+
+
+## The level's navigation map when the player starts on its mesh: then a spot off the mesh is
+## no place to stand. A level whose mesh is only for its enemies (the player starts off it), or
+## that has none, is judged by physics alone.
+static func _player_navigation(player: Node) -> RID:
+	var world := (player as Node3D).get_world_3d()
+	if world == null:
+		return RID()
+	var map := world.navigation_map
+	if not map.is_valid() or NavigationServer3D.map_get_regions(map).is_empty():
+		return RID()
+	if NavigationServer3D.map_get_iteration_id(map) == 0:
+		return RID()
+	var at := _where(player)
+	var near := NavigationServer3D.map_get_closest_point(map, at)
+	if Vector2(near.x, near.z).distance_to(Vector2(at.x, at.z)) > NAV_SLACK:
+		return RID()
+	return map
+
+
+func _on_navigation(at: Vector3) -> bool:
+	if not _nav.is_valid():
+		return true
+	var near := NavigationServer3D.map_get_closest_point(_nav, at)
+	return (
+		Vector2(near.x, near.z).distance_to(Vector2(at.x, at.z)) <= NAV_SLACK
+		and (absf(near.y - at.y) <= 1.0)
+	)
+
+
 ## The floor height under [param centre] (3D), or null: the highest surface facing up that is
-## no higher than [constant ABOVE_3D] over the player, with room to stand on it.
+## no higher than [constant ABOVE_3D] over the player, where the player's own collision shape
+## fits standing on it (a point a little above it when the player has no shape).
 func _floor_at(player: Node, centre: Vector2, player_y: float) -> Variant:
 	var space := (player as Node3D).get_world_3d().direct_space_state
 	var top := player_y + 40.0
@@ -708,15 +801,57 @@ func _floor_at(player: Node, centre: Vector2, player_y: float) -> Variant:
 		var point: Vector3 = hit["position"]
 		var normal: Vector3 = hit["normal"]
 		if point.y <= player_y + ABOVE_3D and normal.y > 0.6:
-			var room := PhysicsPointQueryParameters3D.new()
-			room.position = point + Vector3.UP * 0.9
-			room.collision_mask = _mask(player)
-			room.exclude = _exclude(player)
-			if space.intersect_point(room, 1).is_empty():
-				return point.y
-			return null
+			return point.y if _room_to_stand(player, point) else null
 		top = point.y - 0.05
 	return null
+
+
+## Whether the player fits standing at [param feet]: its collision shapes, placed as they sit
+## on the player with their lowest point a little above the floor, touch nothing solid that
+## stays put (a crate or an enemy in the way still leaves room to stand).
+func _room_to_stand(player: Node, feet: Vector3) -> bool:
+	var space := (player as Node3D).get_world_3d().direct_space_state
+	if _stance.is_empty():
+		var room := PhysicsPointQueryParameters3D.new()
+		room.position = feet + Vector3.UP * 0.9
+		room.collision_mask = _mask(player)
+		room.exclude = _exclude(player)
+		return space.intersect_point(room, 1).is_empty()
+	for pose: Array in _stance:
+		var query := PhysicsShapeQueryParameters3D.new()
+		query.shape = pose[0]
+		var place: Transform3D = pose[1]
+		place.origin += feet + Vector3.UP * 0.08
+		query.transform = place
+		query.collision_mask = _mask(player)
+		query.exclude = _exclude(player)
+		for hit: Dictionary in space.intersect_shape(query, 4):
+			var collider: Object = hit.get("collider")
+			if not (collider is CharacterBody3D or collider is RigidBody3D):
+				return false
+	return true
+
+
+## The player's collision shapes as [shape, transform] with the transform's origin relative to
+## the player's feet: across from the body's origin, and up by the shape's own depth below it.
+static func _stance_of(player: Node) -> Array:
+	var found: Array = []
+	var body := player as Node3D
+	for child: Node in player.get_children():
+		if not child is CollisionShape3D:
+			continue
+		var holder := child as CollisionShape3D
+		if holder.shape == null or holder.disabled:
+			continue
+		var place := holder.global_transform
+		var box := place * holder.shape.get_debug_mesh().get_aabb()
+		place.origin = Vector3(
+			place.origin.x - body.global_position.x,
+			place.origin.y - box.position.y,
+			place.origin.z - body.global_position.z
+		)
+		found.append([holder.shape, place])
+	return found
 
 
 func _free_2d(player: Node, centre: Vector2) -> bool:
@@ -831,6 +966,8 @@ func _index(at: Vector2i) -> int:
 ## height of [param at]).
 func _world(index: int, at: Vector3) -> Vector3:
 	var centre := origin + Vector2(index % cols + 0.5, index / cols + 0.5) * cell
+	if index < _spots.size() and not is_nan(_spots[index].x):
+		centre = _spots[index]
 	if mode == "3d":
 		var height := _floor[index] if index < _floor.size() and not is_nan(_floor[index]) else at.y
 		return Vector3(centre.x, height, centre.y)

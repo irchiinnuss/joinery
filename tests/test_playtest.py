@@ -440,6 +440,33 @@ def test_coverage_names_the_biggest_unreached_areas_and_where_they_are() -> None
     assert coverage["unreached"][2]["at"] == [-3.0, -3.0]
 
 
+def test_a_3d_map_carries_the_path_and_the_level_seen_from_above(
+    tmp_path: Path,
+) -> None:
+    path = [[4.5, 3.25], [5.0, 3.5], "bad", [1]]
+    report = playtest_report.build(
+        _bot(coverage=_coverage(path=path)), "", 0, options=OPTIONS
+    )
+    assert report["coverage"]["path"] == [[4.5, 3.25], [5.0, 3.5]]
+    # The replay's render (bot_map.gd) and the ground it shows, in the grid's cells.
+    shots = tmp_path / "shots"
+    shots.mkdir()
+    playtest.level_picture(report, shots)
+    assert "picture" not in report["coverage"]
+    (shots / "level.png").write_bytes(b"\x89PNG")
+    (shots / "level.json").write_text('{"origin": [-4, -4], "size": [30, 26]}')
+    playtest.level_picture(report, shots)
+    coverage = report["coverage"]
+    assert coverage["picture"] == str(shots / "level.png")
+    origin = coverage["origin"]
+    assert coverage["picture_rect"] == [
+        (-4 - origin[0]) / 2,
+        (-4 - origin[1]) / 2,
+        15.0,
+        13.0,
+    ]
+
+
 def test_the_level_s_rooms_name_where_the_unreached_floor_is() -> None:
     rooms = [
         {"name": "Yard", "rect": [0.0, 0.0, 6.0, 4.0]},

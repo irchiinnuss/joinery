@@ -875,6 +875,15 @@ func _release_looks() -> void:
 	_press_look(Vector2.ZERO)
 
 
+## For the drive: turns the view toward [param point] (Vector3.INF lets go of the look keys)
+## and returns how far off it still is (yaw, pitch in radians).
+func look_toward(point: Vector3) -> Vector2:
+	if not point.is_finite():
+		_release_looks()
+		return Vector2.ZERO
+	return _look_at(point)
+
+
 ## Let go of what the fight holds, once, when the drive takes over again.
 func _stop() -> bool:
 	if _steering:
