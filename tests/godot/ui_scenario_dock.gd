@@ -51,6 +51,15 @@ func _run() -> void:
 			_lib.set("teardown", _teardown)
 			if not await _lib.call("run"):
 				ok = false
+	# Let go of everything the scenarios held, so nothing is still in use at exit.
+	_lib.set("dock", null)
+	_lib.set("chat", null)
+	_lib.set("build", Callable())
+	_lib.set("teardown", Callable())
+	_lib.get("_cases").set("s", null)
+	_lib = null
+	for index: int in 10:
+		await process_frame
 	print("ui scenarios dock: ", "ok" if ok else "FAILED")
 	quit(0 if ok else 1)
 
