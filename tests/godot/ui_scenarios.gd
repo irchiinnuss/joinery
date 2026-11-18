@@ -300,7 +300,8 @@ func reply_shown() -> String:
 	var messages: Array = transcript().get("_messages")
 	for index: int in range(messages.size() - 1, -1, -1):
 		if messages[index]["who"] == "Journeyman":
-			return (messages[index]["label"] as RichTextLabel).get_parsed_text()
+			var markdown: GDScript = load("res://addons/joinery/chat_markdown.gd")
+			return str(markdown.call("shown", messages[index]["parts"]))
 	return ""
 
 

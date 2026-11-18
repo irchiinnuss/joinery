@@ -174,13 +174,12 @@ func add_message(who: String, text: String) -> void:
 	var column := VBoxContainer.new()
 	column.theme_type_variation = "JoineryTight"
 	inset.add_child(column)
-	var label := RichTextLabel.new()
-	_configure_text(label)
-	# A reply's blocks (paragraphs, headings, list items) sit SPACE.3 apart (chat_markdown.gd).
-	label.add_theme_constant_override("paragraph_separation", UI_THEME.space(self, 3))
-	REMEMBER.offer(label, remember_requested)
-	label.accessibility_name = who + " message"
-	column.add_child(label)
+	# The reply's text, then a box per code block (chat_markdown.gd), SPACE.3 apart.
+	var body := VBoxContainer.new()
+	body.add_theme_constant_override("separation", UI_THEME.space(self, 3))
+	column.add_child(body)
+	var label := _reply_label(who)
+	body.add_child(label)
 	var summary := UI.quiet("")
 	summary.icon_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	summary.alignment = HORIZONTAL_ALIGNMENT_LEFT
@@ -203,6 +202,8 @@ func add_message(who: String, text: String) -> void:
 				"who": who,
 				"text": text,
 				"label": label,
+				"body": body,
+				"parts": [label],
 				"panel": null,
 				"summary": summary,
 				"details": details,
@@ -211,6 +212,17 @@ func add_message(who: String, text: String) -> void:
 		)
 	)
 	_dirty = true
+
+
+## A label for [param who]'s reply: selectable, scaled, with "Remember this".
+func _reply_label(who := "Journeyman") -> RichTextLabel:
+	var label := RichTextLabel.new()
+	_configure_text(label)
+	# A reply's blocks (paragraphs, headings, list items) sit SPACE.3 apart (chat_markdown.gd).
+	label.add_theme_constant_override("paragraph_separation", UI_THEME.space(self, 3))
+	REMEMBER.offer(label, remember_requested)
+	label.accessibility_name = who + " message"
+	return label
 
 
 ## A reply another follows while the turn still works was a step, not the answer: it becomes
@@ -222,7 +234,7 @@ func _fold_interim(who: String) -> void:
 	if card.state != "working" or _messages[-1]["panel"] != null:
 		return
 	var record: Dictionary = _messages.pop_back()
-	(record["label"] as Control).get_parent().queue_free()
+	(record["body"] as Control).get_parent().queue_free()
 	var words := str(record["text"]).replace("**", "").replace("`", "").strip_edges()
 	if not words.is_empty():
 		card.add_step(words.get_slice("\n", 0), words)
@@ -561,11 +573,6 @@ func _semibold(label: RichTextLabel) -> void:
 	label.add_theme_font_override("bold_font", UI_THEME.medium_font(self))
 
 
-## The reply's Markdown as BBCode (chat_markdown.gd), BBCode in it escaped.
-func _format(source: String) -> String:
-	return MARKDOWN.format(source, get_theme_color("surface_raised", "Joinery"))
-
-
 func _process(_delta: float) -> void:
 	if _caption != null and _caption.visible:
 		_place_caption()
@@ -574,8 +581,7 @@ func _process(_delta: float) -> void:
 	_dirty = false
 	for record: Dictionary in _messages:
 		if record["dirty"]:
-			var label: RichTextLabel = record["label"]
-			label.text = _format(str(record["text"]))
+			MARKDOWN.render(record["body"], record["parts"], str(record["text"]), _reply_label)
 			record["dirty"] = false
 	if _follower.following:
 		_follower.to_end()
