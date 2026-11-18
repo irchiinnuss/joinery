@@ -79,6 +79,23 @@ ADR 0035 already kept the turn controller free of globals so that a scheduler co
    time; a task's never opens by itself, so the lead's review keeps priority. Stop on the lead's request
    offers, in one line, to stop the tasks too. A finished task leaves one line in the
    transcript, and saved chats record each task's start and outcome (`type: task`).
+10. **A message from another chat.** While a turn works in one chat, a message sent from another
+    chat (host message `chat_task`, with that chat's id, "" for a new one) starts at once as a
+    *chat task* (`Crew.start_chat`) when a turn is free: the same lane, claims, live-scene rule,
+    worker slots and policy as any task, and the same Rule Zero stop. It is that chat's own
+    turn, not a side task: a `ChatRecorder` of its own resumes the chat's provider session (or
+    primes a fresh one with the chat's summary, as switching chats does), records the request,
+    replies, steps, change and timing in that chat's saved file, never the open chat's, and
+    keeps the session's handle there, so the chat goes on from it whichever way it continues
+    next. Its agent hears `CHAT_TASK_RULES` instead of a task brief and can't start tasks. Its
+    events carry `task_id`, `chat_id` and the sidebar's `ref`; the sidebar (`chat_turns.gd`)
+    shows them in that chat's own view, with its own Stop, kept out of sight like a working
+    chat with its own dot on the Chats page, and no task card. Its change is its own row in the
+    Review tab, decided like any task's. With every turn taken (or `parallel = 1`) the host
+    answers `chat_wait` and the message waits in its chat's queue ("Sends when the other chat
+    finishes") until one is free; a message in a chat whose own turn still works waits in that
+    chat's queue as before. Stop all on one chat's request stops that chat's tasks, never
+    another chat's turn.
 
 ## Consequences
 
@@ -86,6 +103,9 @@ ADR 0035 already kept the turn controller free of globals so that a scheduler co
   one never touches another's stage.
 - Every task costs a provider session and its own context; a task's context use is in its
   status. Tasks are single turns, so they never need a session summary.
+- Two chats can work at once without waiting for each other, and each keeps its own history.
+  A chat task's session is resumed by the chat's next turn as the lead's would be, so the two
+  roles share one provider conversation per chat.
 - Claims are checked by path. A tool that writes a file its arguments don't name is caught
   after the call, so it may have done other work first; one rewritten in place in a folder
   whose listing didn't change is caught at submit.
