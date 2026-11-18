@@ -355,6 +355,12 @@ func set_failed(reason := "") -> void:
 	failed.emit(reason)
 
 
+## True for a request that never reached the assistant ("Not sent"), not a turn that ran and
+## ended failed ([method finish]); both are in the "failed" state.
+func not_sent() -> bool:
+	return state == "failed" and _finished_as != "failed"
+
+
 ## Whether Retry is offered. While the connection banner shows its own fix, the card says
 ## only "Not sent" and Retry waits until the assistant is back.
 func set_retry_allowed(on: bool) -> void:

@@ -461,9 +461,14 @@ func _keyboard() -> void:
 	await s.wait_until(func() -> bool: return s.card_state() != "working", 6000)
 
 
-## The icon leading a finished card's status line ("success", "stop", "error"), "" when none.
+## The icon a finished card leads with ("success", "stop", "error"): its status line's mark, or,
+## with no timing line (no reply came), its live line's end mark; "" when none shows.
 func _mark(card: Control) -> String:
-	var mark: TextureRect = card.get("_done_mark") if card != null else null
+	if card == null:
+		return ""
+	var mark: TextureRect = card.get("_done_mark")
+	if mark == null or not mark.is_visible_in_tree():
+		mark = card.find_child("Mark", true, false) as TextureRect
 	if mark == null or not mark.is_visible_in_tree():
 		return ""
 	return str(mark.get_meta("_joinery_glyph", ""))

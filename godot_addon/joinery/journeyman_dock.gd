@@ -496,7 +496,7 @@ func _send_request(card: Control) -> void:
 func _retry(card: Control) -> void:
 	if _occupied():
 		return
-	if card.state == "failed":  # Not sent: the same card goes again.
+	if card.not_sent():  # Not sent: the same card goes again.
 		_send_request(card)
 	else:  # It ran and failed: ask again, as a new request.
 		_start_request(card.request, card.targets)
