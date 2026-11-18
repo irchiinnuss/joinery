@@ -80,9 +80,13 @@ func _ready() -> void:
 
 
 ## Show [param chats] (chat_store.gd's list); [param current] is the open chat's id and
-## [param working] the one Journeyman works in ("" for none). [param now] fixes the clock for
-## tests (-1: the real time).
-func show_chats(chats: Array[Dictionary], current: String, now := -1, working := "") -> void:
+## [param working] the one Journeyman works in ("" for none), or every chat at work (an Array
+## of ids: chats running beside it, chat_turns.gd). [param now] fixes the clock for tests (-1:
+## the real time).
+func show_chats(
+	chats: Array[Dictionary], current: String, now := -1, working: Variant = ""
+) -> void:
+	var busy := _ids(working)
 	for child: Node in _list.get_children():
 		_list.remove_child(child)
 		child.queue_free()
@@ -102,7 +106,7 @@ func show_chats(chats: Array[Dictionary], current: String, now := -1, working :=
 			caption.name = day
 			_list.add_child(_header(caption, _list.get_child_count() > 0))
 		var row := ChatRow.new(chat, chat["id"] == current, clock, providers.size() > 1)
-		row.set_working(chat["id"] == working and not working.is_empty())
+		row.set_working(busy.has(str(chat["id"])))
 		row.pressed.connect(func() -> void: chosen.emit(str(chat["id"])))
 		row.title_changed.connect(
 			func(title: String) -> void: rename_requested.emit(str(chat["id"]), title)
@@ -158,10 +162,24 @@ func row_for(chat_id: String) -> ChatRow:
 	return _rows.get(chat_id)
 
 
-## Mark [param chat_id] as the chat Journeyman works in ("" marks none).
-func set_working(chat_id: String) -> void:
+## Mark [param chat_id] as the chat Journeyman works in ("" marks none), or every chat in an
+## Array of ids.
+func set_working(chat_id: Variant) -> void:
+	var busy := _ids(chat_id)
 	for id: String in _rows:
-		_rows[id].set_working(id == chat_id and not chat_id.is_empty())
+		_rows[id].set_working(busy.has(id))
+
+
+## The ids in [param value]: one id ("" for none) or an Array of them.
+static func _ids(value: Variant) -> PackedStringArray:
+	var ids := PackedStringArray()
+	if value is Array or value is PackedStringArray:
+		for each: Variant in value:
+			if not str(each).is_empty():
+				ids.append(str(each))
+	elif not str(value).is_empty():
+		ids.append(str(value))
+	return ids
 
 
 ## Show or hide the page in place of the conversation, restoring what was there.
