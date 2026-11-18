@@ -529,12 +529,12 @@ func refresh_layout() -> void:
 	_sync_activity()
 
 
-## Seconds spent so far; the timer appears after three seconds. Each second only its text
-## changes: a ticking clock that moves every second pulls the eye from the work.
+## Seconds spent so far; the timer appears after the first second, so a silent wait shows it
+## is still going. Each second only its text changes: no motion that pulls the eye from the work.
 func set_elapsed(seconds: int) -> void:
 	if state == "working":
 		_seconds = seconds
-	if seconds < 3 or state != "working":
+	if seconds < 1 or state != "working":
 		return
 	_timer.text = UI_MOTION.format_clock(seconds)
 	if not _timer.visible:

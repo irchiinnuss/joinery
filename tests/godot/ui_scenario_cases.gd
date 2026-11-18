@@ -391,6 +391,7 @@ func _thinking() -> void:
 		not s.reply_shown().is_empty() or s.card_state() == "working", "Still working, not stuck"
 	)
 	s.metric("timer_shown_after_1_5s", 1.0 if timer.is_visible_in_tree() else 0.0, "bool")
+	s.check(timer.is_visible_in_tree(), "The elapsed time shows after about a second")
 	await s.wait_until(func() -> bool: return s.card_state() == "done", 8000)
 
 
