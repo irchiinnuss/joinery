@@ -67,7 +67,8 @@ func _report() -> Dictionary:
 					"where": "res://game/player.gd:12" if index == 0 else "",
 					"t": 5.0 + index,
 					"seed": 4821,
-					"repro": "Run `joinery playtest --project . --seed 4821 --seconds 120`.",
+					"kind": "softlock" if index == 0 else "text",
+					"repro": "Replay seed 4821 (2:00 run); watch around 0:05 of play.",
 					"shot": ProjectSettings.globalize_path(SHOT) if index == 0 else "",
 				}
 			)
@@ -133,7 +134,7 @@ func _run() -> void:
 	_check(str(started.get("focus", "")) == "the lever", "/playtest sends its focus")
 	var card: Control = tasks.get("playtest")
 	_check(card != null and tasks.visible, "The playtest card shows at once")
-	_check(card.call("step_text") == "Starting the playtester…", "It says it is starting")
+	_check(card.call("step_text") == "Starting the playtest…", "It says it is starting")
 	var event := {"kind": "playtest", "playtest_id": "pt1", "state": "starting", "seconds": 120}
 	backend.call("_handle", event)
 	_check(tasks.get("playtest") == card, "The host's event lands on the same card")
@@ -142,7 +143,10 @@ func _run() -> void:
 	# Playing: "Playing…" with the game time and its length; its own Stop.
 	event = event.merged({"state": "playing", "elapsed": 42.0}, true)
 	backend.call("_handle", event)
-	_check(card.call("step_text") == "Playing…", "It says it is playing")
+	var playing: String = card.call("step_text")
+	_check(playing.begins_with("A bot is playing ") and playing.ends_with("…"), playing)
+	var about := card.get("_about") as Label
+	_check(about.visible and about.text.contains("changes nothing"), "It says it changes nothing")
 	_check(str((card.get("_timer") as Label).text) == "0:42 / 2:00", "Game time of the run")
 	dock.call("set_chat_busy", true)
 	_check(header.call("agents_text") == "2 agents working", "The playtester counts as an agent")
@@ -159,11 +163,14 @@ func _run() -> void:
 	card = tasks.get("playtest")
 	event = event.merged({"state": "writing", "report": _report()}, true)
 	backend.call("_handle", event)
-	_check(card.call("step_text") == "Writing the report…", "Then it writes")
+	_check(card.call("step_text") == "Writing up what it found…", "Then it writes")
+	# More findings than show at once: one count per kind, in plain words.
 	var words: PackedStringArray = card.call("count_words")
-	_check(words == PackedStringArray(["1 high", "5 low"]), "Counts by severity: %s" % words)
+	_check(words == PackedStringArray(["1 bug", "5 minor"]), "Counts in plain words: %s" % words)
+	_check((card.get("_counts") as Control).visible, "The counts show")
 	# How much of the level the bot reached, over a map of what it missed.
-	_check(card.call("coverage_text") == "Explored 40% of the level", card.call("coverage_text"))
+	var reached: String = card.call("coverage_text")
+	_check(reached == "Reached 40% of the walkable level", reached)
 	var map: Control = card.find_child("CoverageMap", true, false)
 	_check(map != null and map.is_visible_in_tree(), "The map shows")
 	_check(map.call("counts") == [4, 6], "Reached and unreached cells: %s" % [map.call("counts")])
@@ -183,7 +190,9 @@ func _run() -> void:
 	card.call("show_layer", "deaths", false)
 	_check(not map.call("layer_on", "deaths"), "A layer turns off")
 	var rows: Array[Control] = card.call("item_rows")
-	_check(rows.size() == 4, "The first four findings show")
+	_check(rows.size() == 3, "The first three findings show")
+	# The rows are never in a scroll of their own, so none is drawn cut off under the counts.
+	_check(card.find_children("", "ScrollContainer", true, false).is_empty(), "No inner scroll")
 	# A low finding says what was found on its one line, not only its kind.
 	var low: Button = rows[1].find_children("", "Button", true, false)[0]
 	_check(low.text == 'Text doesn\'t fit: "Settings" is cut off · 0:06', low.text)
@@ -203,7 +212,10 @@ func _run() -> void:
 		)
 	)
 	backend.call("_handle", event)
-	_check(card.call("step_text") == "Played 2:00, seed 4821.", "Done: what was played")
+	_check(card.call("step_text") == "Found 1 bug", "Done: what was found")
+	var said := (card.get("_about") as Label).text
+	_check(said.begins_with("A bot played ") and said.contains(" for 2:00, looking for"), said)
+	_check(said.ends_with("It changed nothing."), "It changed nothing: " + said)
 	_check(not (card.get("stop") as Button).visible, "No Stop once it is over")
 	_check((card.get("close") as Button).visible, "It can be dismissed")
 
@@ -218,10 +230,15 @@ func _run() -> void:
 	for label: Node in body.find_children("", "Label", true, false):
 		texts.append((label as Label).text)
 	_check(texts.has("res://game/player.gd:12 · seed 4821"), "Place and seed: %s" % texts)
+	_check(texts.has(str(card.get("WHY")["softlock"])), "Why it matters: %s" % texts)
 	_check(body.find_children("", "TextureRect", true, false).size() >= 1, "A screenshot")
 	_button(body, "Fix this").pressed.emit()
-	_check(prompt.text.begins_with("Fix this playtest finding: Softlock at 0:05"), prompt.text)
-	_check(prompt.text.contains("--seed 4821"), "The request carries the seed to check with")
+	var fix := "Fix a problem the test bot found while playing, about 0:05 in: Softlock."
+	_check(prompt.text.begins_with(fix), prompt.text)
+	_check(prompt.text.contains("It happens in res://game/player.gd:12."), "Where, in words")
+	# Plain words, no command line, and nothing that asks Journeyman for another playtest.
+	_check(not prompt.text.contains("joinery") and not prompt.text.contains("--"), prompt.text)
+	_check(not prompt.text.to_lower().contains("playtest"), "It doesn't ask for a playtest")
 	_check(not _sent(job, "prompt").size(), "Nothing is sent until the user sends it")
 
 	# The playtester's words go to the transcript; its follow-ups are offers.

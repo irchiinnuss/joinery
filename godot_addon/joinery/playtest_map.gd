@@ -1,12 +1,15 @@
 @tool
 extends Control
-## The playtest's coverage map, top-down: the level's floor as the bot mapped it, the parts
-## the player stood on in a quiet tone and the parts nobody reached in the danger colour.
-## It reads as the level: the floor fills the card's width (empty margins cropped), each named
-## area (a blockout's rooms) carries its name, the run's start is a ring marked "Start" and
-## each place the run was asked to reach is a diamond with its name, filled once reached.
-## Drawn from the report's grid in the theme's colours, so it reads in light and dark; the
-## same map is saved as a picture for agents (coverage.png).
+## The playtest's coverage map, top-down. In 3D it is the level itself, rendered from straight
+## above in the run's replay (bot_map.gd, the report's coverage "picture"): the places the
+## player walked are washed in the accent colour, the bot's path is a line over them, and each
+## place a player could stand but the bot never reached is a dot in the danger colour (walls,
+## hedges and ground outside the level are never marked). Without a picture (2D, or a run
+## where nothing could draw) the floor as the bot mapped it is drawn as cells instead, the
+## reached ones in a quiet tone. Either way it fills the card's width (empty margins cropped),
+## each named area carries its name, the run's start is a ring marked "Start" and each place
+## the run was asked to reach is a diamond with its name, filled once reached. Drawn in the
+## theme's colours, so it reads in light and dark; agents get the grid as coverage.png.
 ##
 ## Heat layers from the last few playtests (joinery/playtest_heat.py) paint on the same map:
 ## time spent as an accent wash (stronger where the bot stood longer), deaths as filled dots
@@ -28,6 +31,16 @@ const HEAT_MISSED_ALPHA := 0.22
 const TIME_ALPHA := Vector2(0.18, 0.85)
 ## Cells of floor kept round the cropped map.
 const MARGIN := 1
+## Over the level's picture: the wash on reached ground, and the path's strength.
+const WALKED_ALPHA := 0.3
+const PATH_ALPHA := 0.9
+
+## The tallest the map may draw, in pixels (the card's room left); 0 for HEIGHT_UNITS.
+var max_height := 0.0:
+	set(value):
+		max_height = value
+		_fit()
+		queue_redraw()
 
 var _grid: PackedStringArray = PackedStringArray()
 var _cols := 0
@@ -42,6 +55,11 @@ var _marks: Array[Dictionary] = []
 ## Layer -> {Vector2i: value}.
 var _heat: Dictionary = {}
 var _on: Dictionary = {}
+## The level from above (3D runs), and the part of the grid it shows (cells).
+var _picture: Texture2D = null
+var _picture_rect := Rect2()
+## The bot's path, in cells.
+var _path := PackedVector2Array()
 
 
 func _init() -> void:
@@ -69,6 +87,11 @@ func set_coverage(coverage: Dictionary) -> void:
 		if rect is Array and (rect as Array).size() == 4:
 			var box := Rect2(float(rect[0]), float(rect[1]), float(rect[2]), float(rect[3]))
 			_areas.append({"name": str((area as Dictionary).get("name", "")), "rect": box})
+	_path = PackedVector2Array()
+	for point: Variant in coverage.get("path", []):
+		if point is Array and (point as Array).size() == 2:
+			_path.append(Vector2(float(point[0]), float(point[1])))
+	_load_picture(str(coverage.get("picture", "")), coverage.get("picture_rect"))
 	_crop()
 	_fit()
 	queue_redraw()
@@ -95,6 +118,24 @@ func set_marks(marks: Array) -> void:
 	_crop()
 	_fit()
 	queue_redraw()
+
+
+## Whether the level's own picture is under the map (a 3D run that could draw).
+func has_picture() -> bool:
+	return _picture != null
+
+
+func _load_picture(path: String, rect: Variant) -> void:
+	_picture = null
+	if path.is_empty() or not rect is Array or (rect as Array).size() != 4:
+		return
+	if not FileAccess.file_exists(path):
+		return
+	var image := Image.load_from_file(path)
+	if image == null or image.is_empty():
+		return
+	_picture = ImageTexture.create_from_image(image)
+	_picture_rect = Rect2(float(rect[0]), float(rect[1]), float(rect[2]), float(rect[3]))
 
 
 ## The names on the map, as drawn: areas, then "Start", then the places to reach.
@@ -239,16 +280,21 @@ func _fit() -> void:
 		return
 	var unit := UI_THEME.unit(self)
 	var width := size.x if size.x > 1.0 else WIDTH_UNITS * unit
-	var side := minf(width / _view.size.x, HEIGHT_UNITS * unit / _view.size.y)
+	var side := minf(width / _view.size.x, _tallest(unit) / _view.size.y)
 	var height := ceilf(side * _view.size.y)
 	if not is_equal_approx(custom_minimum_size.y, height):
 		custom_minimum_size = Vector2(0, height)
 
 
+func _tallest(unit: float) -> float:
+	var tallest := HEIGHT_UNITS * unit
+	return minf(tallest, max_height) if max_height > 0.0 else tallest
+
+
 ## Pixels a cell takes now, and where the cropped grid's corner is drawn (centred across).
 func _layout() -> Array:
 	var unit := UI_THEME.unit(self)
-	var side := minf(size.x / _view.size.x, minf(size.y, HEIGHT_UNITS * unit) / _view.size.y)
+	var side := minf(size.x / _view.size.x, minf(size.y, _tallest(unit)) / _view.size.y)
 	var offset := Vector2(maxf((size.x - side * _view.size.x) / 2.0, 0.0), 0.0)
 	return [side, offset]
 
@@ -280,14 +326,20 @@ func _draw() -> void:
 		missed = UI_THEME.color(self, "text_faint")
 		missed.a = HEAT_MISSED_ALPHA
 	var gap := 1.0 if side >= 4.0 else 0.0
-	for row: int in range(_view.position.y, _view.end.y):
-		var line := _grid[row]
-		for col: int in range(_view.position.x, mini(_view.end.x, line.length())):
-			var mark := line[col]
-			if mark == " ":
-				continue
-			var box := Rect2(_point(Vector2(col, row), side, offset), Vector2.ONE * (side - gap))
-			draw_rect(box, missed if mark == "." else reached)
+	if _picture != null:
+		_draw_level(side, offset, unit, missed, heat)
+	else:
+		for row: int in range(_view.position.y, _view.end.y):
+			var line := _grid[row]
+			for col: int in range(_view.position.x, mini(_view.end.x, line.length())):
+				var mark := line[col]
+				if mark == " ":
+					continue
+				var box := Rect2(
+					_point(Vector2(col, row), side, offset), Vector2.ONE * (side - gap)
+				)
+				draw_rect(box, missed if mark == "." else reached)
+		_draw_path(side, offset, unit)
 	if layer_on("time"):
 		_draw_time(side, offset, gap)
 	if layer_on("deaths"):
@@ -322,6 +374,50 @@ func _draw() -> void:
 		var rect: Rect2 = area["rect"]
 		var centre := _point(rect.get_center(), side, offset)
 		_label(spaced(str(area["name"])), centre, side, taken, "text_muted", false)
+
+
+## The level's picture under the cropped grid, the walked ground washed, the path over it,
+## and a dot on each place a player could stand that the bot never reached.
+func _draw_level(side: float, offset: Vector2, unit: float, missed: Color, heat: bool) -> void:
+	var shown := Rect2(Vector2(_view.position), Vector2(_view.size))
+	var part := shown.intersection(_picture_rect)
+	if part.has_area():
+		var texels := Vector2(_picture.get_size()) / _picture_rect.size
+		var source := Rect2((part.position - _picture_rect.position) * texels, part.size * texels)
+		var target := Rect2(_point(part.position, side, offset), part.size * side)
+		draw_texture_rect_region(_picture, target, source)
+	var walked := UI_THEME.color(self, "accent")
+	walked.a = 0.0 if heat else WALKED_ALPHA
+	var halo := UI_THEME.color(self, "surface")
+	var radius := clampf(side * 0.22, 2.0 * unit, 5.0 * unit)
+	for row: int in range(_view.position.y, _view.end.y):
+		var line := _grid[row]
+		for col: int in range(_view.position.x, mini(_view.end.x, line.length())):
+			var at := _point(Vector2(col, row), side, offset)
+			if line[col] == "#" and walked.a > 0.0:
+				draw_rect(Rect2(at, Vector2.ONE * side), walked)
+			elif line[col] == ".":
+				var centre := at + Vector2.ONE * side / 2.0
+				draw_circle(centre, radius + maxf(1.0, unit), halo, true, -1.0, true)
+				draw_circle(centre, radius, missed, true, -1.0, true)
+	_draw_path(side, offset, unit)
+
+
+## The bot's way through the level: a line in the accent colour, over a halo so it reads on
+## the level's own colours.
+func _draw_path(side: float, offset: Vector2, unit: float) -> void:
+	if _path.size() < 2:
+		return
+	var points := PackedVector2Array()
+	for point: Vector2 in _path:
+		points.append(_point(point, side, offset))
+	var ink := UI_THEME.color(self, "accent")
+	ink.a = PATH_ALPHA
+	var halo := UI_THEME.color(self, "surface")
+	halo.a = 0.6
+	var width := maxf(1.5, unit * 1.75)
+	draw_polyline(points, halo, width + maxf(2.0, unit * 2.0), true)
+	draw_polyline(points, ink, width, true)
 
 
 func _point(cell: Vector2, side: float, offset: Vector2) -> Vector2:

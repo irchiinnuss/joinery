@@ -529,17 +529,8 @@ func _playtest(light: bool, width: int, chat: Control) -> void:
 	event["elapsed"] = 42.0
 	tasks.call("on_playtest", event)
 	await _shot("playtest", light, width, chat)
-	var items: Array = fixture.call("items", _thumbnail())
 	event["state"] = "done"
-	event["report"] = {
-		"counts": {"critical": 0, "high": 1, "medium": 1, "low": 1, "note": 1},
-		"items": items,
-		# As JSON brings it: a float, shown as a whole number.
-		"seed": 662040.0,
-		"played_seconds": 120.0,
-		"coverage": fixture.call("coverage"),
-		"reach": fixture.call("reach"),
-	}
+	event["report"] = fixture.call("report", _thumbnail())
 	tasks.call("on_playtest", event)
 	var card: Control = tasks.get("playtest")
 	var first: Control = (card.call("item_rows") as Array)[0]
@@ -554,6 +545,15 @@ func _playtest(light: bool, width: int, chat: Control) -> void:
 	card.call("show_layer", "time", true)
 	await _shot("playtest-heat", light, width, chat)
 	card.free()
+	tasks.set("playtest", null)
+	var yard := {"kind": "playtest", "playtest_id": "yard", "state": "done", "seconds": 180}
+	yard["report"] = fixture.call("yard", OS.get_cache_dir().path_join("joinery-visual-yard.png"))
+	tasks.call("on_playtest", yard)
+	await _shot("playtest-yard", light, width, chat)
+	# The cards' own scroll at its end: the whole map.
+	(chat.find_child("TaskScroll", true, false) as ScrollContainer).scroll_vertical = 100000
+	await _shot("playtest-yard-map", light, width, chat)
+	(tasks.get("playtest") as Node).free()
 	tasks.set("playtest", null)
 	tasks.hide()
 

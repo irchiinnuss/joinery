@@ -77,6 +77,8 @@ SIDEBAR_STATES = (
     "playtest",
     "playtest-report",
     "playtest-heat",
+    "playtest-yard",
+    "playtest-yard-map",
     "todo",
     "todo-working",
     "todo-detail",
