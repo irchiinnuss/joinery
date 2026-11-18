@@ -66,7 +66,8 @@ code. Custom games made from the blank blueprint have no play tests at all.
 4. **The `playtest` tool.** `playtest(minutes?, seed?, focus?)` is one read-only tool on the
    `joinery-registry` proxy, backed by the gateway RPC method `playtest`, the same for
    Codex, Claude Code, Gemini CLI and opencode, on the lead's, every task's and the
-   playtester's endpoint. It returns the report trimmed for an agent and up to three
+   playtester's endpoint, and on the lead's and tasks' only when the user asked (section 9).
+   It returns the report trimmed for an agent and up to three
    screenshots as images (context, never assets). One playtest runs at a time.
 5. **The playtester role** (`bridge/playtester.py`, `playtester` in `joinery/roles.py`,
    ADR 0037). `/playtest [focus]` in the sidebar sends `playtest_start`; the host starts the
@@ -81,8 +82,9 @@ code. Custom games made from the blank blueprint have no play tests at all.
    starts the playtester after an accepted change to scripts, scenes, resources, shaders or
    `project.godot` (off by default); `playtest_minutes` sets the run length (default 2).
    Follow-ups are normal requests; an error the run finds can also go to the debugger
-   with `/debug`. `playtest` is a shared read: the lead and workers may call it too, the
-   reviewer (timed to 90 s) may not.
+   with `/debug`. `playtest` is a shared read the role tables allow the lead and workers,
+   but the gateway lets them play only when the user asked (section 9); the reviewer (timed
+   to 90 s) may not.
 6. **The card.** Events `{kind: "playtest", playtest_id, state: starting|playing|writing|
    done|failed|stopped, elapsed, seconds, report, summary, followups}` drive one card above
    the footer with the task cards (`playtest_card.gd`, through `sidebar_tasks.gd`): "Playing…
@@ -136,6 +138,45 @@ code. Custom games made from the blank blueprint have no play tests at all.
    finished, and else the obstacle: which door needs which unreachable key, or the goal it
    was after, how close it got, and whether the map had no way there or it was stuck.
 
+9. **Only when asked** (2026-11-18). Agents ran the bot on their own: a lead called
+   `playtest` nine times in a few hours to check its own work and to chase a warning, each
+   run minutes long, and the "Fix this" text it was handed asked for another run. A
+   playtest is now the user's choice, enforced in the shared core so every agent is held
+   to it (`joinery/playtest_gate.py`, `bridge/playtester.py`):
+   - It runs from `/playtest`, the card's own buttons, `[agents] playtest_after_change`
+     (off by default) or a user request that asks in so many words: "playtest", "play
+     test", "test-play", or the bot asked to play ("run the bot", "let the bot play"),
+     unless the request says not to ("don't playtest it"). A word list is simple and
+     predictable; it errs towards not playing.
+   - The chat host checks each user request as it arrives. The lead's `playtest` is
+     `Playtester.gated`: it refuses unless that request asked, telling the agent to suggest
+     /playtest to the user instead. A task may play only when the user started it with
+     such a request, or the lead started it during one. The playtester role's own endpoint
+     is not gated: only the user's action starts it.
+   - `joinery playtest` in an agent's shell is refused by the policy hook's user-only
+     guards (`joinery.policy`), for every agent (`--heatmap`, which plays nothing, stays
+     open). The tool description and the agents' guide say the same.
+   - `[agents] playtester = false` (Settings > Playtester, `joinery playtester --set
+     off`) turns it off for the project: the tool refuses every caller, `/playtest` and the
+     card are hidden, the CLI refuses, and done-when `reach`/`no_errors` items are
+     inconclusive.
+   - Godot's own teardown report as the headless run quits ("17 ObjectDB instances were
+     leaked at exit", RIDs, resources still in use) is engine noise, never a finding
+     (`console_errors.NOISE`). Repro steps and "Fix this" are plain words with the seed,
+     never a command line.
+   - The card says what ran ("A bot played Yard Day for 3:00, looking for crashes, errors
+     and places it can't reach. It changed nothing."), what it found in plain words, and
+     why each kind of finding matters. Its rows are never in an inner scroll.
+   - In 3D, a cell is floor only where the player's own collision shape fits standing (at
+     its centre or a quarter of the way to a corner; on the navigation mesh when the player
+     starts on one), so walls, hedges, props and ground beyond a fence are never "not
+     reached". The windowed replay renders the level from straight above with an
+     orthographic camera in a SubViewport sharing the game's world (`bot_map.gd`,
+     `level.png`), cut 2.4 m above the player's floor like a floor plan, and the card draws
+     the walked ground, the bot's path and the unreached places over it. The bot turns
+     the view to a goal before pressing interact (first-person games interact with what
+     the view points at) and jumps onto a next cell a step up.
+
 ## Consequences
 
 - Every blueprint gets a real playtest in CI: a 20 s seeded run each in stock Godot must find
@@ -150,6 +191,11 @@ code. Custom games made from the blank blueprint have no play tests at all.
 - Softlock detection is by time (15 s by default, `--softlock`): a slow puzzle that takes
   longer without any visible change reads as stuck.
 - A playtest costs one provider session for the write-up; the run itself costs nothing.
+- An agent can no longer check its own change by playing; it says the user can run
+  /playtest. Done-when `reach` and `no_errors` items, which the user sees in the to-do,
+  still play the staged change.
+- The 3D map's picture exists only where something can draw (the screenshot replay); a
+  headless-only run shows the grid alone.
 - Coverage is an estimate: the grid comes from physics probes, so a floor behind a locked
   door counts as unreached (true, for a bot that cannot open it), and a ledge reached only
   by a long jump may never join the map until the player stands on it.

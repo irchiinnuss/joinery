@@ -100,7 +100,8 @@ REVIEW_REPORT = "report_review"
 DIAGNOSIS_REPORT = "report_diagnosis"
 REPRODUCE = "reproduce_error"
 DESIGN_REPORT = "report_design"
-#: Play the game headless: read-only, so the lead, workers and the playtester may.
+#: Play the game headless: read-only, so the lead, workers and the playtester may; the
+#: gateway lets the lead and workers play only when the user asked (joinery.playtest_gate).
 PLAYTEST = "playtest"
 #: The accessibility and performance checks: read-only, so the lead and workers may too.
 ACCESS_CHECK = "access_check"
