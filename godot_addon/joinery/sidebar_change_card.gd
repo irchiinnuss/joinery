@@ -74,6 +74,8 @@ const ART_GATE := preload("sidebar_art_gate.gd")
 const DEPARTURES := preload("sidebar_departures.gd")
 const UNPLAYED := preload("sidebar_unplayed.gd")
 const TRAIL := preload("sidebar_trail.gd")
+const WORDS := preload("sidebar_turn_words.gd")
+const REFUSALS := preload("sidebar_refusals.gd")
 ## Apps recognised in step text; the card shows each one it sees once.
 const APPS := ["Blender", "Krita", "GIMP", "Material Maker", "Surge XT", "SuperCollider", "Godot"]
 ## Shown instead of Revert once the change's restore data is gone.
@@ -147,7 +149,7 @@ var _done_mark: TextureRect
 ## The state [method finish] ended the turn in ("done", "stopped" or "failed"), "" before.
 var _finished_as := ""
 ## The "Not run: …" lines of calls the project's gate refused ([method _refuse]).
-var _refused: Array[String] = []
+var _refusals := REFUSALS.new()
 ## "5 steps · 0:14 ›": the finished steps folded while the change waits (until the reply's
 ## timing line takes over).
 var _fold: Button
@@ -267,6 +269,7 @@ func _init(text := "", context: Array = []) -> void:
 	_steps.file_opened.connect(func(path: String) -> void: file_opened.emit(path))
 	_steps.hide()
 	_progress.add_child(_steps)
+	_progress.add_child(_refusals)
 	_done_list = VBoxContainer.new()
 	_done_list.theme_type_variation = "JoineryTight"
 	_done_list.accessibility_name = "What was done"
@@ -445,26 +448,13 @@ func add_trail(event: Dictionary) -> void:
 
 
 ## A refused call never reads as done: its line ends with the stop mark, and one quiet line on
-## the card says why ("Not run: Krita isn't enabled for this project. …"). It stays in sight
-## when the steps fold; the same reason is said once.
+## the card says why (sidebar_refusals.gd).
 func _refuse(event: Dictionary) -> void:
 	if bool(event.get("allowed", true)):
 		return
 	_steps.refuse(str(event.get("call_id", "")))
-	var reason := str(event.get("reason", "")).strip_edges()
-	var line := "Not run: " + reason if not reason.is_empty() else "A step was not run"
-	if line in _refused:
-		_sync_activity()
-		return
-	_refused.append(line)
-	var row := _row(_progress)
-	row.name = "Refused"
-	row.accessibility_name = line
-	var mark := _icon("stop", "text_muted")
-	mark.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-	row.add_child(mark)
-	row.add_child(UI.label(line, "JoineryCaption", true))
-	UI_MOTION.fade_in(row)
+	_refusals.add(event)
+	_word_refusals()
 	_sync_activity()
 
 
@@ -507,6 +497,7 @@ func shows_step(text: String) -> bool:
 ## the summary joins the status line after the apps, and the finished steps fold behind it.
 func adopt_timing(summary: Button, details: Label) -> void:
 	if _summary == summary:
+		_word_refusals()
 		return
 	_summary = summary
 	_details = details
@@ -517,6 +508,18 @@ func adopt_timing(summary: Button, details: Label) -> void:
 	details.reparent(_progress, false)
 	_progress.move_child(details, _steps.get_index() + 1)
 	set_details_open(false)
+	_word_refusals()
+
+
+## A turn that ended done with a call refused never reads "Completed" with a tick: its timing
+## line says how many steps were not run, behind the neutral stop mark. A failed turn keeps the
+## error mark and "Failed after".
+func _word_refusals() -> void:
+	if _refusals.count() == 0 or _finished_as != "done":
+		return
+	STYLE.set_glyph(_done_mark, OUTCOMES["stopped"][0], OUTCOMES["stopped"][1])
+	if _summary != null:
+		_summary.text = WORDS.with_refusals(_summary.text, _refusals.count())
 
 
 ## Show or fold the finished steps and timing details under the summary; [param animate]
@@ -568,6 +571,7 @@ func finish(outcome: String) -> void:
 		state = {"success": "done", "stopped": "stopped"}.get(kind, "failed")
 		_finished_as = state
 		STYLE.set_glyph(_done_mark, OUTCOMES[kind][0], OUTCOMES[kind][1])
+		_word_refusals()
 	_sync_activity()
 
 

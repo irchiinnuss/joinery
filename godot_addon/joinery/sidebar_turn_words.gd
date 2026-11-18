@@ -1,7 +1,8 @@
 @tool
 extends RefCounted
 ## How the sidebar words the end of a turn: the timing line on the request's card ("Completed in
-## 0:12", chat_history.gd) and the kind of a decision message (journeyman_dock.gd).
+## 0:12", chat_history.gd; "Done in 0:12, 1 step not run" when a call was refused,
+## sidebar_change_card.gd) and the kind of a decision message (journeyman_dock.gd).
 
 const UI_MOTION := preload("ui_motion.gd")
 
@@ -16,6 +17,14 @@ static func timing_line(outcome: String, seconds: float) -> String:
 	if outcome == "cancelled":
 		return "Stopped within 1 s" if quick else "Stopped after " + clock
 	return "Failed within 1 s" if quick else "Failed after " + clock
+
+
+## [param line] (a done turn's timing line) for a turn in which [param count] calls were
+## refused: "Done in 0:12, 1 step not run". A line already counted is counted again.
+static func with_refusals(line: String, count: int) -> String:
+	var base := line.left(line.rfind(", ")) if line.ends_with(" not run") else line
+	var plural := "" if count == 1 else "s"
+	return "%s, %d step%s not run" % [base.replace("Completed in ", "Done in "), count, plural]
 
 
 ## Kind of a decision message ("success", "rejected", "info" or what [param kind] says); older

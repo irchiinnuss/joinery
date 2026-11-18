@@ -1,0 +1,48 @@
+@tool
+extends VBoxContainer
+## The calls the project's gate refused on a request's card (sidebar_change_card.gd): one quiet
+## line per reason, behind the stop mark ("Not run: Krita isn't enabled for this project. Turn
+## it on in Project apps."). It stays in sight when the card's steps fold; the same reason is
+## said once, while every refused call counts for the card's timing line.
+
+const UI_MOTION := preload("ui_motion.gd")
+const UI := preload("ui_components.gd")
+const STYLE := preload("sidebar_style.gd")
+
+## The refused calls, by call id and reason.
+var _calls: Dictionary = {}
+var _lines: Array[String] = []
+
+
+func _init() -> void:
+	name = "Refusals"
+	theme_type_variation = "JoineryTight"
+	accessibility_name = "Steps not run"
+	hide()
+
+
+## A refused call ({call_id, reason}) adds its line, unless its reason was said already.
+func add(event: Dictionary) -> void:
+	var reason := str(event.get("reason", "")).strip_edges()
+	_calls[str(event.get("call_id", "")) + "|" + reason] = true
+	var line := "Not run: " + reason if not reason.is_empty() else "A step was not run"
+	if line in _lines:
+		return
+	_lines.append(line)
+	var row := HBoxContainer.new()
+	row.theme_type_variation = "JoineryRowTight"
+	row.name = "Refused"
+	row.accessibility_name = line
+	var mark := STYLE.glyph("text_muted")
+	STYLE.set_glyph(mark, "stop", "text_muted")
+	mark.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	row.add_child(mark)
+	row.add_child(UI.label(line, "JoineryCaption", true))
+	add_child(row)
+	show()
+	UI_MOTION.fade_in(row)
+
+
+## How many calls were refused.
+func count() -> int:
+	return _calls.size()

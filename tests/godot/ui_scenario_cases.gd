@@ -600,6 +600,12 @@ func _denied_call() -> void:
 	var words := str((refused.get_node("Line/Words") as Label).text) if refused != null else ""
 	s.check(end == "stopped", "The refused step ends with the stop mark (%s)" % end)
 	s.check(not words.begins_with("Opened"), "The refused step never reads as done: " + words)
+	await s.wait_until(func() -> bool: return not _mark(s.card()).is_empty(), 3000)
+	s.check(
+		not s.visible_text().contains("Completed"), "With a step not run, nothing says Completed"
+	)
+	s.check(s.visible_text().contains("1 step not run"), "The timing line counts the step not run")
+	s.check(_mark(s.card()) == "stop", "Its mark is the stop, not a tick (%s)" % _mark(s.card()))
 	await s.shot("done")
 
 
