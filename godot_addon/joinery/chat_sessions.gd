@@ -543,10 +543,13 @@ func chat_named(view: Control, chat_id: String) -> void:
 
 
 ## Messages queued in a chat Journeyman is not working in go out only from the screen, so that
-## chat stays until they are sent or removed. The chat it works in is kept, queue and all.
+## chat stays until they are sent or removed. The chat it works in is kept, queue and all. The
+## Chats list closes first, so the chat with its queue and the line saying why are in sight: a
+## click is never swallowed behind the list.
 func _blocked() -> bool:
 	if _queued(_transcript) and dock.call("_turn") != _transcript:
-		dock.call("show_status", QUEUED, 4.0)
+		page.set_open(false)
+		dock.call("show_status", QUEUED, 6.0)
 		return true
 	return false
 
