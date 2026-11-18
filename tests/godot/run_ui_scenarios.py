@@ -60,6 +60,8 @@ def scenario_env(env: dict[str, str], args: argparse.Namespace) -> dict[str, str
     env = dict(env)
     env["JOINERY_SCRIPTED_HOST"] = str(TESTS / "scripted_host.py")
     env["JOINERY_TEST_PYTHON"] = sys.executable
+    if trace := os.environ.get("JOINERY_SCRIPTED_TRACE_DIR"):
+        env["JOINERY_SCRIPTED_TRACE_DIR"] = trace  # where a stuck host writes its stacks
     env["JOINERY_BACKGROUND"] = "1"  # never take focus (ADR 0032)
     if args.scenarios:
         env["JOINERY_SCENARIOS"] = args.scenarios
@@ -105,7 +107,12 @@ def editor(
         harness,
         theme,
         "ui_scenario_editor.gd",
-        ["ui_checks.gd", "ui_scenarios.gd", "playtest_fixture.gd"],
+        [
+            "ui_checks.gd",
+            "ui_scenarios.gd",
+            "ui_scenario_cases.gd",
+            "playtest_fixture.gd",
+        ],
         "ui scenarios editor:",
         capture,
         logs,

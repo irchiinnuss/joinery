@@ -57,12 +57,15 @@ var theme_name := "dark"
 var width := 480
 var dock: Control
 var chat: Node
+## What the sidebar would have told the desktop (desktop_notify.gd), one line each.
+var notifications: PackedStringArray = []
 var _checks: GDScript
 var _cases: RefCounted
 var _script_path := ""
 var _scenario := ""
 var _failed := false
-var _timings: Array[Dictionary] = []
+## The scripted hosts this scenario started (process ids), to check each one ends.
+var _hosts: Array[int] = []
 
 
 func _init(scene_tree: SceneTree) -> void:
@@ -87,6 +90,7 @@ func run(only: Array = []) -> bool:
 		var built: Array = build.call()
 		dock = built[0]
 		chat = built[1]
+		_quiet_notifications()
 		await frames(2)
 		await _cases.call("_" + scenario.replace("-", "_"))
 		if chat != null and is_instance_valid(chat):
@@ -94,6 +98,7 @@ func run(only: Array = []) -> bool:
 		if teardown.is_valid():
 			await teardown.call()
 		await frames(2)
+		await _hosts_end()
 	return not _failed
 
 
@@ -138,6 +143,39 @@ func frames(count := 1) -> void:
 		await tree.process_frame
 
 
+## The windows here never have focus, so the sidebar would post real desktop notifications
+## and bounce the Dock icon on every stop or error: record them instead (desktop_notify.gd's
+## own test hooks), never touching the user's desktop.
+func _quiet_notifications() -> void:
+	notifications.clear()
+	var notify := dock.get_node_or_null("DesktopNotify")
+	if notify == null:
+		return
+	notify.set(
+		"runner",
+		func(program: String, args: PackedStringArray, _env: Dictionary) -> int:
+			notifications.append("%s %s" % [program.get_file(), " ".join(args)])
+			return 0
+	)
+	notify.set("attention", func() -> void: notifications.append("attention"))
+	notify.set("notifier", func() -> String: return "")
+
+
+## Closing the chat ends its host process (the editor would otherwise keep it running).
+func _hosts_end() -> void:
+	for pid: int in _hosts:
+		if pid <= 0:
+			continue
+		var ended := await wait_until(func() -> bool: return not OS.is_process_running(pid), 5000)
+		check(ended, "Closing the chat ends its host process (pid %d)" % pid)
+		if not ended:
+			# Ask it where it is stuck first (scripted_host.py writes its stacks), then end it.
+			OS.execute("kill", ["-USR1", str(pid)])
+			await wait_ms(500)
+			OS.kill(pid)
+	_hosts.clear()
+
+
 ## Wait until [param condition] holds, at most [param ms]; true when it did.
 func wait_until(condition: Callable, ms := 8000) -> bool:
 	var deadline := Time.get_ticks_msec() + ms
@@ -169,6 +207,7 @@ func connect_host() -> bool:
 		check(false, "The scripted chat host starts")
 		return false
 	chat.set("_agent", "codex")
+	_hosts.append(int((job.get("_process") as Dictionary).get("pid", 0)))
 	chat.set("_job", job)
 	dock.call("set_chat_agent", "codex")
 	chat.emit_signal("status_changed", "connecting", "Connecting to Codex CLI…")

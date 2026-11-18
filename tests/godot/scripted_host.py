@@ -40,9 +40,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import faulthandler
 import json
 import os
+import signal
 import sys
+import tempfile
+import traceback
 from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
 from pathlib import Path
 from typing import Any, ClassVar
@@ -67,6 +71,15 @@ from bridge.protocol import (
 Step = dict[str, Any]
 #: The policy stop the host handed its RPC endpoint (``{"policy_stop": reason}``).
 _stop: list[Callable[[str], Coroutine[Any, Any, None]]] = []
+#: Tasks started here: asyncio keeps only a weak reference to a task, and one collected
+#: mid-await (the input pump) would leave the host waiting on its input for good.
+_tasks: set[asyncio.Task[Any]] = set()
+
+
+def _keep(task: asyncio.Task[Any]) -> asyncio.Task[Any]:
+    _tasks.add(task)
+    task.add_done_callback(_tasks.discard)
+    return task
 
 
 class ScriptedBridge:
@@ -162,8 +175,10 @@ class ScriptedBridge:
         elif "policy_stop" in step:
             if _stop:
                 # The stop cancels this very turn; let it.
-                asyncio.get_running_loop().create_task(
-                    _stop[0](str(step["policy_stop"]))
+                _keep(
+                    asyncio.get_running_loop().create_task(
+                        _stop[0](str(step["policy_stop"]))
+                    )
                 )
                 await asyncio.sleep(30)
         elif "exit" in step:
@@ -178,7 +193,8 @@ class ScriptedBridge:
         self._cancelled.set()
 
     async def close(self) -> None:
-        pass
+        # A provider's session ends with it: a hanging turn ends too.
+        self._cancelled.set()
 
 
 class ScriptedGateway(MagicMock):
@@ -297,6 +313,15 @@ def answer_decisions(
         filtered = asyncio.StreamReader(limit=1_000_000)
 
         async def pump() -> None:
+            try:
+                await forward()
+            except BaseException:
+                # Never die quietly: the host would wait on its input for good.
+                with _trace_path("pump").open("w") as log:
+                    traceback.print_exc(file=log)
+                raise
+
+        async def forward() -> None:
             while line := await source.readline():
                 try:
                     data = json.loads(line)
@@ -331,12 +356,23 @@ def answer_decisions(
                     )
                     continue
                 filtered.feed_data(line)
+                if isinstance(data, dict) and data.get("kind") == "shutdown":
+                    break
             filtered.feed_eof()
+            # The sidebar is gone: a scripted turn still waiting (a hang, another chat's
+            # task) must never keep this process alive after a short grace.
+            asyncio.get_running_loop().call_later(3.0, os._exit, 0)
 
-        asyncio.get_running_loop().create_task(pump())
+        _keep(asyncio.get_running_loop().create_task(pump()))
         return filtered, transport
 
     return reader
+
+
+def _trace_path(kind: str) -> Path:
+    """Where this host writes what it knows when stuck: JOINERY_SCRIPTED_TRACE_DIR or temp."""
+    folder = os.environ.get("JOINERY_SCRIPTED_TRACE_DIR") or tempfile.gettempdir()
+    return Path(folder) / f"joinery-scripted-host-{os.getpid()}-{kind}.trace"
 
 
 def main() -> int:
@@ -345,6 +381,9 @@ def main() -> int:
     parser.add_argument("--script", type=Path, required=True)
     parser.add_argument("--agent", default="codex")
     args = parser.parse_args()
+    # A host that won't end can be asked where it is: SIGUSR1 writes every stack here.
+    trace = _trace_path("stacks")
+    faulthandler.register(signal.SIGUSR1, file=trace.open("w"), all_threads=True)
     ScriptedBridge.script = json.loads(args.script.read_text(encoding="utf-8"))
     stand_ins: dict[str, Any] = {
         "Bridge": ScriptedBridge,

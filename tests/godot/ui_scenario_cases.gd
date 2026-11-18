@@ -475,6 +475,10 @@ func _provider_error() -> void:
 		"done arrives before timing, so the card finishes as done with a green check"
 	)
 	s.check(s.dock.get("connection_state") == "connected", "Still connected after one failed reply")
+	s.check(
+		not s.notifications.is_empty(),
+		"In the background, a failed request tells the desktop (%s)" % " / ".join(s.notifications)
+	)
 	await s.shot("failed")
 
 
@@ -737,7 +741,8 @@ func _rewind() -> void:
 	s.send(SAY_HELLO)
 	await s.wait_until(func() -> bool: return s.card_state() == "done", 8000)
 	s.send("Darken the wood")
-	await s.wait_until(func() -> bool: return s.card_state() == "done", 8000)
+	var second := await s.wait_until(func() -> bool: return s.card_state() == "done", 8000)
+	s.check(second, "A second request in the same chat finishes (%s)" % s.card_state())
 	await s.wait_ms(400)
 	var sessions: Node = s.dock.get("_chats")
 	var rewinder: Object = sessions.get("rewinder")
@@ -752,6 +757,8 @@ func _rewind() -> void:
 	s.check(rewinder.get("confirm") != null, "Edit and resend asks first")
 	await s.shot("ask")
 	var confirm: Node = rewinder.get("confirm")
+	if confirm == null:
+		return
 	var go: Button = null
 	for button: Button in confirm.find_children("", "Button", true, false):
 		if button.text.begins_with("Rewind"):
