@@ -399,10 +399,11 @@ func add_step(text: String, detail := "") -> void:
 	_sync_activity()
 
 
-## The reply's first words: the live line says so ("Writing the reply…"), so "Thinking through
-## your request…" never stays on while the words arrive; the step before it gets its tick.
+## The reply's first words: while the live line still says it thinks ("Thinking through your
+## request…"), it gets its tick and the live line says the reply is being written. Words between
+## steps leave the steps as they are (they become the trail's thoughts).
 func reply_started() -> void:
-	if state == "working":
+	if state == "working" and _last_step.begins_with("Thinking") and shows_step(_last_step):
 		add_step(WRITING)
 
 
