@@ -262,7 +262,7 @@ func _stream_short() -> void:
 	s.check(s.card_state() == "done", "The request ends done: " + s.card_state())
 	var said := s.visible_text()
 	s.check(not said.contains("0:00"), "A short turn's time is in words, never 0:00")
-	s.check(said.contains("Completed in under a second"), "It says it took under a second")
+	s.check(said.contains("Completed in under 1 s"), "It says it took under a second")
 	s.check(not s.composer().get("stop").visible, "Send is back when the reply ends")
 	s.check(s.prompt().has_focus(), "The message box still has the focus at the end")
 	await s.shot("done")

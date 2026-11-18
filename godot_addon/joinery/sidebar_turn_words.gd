@@ -12,10 +12,10 @@ static func timing_line(outcome: String, seconds: float) -> String:
 	var quick := seconds < 1.0
 	var clock := UI_MOTION.format_clock(seconds)
 	if outcome == "done":
-		return "Completed in under a second" if quick else "Completed in " + clock
+		return "Completed in under 1 s" if quick else "Completed in " + clock
 	if outcome == "cancelled":
-		return "Stopped within a second" if quick else "Stopped after " + clock
-	return "Failed within a second" if quick else "Failed after " + clock
+		return "Stopped within 1 s" if quick else "Stopped after " + clock
+	return "Failed within 1 s" if quick else "Failed after " + clock
 
 
 ## Kind of a decision message ("success", "rejected", "info" or what [param kind] says); older
