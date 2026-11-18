@@ -45,6 +45,7 @@ const EMPTY := preload("sidebar_empty.gd")
 const FOLLOW := preload("chat_follow.gd")
 const NOTICES := preload("chat_notices.gd")
 const MARKDOWN := preload("chat_markdown.gd")
+const WORDS := preload("sidebar_turn_words.gd")
 const NO_AGENT := "No agent connected"
 ## Notice kind -> [icon ("" for none), tint role].
 const NOTICE_ICONS := {
@@ -392,14 +393,8 @@ func show_timing(event: Dictionary) -> bool:
 		return false
 	var record: Dictionary = _messages[-1]
 	var seconds := float(event.get("total_ms", 0)) / 1000.0
-	var outcome := str(event.get("outcome", ""))
-	var clock := UI_MOTION.format_clock(seconds)
 	var summary: Button = record["summary"]
-	summary.text = (
-		"Completed in " + clock
-		if outcome == "done"
-		else "Stopped after " + clock if outcome == "cancelled" else "Failed after " + clock
-	)
+	summary.text = WORDS.timing_line(str(event.get("outcome", "")), seconds)
 	summary.tooltip_text = "Show timing details"
 	summary.accessibility_name = "Show response timing details"
 	if not summary.has_meta("_joinery_icon"):
