@@ -55,7 +55,7 @@ def test_compile_and_sign_commands() -> None:
         "--force",
         "--sign",
         "-",
-        "/a.app",
+        str(Path("/a.app")),
     ]
     signed = notifier.sign_command(Path("/a.app"), "Developer ID Application: X")
     assert "--timestamp" in signed and "runtime" in signed

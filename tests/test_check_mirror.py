@@ -35,7 +35,7 @@ def test_the_stage_is_listed_without_what_no_godot_run_reads(tmp_path: Path) -> 
     (tmp_path / ".git").mkdir()
     (tmp_path / ".git/HEAD").write_text("ref")
     (tmp_path / "game").mkdir()
-    (tmp_path / "game/player.gd").write_text("extends Node\n")
+    (tmp_path / "game/player.gd").write_bytes(b"extends Node\n")
     os.utime(tmp_path / "game/player.gd", (1000.7, 1000.7))
     marks = check_mirror.host_marks(tmp_path)
     assert marks == {
