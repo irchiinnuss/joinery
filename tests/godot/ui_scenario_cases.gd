@@ -560,6 +560,8 @@ func _denied_call() -> void:
 	await s.frames(4)
 	var text := s.visible_text()
 	s.check(s.reply_shown().contains("couldn't open"), "The turn goes on after the refusal")
+	var badge: Control = s.card().find_child("Krita", true, false)
+	s.check(badge == null or not badge.is_visible_in_tree(), "No Krita badge: Krita did nothing")
 	s.expect_bug(
 		text.contains("isn't enabled for this project"),
 		"The refusal's reason is shown",

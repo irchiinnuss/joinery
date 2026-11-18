@@ -148,6 +148,8 @@ var _fold: Button
 var _seconds := 0
 var _details: Label
 var _seen_apps: Array[String] = []
+## app -> {call id (or step text): its state}: a badge shows while one of them didn't fail.
+var _app_calls: Dictionary = {}
 var _last_step := ""
 var _previous_outcome: Array = []
 
@@ -408,7 +410,7 @@ func add_tests(event: Dictionary) -> void:
 func add_trail(event: Dictionary) -> void:
 	if state in ["sending", "failed"]:
 		set_sent()
-	_note_apps(str(event.get("text", "")))
+	_note_apps(str(event.get("text", "")), str(event.get("id", "")), str(event.get("state", "")))
 	_steps.add_call(event)
 	if _fold.visible or _summary != null:
 		_sync_activity()
@@ -418,12 +420,23 @@ func add_trail(event: Dictionary) -> void:
 	_sync_activity()
 
 
-func _note_apps(line: String) -> void:
+## An app named in [param line] joins the status line. Its badge shows only while the app did
+## something: once every step naming it failed ([param state] of its call [param id]), as when
+## the app isn't enabled, the badge goes, so the status line never credits an app with nothing.
+func _note_apps(line: String, id := "", state := "") -> void:
 	for app: String in APPS:
-		if line.contains(app) and not _seen_apps.has(app):
+		if not line.contains(app):
+			continue
+		if not _seen_apps.has(app):
 			_seen_apps.append(app)
-			_apps.add_child(_app_badge(app))
-			_apps.show()
+			var badge := _app_badge(app)
+			badge.name = app
+			_apps.add_child(badge)
+		var calls: Dictionary = _app_calls.get_or_add(app, {})
+		calls[id if not id.is_empty() else line] = state
+		var did := calls.values().any(func(each: String) -> bool: return each != "failed")
+		(_apps.get_node(NodePath(app)) as Control).visible = did
+	_apps.visible = _apps.get_children().any(func(badge: Control) -> bool: return badge.visible)
 
 
 ## The whole trail ([param all], when the folded line is opened), or the newest lines.
