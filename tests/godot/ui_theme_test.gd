@@ -466,6 +466,11 @@ func _check_motion() -> void:
 	var fade: Tween = hidden.get_meta("_joinery_tween_presence")
 	_check(fade.is_running(), "A fade-in is not paused by the pulse's watch")
 	page.show()
+	# A stopped pulse keeps its watch; showing and hiding it then must print no error.
+	UI_MOTION.stop(waiting)
+	page.hide()
+	page.show()
+	_check(not waiting.has_meta("_joinery_tween_presence"), "A stopped pulse stays stopped")
 	_check(UI_THEME.set_pref("reduce_motion", "on") == OK, "Reduce motion")
 	_check(not UI_MOTION.is_enabled(), "Reduce motion turns every animation off")
 	_check(UI_THEME.set_pref("reduce_motion", "off") == OK, "Restore motion")

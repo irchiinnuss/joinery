@@ -526,7 +526,10 @@ static func breathe(node: CanvasItem) -> Tween:
 
 ## The breathing loop on [param node] runs only while the node shows.
 static func _follow_visibility(node: CanvasItem) -> void:
-	var tween: Variant = node.get_meta(_TWEEN_META + "presence", null)
+	# Godot treats a null default as no default, so a missing key must be checked first.
+	if not node.has_meta(_TWEEN_META + "presence"):
+		return  # Stopped, or another presence animation ended and took its key.
+	var tween: Variant = node.get_meta(_TWEEN_META + "presence")
 	if not tween is Tween or not (tween as Tween).is_valid():
 		return
 	if (tween as Tween).get_loops_left() != -1:
