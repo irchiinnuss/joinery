@@ -889,22 +889,37 @@ func _idle() -> void:
 	s.send(SAY_HELLO)
 	await s.wait_until(func() -> bool: return s.card_state() == "done", 8000)
 	await s.wait_ms(1500)
-	# In the editor (low-processor mode) a frame is drawn only when something asks for one:
-	# frames drawn while nothing happens are the sidebar's idle cost.
-	var frames_before := Engine.get_frames_drawn()
-	var started := Time.get_ticks_msec()
-	var busy_us := 0
-	while Time.get_ticks_msec() - started < 3000:
-		await s.tree.process_frame
-		busy_us += int(Performance.get_monitor(Performance.TIME_PROCESS) * 1e6)
-	var seconds := (Time.get_ticks_msec() - started) / 1000.0
-	var drawn := (Engine.get_frames_drawn() - frames_before) / seconds
 	if not Engine.is_editor_hint():
 		return  # A script run draws every frame; only the editor's idle means anything.
-	s.metric("idle_frames_drawn_per_s", drawn, "fps")
-	s.metric("idle_process_ms_per_frame", busy_us / 1000.0 / maxf(1.0, drawn * seconds), "ms")
+	# In the editor (low-processor mode) a frame is drawn only when something asks for one:
+	# frames drawn while nothing happens are idle cost. Then the same without the message
+	# box's focus, and with the sidebar hidden, to see who asks.
+	var drawn := await _redraws("idle_frames_drawn_per_s")
+	s.tree.root.gui_release_focus()
+	await _redraws("idle_no_focus_frames_per_s")
+	s.dock.visible = false
+	var hidden := await _redraws("idle_sidebar_hidden_frames_per_s")
+	s.dock.visible = true
+	# Only the sidebar's own share is held to a budget: the rest of the editor is not ours.
 	if OS.is_in_low_processor_usage_mode():
-		s.check(drawn < 5.0, "Idle, the editor stops redrawing (%.1f frames/s)" % drawn)
+		s.check(
+			drawn - hidden < 5.0,
+			(
+				"Idle, the sidebar asks for no redraws (%.1f frames/s with it, %.1f without)"
+				% [drawn, hidden]
+			)
+		)
+
+
+## Frames drawn per second over two quiet seconds, recorded as [param name].
+func _redraws(name: String) -> float:
+	await s.wait_ms(300)
+	var before := Engine.get_frames_drawn()
+	var started := Time.get_ticks_msec()
+	await s.wait_ms(2000)
+	var rate := (Engine.get_frames_drawn() - before) / ((Time.get_ticks_msec() - started) / 1000.0)
+	s.metric(name, rate, "fps")
+	return rate
 
 
 ## The script for scripted_host.py, with the long reply filled in.

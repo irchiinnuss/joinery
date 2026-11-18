@@ -53,6 +53,10 @@ func _fresh_sidebar() -> Array:
 		queue.call("remove", card)
 	sessions.call("new_chat")
 	_dock.call("hide_edit_review")
+	# A change left waiting by the last scenario is dropped in the plugin too (a user can't
+	# send while one waits: new messages queue), so it never shapes the next scenario.
+	_plugin.set("_file_review", {})
+	_plugin.set("_deciding", false)
 	_dock.set("_turn_log", null)
 	_dock.set("_active_card", null)
 	(_dock.get("_transcript") as Node).call("clear")
