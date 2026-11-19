@@ -23,6 +23,9 @@ from pathlib import Path, PurePosixPath
 MARKER = ".gdignore"
 #: Joinery's own state in a project (backups, stages, chats, caches): never the game's.
 STATE = ".joinery"
+#: Folders in it that keep copies of the game's scripts: add-on backups, each change's
+#: stage and ``original/`` files, blueprint backups.
+SCRIPT_COPIES = ("addon-backups", "transactions", "backup")
 #: Source-only folders, project-relative. Godot skips subfolders of an ignored one.
 SOURCE_ONLY = ("recipes", "art/sources", "art/reference", "audio/sources")
 #: Game files whose ``res://`` paths load other files.
@@ -100,24 +103,30 @@ def mark(root: Path, *, create: bool = False) -> tuple[list[str], dict[str, list
 
 
 def hide_state(project: Path) -> None:
-    """Give Joinery's own folder (``.joinery/``) a ``.gdignore``.
+    """Give Joinery's own folder (``.joinery/``) a ``.gdignore``, and each folder in it
+    that keeps copies of the game's scripts (:data:`SCRIPT_COPIES`) one of its own.
 
     Godot's file system skips hidden folders, but its GDScript language server
-    lists every ``.gd`` under the project unless a ``.gdignore`` stops it. Without
-    the marker the editor parses the backups and stages kept there (a change's
-    ``original/`` files, old add-on copies) and reports each ``class_name`` twice
-    ("Class "Player" hides a global script class"). Called whenever Joinery makes
-    or updates a project, starts a change, and checks the add-on as the editor opens.
+    lists every ``.gd`` under the project unless a ``.gdignore`` stops it (it looks
+    for one in each folder before going in). Without the marker the editor parses
+    the backups and stages kept there (a change's ``original/`` files, old add-on
+    copies) and reports each ``class_name`` twice ("Class "Player" hides a global
+    script class"). The marker in each copy folder still holds if the outer one is
+    lost. Called whenever Joinery makes or updates a project, makes a backup or
+    starts a change, and checks the add-on as the editor opens.
     """
-    folder = project / STATE
-    marker = folder / MARKER
-    if marker.exists() or not (project / "project.godot").is_file():
+    if not (project / "project.godot").is_file():
         return
-    try:
-        folder.mkdir(exist_ok=True)
-        marker.write_text("")
-    except OSError:
-        pass  # A read-only project: nothing Joinery writes there either.
+    folder = project / STATE
+    for place in (folder, *(folder / name for name in SCRIPT_COPIES)):
+        marker = place / MARKER
+        if marker.exists() or (place != folder and not place.is_dir()):
+            continue
+        try:
+            place.mkdir(exist_ok=True)
+            marker.write_text("")
+        except OSError:
+            pass  # A read-only project: nothing Joinery writes there either.
 
 
 def missing(root: Path) -> list[str]:

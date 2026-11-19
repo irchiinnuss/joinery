@@ -405,6 +405,8 @@ def update_addon(project: Path) -> dict[str, str]:
         return current
     backups = project / ".joinery/addon-backups"
     backups.mkdir(parents=True, exist_ok=True)
+    # The old add-on's scripts land here: hidden from Godot's language server first.
+    source_folders.hide_state(project)
     staging = Path(
         tempfile.mkdtemp(
             prefix=".addon-", dir=target.parent if target.parent.is_dir() else project

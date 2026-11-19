@@ -60,6 +60,7 @@ from joinery.godot_config import (
     pad_button_event,
     to_variant,
 )
+from joinery.source_folders import hide_state
 
 BLUEPRINTS_DIR = ROOT / "blueprints"
 FEATURES_DIR = ROOT / "features"
@@ -1561,6 +1562,8 @@ def _back_up(target: Path, rels: Iterable[str]) -> str | None:
     ignore.parent.mkdir(parents=True, exist_ok=True)
     if not ignore.is_file():
         ignore.write_text("*\n", encoding="utf-8")
+    # Copies of the game's scripts: never read by Godot's language server.
+    hide_state(target)
     for rel in existing:
         copy = target / folder / rel
         copy.parent.mkdir(parents=True, exist_ok=True)

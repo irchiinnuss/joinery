@@ -401,8 +401,8 @@ class FileTransaction:
             raise ValueError("Transaction already exists.")
         # The stage and the backups are copies of the game's scripts: Godot's
         # language server must not take them for the project's own classes.
-        hide_state(self.project)
         self.directory.mkdir(parents=True, mode=0o700)
+        hide_state(self.project)
         try:
             clone_tree(self.project, self.stage)
             # The first import of the stage then redoes only what the change made.

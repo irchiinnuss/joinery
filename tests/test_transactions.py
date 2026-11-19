@@ -303,7 +303,11 @@ def test_size_budget_prunes_older_but_never_the_newest(tmp_path: Path) -> None:
     edit(project, "art/big.bin", "x" * 10)
     first = FileTransaction.load(
         project,
-        next(path.name for path in (project / ".joinery/transactions").iterdir()),
+        next(
+            path.name
+            for path in (project / ".joinery/transactions").iterdir()
+            if path.is_dir()
+        ),
     )
     assert first.revertible, "The newest change stays revertible over budget"
     second = edit(project, "script.gd", "v1")

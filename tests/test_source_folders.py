@@ -66,3 +66,47 @@ def test_joinerys_own_folder_is_hidden_from_godots_language_server(
     elsewhere.mkdir()
     source_folders.hide_state(elsewhere)
     assert not (elsewhere / ".joinery").exists()
+
+
+def _language_server_scripts(folder: Path, root: str = "res://") -> list[str]:
+    """Godot's GDScript language server's scan (gdscript_workspace.cpp,
+    list_script_files): every .gd, hidden folders too, unless a folder holds a
+    .gdignore."""
+    if (folder / ".gdignore").exists():
+        return []
+    found: list[str] = []
+    for entry in sorted(folder.iterdir()):
+        if entry.is_dir():
+            found += _language_server_scripts(entry, f"{root}{entry.name}/")
+        elif entry.name.endswith(".gd"):
+            found.append(root + entry.name)
+    return found
+
+
+def test_no_copy_of_a_script_joinery_keeps_reaches_godots_language_server(
+    tmp_path: Path,
+) -> None:
+    from joinery.transactions import FileTransaction
+
+    (tmp_path / "project.godot").write_text("config_version=5\n")
+    (tmp_path / "game").mkdir()
+    (tmp_path / "game/mower.gd").write_text("class_name PushMower\nextends Node\n")
+    change = FileTransaction(tmp_path)
+    change.begin("Louder mower")
+    # The copies a change, an add-on update and a blueprint keep.
+    for copy in (
+        change.snapshot / "game/mower.gd",
+        tmp_path / ".joinery/addon-backups/1794-bd47/chat_rewind.gd",
+        tmp_path / ".joinery/backup/20261115-111423/game/mower.gd",
+    ):
+        copy.parent.mkdir(parents=True, exist_ok=True)
+        copy.write_text("class_name PushMower\nextends Node\n")
+    source_folders.hide_state(tmp_path)
+    assert _language_server_scripts(tmp_path) == ["res://game/mower.gd"]
+    # Each copy folder has its own marker: losing the outer one exposes nothing.
+    (tmp_path / ".joinery/.gdignore").unlink()
+    assert _language_server_scripts(tmp_path) == ["res://game/mower.gd"]
+    for name in source_folders.SCRIPT_COPIES:
+        assert (tmp_path / ".joinery" / name / ".gdignore").is_file()
+    # The stage is still a whole project Godot can open: no marker at its root.
+    assert not (change.stage / ".gdignore").exists()
