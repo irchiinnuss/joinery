@@ -7,14 +7,13 @@ import contextlib
 import hashlib
 import json
 import os
-import re
 import shutil
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from joinery import docker_cli, tools, worker_platform
+from joinery import docker_cli, failure_log, tools, worker_platform
 from joinery.catalog import load_catalog, load_project_tools, selection_ids
 from joinery.lockfile import GLTF_SUFFIXES, LOCK_NAME
 from joinery.locking import write_lock
@@ -61,17 +60,6 @@ def confined(project: Path, relative: str) -> Path:
     if not target.resolve().is_relative_to(project.resolve()):
         raise ValueError("The document is outside this project.")
     return target
-
-
-#: Warnings an app prints about its own bundled scripts on every start (Krita's
-#: scripter under Python 3.12): never the agent's code, and long enough to push
-#: the real traceback out of the error the agent reads.
-_NOISE = re.compile(r"^\S+\.py:\d+: SyntaxWarning: .*\n(?:[ \t]+.*\n?)?", re.MULTILINE)
-
-
-def _quiet(output: str) -> str:
-    """``output`` without the apps' own start-up warnings."""
-    return _NOISE.sub("", output)
 
 
 class WorkerTimeout(TimeoutError):
@@ -399,15 +387,23 @@ async def edit_document(
                 result = await run_offline(argv, project)
         except WorkerTimeout as late:
             raise RuntimeError(
-                f"{tool} did not finish the document operation in {late.seconds:g} s "
-                "and was stopped: the code may loop forever or wait for something "
-                f"that never comes. {_quiet(late.output)[-1500:]}".rstrip()
+                failure_log.failure(
+                    f"{tool} did not finish the document operation in "
+                    f"{late.seconds:g} s and was stopped: the code may loop forever "
+                    "or wait for something that never comes",
+                    late.output,
+                    app=module.name,
+                )
             ) from None
         if not result.ok:
             # A failed operation is no recipe: the undo leaves no script behind.
+            # The error leads; the log follows (the gateway pages a long one).
             raise RuntimeError(
-                f"{tool} did not complete the document operation: "
-                f"{_quiet(result.output)[-2000:]}"
+                failure_log.failure(
+                    f"{tool} did not complete the document operation",
+                    result.output,
+                    app=module.name,
+                )
             )
         if tool == "blender":
             folder = confined(project, texture_dir(source))

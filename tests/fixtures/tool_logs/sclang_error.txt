@@ -1,0 +1,33 @@
+compiling class library...
+	Found 821 primitives.
+	Compiling directory '/usr/share/SuperCollider/SCClassLibrary'
+	Compiling directory '/usr/share/SuperCollider/Extensions'
+	numentries = 1170376 / 17414752 = 0.067
+	5578 method selectors, 3122 classes
+	method table size 18225832 bytes, big table size 139318016
+	Number of Symbols 13169
+	Byte Code Size 389826
+	compiled 335 files in 1.15 seconds
+
+Info: 4 methods are currently overwritten by extensions. To see which, execute:
+MethodOverride.printAll
+
+compile done
+localhost : setting clientID to 0.
+internal : setting clientID to 0.
+Class tree inited in 0.03 seconds
+
+
+*** Welcome to SuperCollider 3.13.0. *** For help type ctrl-c ctrl-h (Emacs) or :SChelp (vim) or ctrl-U (sced/gedit).
+ERROR: Message 'ar' not understood.
+RECEIVER:
+   nil
+ARGS:
+CALL STACK:
+	DoesNotUnderstandError:reportError
+		arg this = <instance of DoesNotUnderstandError>
+	< closed FunctionDef >
+		arg error = <instance of DoesNotUnderstandError>
+	Function:try
+		arg this = <instance of Function>
+JOINERY_ERROR: the patch raised an error; see the SuperCollider error above.

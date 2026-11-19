@@ -1,0 +1,9 @@
+02:44.046  blend            | Read blend: "/work/recipes/inputs/4fa5269bf53ff2172b6b10030e3f21f8fc95f9aef10631628c9a4791428b29c0.blend"
+
+recipes/3778d5e0a35c450da5c27eeef2373a14.py:32: DeprecationWarning: 'Material.use_nodes' is expected to be removed in Blender 6.0
+  mat = bpy.data.materials.new('Chair_Plastic'); mat.use_nodes = True
+Traceback (most recent call last):
+  File "<string>", line 57, in _run
+  File "recipes/3778d5e0a35c450da5c27eeef2373a14.py", line 140, in <module>
+    raise SystemExit(0) if False else None
+TypeError: exceptions must derive from BaseException

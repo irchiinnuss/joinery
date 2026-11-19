@@ -1,0 +1,32 @@
+krita.lib.resources: Created table "version_information"
+krita.lib.resources: Created table "storage_types"
+krita.lib.resources: Created table "resource_types"
+krita.lib.resources: Created table "storages"
+krita.lib.resources: Created table "tags"
+krita.lib.resources: Created table "resources"
+krita.lib.resources: Created table "versioned_resources"
+krita.lib.resources: Created table "resource_tags"
+krita.lib.resources: Created table "metadata"
+krita.lib.resources: Created table "tags_storages"
+krita.lib.resources: Created table "tag_translations"
+krita.lib.resources: Created table "storages"
+krita.lib.resources: Created table "versioned_resources"
+krita.lib.resources: Created table "tags"
+krita.lib.resources: Created table "resources"
+krita.lib.resources: Created table "tag_translations"
+krita.lib.resources: Created table "resource_tags"
+krita.lib.resources: Created table "resources_signature"
+krita.lib.resources: Filled lookup table storage_types
+krita.lib.resources: Filled lookup table resource_types
+krita.lib.resources: Filled version table
+QObject::startTimer: Timers cannot have negative intervals
+/usr/lib/x86_64-linux-gnu/krita-python-libs/krita added to PYTHONPATH
+Warning: requested data for unknown action "path-break-at-selection"
+Traceback (most recent call last):
+  File "/tmp/joinery-krita-fpehacde/data/krita/pykrita/joinery_worker/__init__.py", line 17, in run
+    exec(compile(open(path).read(), path, "exec"), {"__name__": "__main__"})
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/work/recipes/9a7df0f17c424ab1b04775d65da7e8b0.py", line 71, in <module>
+    assert document is not None, 'Create or open a native Krita document'
+           ^^^^^^^^^^^^^^^^^^^^
+AssertionError: Create or open a native Krita document

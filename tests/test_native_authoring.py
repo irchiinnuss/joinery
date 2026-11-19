@@ -168,6 +168,31 @@ def test_a_failed_operation_leaves_no_script_and_shows_the_traceback(
     assert list((stage / "recipes").glob("*.py")) == []
 
 
+def test_a_failed_krita_operation_leads_with_its_error_not_krita_s_chatter(
+    stage: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # As Krita printed it in a real session: a page of resource-table lines first.
+    log = (Path(__file__).parent / "fixtures/tool_logs/krita_assert.txt").read_text()
+    monkeypatch.setattr(
+        authoring,
+        "run_offline",
+        AsyncMock(return_value=Result(False, "", log, 0.1)),
+    )
+    with pytest.raises(RuntimeError) as failed:
+        asyncio.run(
+            authoring.edit_document(
+                stage, "krita", "art/paint/icon.kra", "x = 1", ["art/textures/icon.png"]
+            )
+        )
+    said = str(failed.value)
+    assert said.startswith(
+        "krita did not complete the document operation: AssertionError: Create or "
+        "open a native Krita document. at recipes/"
+    )
+    assert "\n\nLog:\nTraceback (most recent call last):" in said
+    assert "krita.lib.resources" not in said
+
+
 def test_a_document_operation_past_its_time_says_so(
     stage: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
