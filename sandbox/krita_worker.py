@@ -19,7 +19,7 @@ from PyQt5.QtCore import QTimer
 import os, traceback
 def report(text):
     path = os.environ["JOINERY_KRITA_RESULT"]
-    with open(path + ".tmp", "w") as output:
+    with open(path + ".tmp", "w", encoding="utf-8") as output:
         output.write(text)
     os.replace(path + ".tmp", path)
 class Worker(Extension):
@@ -30,7 +30,7 @@ class Worker(Extension):
     def run(self):
         try:
             path = os.environ["JOINERY_KRITA_SCRIPT"]
-            exec(compile(open(path).read(), path, "exec"), {"__name__": "__main__"})
+            exec(compile(open(path, encoding="utf-8").read(), path, "exec"), {"__name__": "__main__"})
             report("ok")
         except BaseException:
             report(traceback.format_exc())
