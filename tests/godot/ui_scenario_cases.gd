@@ -604,6 +604,8 @@ func _denied_call() -> void:
 	s.check(
 		not s.visible_text().contains("Completed"), "With a step not run, nothing says Completed"
 	)
+	# The timing line follows the turn's end, sometimes a read later.
+	await s.wait_until(func() -> bool: return s.visible_text().contains("not run"), 3000)
 	s.check(s.visible_text().contains("1 step not run"), "The timing line counts the step not run")
 	s.check(_mark(s.card()) == "stop", "Its mark is the stop, not a tick (%s)" % _mark(s.card()))
 	await s.shot("done")

@@ -329,6 +329,9 @@ def answer_decisions(
         async def pump() -> None:
             try:
                 await forward()
+            except BrokenPipeError:
+                # The sidebar went while a decision was answered: so does this host.
+                os._exit(0)
             except BaseException:
                 # Never die quietly: the host would wait on its input for good.
                 with _trace_path("pump").open("w") as log:
