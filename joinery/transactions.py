@@ -57,6 +57,27 @@ CARRIED = (".joinery/game-manifest.json", ".joinery/core-files.json")
 CARRIED_BASE = "carried-base"
 #: Marks a change kept waiting for review across sessions (FileTransaction.hold).
 HELD = "held.json"
+#: The files of a reverted change as it was accepted, kept so the revert can be
+#: undone (FileTransaction.unrevert). Older reverts read them from the Timeline.
+REDO = "redo"
+NOT_REVERTED = "Only a reverted change can be put back."
+
+
+class RevertConflict(ValueError):
+    """Files a reverted change would put back were edited since the revert."""
+
+    def __init__(self, paths: list[str]) -> None:
+        self.paths = list(paths)
+        shown = ", ".join(self.paths[:3])
+        if len(self.paths) > 3:
+            shown += f" and {len(self.paths) - 3} more"
+        one = len(self.paths) == 1
+        super().__init__(
+            f"{shown} {'was' if one else 'were'} changed since the revert. Putting the "
+            f"change back would replace {'it' if one else 'them'}. Keep your files "
+            "(nothing changes), or replace them: your versions are saved, so Revert "
+            "brings them back."
+        )
 
 
 class ProjectLease:
@@ -298,6 +319,17 @@ def _safe(path: str) -> None:
         raise ValueError("Unsafe journal path.")
 
 
+def _apply_order(change: dict[str, str]) -> tuple[int, int]:
+    """Folders made first (outermost first), files next, folders removed last
+    (innermost first)."""
+    depth = len(Path(change["path"]).parts)
+    if change["after"] == DIRECTORY:
+        return 0, depth
+    if change["before"] == DIRECTORY:
+        return 2, -depth
+    return 1, depth
+
+
 class FileTransaction:
     """No writes to working sources until explicit accept. No git reset needed."""
 
@@ -312,6 +344,8 @@ class FileTransaction:
         #: Files this transaction replaces or deletes, as they were before it.
         self.snapshot = self.directory / "original"
         self.stage = self.directory / "stage"
+        #: The change's files as accepted, while it is reverted (REDO).
+        self.redo = self.directory / REDO
         self.journal = self.directory / "journal.json"
         self.state = "new"
         self.base: dict[str, str] = {}
@@ -345,6 +379,9 @@ class FileTransaction:
         self.chat_id = ""
         #: Kept for review before Joinery's checks ran on it (a run that stopped).
         self.unchecked = False
+        #: Each decision in order: [{state, at, by?, commit?}], so a change reverted
+        #: and put back again says so.
+        self.history: list[dict[str, Any]] = []
 
     @property
     def original(self) -> Path:
@@ -426,6 +463,8 @@ class FileTransaction:
             data["carried"] = self.carried
         if self.decided:
             data["decided"] = self.decided
+        if self.history:
+            data["history"] = self.history
         if self.state == "accepted":
             data["revertible"] = self.revertible
         atomic_json(self.journal, {**data, **extra})
@@ -547,20 +586,7 @@ class FileTransaction:
         self._record(changes=changes)
         applied = []
         try:
-            ordered = sorted(
-                changes,
-                key=lambda change: (
-                    0
-                    if change["after"] == DIRECTORY
-                    else 2
-                    if change["before"] == DIRECTORY
-                    else 1,
-                    -len(Path(change["path"]).parts)
-                    if change["before"] == DIRECTORY
-                    else len(Path(change["path"]).parts),
-                ),
-            )
-            for change in ordered:
+            for change in sorted(changes, key=_apply_order):
                 path = change["path"]
                 target = self.project / path
                 if change["after"] == DIRECTORY:
@@ -575,6 +601,7 @@ class FileTransaction:
             self._carry()
             self.state = "accepted"
             self.decided = time.time()
+            self.history.append({"state": "accepted", "at": self.decided})
             self._record(changes=changes)
         except BaseException:
             self._uncarry()
@@ -585,6 +612,7 @@ class FileTransaction:
             raise
         self._discard(self.stage)
         self._add_to_timeline(changes, reverted=False)
+        self._note_commit()
         self._stamp_unplayed(changes)
         self._index_recipes()
         self._housekeep()
@@ -621,7 +649,9 @@ class FileTransaction:
         except (OSError, ValueError):
             pass
 
-    def _add_to_timeline(self, changes: list[dict[str, str]], reverted: bool) -> None:
+    def _add_to_timeline(
+        self, changes: list[dict[str, str]], reverted: bool, restored: bool = False
+    ) -> None:
         """Commit exactly this change's files to the project's git timeline.
 
         Bookkeeping like retention: a timeline that can't be written never fails
@@ -635,7 +665,20 @@ class FileTransaction:
             self.summary,
             reverted,
             request=self.request,
+            restored=restored,
         )
+
+    def _note_commit(self) -> None:
+        """Keep the timeline entry the last decision made with that decision, so the
+        Timeline can offer Undo revert on the right entry. Never fails a decision."""
+        commit = self.timeline.get("commit", "")
+        if not commit or not self.history:
+            return
+        self.history[-1]["commit"] = commit
+        try:
+            self._record()
+        except OSError:
+            pass
 
     def _timeline_paths(self, changes: list[dict[str, str]]) -> list[str]:
         return [
@@ -820,16 +863,177 @@ class FileTransaction:
                     "A later change updated this project's game features. Revert that one first."
                 )
             self._check_snapshot([*changes, *self.carried])
+            # The accepted files are kept first, so the revert can be undone.
+            self._discard(self.redo)
+            self._keep_redo([*changes, *self.carried])
             self._restore(changes)
             self._uncarry()
+            if not self.history:  # A journal from before decisions were listed.
+                self.history.append({"state": "accepted", "at": self.decided})
             self.state = "reverted"
             self.decided = time.time()
+            self.history.append({"state": "reverted", "at": self.decided})
             self._record(changes=changes)
             self._discard(self.stage, self.snapshot)
         self._add_to_timeline(changes, reverted=True)
+        self._note_commit()
         from joinery import played
 
         played.forget(self.project, self.id)
+
+    def _keep_redo(self, entries: list[dict[str, str]]) -> None:
+        """Copy each file the change wrote, still as it wrote it, into REDO."""
+        for entry in entries:
+            after = entry["after"]
+            if not after or after == DIRECTORY:
+                continue
+            source = self.project / entry["path"]
+            if (
+                source.is_file()
+                and not source.is_symlink()
+                and _sha256(source) == after
+            ):
+                copy_file(source, self.redo / entry["path"])
+
+    def _now(self, path: str) -> str:
+        """What ``path`` holds in the project now: its hash, DIRECTORY or ""."""
+        target = self.project / path
+        if target.is_symlink():
+            raise ValueError("Project transactions do not follow symbolic links.")
+        if target.is_dir():
+            return DIRECTORY
+        return _sha256(target) if target.is_file() else ""
+
+    def _from_timeline(self, path: str, digest: str, target: Path) -> bool:
+        """Write ``path`` as the Timeline kept it with hash ``digest`` to ``target``."""
+        from joinery import timeline  # Late: timeline stages restores through here.
+
+        if not digest or digest == DIRECTORY:
+            return False
+        data = timeline.find_blob(self.project, path, digest)
+        if data is None:
+            return False
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+        return True
+
+    def _has_redo(self, entry: dict[str, str]) -> bool:
+        """REDO holds ``entry``'s file as the change wrote it, or can from the Timeline."""
+        after = entry["after"]
+        if not after or after == DIRECTORY:
+            return True
+        kept = self.redo / entry["path"]
+        if kept.is_file() and _sha256(kept) == after:
+            return True
+        return self._from_timeline(entry["path"], after, kept)
+
+    def unrevert(self, overwrite: bool = False) -> list[dict[str, str]]:
+        """Put a reverted change back as it was accepted (Undo revert).
+
+        The accepted files come from REDO, kept by the revert, or for an older
+        revert from the Timeline. A file edited since the revert is never replaced
+        silently: :class:`RevertConflict` names them, and ``overwrite`` replaces
+        them after saving the edited copies, which then become what a later Revert
+        puts back. Like accept, the files about to be replaced are saved before the
+        first write, the intent is journalled, and a failure puts everything back.
+        Returns the change's files as now recorded.
+        """
+        if self.state != "reverted":
+            raise ValueError(NOT_REVERTED)
+        with _wait_for_history(self.project):
+            raw = json.loads(self.journal.read_text())
+            if raw.get("state") != "reverted":
+                raise ValueError(NOT_REVERTED)
+            if not self.changes:
+                raise ValueError(
+                    "This change's record lists no files, so it can't be put back."
+                )
+            entries = [*self.changes, *self.carried]
+            now = {entry["path"]: self._now(entry["path"]) for entry in entries}
+            edited = sorted(
+                entry["path"]
+                for entry in entries
+                if now[entry["path"]] not in {entry["before"], entry["after"]}
+            )
+            if edited and not overwrite:
+                raise RevertConflict(edited)
+            for path in edited:
+                entry = next(e for e in entries if e["path"] == path)
+                if (
+                    DIRECTORY in {now[path], entry["after"]}
+                    and now[path]
+                    and entry["after"]
+                ):
+                    raise ValueError(
+                        f"{path} is now a folder where the change had a file, or the "
+                        "other way round. Nothing was changed."
+                    )
+
+            def rebased(entry: dict[str, str]) -> dict[str, str]:
+                path, after = entry["path"], entry["after"]
+                before = now[path] if path in edited else entry["before"]
+                kind = (
+                    "created" if not before else "deleted" if not after else "modified"
+                )
+                return {**entry, "before": before, "change": kind}
+
+            changes = [rebased(entry) for entry in self.changes]
+            carried = [
+                {"path": e["path"], "before": e["before"], "after": e["after"]}
+                for e in map(rebased, self.carried)
+            ]
+            todo = [e for e in [*changes, *carried] if now[e["path"]] != e["after"]]
+            missing = [entry["path"] for entry in todo if not self._has_redo(entry)]
+            if missing:
+                more = f" and {len(missing) - 1} more" if len(missing) > 1 else ""
+                raise ValueError(
+                    f"Joinery no longer has {missing[0]}{more} as this change made it, "
+                    "and the Timeline doesn't either. Nothing was changed."
+                )
+            # What a later Revert puts back: each file as it is now, or, for one put
+            # back by hand already, as the Timeline kept it before the change.
+            self._discard(self.snapshot)
+            befores = {e["path"]: e["before"] for e in [*changes, *carried]}
+            lost = [
+                path
+                for path in self._capture([*changes, *carried])
+                if not self._from_timeline(path, befores[path], self.snapshot / path)
+            ]
+            self.changes, self.carried = changes, carried
+            self.state = "committing"
+            self._record(changes=changes)
+            applied: list[dict[str, str]] = []
+            try:
+                for entry in sorted(todo, key=_apply_order):
+                    target = self.project / entry["path"]
+                    if entry["after"] == DIRECTORY:
+                        target.mkdir(parents=True, exist_ok=True)
+                    elif entry["before"] == DIRECTORY:
+                        target.rmdir()
+                    elif entry["after"]:
+                        place_file(self.redo / entry["path"], target)
+                    elif target.exists():
+                        target.unlink()
+                    applied.append(entry)
+            except BaseException:
+                self._restore(applied)
+                self.state = "reverted"
+                self._record(changes=changes)
+                raise
+            self.state = "accepted"
+            self.revertible = not lost
+            self.decided = time.time()
+            self.history.append(
+                {"state": "accepted", "at": self.decided, "by": "undo revert"}
+            )
+            self._record(changes=changes)
+            self._discard(self.redo)
+        self._add_to_timeline(changes, reverted=False, restored=True)
+        self._note_commit()
+        self._stamp_unplayed(changes)
+        self._index_recipes()
+        self._housekeep()
+        return changes
 
     @classmethod
     def load(cls, project: Path, identifier: str) -> FileTransaction:
@@ -877,12 +1081,25 @@ class FileTransaction:
         ]
         transaction.chat_id = str(raw.get("chat_id") or "")
         transaction.unchecked = raw.get("unchecked") is True
+        transaction.history = [
+            dict(step)
+            for step in raw.get("history") or []
+            if isinstance(step, dict) and isinstance(step.get("state"), str)
+        ]
         # Never accept journal paths outside this project, even after local tampering.
         for path in transaction.base:
             _safe(path)
         for change in transaction.changes:
             _safe(change["path"])
         return transaction
+
+    @property
+    def undo_revert_commit(self) -> str:
+        """The timeline entry of this change's revert, while it is reverted."""
+        if self.state != "reverted" or not self.history:
+            return ""
+        last = self.history[-1]
+        return str(last.get("commit", "")) if last.get("state") == "reverted" else ""
 
     def recover(self) -> None:
         if self.state != "committing":
@@ -909,7 +1126,10 @@ class FileTransaction:
     # --- Restore data ------------------------------------------------------
 
     def restore_bytes(self) -> int:
-        """Bytes a revert of this accepted transaction would read."""
+        """Bytes a revert of this accepted transaction, or an undo of its revert,
+        would read."""
+        if self.state == "reverted":
+            return tree_bytes(self.redo)
         if self.state != "accepted" or not self.revertible:
             return 0
         if not self.changes:  # An old journal: the whole folder is restore data.
@@ -921,6 +1141,8 @@ class FileTransaction:
         if self.state in PENDING:
             return 0
         total = tree_bytes(self.stage) + tree_bytes(self.snapshot)
+        if self.state == "reverted":
+            return total
         return total - self.restore_bytes()
 
     def _needed(self) -> set[str]:
@@ -968,7 +1190,7 @@ class FileTransaction:
         if self.state == "accepted" and self.revertible:
             self.revertible = False
             self._record(pruned=reason)
-        self._discard(self.stage, self.snapshot)
+        self._discard(self.stage, self.snapshot, self.redo)
 
     @staticmethod
     def _discard(*paths: Path) -> None:
@@ -1203,6 +1425,15 @@ def apply_retention(
             pruned_bytes += size
             if not dry_run:
                 tx.drop_restore_data("retention")
+        # A revert is undone from its own copies while it is among the newest; an
+        # older one still can be from the Timeline.
+        reverted = [tx for tx in reversed(found) if tx.state == "reverted"]
+        for tx in reverted[policy.keep :]:
+            size = tx.restore_bytes()
+            if size:
+                pruned_bytes += size
+                if not dry_run:
+                    tx.drop_restore_data("retention")
     return {
         "kept": kept,
         "kept_bytes": kept_bytes,

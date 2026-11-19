@@ -601,7 +601,7 @@ LISTED_FILES = 20
 
 
 def transactions(
-    project: Path, action: str, identifier: str = ""
+    project: Path, action: str, identifier: str = "", overwrite: bool = False
 ) -> list[dict[str, Any]]:
     paths = (
         [project / ".joinery/transactions" / identifier / "journal.json"]
@@ -623,6 +623,10 @@ def transactions(
                 references.users_of(project, references.created(tx.changes)),
                 references.REVERTED,
             )
+        elif action == "unrevert":
+            # Undo revert: the change's files as accepted, edited ones only with
+            # overwrite (transactions.RevertConflict says which).
+            tx.unrevert(overwrite=overwrite)
         # A pruned change keeps its journal but can no longer be reverted.
         result.append(
             {
@@ -633,6 +637,8 @@ def transactions(
                 # For the editor's Review tab: when, which apps, and what changed.
                 "created": tx.created,
                 "decided": tx.decided,
+                # Each decision in order (accepted, reverted, accepted by undo revert).
+                "history": tx.history,
                 "tools": tx.tools,
                 # The reviewer agent's notes and how its review went.
                 "review_notes": tx.review_notes,

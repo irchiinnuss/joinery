@@ -28,6 +28,7 @@ The command line entry is :func:`register`, wired into ``joinery`` by cli.py.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -45,6 +46,9 @@ from typing import Any
 #: Accepted and reverted changes say where they were decided, in plain text.
 ACCEPTED_LINE = "Accepted in Joinery"
 REVERTED_LINE = "Reverted in Joinery"
+RESTORED_LINE = "Restored in Joinery"
+#: Commits looked through for a file's earlier bytes (find_blob).
+FIND_DEPTH = 50
 STARTED_MESSAGE = "Timeline starts here"
 #: The author when the user has no git identity. Never an agent's name.
 FALLBACK_NAME = "Joinery user"
@@ -467,9 +471,12 @@ def _drop_marker(project: Path) -> None:
 # --- Recording a change -----------------------------------------------------------
 
 
-def message_for(summary: str, reverted: bool = False, request: str = "") -> str:
+def message_for(
+    summary: str, reverted: bool = False, request: str = "", restored: bool = False
+) -> str:
     """The commit message: the change's summary, then the request it answered
-    (when that says more than the summary), then where it was decided."""
+    (when that says more than the summary), then where it was decided. A revert
+    reads "Revert: …", and an undone revert "Restore: …"."""
     lines = [line.strip() for line in summary.strip().splitlines() if line.strip()]
     subject = lines[0] if lines else "Project changes"
     body = lines[1:]
@@ -478,13 +485,17 @@ def message_for(summary: str, reverted: bool = False, request: str = "") -> str:
         subject = subject[:99].rstrip() + "…"
     if reverted:
         subject = "Revert: " + subject
+    elif restored:
+        subject = "Restore: " + subject
     asked = " ".join(request.split())
     if asked and asked not in {" ".join(line.split()) for line in lines}:
         body.append("Request: " + asked)
     parts = [subject]
     if body:
         parts.append("\n".join(body))
-    parts.append(REVERTED_LINE if reverted else ACCEPTED_LINE)
+    parts.append(
+        REVERTED_LINE if reverted else RESTORED_LINE if restored else ACCEPTED_LINE
+    )
     return "\n\n".join(parts)
 
 
@@ -637,6 +648,7 @@ def record(
     summary: str,
     reverted: bool = False,
     request: str = "",
+    restored: bool = False,
 ) -> dict[str, str]:
     """Add one decided change to the timeline, if this project keeps one.
 
@@ -664,7 +676,7 @@ def record(
             "state": "failed",
             "message": f"Couldn't add this to the Timeline. {exc}",
         }
-    message = message_for(summary, reverted, request)
+    message = message_for(summary, reverted, request, restored)
     queue = [*_owed(project), {"paths": sorted(set(mine)), "message": message}]
     commit, reason = "", ""
     still: list[dict[str, Any]] = []
@@ -855,6 +867,7 @@ def entries(
 
     pulled = team.last_pulled(project)
     waiting = set(played.summary(project)["commits"])
+    undo = reverted_entries(project, page[:limit])
     result["entries"] = [
         {
             **{key: value for key, value in entry.items() if key != "paths"},
@@ -863,11 +876,53 @@ def entries(
             "pulled": entry["commit"] in pulled,
             # Accepted here, changes the game, and nobody has played it since.
             "unplayed": entry["commit"] in waiting,
+            # The revert of a change still reverted: the tab offers Undo revert.
+            **(
+                {"reverted_change": undo[entry["commit"]]}
+                if entry["commit"] in undo
+                else {}
+            ),
         }
         for entry in page[:limit]
     ]
     result["team"] = team.sync_summary(project)
     return result
+
+
+#: An older revert's entry is told by its subject and a time this close to the
+#: revert's own, in seconds.
+REVERT_MATCH = 600
+
+
+def reverted_entries(project: Path, shown: Sequence[dict[str, Any]]) -> dict[str, str]:
+    """Which of ``shown`` are the revert entries of changes still reverted:
+    {commit: transaction id}. A revert keeps its entry in its journal; one made
+    before that is matched by its "Revert: …" subject and time."""
+    from joinery.transactions import list_transactions  # Late: it imports this.
+
+    found: dict[str, str] = {}
+    try:
+        reverted = [tx for tx in list_transactions(project) if tx.state == "reverted"]
+    except (OSError, ValueError):
+        return found
+    commits = {entry["commit"] for entry in shown}
+    for tx in reverted:
+        known = tx.undo_revert_commit
+        if known:
+            match = next((c for c in commits if c.startswith(known)), "")
+            if match:
+                found[match] = tx.id
+            continue
+        subject = message_for(tx.summary, reverted=True).split("\n", 1)[0]
+        for entry in shown:
+            if (
+                entry["subject"] == subject
+                and abs(entry["time"] - tx.decided) <= REVERT_MATCH
+                and entry["commit"] not in found
+            ):
+                found[entry["commit"]] = tx.id
+                break
+    return found
 
 
 def _base(project: Path, commit: str) -> str:
@@ -972,6 +1027,42 @@ def _blob(project: Path, revision: str, path: str) -> bytes | None:
     if _git(project, "cat-file", "-e", spec, check=False).returncode != 0:
         return None
     return _git(project, "cat-file", "--filters", spec).stdout
+
+
+def find_blob(project: Path, path: str, digest: str) -> bytes | None:
+    """``path`` as it was checked out in a recent entry whose bytes hash to
+    ``digest`` (sha256), or None. Undo revert reads an older revert's accepted
+    files from here: the revert entry's parent has them. Never raises."""
+    project = project.resolve()
+    try:
+        if state(project)["state"] != "ready":
+            return None
+        path = _check_path(path)
+        commits = _text(
+            _git(project, "log", f"--max-count={FIND_DEPTH}", "--format=%H", "--", path)
+        ).split()
+        seen: set[str] = set()
+        for commit in commits:
+            for revision in (commit, commit + "^"):
+                spec = _text(
+                    _git(
+                        project,
+                        "rev-parse",
+                        "--verify",
+                        "-q",
+                        f"{revision}:{path}",
+                        check=False,
+                    )
+                ).strip()
+                if not spec or spec in seen:
+                    continue
+                seen.add(spec)
+                data = _blob(project, revision, path)
+                if data is not None and hashlib.sha256(data).hexdigest() == digest:
+                    return data
+    except (OSError, TimelineError):
+        return None
+    return None
 
 
 def _size(project: Path, revision: str, path: str) -> int:

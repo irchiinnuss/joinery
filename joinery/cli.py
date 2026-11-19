@@ -98,6 +98,7 @@ from joinery.transactions import (
     DIRECTORY,
     FileTransaction,
     HistoryPolicy,
+    RevertConflict,
     load_policy,
 )
 from joinery.vcs import ensure_lfs
@@ -1209,10 +1210,16 @@ def _parser() -> argparse.ArgumentParser:
     )
     tx_cmd = commands.add_parser(
         "transactions",
-        help="inspect, accept, reject, recover or revert project changes",
+        help="inspect, accept, reject, recover, revert or unrevert project changes",
     )
     tx_cmd.add_argument(
-        "action", choices=["list", "show", "accept", "reject", "recover", "revert"]
+        "action",
+        choices=["list", "show", "accept", "reject", "recover", "revert", "unrevert"],
+    )
+    tx_cmd.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="unrevert: replace files edited since the revert (they are saved first)",
     )
     tx_cmd.add_argument("--project", type=Path, required=True)
     tx_cmd.add_argument("--id", default="")
@@ -1823,6 +1830,10 @@ def main(argv: list[str] | None = None) -> int:
                     raise ValueError(
                         "Choose one accepted transaction with --id before reverting."
                     )
+                if args.action == "unrevert" and not args.id:
+                    raise ValueError(
+                        "Choose one reverted transaction with --id to put it back."
+                    )
                 if args.action == "show":
                     if not args.id:
                         raise ValueError("Choose the transaction with --id.")
@@ -1835,7 +1846,7 @@ def main(argv: list[str] | None = None) -> int:
                     return 0
                 outcome = {
                     "transactions": transactions(
-                        args.project.resolve(), args.action, args.id
+                        args.project.resolve(), args.action, args.id, args.overwrite
                     )
                 }
                 if args.action == "list":
@@ -1847,6 +1858,18 @@ def main(argv: list[str] | None = None) -> int:
                     )
             print(json.dumps(outcome))
             return 0
+        except RevertConflict as exc:
+            # The choices: keep the edited files (nothing changes) or --overwrite.
+            print(
+                json.dumps(
+                    {
+                        "error": str(exc),
+                        "conflict": exc.paths,
+                        "choices": ["keep", "overwrite"],
+                    }
+                )
+            )
+            return 1
         except (OSError, ValueError, RuntimeError) as exc:
             print(json.dumps({"error": str(exc)}))
             return 1
