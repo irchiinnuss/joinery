@@ -21,6 +21,7 @@ from joinery import (
     design,
     design_doc_tool,
     live_game,
+    machine_health,
     project_search,
     replays,
     scene_variants,
@@ -238,6 +239,23 @@ def variants_request(params: dict[str, Any]) -> dict[str, Any]:
 
 
 class GatewayRPC:
+    def _said(self, exc: BaseException, method: str) -> str:
+        """A failed call's error for the agent. One that is the machine's (no space
+        left, Docker out of reach) is said plainly and kept for the turn's failure."""
+        message = said(exc, f"Joinery's {method}")
+        project = getattr(self.gateway, "project", None)
+        places = [project, *machine_health.docker_data()] if project else []
+        plain = (
+            str(exc)
+            if isinstance(exc, machine_health.MachineProblem)
+            else machine_health.explain(message, places)
+        )
+        if not plain:
+            return message
+        with contextlib.suppress(AttributeError):
+            self.gateway.machine_problem = plain
+        return plain + " " + machine_health.FOR_AGENT
+
     def __init__(
         self,
         gateway: ProjectGateway,
@@ -761,7 +779,7 @@ class GatewayRPC:
             RuntimeError,
             TimeoutError,
         ) as exc:
-            response = {"ok": False, "error": said(exc, f"Joinery's {method}")}
+            response = {"ok": False, "error": self._said(exc, str(method))}
         except asyncio.CancelledError:
             writer.close()
             with contextlib.suppress(OSError):

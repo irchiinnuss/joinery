@@ -24,6 +24,7 @@ from joinery import (
     done_when,
     keep_avoid,
     look_preview,
+    machine_health,
     metrics,
     provenance_hold,
     reasons,
@@ -1173,6 +1174,9 @@ class TurnController:
         elif isinstance(error, (OSError, RuntimeError, ValueError, TimeoutError)):
             tx = self.gateway.transaction
             found = tx.diff() if tx is not None and tx.state == "staging" else []
+            if isinstance(error, machine_health.MachineProblem):
+                # A full disk or Docker down: the turn's failure says so too.
+                self.gateway.machine_problem = str(error)
             # Joinery's own failure: no change the agent makes can pass it.
             problems = [
                 Problem(

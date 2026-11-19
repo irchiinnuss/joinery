@@ -27,3 +27,12 @@ def _checks_on_the_mount(monkeypatch: pytest.MonkeyPatch) -> None:
     """Checks run their stand-in workers on the stage itself, never on a copy in
     a real container (joinery.check_mirror): a test of the copy turns it on."""
     monkeypatch.setenv("JOINERY_CHECK_MIRROR", "0")
+
+
+@pytest.fixture(autouse=True)
+def _machine_is_fine(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The chat host never asks the real disk or Docker before a turn, and a
+    worker's time-out is never this machine's free space
+    (joinery.machine_health): a test of the check turns it on."""
+    monkeypatch.setenv("JOINERY_MACHINE_CHECK", "off")
+    monkeypatch.setattr("joinery.machine_health.MIN_FREE", 0)

@@ -37,6 +37,7 @@ from bridge.provider_process import (
 
 #: Per session, a hash of the rules and map its last turn carried (under the project).
 SESSIONS_DIR = ".joinery/sessions"
+from joinery import machine_health
 from joinery.catalog import ROOT
 from joinery.chat_attachments import encoded
 from joinery.hook import shell_search
@@ -357,6 +358,10 @@ def claude_exit_text(details: str) -> str:
         return "Claude Code is out of usage for now. Details are in Output."
     if reason == "outdated":
         return "Claude Code is out of date. Run claude update, then Reconnect."
+    # No space left, Docker gone: the machine's, said plainly.
+    machine = machine_health.explain(details)
+    if machine:
+        return machine
     last = details.strip().splitlines()[-1] if details.strip() else ""
     return "Claude Code stopped with an error" + (f": {last}" if last else ".")
 

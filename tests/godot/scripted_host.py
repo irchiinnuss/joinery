@@ -397,6 +397,8 @@ def main() -> int:
     }
     for name, value in stand_ins.items():
         setattr(stdio, name, value)
+    # Stand-in workers: the real disk and Docker are never asked before a turn.
+    os.environ.setdefault("JOINERY_MACHINE_CHECK", "off")
     return asyncio.run(stdio.serve(args.project.resolve(), args.agent))
 
 

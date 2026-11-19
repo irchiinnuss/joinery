@@ -55,6 +55,7 @@ from joinery import (
     done_when,
     idle_runs,
     look_preview,
+    machine_health,
     playtest,
     playtest_gate,
     session_summary,
@@ -325,6 +326,7 @@ async def _serve(
     gateway.on_kept = emit
     editor_calls: dict[str, asyncio.Future[dict[str, Any]]] = {}
     gateway.progress = lambda text: emit({"kind": "progress", "text": text})
+    gateway.health = machine_health.checker(project)
     gateway.tests_report = emit
     controller = TurnController(gateway, emit, agent_id)
     session_start = time.time()
@@ -560,6 +562,12 @@ async def _serve(
             request = todo.request if todo is not None else str(data["text"])
             gateway.request_summary = request
             gateway.attachments = attachments
+            # A full disk or a stopped Docker: said before any agent works, plainly.
+            gateway.machine_problem = ""
+            problem = await gateway.health() if gateway.health is not None else ""
+            if problem:
+                gateway.progress(problem)
+                raise machine_health.MachineProblem(problem)
             selection.clear()
             selection.update(prompt.selection.model_dump())
             outcome = await run_turn(

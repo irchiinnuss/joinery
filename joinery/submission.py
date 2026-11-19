@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any
 from joinery import (
     check_mirror,
     complex_models,
+    machine_health,
     reasons,
     references,
     replays,
@@ -831,12 +832,28 @@ async def worker_run(
     itself can't start: one Docker hiccup must not end a check, or the turn with
     it. A run that started and then timed out raises as before, never retried."""
     start = runner if runner is not None else run_offline
-    got = await start(argv, root, seconds, **options)
-    for delay in WORKER_RETRY_DELAYS:
-        if got.ok or not any(sign in got.stderr for sign in WORKER_DOWN):
-            break
-        await asyncio.sleep(delay)
+    places = [root, *machine_health.docker_data()]
+    try:
         got = await start(argv, root, seconds, **options)
+        for delay in WORKER_RETRY_DELAYS:
+            if got.ok or not any(sign in got.stderr for sign in WORKER_DOWN):
+                break
+            await asyncio.sleep(delay)
+            got = await start(argv, root, seconds, **options)
+    except WorkerTimeout as stopped:
+        # A run that only counted on (an import that never ends) on a full disk:
+        # the disk, said plainly, not a slow import.
+        full = machine_health.explain(stopped.output, places)
+        if not full:
+            full = await asyncio.to_thread(machine_health.disk_problem, places)
+        if full:
+            raise machine_health.MachineProblem(full) from stopped
+        raise
+    if not got.ok:
+        # No space left, or Docker gone: the machine's, never the change's to fix.
+        found = machine_health.explain(got.output, places)
+        if found:
+            raise machine_health.MachineProblem(found)
     return got
 
 

@@ -21,6 +21,7 @@ from joinery import (
     check_mirror,
     import_cache,
     live_game,
+    machine_health,
     metrics,
     played,
     references,
@@ -334,6 +335,13 @@ def _shared_call(server: str, tool: str) -> bool:
     return read_only(server, tool)
 
 
+def _current_task() -> asyncio.Task[Any] | None:
+    try:
+        return asyncio.current_task()
+    except RuntimeError:
+        return None  # no loop running
+
+
 class ProjectGateway:
     """The project's tools for one turn's agent.
 
@@ -381,6 +389,9 @@ class ProjectGateway:
         self.task_id = MAIN
         self.title = MAIN_TITLE
         self._root = self
+        #: The machine check (free disk, Docker answering) a chat host wires in; a
+        #: long step runs it at each progress tick (joinery.machine_health).
+        self.health: machine_health.Check | None = None
         #: The parallel tasks' lanes, by task id (on the chat's own gateway).
         self.lanes: dict[str, ProjectGateway] = {}
         #: A headless run (``joinery run``): a change still waiting for review when
@@ -419,6 +430,9 @@ class ProjectGateway:
         self.review_extras: dict[str, dict[str, Any]] = {}
         #: Set when a call needed an approved art bible; the turn's end reports it.
         self.art_gate: dict[str, Any] | None = None
+        #: The machine's own problem a call or a long step ran into this turn (a full
+        #: disk, Docker down), said plainly; the turn's failure carries it.
+        self.machine_problem = ""
         self.runtime_owned = False
         self.runtime_config: str | None = None
         self.runtime_injected: str | None = None
@@ -1654,8 +1668,13 @@ class ProjectGateway:
     @contextmanager
     def ticking(self, label: str) -> Iterator[None]:
         """While the block runs, a progress event every ``PROGRESS_EVERY`` seconds
-        ("Running scene tests: 3 of 8, 2 min…"), for the innermost long phase."""
-        entry: list[Any] = [label, time.monotonic(), ""]
+        ("Running scene tests: 3 of 8, 2 min…"), for the innermost long phase.
+
+        Each tick also asks the machine check (:attr:`health`): a full disk or a
+        stopped Docker ends the step at once with :class:`MachineProblem`, in plain
+        words, rather than counting on."""
+        # [label, started, detail, the task running the block, the problem found]
+        entry: list[Any] = [label, time.monotonic(), "", _current_task(), ""]
         self._ticks.append(entry)
         if self._ticker is None or self._ticker.done():
             try:
@@ -1664,6 +1683,12 @@ class ProjectGateway:
                 self._ticker = None  # no loop running: nothing to keep alive
         try:
             yield
+        except asyncio.CancelledError:
+            if not entry[4] or entry[3] is None:
+                raise
+            # Stopped by the tick for the machine's sake, not by the user.
+            entry[3].uncancel()
+            raise machine_health.MachineProblem(entry[4]) from None
         finally:
             self._ticks.remove(entry)
             if not self._ticks and self._ticker is not None:
@@ -1680,9 +1705,19 @@ class ProjectGateway:
             await asyncio.sleep(PROGRESS_EVERY)
             if not self._ticks:
                 return
-            label, started, detail = self._ticks[-1]
+            entry = self._ticks[-1]
+            label, started, detail = entry[:3]
             minutes = int((time.monotonic() - started) // 60)
             took = f"{minutes} min" if minutes else "under a minute"
+            check = self._root.health
+            problem = await check() if check is not None else ""
+            if problem and entry in self._ticks:
+                self.machine_problem = problem
+                self.progress(f"{label}: {problem}")
+                entry[4] = problem
+                if entry[3] is not None:
+                    entry[3].cancel()
+                return
             self.progress(f"{label}{': ' + detail if detail else ''}, {took}…")
 
     def search_root(self) -> Path:

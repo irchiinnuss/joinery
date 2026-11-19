@@ -29,7 +29,7 @@ from bridge.protocol import (
     Trail,
     Usage,
 )
-from joinery import done_when, metrics, request_digest
+from joinery import done_when, machine_health, metrics, request_digest
 from joinery.fallback import is_quota, provider_error, staged_lines
 from joinery.headless import LEFT_CHANGE, PROVIDER_ERROR
 from joinery.routing import routing_settings, step_model
@@ -355,8 +355,21 @@ async def _events(
         if isinstance(event, Done):
             ok = event.ok
             continue
+        if isinstance(event, Message) and event.level == "warn":
+            event = _with_cause(event, getattr(gateway, "machine_problem", ""))
         emit(event.model_dump())
     return ok, usage
+
+
+def _with_cause(event: Message, problem: str) -> Message:
+    """A provider's "stopped with an error" after a call ran into a full disk or a
+    stopped Docker: the cause first, in plain words."""
+    if not problem or problem in event.text:
+        return event
+    if not (event.details or machine_health.provider_failure(event.text)):
+        return event
+    said = event.text.rstrip(".")
+    return event.model_copy(update={"text": f"{problem} ({said}.)"})
 
 
 def picture_path(gateway: Any, path: str) -> str:
