@@ -6,7 +6,10 @@ extends ScrollContainer
 ## get_selected_items, item_selected), and indexes count rows only, never section titles.
 ## A section added with a key has a header that folds it (click, Enter or Space; a count shows
 ## while folded), a right-click or Menu-key menu, takes dropped rows and can be renamed in
-## place. Whoever fills the list decides what each menu offers and what a drop means.
+## place. With [member row_menus] each row and movable header also has a ⋯ button for its menu.
+## Up and Down move the keyboard focus through headers and rows (Home and End to either end);
+## a header lights up while a dragged row or header would land on it. Whoever fills the list
+## decides what each menu offers and what a drop means.
 
 signal item_selected(index: int)
 ## The header of section [param key] was clicked: it is now [param open] or folded.
@@ -21,6 +24,8 @@ signal item_dropped(index: int, key: String)
 signal section_dropped(key: String, target: String)
 ## The title typed for section [param key] (begin_rename); "" when cancelled.
 signal section_renamed(key: String, title: String)
+## Delete (or Backspace) on movable section [param key]'s header.
+signal section_delete_requested(key: String)
 
 const UI_COMPONENTS := preload("ui_components.gd")
 const UI_MOTION := preload("ui_motion.gd")
@@ -42,6 +47,8 @@ var fit_content := false:
 
 ## Rows can be dragged onto section headers ([signal item_dropped]).
 var drag_rows := false
+## Rows and movable headers carry a ⋯ button that asks for their menu.
+var row_menus := false
 ## (data: Dictionary, key: String) -> bool: whether a dragged row or header may land on [param key].
 var can_drop := Callable()
 
@@ -60,6 +67,8 @@ class Row:
 	var title: Label
 	var count: Label
 	var dot: Control
+	## The ⋯ button ([member row_menus]), or null.
+	var more: Button
 	var metadata: Variant = null
 	var text_value := ""
 	var section := ""
@@ -105,7 +114,7 @@ func add_section(
 		_group.add_child(inset)
 		return
 	var section: SECTION_SCRIPT = SECTION_SCRIPT.new()
-	section.setup(self, title, key, empty_text)
+	section.setup(self, title, key, empty_text, row_menus and movable)
 	section.movable = movable
 	_sections[key] = section
 	_box.add_child(section)
@@ -183,13 +192,21 @@ func add_item(text: String, icon_name := "") -> int:
 	row.dot.hide()
 	line.add_child(row.dot)
 	var index := _rows.size()
+	if row_menus:
+		row.more = SECTION_SCRIPT.more_button(row, "More for %s" % text)
+		row.more.pressed.connect(
+			func() -> void:
+				select(index)
+				item_menu_requested.emit(index, SECTION_SCRIPT.below(row.more))
+		)
+		line.add_child(row.more)
 	row.pressed.connect(_on_row_pressed.bind(index))
 	row.theme_changed.connect(_style_row.bind(row))
 	row.gui_input.connect(_row_input.bind(row, index))
 	if drag_rows:
 		row.set_drag_forwarding(
 			SECTION_SCRIPT.drag_row.bind(row, index),
-			func(_at: Vector2, data: Variant) -> bool: return _accepts(data, row.section),
+			func(_at: Vector2, data: Variant) -> bool: return _hover_drop(data, row.section),
 			func(_at: Vector2, data: Variant) -> void: drop(data, row.section)
 		)
 	_group.add_child(row)
@@ -281,8 +298,27 @@ func _accepts(data: Variant, key: String) -> bool:
 	return bool(can_drop.call(data, key))
 
 
+## Whether [param data] may land on [param key], lighting that section's header while it may.
+func _hover_drop(data: Variant, key: String) -> bool:
+	var ok := _accepts(data, key)
+	for id: String in _sections:
+		(_sections[id] as SECTION_SCRIPT).set_drop_lit(ok and id == key)
+	return ok
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_DRAG_END:
+		_put_lights_out()
+
+
+func _put_lights_out() -> void:
+	for id: String in _sections:
+		(_sections[id] as SECTION_SCRIPT).set_drop_lit(false)
+
+
 ## Land a dragged row or header on section [param key].
 func drop(data: Variant, key: String) -> void:
+	_put_lights_out()
 	if not _accepts(data, key):
 		return
 	var payload := data as Dictionary
@@ -299,6 +335,48 @@ func _row_input(event: InputEvent, row: Row, index: int) -> void:
 		row.accept_event()
 		select(index)
 		item_menu_requested.emit(index, at)
+		return
+	if _move_focus(row, event as InputEventKey):
+		row.accept_event()
+
+
+## The headers and rows the keyboard moves through, in list order (folded rows left out).
+func _focus_stops() -> Array[Control]:
+	var stops: Array[Control] = []
+	for group: Node in _box.get_children():
+		if group is SECTION_SCRIPT:
+			var section := group as SECTION_SCRIPT
+			stops.append(section.header)
+			if not section.open:
+				continue
+			for child: Node in section.body.get_children():
+				if child is Row:
+					stops.append(child as Control)
+		else:
+			for child: Node in group.get_children():
+				if child is Row:
+					stops.append(child as Control)
+	return stops.filter(
+		func(stop: Control) -> bool: return stop.visible and stop.focus_mode != FOCUS_NONE
+	)
+
+
+## Up, Down, Home or End on [param from] moves the focus to the next header or row; true when
+## [param press] was one of them.
+func _move_focus(from: Control, press: InputEventKey) -> bool:
+	if press == null or not press.pressed or press.is_command_or_control_pressed():
+		return false
+	var steps := {KEY_UP: -1, KEY_DOWN: 1, KEY_HOME: -100000, KEY_END: 100000}
+	if not steps.has(press.keycode) or press.shift_pressed or press.alt_pressed:
+		return false
+	var stops := _focus_stops()
+	var at := stops.find(from)
+	if at < 0 or stops.is_empty():
+		return false
+	var target := clampi(at + int(steps[press.keycode]), 0, stops.size() - 1)
+	stops[target].grab_focus()
+	ensure_control_visible(stops[target])
+	return true
 
 
 ## Scroll [param row] into view, unless the list was rebuilt before this deferred call ran.
