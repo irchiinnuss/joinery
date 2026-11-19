@@ -78,6 +78,10 @@ var areas: Dictionary = {}
 
 ## The player's path on this level, on the ground plane (world units), oldest first.
 var path: PackedVector2Array = PackedVector2Array()
+## How far the player walked on this level (world units; a respawn's jump doesn't count), and
+## the frames it first stood in its earliest and its newest cell: the report's pace.
+var travelled: float = 0.0
+var found: Vector2i = Vector2i(-1, -1)
 
 var _tree: SceneTree
 var _floor: PackedFloat32Array = PackedFloat32Array()
@@ -98,6 +102,7 @@ var _key: String = ""
 ## The cell the player stood in last frame (-1 none): a step from it to the next cell shows
 ## the way between them is open, whatever the probes said.
 var _last_cell: int = -1
+var _last_at: Vector2 = Vector2(NAN, NAN)
 ## Ways the player walked, as cell * 8 + wall bit: no probe walls them again (a doorway's
 ## jamb the probe's line grazes, a door probed while it was still opening).
 var _passed: Dictionary = {}
@@ -141,6 +146,8 @@ func build(player: Node, style: String) -> void:
 	if not (key == _key and built):
 		began = at
 		path = PackedVector2Array()
+		travelled = 0.0
+		found = Vector2i(-1, -1)
 	if key == _key and built:
 		for index: int in visited.size():
 			var centre := origin + Vector2(index % cols + 0.5, index / cols + 0.5) * cell
@@ -196,7 +203,11 @@ func visit(at: Vector3, frame: int) -> void:
 	dwell[here] += 1
 	if visited[here] == 0:
 		visited[here] = frame + 1
+		found = Vector2i(frame if found.x < 0 else found.x, frame)
 	var flat := _plane(at)
+	if not is_nan(_last_at.x) and _last_at.distance_to(flat) < cell:
+		travelled += _last_at.distance_to(flat)
+	_last_at = flat
 	if (
 		frame % PATH_EVERY == 0
 		and path.size() < PATH_MAX
@@ -350,9 +361,9 @@ func reprobe(player: Node, at: Vector3, radius: float) -> void:
 				queue.append(next)
 
 
-## {mode, cell, origin, cols, rows, start, navigable, visited, percent, grid, dwell}: the
+## {mode, cell, origin, cols, rows, start, navigable, visited, percent, grid, dwell, …}: the
 ## grid as rows of text, "#" visited, "." navigable and never reached, " " not navigable;
-## dwell lists [col, row, frames] for each cell the player spent time in.
+## dwell lists [col, row, frames] per cell the player spent time in; travelled and found, pace.
 func summary() -> Dictionary:
 	if not built:
 		return {}
@@ -390,6 +401,8 @@ func summary() -> Dictionary:
 		"dwell": spent,
 		"areas": _area_cells(),
 		"path": _path_cells(),
+		"travelled": snappedf(travelled, 0.1),
+		"found": [found.x, found.y],
 	}
 
 

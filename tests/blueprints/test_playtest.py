@@ -169,6 +169,10 @@ def test_the_bot_explores_unvisited_cells_and_maps_what_it_missed(
     # The unreached areas, biggest first, each with where it is.
     sizes = [area["cells"] for area in coverage["unreached"]]
     assert sizes == sorted(sizes, reverse=True) and sizes, coverage
+    # Its pace, so the report can tell a run too short for the level from floor it can't
+    # get to: how far it walked and when it last found new floor.
+    assert coverage["travelled"] > 0 and coverage["first_found"] is not None
+    assert coverage["first_found"] <= coverage["last_found"] <= 60
     width, height = _png_size(Path(coverage["map"]))
     assert width >= coverage["cols"] * 3 and height >= coverage["rows"] * 3
     assert Path(coverage["map"]).is_relative_to(project / ".joinery" / "playtests")
