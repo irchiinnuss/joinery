@@ -113,21 +113,47 @@ def _private_windows_acl(path: Path, access: str) -> None:
             )
 
 
-def command_targets_project(command: str, project: Path) -> bool:
-    """Match absolute editor paths, including paths containing spaces."""
+def _project_patterns(command: str, project: Path) -> tuple[str, str, str]:
+    """The command and the project path to match it on, plus the project file."""
     path = str(project.resolve())
     if os.name == "nt":
         command = command.replace("\\", "/").lower()
         path = path.replace("\\", "/").lower()
+    return command, path, path + "/project.godot"
+
+
+def _quoted(text: str) -> str:
+    return r"[\"']?" + re.escape(text) + r"[\"']?(?=\s|$)"
+
+
+def command_targets_project(command: str, project: Path) -> bool:
+    """Match absolute editor paths, including paths containing spaces."""
+    command, path, project_file = _project_patterns(command, project)
     return bool(
-        re.search(
-            r"(?:^|\s)--path(?:=|\s+)[\"']?" + re.escape(path) + r"[\"']?(?=\s|$)",
-            command,
-        )
-        or re.search(
-            r"(?:^|\s)[\"']?" + re.escape(path + "/project.godot") + r"[\"']?(?=\s|$)",
-            command,
-        )
+        re.search(r"(?:^|\s)--path(?:=|\s+)" + _quoted(path), command)
+        or re.search(r"(?:^|\s)" + _quoted(project_file), command)
+    )
+
+
+#: Flags that make Godot open its editor or the project manager, not run the game.
+_EDITOR_FLAG = re.compile(
+    r"(?:^|\s)[\"']?(?:-e|--editor|-p|--project-manager)[\"']?(?=\s|$)"
+)
+
+
+def command_is_editor(command: str, project: Path) -> bool:
+    """A Godot editor (or project manager) on ``project``, not a game it runs.
+
+    A game started from the editor passes ``--path`` too (with ``--remote-debug``
+    and ``--editor-pid``) and outlives an editor that crashed; it never has
+    ``--editor``. A ``project.godot`` path as an argument opens the editor.
+    """
+    if not command_targets_project(command, project):
+        return False
+    command, _, project_file = _project_patterns(command, project)
+    return bool(
+        _EDITOR_FLAG.search(command)
+        or re.search(r"(?:^|\s)" + _quoted(project_file), command)
     )
 
 
@@ -168,7 +194,7 @@ def editor_running(project: Path) -> bool:
             isinstance(row, dict)
             and (
                 row.get("CommandLine") is None
-                or command_targets_project(str(row["CommandLine"]), project)
+                or command_is_editor(str(row["CommandLine"]), project)
             )
             for row in rows
         )
@@ -194,7 +220,7 @@ def editor_running(project: Path) -> bool:
         if (
             len(parts) == 2
             and parts[0] in editors
-            and command_targets_project(parts[1], project)
+            and command_is_editor(parts[1], project)
         ):
             return True
     return False

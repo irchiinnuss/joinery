@@ -22,7 +22,12 @@ from joinery.connection import status
 from joinery.gateway import ProjectGateway
 from joinery.gateway_rpc import GatewayRPC, rpc
 from joinery.mcp_runtime import host_environment
-from joinery.platform_support import command_targets_project, hook_command, launch_argv
+from joinery.platform_support import (
+    command_is_editor,
+    command_targets_project,
+    hook_command,
+    launch_argv,
+)
 from joinery.server_install import _run
 from joinery.transactions import ProjectLease
 
@@ -172,6 +177,74 @@ def test_editor_project_matching_handles_spaces_without_prefix_collisions(
     assert command_targets_project(
         'godot "' + str(project / "project.godot") + '"', project
     )
+
+
+def test_only_an_editor_on_the_project_counts_not_a_game_it_left_running(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "yard day"
+    path = str(project)
+    assert command_is_editor("godot --editor --path " + path, project)
+    assert command_is_editor("godot --path " + path + " -e", project)
+    assert command_is_editor('godot "' + str(project / "project.godot") + '"', project)
+    assert command_is_editor("godot --path " + path + " --project-manager", project)
+    # A game run from the editor that outlived it: --path, but no --editor.
+    game = (
+        "godot --path " + path + " --remote-debug tcp://127.0.0.1:6007"
+        " --editor-pid 14314 --scene res://core/main.tscn"
+    )
+    assert command_targets_project(game, project)
+    assert not command_is_editor(game, project)
+    assert not command_is_editor("godot --editor --path " + path + "-other", project)
+
+
+def test_a_leftover_game_run_does_not_hold_back_an_addon_update(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if os.name == "nt":
+        pytest.skip("POSIX process listing")
+    project = tmp_path / "yard day"
+    rows = {
+        "comm=": "14500 /Applications/Joinery.app/Contents/MacOS/godot.macos.editor.arm64\n"
+        "14501 /usr/bin/python3\n",
+        "args=": f"14500 godot --path {project} --remote-debug tcp://127.0.0.1:6007"
+        " --editor-pid 14314 --scene res://core/main.tscn\n"
+        f"14501 python3 -m joinery chat --project {project}\n",
+    }
+
+    def ps(argv: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        field = argv[-1].split(",")[-1]
+        return subprocess.CompletedProcess(argv, 0, rows[field], "")
+
+    monkeypatch.setattr(platform_support.subprocess, "run", ps)
+    assert not platform_support.editor_running(project)
+    rows["args="] += f"14502 godot --editor --path {project}\n"
+    rows["comm="] += "14502 godot\n"
+    assert platform_support.editor_running(project)
+
+
+def test_a_windows_game_run_is_not_an_editor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "yard day"
+    game = {
+        "ExecutablePath": "C:/Joinery/godot.exe",
+        "CommandLine": f'godot.exe --path "{project}" --editor-pid 14314'
+        " --scene res://core/main.tscn",
+    }
+    listed = [game]
+
+    def query(_: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess([], 0, json.dumps(listed), "")
+
+    monkeypatch.setattr(platform_support.os, "name", "nt")
+    monkeypatch.setattr(platform_support.shutil, "which", lambda _: "powershell.exe")
+    monkeypatch.setattr(platform_support, "_windows_editor_query", query)
+    assert not platform_support.editor_running(project)
+    listed.append(
+        {"ExecutablePath": "", "CommandLine": f'godot.exe --editor --path "{project}"'}
+    )
+    assert platform_support.editor_running(project)
 
 
 def test_explicit_python_provider_never_passes_arguments_through_a_shell(
