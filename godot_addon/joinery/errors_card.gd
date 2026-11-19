@@ -82,16 +82,7 @@ func _init() -> void:
 	name = "ErrorsCard"
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	accessibility_name = "Console errors"
-	STYLE.on_theme_overrides(
-		self,
-		func() -> void:
-			var source := get_theme_stylebox("panel", "JoineryChangeCard")
-			if source == null:
-				return
-			var box := source.duplicate() as StyleBox
-			box.set_content_margin_all(float(UI_THEME.space(self, 2)))
-			add_theme_stylebox_override("panel", box)
-	)
+	STYLE.task_card(self)
 	var column := VBoxContainer.new()
 	column.theme_type_variation = "JoineryTight"
 	add_child(column)
@@ -263,6 +254,14 @@ func _settled_headline() -> String:
 	return "Fixed %d of %d %s" % [fixed, _groups.size(), noun]
 
 
+## True when every row is fixed: the headline says so ("Fixed 2 errors").
+func _all_fixed() -> bool:
+	for group: Dictionary in _groups:
+		if str(group.get("status", "")) != "fixed":
+			return false
+	return not _groups.is_empty()
+
+
 ## One error: [mark] title / caption · action [›], and the cause under it when open.
 func _row(group: Dictionary) -> Control:
 	var id := str(group.get("id", ""))
@@ -321,6 +320,12 @@ func _row(group: Dictionary) -> Control:
 	var cause := str(group.get("cause", ""))
 	if not cause.is_empty():
 		meta.add_child(_disclosure(text, id, cause))
+	# Nothing to say: the title takes the caption's place, so its action ends the title's line
+	# instead of sitting alone on one of its own.
+	if caption.text.is_empty():
+		caption.hide()
+		name_label.reparent(meta, false)
+		meta.move_child(name_label, 0)
 	var corner := _corner(group, row)
 	if corner != null:
 		row.add_child(corner)
@@ -403,6 +408,9 @@ func _caption(group: Dictionary, step := "", seconds := -1) -> String:
 		words = "Fix discarded"
 	if status == "fixing" and not step.is_empty():
 		words = step
+	# "Fixed 2 errors" over the rows already says it, and each row's tick shows it.
+	if status == "fixed" and _all_fixed():
+		words = ""
 	var count := int(group.get("count", 1))
 	if count > 1:
 		parts.append("%d times" % count)
@@ -440,11 +448,12 @@ func _action(group: Dictionary) -> Button:
 	var button: Button
 	match str(group.get("status", "open")):
 		"open", "stopped":
-			button = UI.quiet_link("Fix" if str(group.get("status")) == "open" else "Try again")
+			# The row's way forward: an accent link, like Retry in the chat.
+			button = UI.link("Fix" if str(group.get("status")) == "open" else "Try again")
 			button.accessibility_name = "Fix: " + label
 			button.pressed.connect(_on_fix.bind(id, button))
 		"in_review":
-			button = UI.quiet_link("Review")
+			button = UI.link("Review")
 			button.accessibility_name = "Review the fix for: " + label
 			var transaction := str(group.get("transaction_id", ""))
 			button.pressed.connect(func() -> void: review_requested.emit(transaction))
