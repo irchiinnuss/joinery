@@ -108,7 +108,7 @@ func _rapid_input() -> void:
 	s.check(again, "The next request after an early Stop runs (%s)" % s.card_state())
 	# Stop twice.
 	s.send(KEEP_GOING)
-	await s.wait_until(func() -> bool: return s.reply_shown().length() > 10, 8000)
+	await s.wait_until(func() -> bool: return _turn_text().contains("Working through"), 8000)
 	var stop: Button = s.composer().get("stop")
 	await s.click(stop)
 	await s.click(stop)
@@ -117,9 +117,10 @@ func _rapid_input() -> void:
 	s.check(s.card_state() == "stopped", "Stop twice ends it stopped (%s)" % s.card_state())
 	var said := _turn_text().count("Stopped")
 	s.check(said == 1, "Stop twice says Stopped once (%d): %s" % [said, _turn_text()])
-	# Esc while the command menu is open closes the menu only.
+	# Esc while the command menu is open closes the menu only (sent once the last turn is over).
+	await s.wait_until(func() -> bool: return not bool(s.dock.call("_occupied")), 4000)
 	s.send(KEEP_GOING)
-	await s.wait_until(func() -> bool: return s.reply_shown().length() > 10, 8000)
+	await s.wait_until(func() -> bool: return _turn_text().contains("Working through"), 8000)
 	field.grab_focus()
 	field.text = "/"
 	field.set_caret_column(1)

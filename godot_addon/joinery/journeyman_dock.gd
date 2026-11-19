@@ -13,10 +13,9 @@ extends PanelContainer
 ## connection turns the header dot red and disables Send, leaving Retry as the one action. A
 ## chat bridge added as a child is attached automatically ([method attach_bridge]).
 ## While a request runs or a change waits for review, Send queues the message (sidebar_queue.gd);
-## queued messages go out one at a time once nothing is in the way ([method _drain]). Agents
-## working alongside (parallel tasks) have their own cards above the composer (sidebar_tasks.gd).
-## "/feature add|remove <id>" shows a plan card; the feature is applied only on Apply. "/brief"
-## opens design/brief.md read-only. Brief suggestions arrive one line at a time, never acted on.
+## queued messages go out one at a time once nothing is in the way ([method _drain]). Parallel
+## tasks have their own cards above the composer (sidebar_tasks.gd). "/feature add|remove <id>"
+## shows a plan card, applied only on Apply. "/brief" opens design/brief.md read-only.
 
 signal setup_requested
 signal focus_toggle_requested
@@ -66,6 +65,7 @@ const FILE_OPEN := preload("res://addons/joinery/sidebar_file_open.gd")
 const NOTIFY := preload("res://addons/joinery/desktop_notify.gd")
 const WORDS := preload("res://addons/joinery/sidebar_turn_words.gd")
 const REVERTS := preload("res://addons/joinery/sidebar_reverts.gd")
+const TURN_END := preload("res://addons/joinery/sidebar_turn_end.gd")
 ## Minimum dock width in font sizes: in Joinery's layout, the whole visible sidebar.
 const MIN_EM := 26
 ## The same below the Inspector (classic layout): a wider shared column crowds a laptop screen.
@@ -127,6 +127,7 @@ var _opener: OPENER
 var _resume_ready := false
 ## Revert's outcome, Undo revert and the toast after a revert (sidebar_reverts.gd).
 var _reverts: REVERTS
+var _turn_end := TURN_END.new()
 
 
 func _init() -> void:
@@ -426,7 +427,8 @@ func _start_request(entry: String, targets: Array) -> void:
 ## A request runs, is on its way, or a change waits for review: new messages queue.
 func _occupied() -> bool:
 	var card := _card()
-	return _busy or _review_pending or (card != null and card.state == "sending")
+	var sending: bool = card != null and card.state == "sending"
+	return _busy or _review_pending or _turn_end.waiting() or sending
 
 
 # --- Queue -------------------------------------------------------------------------------------
@@ -473,8 +475,7 @@ func _drain() -> void:
 		_drain.call_deferred()
 
 
-## Put [param text] in the message box, ready to edit and send (offers and "Ask Journeyman");
-## with none, keep what is typed there and take the focus (the Tools page's "Ask Journeyman").
+## Put [param text] (or, with none, what is typed) in the message box, with the focus.
 func fill_composer(text := "") -> void:
 	_fill_prompt(text if not text.is_empty() else _prompt.text)
 
@@ -784,9 +785,7 @@ func set_chat_busy(busy: bool) -> void:
 	_sync_send_slot()
 	_sync()
 	if not busy and was_busy and _bridge != null and bool(_bridge.get("dispatching")):
-		# Mid-read: the turn's timing line, just behind its done, lands before the next turn.
-		_resume_held.call_deferred()
-		_drain.call_deferred()
+		_turn_end.ended(get_tree(), [_resume_held, _drain] as Array[Callable])  # After its timing.
 	elif not busy and was_busy:
 		_resume_held()
 		_drain()
@@ -816,6 +815,7 @@ func show_timing(event: Dictionary) -> void:
 	var placed := _turn().show_timing(event)
 	if _outcome == "cancelled" and not placed:
 		_turn().add_decision("Stopped", "stopped", _card())
+	_turn_end.timed()  # Then the next turn may start (sidebar_turn_end.gd).
 
 
 func append_agent_text(text: String, new_message: bool) -> void:
