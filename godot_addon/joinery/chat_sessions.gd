@@ -529,6 +529,18 @@ func working_id() -> String:
 	return _current_id if turn == _transcript and not viewing else ""
 
 
+## The change card of [param transaction_id] in the chat on screen or one kept out of sight;
+## null when none shows it.
+func card_for(transaction_id: String) -> Control:
+	for view: Control in [_transcript] + _kept.values():
+		var card: Variant = (
+			view.call("card_for", transaction_id) if is_instance_valid(view) else null
+		)
+		if card is Control:
+			return card
+	return null
+
+
 ## Every chat at work: the one Journeyman works in and those running beside it.
 func working_ids() -> PackedStringArray:
 	var ids := turns.chat_ids() if turns != null else PackedStringArray()

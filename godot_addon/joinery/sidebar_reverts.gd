@@ -119,8 +119,10 @@ func _on_listed(entries: Array) -> void:
 			card.call("unrevert_finished", true)
 
 
+## The change card of [param id] in the chat on screen, or in one kept out of sight (a revert
+## may finish after the user went to another chat).
 func _card(id: String) -> Control:
-	return _dock.get("_transcript").call("card_for", id) as Control
+	return _dock.get("_chats").call("card_for", id) as Control
 
 
 func _plan(id: String) -> Control:

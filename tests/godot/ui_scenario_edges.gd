@@ -463,6 +463,39 @@ func _crash_two_chats() -> void:
 	s.check(not (s.composer().get("stop") as Button).visible, "The first chat has no Stop left")
 
 
+## Revert pressed on an accepted change, then another chat opened while Journeyman works in the
+## first: back there, the change says how the revert went, never "Reverting…" for good.
+func _revert_elsewhere() -> void:
+	if not await s.connect_host():
+		return
+	s.send(WIDEN)
+	await s.wait_until(func() -> bool: return bool(s.dock.get("_review_pending")), 8000)
+	await s.frames(3)
+	s.dock.call("_on_accept")
+	await s.wait_until(func() -> bool: return not bool(s.dock.get("_review_pending")), 6000)
+	var change: Control = s.card()
+	change.call("set_revertible", true)
+	s.send(KEEP_GOING)
+	await s.wait_until(func() -> bool: return s.reply_shown().length() > 10, 8000)
+	var first := s.transcript()
+	change.call("_on_revert")
+	s.check(str(change.get("state")) == "accepted", "Revert pressed on the accepted change")
+	var sessions: Node = s.dock.get("_chats")
+	sessions.call("new_chat")
+	var slash: Node = s.dock.get("_slash")
+	var settled := await s.wait_until(
+		func() -> bool: return (slash.get("_jobs") as Dictionary).is_empty(), 20000
+	)
+	s.check(settled, "The revert finished")
+	await s.frames(3)
+	sessions.call("open_chat", _kept_id(sessions, first))
+	await s.frames(3)
+	var reverting: Control = change.get("_reverting")
+	s.check(not reverting.visible, "Back in its chat, the change no longer says Reverting…")
+	(s.composer().get("stop") as Button).pressed.emit()
+	await s.wait_until(func() -> bool: return not bool(s.dock.get("_busy")), 6000)
+
+
 ## The kept chat Journeyman works in.
 func _first_view(sessions: Node) -> Control:
 	var kept: Dictionary = sessions.get("_kept")
