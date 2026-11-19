@@ -3,7 +3,9 @@ extends SceneTree
 ## created, renamed, reordered and deleted; assets are moved in by menu and by drop and taken
 ## out; every group folds from its header with a count, remembered, and opens while a search
 ## matches it; design/asset_categories.toml round-trips, keeps a stable order and drops assets
-## that are gone.
+## that are gone. The ways in are visible and reachable from the keyboard: New category above
+## the list with a hint while there are none, ⋯ on rows and category headers, the Menu key and
+## Shift+F10, arrows, F2, Delete asking in place first, and a lit header under a drag.
 
 const WORKSPACE := preload("res://addons/joinery/tool_workspace.gd")
 const CATEGORIES := preload("res://addons/joinery/asset_categories.gd")
@@ -66,6 +68,134 @@ func _row(workspace: WORKSPACE, path: String) -> int:
 	return workspace._rows.find_custom(func(row: Dictionary) -> bool: return row["path"] == path)
 
 
+func _key(code: Key, shift := false) -> void:
+	for pressed: bool in [true, false]:
+		var event := InputEventKey.new()
+		event.keycode = code
+		event.physical_keycode = code
+		event.shift_pressed = shift
+		event.pressed = pressed
+		root.push_input(event)
+	await process_frame
+
+
+func _visible_ways(workspace: WORKSPACE, groups: Node) -> void:
+	var menu: PopupMenu = groups._menu
+	var hint: Label = groups.hint
+	_check(groups.bar.is_visible_in_tree(), "New category shows above the list")
+	_check(hint.is_visible_in_tree() and "drag" in hint.text, "The hint shows while there are none")
+	_check(groups.new_button.text == "New category", groups.new_button.text)
+
+	# The button creates a category and types its name in place.
+	groups.new_button.pressed.emit()
+	await process_frame
+	_check(_titles(workspace)[0] == "New category", "Made: %s" % [_titles(workspace)])
+	var made := _section(workspace, "category:New category")
+	_check(made.rename.visible and made.rename.has_focus(), "Its name is typed in place")
+	made.rename.text = "Tools"
+	made.rename.text_submitted.emit(made.rename.text)
+	await process_frame
+	_check(_titles(workspace)[0] == "Tools", "Named: %s" % [_titles(workspace)])
+	_check(not hint.is_visible_in_tree(), "The hint goes once there is a category")
+	var tools := _section(workspace, "category:Tools")
+	_check(tools.empty.is_visible_in_tree(), "The empty category says Drag assets here")
+
+	# ⋯ on a category header and on a row opens the same menus as right-click.
+	_check(tools.more != null and tools.more.tooltip_text == "More for Tools", "Header ⋯")
+	_check(_section(workspace, "kind:model").more == null, "No ⋯ on a kind's group")
+	tools.more.pressed.emit()
+	_check(menu.visible and menu.get_item_text(0) == "Rename…", "Header ⋯ opens its menu")
+	_check(menu.get_item_text(menu.get_item_index(groups.DELETE)) == "Delete category…", "Asks")
+	menu.hide()
+	var mower := _row(workspace, "art/sources/push_mower.blend")
+	var row: Button = workspace._assets._rows[mower]
+	_check(
+		row.more != null and row.more.tooltip_text == "More for Push mower", row.more.tooltip_text
+	)
+	_check(row.more.focus_mode == Control.FOCUS_NONE, "⋯ is never a Tab stop of its own")
+	row.more.pressed.emit()
+	_check(menu.visible and menu.get_item_text(0) == "Move to category", "Row ⋯ opens its menu")
+	_check(workspace._assets.get_selected_items() == PackedInt32Array([mower]), "and selects it")
+	menu.hide()
+	# A closing popup holds the keyboard for a frame.
+
+	# Keyboard: the Menu key and Shift+F10 open a row's menu; arrows move through the list.
+	await process_frame
+	row.grab_focus()
+	await _key(KEY_MENU)
+	_check(menu.visible and menu.get_item_text(0) == "Move to category", "Menu key")
+	menu.hide()
+	await process_frame
+	row.grab_focus()
+	await _key(KEY_F10, true)
+	_check(menu.visible and menu.get_item_text(0) == "Move to category", "Shift+F10")
+	menu.hide()
+	await process_frame
+	tools.header.grab_focus()
+	await _key(KEY_DOWN)
+	var models := _section(workspace, "kind:model")
+	_check(models.header.has_focus(), "Down from an empty category: the next header")
+	await _key(KEY_DOWN)
+	_check(workspace._assets._rows[0].has_focus(), "Down again: its first row")
+	await _key(KEY_UP)
+	await _key(KEY_UP)
+	_check(tools.header.has_focus(), "Up twice: back on Tools")
+	await _key(KEY_LEFT)
+	_check(not _section(workspace, "category:Tools").open, "Left folds")
+	await _key(KEY_RIGHT)
+	tools = _section(workspace, "category:Tools")
+	_check(tools.open, "Right opens")
+	tools.header.grab_focus()
+	await _key(KEY_F2)
+	_check(tools.rename.visible and tools.rename.has_focus(), "F2 renames")
+	await _key(KEY_ESCAPE)
+	_check(not tools.rename.visible and _titles(workspace)[0] == "Tools", "Escape keeps the name")
+
+	# A drag lights the header it would land on, and only while it would.
+	var drag := {"type": SECTION.ROW_DRAG, "index": mower}
+	drag["list"] = workspace._assets.get_instance_id()
+	_check(workspace._assets._hover_drop(drag, "category:Tools"), "Lands on Tools")
+	_check(tools.drop_lit and not models.drop_lit, "Tools is lit")
+	_check(not workspace._assets._hover_drop(drag, "kind:model"), "Not on its own group")
+	_check(not tools.drop_lit and not models.drop_lit, "Nothing lit where it can't land")
+	workspace._assets._hover_drop(drag, "category:Tools")
+	workspace._assets.drop(drag, "category:Tools")
+	await process_frame
+	tools = _section(workspace, "category:Tools")
+	_check(not tools.drop_lit, "The light goes out on drop")
+	_check(groups.model.category_of("art/sources/push_mower.blend") == "Tools", "Dropped in")
+
+	# Delete asks first, in place, and says where the assets go; Cancel keeps it.
+	tools.header.grab_focus()
+	await _key(KEY_DELETE)
+	_check(tools.question != null and tools.question.is_visible_in_tree(), "Delete asks first")
+	var words: Label = tools.question.find_child("Text", true, false)
+	var expected := "Delete “Tools”? Its asset goes back to Models. No files are deleted."
+	_check(words.text == expected, words.text)
+	var cancel: Button = tools.question.find_child("Cancel", true, false)
+	cancel.pressed.emit()
+	await process_frame
+	_check(tools.question == null and _titles(workspace)[0] == "Tools", "Cancel keeps it")
+	_check(tools.header.has_focus(), "Focus back on the header")
+	await _key(KEY_DELETE)
+	await _key(KEY_ESCAPE)
+	_check(tools.question == null and _titles(workspace)[0] == "Tools", "Escape keeps it")
+	tools.more.pressed.emit()
+	menu.hide()
+	await process_frame
+	menu.id_pressed.emit(groups.DELETE)
+	_check(tools.question != null, "The menu's Delete category… asks too")
+	var yes: Button = tools.question.find_child("Yes", true, false)
+	_check(yes.text == "Delete category" and yes.has_focus(), "Delete category, focused")
+	yes.pressed.emit()
+	await process_frame
+	_check(_titles(workspace) == ["Models", "Sounds", "Images"], "Gone: %s" % [_titles(workspace)])
+	_check(groups.model.category_of("art/sources/push_mower.blend") == "", "Mower back")
+	_check(not FileAccess.file_exists(FILE), "No categories, no file")
+	_check(groups.hint.is_visible_in_tree(), "The hint is back")
+	_check(_section(workspace, "kind:model").header.has_focus(), "Focus on the next group")
+
+
 func _run() -> void:
 	root.size = Vector2i(1000, 700)
 	if FileAccess.file_exists(FILE):
@@ -79,6 +209,7 @@ func _run() -> void:
 	var groups: Node = workspace._groups
 	_check(_titles(workspace) == ["Models", "Sounds", "Images"], "Kinds: %s" % [_titles(workspace)])
 	_check(not FileAccess.file_exists(FILE), "Nothing is written until the user makes a category")
+	await _visible_ways(workspace, groups)
 
 	# Create from an asset's menu: the asset moves in and the new header is renamed in place.
 	var mower := "art/sources/push_mower.blend"
