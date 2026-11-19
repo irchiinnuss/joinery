@@ -107,6 +107,9 @@ var view_provider := Callable(EDITOR_VIEW, "capture")
 var chat_id := ""
 ## Turns that may run at once, Journeyman's own included ([agents] parallel); 1 = no tasks.
 var parallel := 1
+## True while the host's lines of one read are handled: a line can still follow the one being
+## handled (a turn's timing follows its done).
+var dispatching := false
 var _job: RefCounted
 var _connected := false
 var _pending: Dictionary = {}
@@ -534,11 +537,13 @@ func cancel_turn() -> void:
 func _process(_delta: float) -> void:
 	if _job == null:
 		return
+	dispatching = true
 	for line: String in _job.take_lines():
 		var event_json := JSON.new()
 		var event: Variant = event_json.data if event_json.parse(line) == OK else null
 		if event is Dictionary:
 			_handle(event)
+	dispatching = false
 	var result: Dictionary = _job.poll()
 	if not result.is_empty():
 		_job = null

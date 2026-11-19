@@ -274,7 +274,7 @@ func attach_bridge(bridge: Node) -> void:
 		"sent": _on_sent,
 		"notice": _on_notice,
 		"file_preview": _on_bridge_preview,
-		"art_review": _on_art_review_event,
+		"art_review": func(event: Dictionary) -> void: art_review_event = event.duplicate(true),
 		"art_gate": _on_art_gate,
 		"art_approved": _on_art_approved,
 		"suggestions": _suggestions.take,
@@ -314,10 +314,6 @@ func _on_bridge_preview(event: Dictionary) -> void:
 	var card := _card()
 	if card != null and card.transaction_id.is_empty():
 		card.transaction_id = str(event.get("transaction_id", ""))
-
-
-func _on_art_review_event(event: Dictionary) -> void:
-	art_review_event = event.duplicate(true)
 
 
 ## Asset work stopped at the art gate: the request's card holds it, with the look in small.
@@ -787,7 +783,11 @@ func set_chat_busy(busy: bool) -> void:
 			_turn().queue.pause()
 	_sync_send_slot()
 	_sync()
-	if not busy and was_busy:
+	if not busy and was_busy and _bridge != null and bool(_bridge.get("dispatching")):
+		# Mid-read: the turn's timing line, just behind its done, lands before the next turn.
+		_resume_held.call_deferred()
+		_drain.call_deferred()
+	elif not busy and was_busy:
 		_resume_held()
 		_drain()
 

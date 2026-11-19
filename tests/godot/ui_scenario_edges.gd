@@ -249,7 +249,8 @@ func _noisy_host() -> void:
 ## chat ends the host.
 func _never_ready() -> void:
 	await s.connect_host(false, {"connect_ms": 600000})
-	await s.wait_ms(800)
+	# Long enough for the host to be up and waiting: closing then must still end it.
+	await s.wait_ms(2500)
 	s.check(s.dock.get("connection_state") == "connecting", "It says it is connecting")
 	s.check(not bool(s.chat.call("is_ready")), "The chat isn't ready")
 	var field := s.prompt()
@@ -494,6 +495,30 @@ func _revert_elsewhere() -> void:
 	s.check(not reverting.visible, "Back in its chat, the change no longer says Reverting…")
 	(s.composer().get("stop") as Button).pressed.emit()
 	await s.wait_until(func() -> bool: return not bool(s.dock.get("_busy")), 6000)
+
+
+## A queued message goes out the moment the turn before it ends: that turn still gets its own
+## timing line and outcome, and the next one isn't marked with them.
+func _queue_follows() -> void:
+	if not await s.connect_host():
+		return
+	s.send(SAY_HELLO)
+	await s.wait_until(func() -> bool: return s.reply_shown().length() > 4, 8000)
+	s.send("Darken the wood")
+	var cards: Array = s.transcript().get("_cards")
+	await s.wait_until(func() -> bool: return cards.size() == 2, 8000)
+	await s.wait_until(
+		func() -> bool: return str((cards[-1] as Control).get("state")) == "done", 8000
+	)
+	await s.wait_ms(300)
+	for index: int in cards.size():
+		var card: Control = cards[index]
+		var said := s.visible_text(card.get_parent())
+		s.check(
+			said.contains("Completed in"),
+			"Request %d has its own timing line: %s" % [index + 1, said.left(200)]
+		)
+		s.check(str(card.get("state")) == "done", "Request %d ends done" % (index + 1))
 
 
 ## The kept chat Journeyman works in.

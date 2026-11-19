@@ -70,6 +70,7 @@ const ALL := [
 	"other-chat-stop",
 	"crash-two-chats",
 	"revert-elsewhere",
+	"queue-follows",
 	"editor-life",
 	"reopen",
 ]
