@@ -315,8 +315,9 @@ def test_writes_stay_fast_on_a_large_stage(
                 await write(main, f"art/set{index}/new{index}.png", "new")
             spent = time.monotonic() - started
             assert full == [], "a write hashed the whole stage"
-            assert "claims" in main.timing.phases
-            assert main.timing.phases["claims"] < 2.0
+            # Claiming is part of each write's tool call.
+            assert main.timing.within().get("claims") == "tools"
+            assert main.timing.nested["claims"] < 2.0
             assert spent < 10.0
             assert len(main.claims.held("main")) == 21
             # The other agent still can't take one of them.

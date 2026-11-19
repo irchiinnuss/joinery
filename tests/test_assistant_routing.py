@@ -182,6 +182,8 @@ def test_timing_records_monotonic_spans_first_response_and_bounds_history(
         "total_ms",
         "first_response_ms",
         "phases_ms",
+        "nested_ms",
+        "within",
     }
     for _ in range(205):
         trace.save(tmp_path, "cancelled")
