@@ -614,14 +614,18 @@ func _reopen() -> void:
 	# Viewed read-only (with Continue), it still fits the sidebar it is in.
 	var room := (s.dock.get_parent() as Control).size.x
 	var wide := s.dock.get_combined_minimum_size().x
-	s.expect_bug(
-		wide <= room + 1.0,
-		"The earlier chat fits the sidebar (%.0f of %.0f px)" % [wide, room],
-		(
-			"reopened, a refused call's app badge shows (the record keeps the step as it started),"
-			+ " and the timing line beside it never shrinks"
+	var what := "The earlier chat fits the sidebar (%.0f of %.0f px)" % [wide, room]
+	if room >= 480.0:
+		s.check(wide <= room + 1.0, what)
+	else:
+		s.expect_bug(
+			wide <= room + 1.0,
+			what,
+			(
+				"reopened, a refused call's app badge shows (the record keeps the step as it"
+				+ " started), and the timing line beside it never shrinks: too wide at 340 px"
+			)
 		)
-	)
 	await s.shot("reopened")
 
 
