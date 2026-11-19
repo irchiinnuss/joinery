@@ -288,7 +288,8 @@ func _show(chat_id: String, read_only: bool) -> void:
 		return
 	# A restored chat appears whole; nothing in it is news. Motion comes back as it was.
 	var key: String = UI_MOTION._ENABLED_META
-	var motion: Variant = Engine.get_meta(key, null)
+	# Unset in the editor; get_meta with a null default would print an error.
+	var motion: Variant = Engine.get_meta(key) if Engine.has_meta(key) else null
 	UI_MOTION.set_enabled(false)
 	_reset()
 	render(data["entries"])
