@@ -106,7 +106,8 @@ func offer(card: Control) -> void:
 
 ## The menu button of [param card] (null without one).
 static func menu_of(card: Control) -> MenuButton:
-	return card.get_meta(MENU_META, null) as MenuButton
+	# A null default reads as none in Godot: a card without the menu would print an error.
+	return card.get_meta(MENU_META) as MenuButton if card.has_meta(MENU_META) else null
 
 
 func _reveal(card: Control, on: bool) -> void:

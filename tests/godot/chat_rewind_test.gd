@@ -139,6 +139,10 @@ func _run() -> void:
 	for card: Control in cards:
 		var menu: MenuButton = rewinder.menu_of(card)
 		_check(menu != null, "Every request has the menu")
+	# A card the menu never joined has none, and asking says so quietly (no error printed).
+	var bare := Control.new()
+	_check(rewinder.menu_of(bare) == null, "A card without the menu has none")
+	bare.free()
 	var second: Control = cards[1]
 	var menu: MenuButton = rewinder.menu_of(second)
 	var items: Array[String] = []
