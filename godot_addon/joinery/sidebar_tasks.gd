@@ -654,19 +654,22 @@ func _pin_row(row: Control) -> void:
 
 ## The pinned row goes back where it was in its card.
 func _unpin() -> void:
-	var row := _pinned
+	var pinned: Variant = _pinned
 	_pinned = null
 	_pinned_card = null
 	if _pin != null:
 		STYLE.show_part(_pin, false)
-	if not is_instance_valid(row):
+	if not is_instance_valid(pinned):
 		return
+	var row := pinned as Control
 	var home: Array = row.get_meta("_joinery_pin_home", [])
 	row.remove_meta("_joinery_pin_home")
-	var parent: Node = home[0] if home.size() == 2 else null
-	if not is_instance_valid(parent) or parent.is_queued_for_deletion():
+	# Untyped first: the card may be freed already, and a freed one can't go in a Node.
+	var held: Variant = home[0] if home.size() == 2 else null
+	if not is_instance_valid(held) or (held as Node).is_queued_for_deletion():
 		row.queue_free()
 		return
+	var parent := held as Node
 	row.reparent(parent, false)
 	parent.move_child(row, mini(int(home[1]), parent.get_child_count() - 1))
 
