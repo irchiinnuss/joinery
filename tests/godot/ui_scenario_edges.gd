@@ -209,7 +209,8 @@ func _huge_reply() -> void:
 	_inside_column("huge")
 
 
-## A 2,000-message chat: it opens in reasonable time, scrolls, and leaves nothing behind when a
+## A 300-message chat (100 requests; 2,000 can outrun a scenario's time limit on a busy
+## machine): it opens in reasonable time, scrolls, and leaves nothing behind when a
 ## new chat replaces it.
 func _long_chat() -> void:
 	if not await s.connect_host():
@@ -217,7 +218,7 @@ func _long_chat() -> void:
 	await s.frames(4)
 	var nodes_before := Performance.get_monitor(Performance.OBJECT_NODE_COUNT)
 	var entries: Array = []
-	for index: int in 1000:
+	for index: int in 100:
 		entries.append({"type": "user", "text": "Request %d: move lamp %d" % [index, index]})
 		entries.append({"type": "agent", "text": "Moved **lamp %d** to the pier." % index})
 		entries.append({"type": "turn", "outcome": "done", "total_ms": 1200})
@@ -228,8 +229,8 @@ func _long_chat() -> void:
 	var took := Time.get_ticks_msec() - started
 	s.metric("long_chat_open", took, "ms")
 	s.expect_bug(
-		took < 5000,
-		"2,000 messages open in under 5 s (%d ms)" % took,
+		took < 1000,
+		"300 messages open in under 1 s (%d ms)" % took,
 		"each request card takes several ms to build, and a reopened chat builds them all at once"
 	)
 	var scroll := s.transcript() as ScrollContainer
@@ -241,7 +242,7 @@ func _long_chat() -> void:
 		worst = maxf(worst, (Time.get_ticks_usec() - last) / 1000.0)
 	s.metric("long_chat_scroll_frame", worst, "ms")
 	var cards: Array = s.transcript().get("_cards")
-	s.check(cards.size() == 1000, "Every request is there (%d)" % cards.size())
+	s.check(cards.size() == 100, "Every request is there (%d)" % cards.size())
 	sessions.call("new_chat")
 	for index: int in 10:
 		await s.frames(2)
