@@ -152,6 +152,12 @@ def _game(path: Path, env: dict[str, str]) -> Path:
     return path
 
 
+def _text(output: str | bytes | None) -> str:
+    if isinstance(output, bytes):
+        return output.decode("utf-8", "replace")
+    return output or ""
+
+
 def main(selected: list[str]) -> int:
     temporary = Path(tempfile.mkdtemp(prefix="joinery native widgets "))
     try:
@@ -207,16 +213,24 @@ def _run(selected: list[str], temporary: Path) -> int:
     ]
     failed: list[str] = []
     for argv, marker in commands:
-        result = subprocess.run(
-            argv,
-            env=env,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=SLOW.get(Path(argv[-1]).name, 120),
-            check=False,
-        )
+        limit = SLOW.get(Path(argv[-1]).name, 120)
+        try:
+            result = subprocess.run(
+                argv,
+                env=env,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=limit,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as late:
+            # What it printed before it was stopped says where it was.
+            print(_text(late.stdout) + _text(late.stderr), flush=True)
+            print(f"{marker or ' '.join(argv[-2:])}: still running after {limit} s")
+            failed.append(marker or " ".join(argv[-2:]))
+            continue
         output = result.stdout + result.stderr
         print(output, flush=True)
         if reason := crash(result.returncode, output):

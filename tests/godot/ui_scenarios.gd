@@ -13,11 +13,17 @@ extends RefCounted
 ## and takes screenshots through ui_checks.gd (VISUAL-CAPTURE, UI-CHECK lines), named
 ## scn-<scenario>-<state>-<theme>-<width>.png.
 ##
-## JOINERY_SCENARIOS (comma-separated) runs only those scenarios.
+## JOINERY_SCENARIOS (comma-separated) runs only those scenarios. Each scenario starts with a
+##   SCENARIO-BEGIN <scenario>   and   SCENARIO-END <scenario> <seconds>
+## lines and may take at most SCENARIO_MS. A host that never connects, or a scenario that never
+## ends, prints the host's exit code and stderr and ends the run there, rather than every later
+## scenario waiting the same way in turn.
 
 const UI_CHECKS_FILE := "ui_checks.gd"
 ## The scenarios themselves, one function each.
 const CASES_FILE := "ui_scenario_cases.gd"
+## The longest one scenario may take (they take a few seconds each).
+const SCENARIO_MS := 60000
 ## Every scenario, in the order they run (ui_scenario_cases.gd has one function each).
 const ALL := [
 	"empty",
@@ -66,6 +72,11 @@ var _scenario := ""
 var _failed := false
 ## The scripted hosts this scenario started (process ids), to check each one ends.
 var _hosts: Array[int] = []
+## The last scripted host started, for its stderr when it never connects.
+var _host_job: RefCounted
+## Why the remaining scenarios are not run (a host that never connects, a scenario that never
+## ends): each would only wait the same way.
+var _halted := ""
 
 
 func _init(scene_tree: SceneTree) -> void:
@@ -87,12 +98,28 @@ func run(only: Array = []) -> bool:
 		if not wanted.is_empty() and not wanted.has(scenario):
 			continue
 		_scenario = scenario
+		if not _halted.is_empty():
+			_line("fail", "Not run: %s" % _halted)
+			_failed = true
+			continue
+		print("SCENARIO-BEGIN ", scenario)
 		var built: Array = build.call()
 		dock = built[0]
 		chat = built[1]
 		_quiet_notifications()
 		await frames(2)
-		await _cases.call("_" + scenario.replace("-", "_"))
+		var finished := [false]
+		var play := func() -> void:
+			await _cases.call("_" + scenario.replace("-", "_"))
+			finished[0] = true
+		play.call()
+		var started := Time.get_ticks_msec()
+		if not await wait_until(func() -> bool: return finished[0], SCENARIO_MS):
+			check(false, "The scenario ends within %d s" % (SCENARIO_MS / 1000))
+			_host_output()
+			# What it still awaits must not run on into the next scenario's sidebar.
+			_halted = "%s did not end" % scenario
+		print("SCENARIO-END %s %.1f s" % [scenario, (Time.get_ticks_msec() - started) / 1000.0])
 		if chat != null and is_instance_valid(chat):
 			chat.call("close")
 		if teardown.is_valid():
@@ -170,8 +197,10 @@ func _hosts_end() -> void:
 		check(ended, "Closing the chat ends its host process (pid %d)" % pid)
 		if not ended:
 			# Ask it where it is stuck first (scripted_host.py writes its stacks), then end it.
-			OS.execute("kill", ["-USR1", str(pid)])
-			await wait_ms(500)
+			# Windows has no SIGUSR1: there it is only ended.
+			if OS.get_name() != "Windows":
+				OS.execute("kill", ["-USR1", str(pid)])
+				await wait_ms(500)
 			OS.kill(pid)
 	_hosts.clear()
 
@@ -207,15 +236,34 @@ func connect_host() -> bool:
 		check(false, "The scripted chat host starts")
 		return false
 	chat.set("_agent", "codex")
+	_host_job = job
 	_hosts.append(int((job.get("_process") as Dictionary).get("pid", 0)))
 	chat.set("_job", job)
 	dock.call("set_chat_agent", "codex")
 	chat.emit_signal("status_changed", "connecting", "Connecting to Codex CLI…")
 	var ok := await wait_until(func() -> bool: return bool(chat.call("is_ready")), 20000)
 	check(ok, "The sidebar connects to the scripted chat host")
+	if not ok:
+		_host_output()
+		_halted = "the scripted chat host never connected"
 	await wait_until(func() -> bool: return dock.get("connection_state") == "connected", 2000)
 	await frames(2)
 	return ok
+
+
+## Print what the last scripted host said on stderr, and whether it is still running.
+func _host_output() -> void:
+	if _host_job == null:
+		return
+	var pid := int(_hosts[-1]) if not _hosts.is_empty() else 0
+	var state := "running" if pid > 0 and OS.is_process_running(pid) else "ended"
+	if state == "ended" and pid > 0:
+		state = "ended with code %d" % OS.get_process_exit_code(pid)
+	if not (_host_job.get("_process") as Dictionary).is_empty():
+		_host_job.call("take_lines")
+	var stderr: PackedByteArray = _host_job.get("_stderr")
+	print("SCENARIO-HOST %s pid %d %s, stderr:" % [_scenario, pid, state])
+	print(stderr.get_string_from_utf8().strip_edges())
 
 
 ## scripted_host.py: JOINERY_SCRIPTED_HOST, or the one beside this script.
