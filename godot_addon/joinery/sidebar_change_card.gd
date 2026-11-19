@@ -269,6 +269,7 @@ func _init(text := "", context: Array = []) -> void:
 	_retry.pressed.connect(func() -> void: retry_requested.emit())
 	UI.bind_height(_retry, "xs")
 	_failure.add_child(_retry)
+	STYLE.first_line(_failure, _failure.get_child(0), _failure_text)
 	_failure.hide()
 	_steps = TRAIL.new()
 	_steps.file_opened.connect(func(path: String) -> void: file_opened.emit(path))

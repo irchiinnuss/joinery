@@ -158,7 +158,8 @@ static func retry(row: Control, pressed: Callable) -> void:
 	button.name = "Retry"
 	button.tooltip_text = "Send this request again"
 	button.accessibility_name = button.tooltip_text
-	button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	# Level with the notice's first line (STYLE.first_line), however far its words wrap.
+	button.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	UI.bind_height(button, "xs")
 	button.pressed.connect(pressed)
 	row.add_child(button)

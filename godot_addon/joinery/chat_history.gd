@@ -344,6 +344,8 @@ func add_notice(text: String, kind := "info") -> void:
 	var label := UI.label(text, "JoineryCaption", true)
 	row.add_child(label)
 	_scale(label, "caption")
+	if row.get_child_count() > 1:
+		STYLE.first_line(row, row.get_child(0), label)
 	var lines := text.split("\n", true, 1)
 	if lines.size() > 1:
 		# One line, and the whole story behind its ›: "Change not applied · … ›".

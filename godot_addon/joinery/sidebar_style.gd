@@ -35,6 +35,27 @@ static func task_card(control: Control) -> void:
 	boxed(control, "JoineryChangeCard", 3)
 
 
+## A status row whose [param words] may wrap: its [param mark] (a glyph) and any small action
+## at its end stay level with the FIRST line, never the middle of the paragraph. The first line
+## is a CONTROL_H.xs band: the words are padded into it, the glyph centred in it, and the
+## row's other controls (an xs-tall "Retry") sit at its top.
+static func first_line(row: HBoxContainer, mark: Control, words: Label) -> void:
+	mark.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	for each: Node in row.get_children():
+		if each is Button:
+			(each as Control).size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	on_theme(mark, func() -> void: mark.custom_minimum_size.y = UI_THEME.control_h(mark, "xs"))
+	on_theme_overrides(
+		words,
+		func() -> void:
+			var band := float(UI_THEME.control_h(words, "xs"))
+			var box := StyleBoxEmpty.new()
+			box.content_margin_top = maxf((band - float(words.get_line_height())) / 2.0, 0.0)
+			box.content_margin_bottom = box.content_margin_top
+			words.add_theme_stylebox_override("normal", box)
+	)
+
+
 ## How far an icon button's glyph sits inside its square (CONTROL_H.md around an ICON.sm
 ## glyph): a row of them reaches this far past the gutter, so the glyphs end on it.
 static func icon_inset(control: Control) -> int:
