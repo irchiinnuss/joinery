@@ -214,3 +214,41 @@ def test_feature_overlay_files_update_too_and_edited_ones_are_kept(
     assert units["behaviour"]["files"][agent] == _sha(found.files[agent])
     assert agent not in units[core_update.CORE_UNIT]["files"]
     assert core_update.plan(project).update == []
+
+
+def test_a_rejected_update_is_not_offered_again_until_it_changes(
+    game: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    first = core_update.offer(game)
+    assert first["state"] == "staged"
+    FileTransaction.load(game, first["transaction_id"]).reject()
+    # The same files going the same way: not offered again, however often the
+    # add-on is refreshed.
+    for _ in range(3):
+        assert core_update.offer(game)["state"] == "declined"
+    remembered = json.loads((game / core_update.DECLINED).read_text())["declined"]
+    ((files,),) = [[v["files"]] for v in remembered.values()]
+    assert files == sorted([REPLAYS, SCRIPT])
+    # Remembered even once the rejected change's journal is gone.
+    for journal in (game / ".joinery/transactions").glob("*/journal.json"):
+        journal.unlink()
+    assert core_update.offer(game)["state"] == "declined"
+    # The way back: the command says so, and stages it when asked.
+    args = argparse.Namespace(project=game, check=True, force=False, json=True)
+    assert core_update.main(args) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["declined"] is True
+    assert any("turned this update down" in line for line in data["words"])
+    # A different update (the game's copy changed, or Joinery ships a new one) is
+    # offered as usual.
+    (game / REPLAYS).write_bytes(OLD + b"# older still\n")
+    _installed_as(game, REPLAYS, OLD + b"# older still\n")
+    assert core_update.offer(game)["state"] == "staged"
+
+
+def test_an_accepted_or_open_update_is_no_decline(game: Path) -> None:
+    tx = core_update.stage(game)
+    assert tx is not None
+    assert core_update.offer(game)["state"] == "pending"
+    tx.accept()
+    assert core_update.declined(game) == {}

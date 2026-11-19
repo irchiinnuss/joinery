@@ -20,6 +20,13 @@ as edited.
 ``stage`` puts every update up as ONE change for review (accept or reject, as
 with any change), and records the new installed hashes in both records, so the
 next update knows them.
+
+A rejected update is remembered by what it would change (:func:`fingerprint`: each
+file's hash before and after) in ``DECLINED`` (``.joinery/core-declined.json``), and
+from the rejected changes' journals, so an add-on refresh never offers the same one
+again. A different update (Joinery ships new versions of those files, or the game's
+copies change) is offered as usual. ``joinery update-core`` always stages it: that is
+the way back to an update turned down.
 """
 
 from __future__ import annotations
@@ -33,10 +40,12 @@ from typing import Any
 
 from joinery import blueprints, source_folders
 from joinery.blockout import build as blockout_build
-from joinery.transactions import FileTransaction
+from joinery.transactions import DIRECTORY, FileTransaction
 
 #: Installed hashes of the Joinery-owned files the game manifest does not track.
 RECORD = ".joinery/core-files.json"
+#: Core updates the user rejected: {fingerprint: {files, declined}}.
+DECLINED = ".joinery/core-declined.json"
 #: The game core's unit in the game manifest.
 CORE_UNIT = "_core"
 #: The blockout level script: written once with the first blockout.
@@ -291,13 +300,86 @@ def stage(
     return stage_change(project, SUMMARY, edit)
 
 
+def fingerprint(changes: list[tuple[str, str, str]]) -> str:
+    """One update's identity: each file's path with its hash before and after ("" for
+    a file that isn't there). The same files going the same way: the same update."""
+    lines = sorted("\0".join(change) for change in changes)
+    return _sha("\n".join(lines).encode("utf-8"))
+
+
+def _planned(project: Path, found: CorePlan) -> list[tuple[str, str, str]]:
+    """What staging ``found`` would change, as (path, before, after)."""
+    changes: list[tuple[str, str, str]] = []
+    for rel in found.writes():
+        path = project / rel
+        before = _sha(path.read_bytes()) if path.is_file() else ""
+        changes.append((rel, before, _sha(found.files[rel])))
+    return changes
+
+
+def _journal_changes(tx: FileTransaction) -> list[tuple[str, str, str]]:
+    return [
+        (str(c["path"]), str(c.get("before", "")), str(c.get("after", "")))
+        for c in tx.changes
+        if DIRECTORY not in (c.get("before"), c.get("after"))
+    ]
+
+
+def declined(project: Path) -> dict[str, dict[str, Any]]:
+    """Core updates the user rejected: {fingerprint: {files, declined}}, from
+    ``DECLINED`` and from the journals of rejected core updates (kept in ``DECLINED``
+    the first time they are read, so pruning old changes forgets none)."""
+    path = project / DECLINED
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raw = {}
+    known: dict[str, dict[str, Any]] = {
+        str(k): dict(v)
+        for k, v in (raw.get("declined", {}) if isinstance(raw, dict) else {}).items()
+        if isinstance(v, dict)
+    }
+    found = dict(known)
+    for journal in sorted((project / ".joinery/transactions").glob("*/journal.json")):
+        try:
+            tx = FileTransaction.load(project, journal.parent.name)
+        except (OSError, ValueError):
+            continue
+        if tx.summary != SUMMARY or tx.state != "rejected":
+            continue
+        changes = _journal_changes(tx)
+        if changes:
+            found.setdefault(
+                fingerprint(changes),
+                {"files": sorted(c[0] for c in changes), "declined": tx.decided},
+            )
+    if found != known:
+        _save_declined(project, found)
+    return found
+
+
+def _save_declined(project: Path, found: dict[str, dict[str, Any]]) -> None:
+    path = project / DECLINED
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        text = json.dumps({"declined": dict(sorted(found.items()))}, indent=2)
+        path.write_text(text + "\n", encoding="utf-8")
+    except OSError:
+        pass  # The journals still say so.
+
+
 def offer(project: Path) -> dict[str, Any]:
     """After the add-on is refreshed: stage the core update for review when there
-    is one and none waits already. Never raises; the outcome says what happened."""
+    is one, none waits already, and the user didn't reject this same one before.
+    Never raises; the outcome says what happened."""
     try:
         if pending(project) is not None:
             return {"state": "pending"}
         found = plan(project)
+        changes = _planned(project, found)
+        if changes and fingerprint(changes) in declined(project):
+            # Turned down before, and nothing about it changed since.
+            return {"state": "declined", **found.as_json()}
         tx = stage(project, found=found)
     except (OSError, ValueError, RuntimeError) as exc:
         return {"state": "failed", "message": str(exc) or type(exc).__name__}
@@ -345,6 +427,14 @@ def main(args: Any) -> int:
         return 1
     data: dict[str, Any] = {**found.as_json(), "forced": bool(args.force)}
     lines = _words(found, args.force) or ["Joinery's core game files are current."]
+    if args.check and found.writes():
+        turned_down = fingerprint(_planned(project, found)) in declined(project)
+        data["declined"] = turned_down
+        if turned_down:
+            lines.append(
+                "You turned this update down before, so an add-on update doesn't "
+                "offer it again. Run update-core without --check to review it."
+            )
     if tx is not None:
         data.update(transaction_id=tx.id, state=tx.state, summary=tx.summary)
         lines.append(
