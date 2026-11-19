@@ -373,10 +373,15 @@ func _host_output() -> void:
 
 
 ## The scripted hosts die at once, as a crash would. Killed from outside (OS.kill would also
-## reap them, which the sidebar's own job then can't).
+## reap them, which the sidebar's own job then can't). Windows has no kill: taskkill ends the
+## host and anything it started (a venv's python.exe runs the real one as its child).
 func kill_hosts() -> void:
 	for pid: int in _hosts:
-		if pid > 0 and OS.is_process_running(pid):
+		if pid <= 0 or not OS.is_process_running(pid):
+			continue
+		if OS.get_name() == "Windows":
+			OS.execute("taskkill", ["/F", "/T", "/PID", str(pid)])
+		else:
 			OS.execute("kill", ["-9", str(pid)])
 
 
