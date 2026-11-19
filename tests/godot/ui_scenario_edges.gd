@@ -69,10 +69,10 @@ static func odd_reply() -> String:
 	return SCRIPTS + "\n\n" + "x".repeat(5000) + "\n\n" + MALFORMED
 
 
-## About 50 KB of reply.
+## About 50 KB of reply, in paragraphs as replies come.
 static func huge_reply() -> String:
-	var line := "The tide comes in over the harbour wall and the lamps hold steady. "
-	return line.repeat(50 * 1024 / line.length() + 1)
+	var paragraph := "The tide comes in over the harbour wall and the lamps hold steady. ".repeat(6)
+	return (paragraph.strip_edges() + "\n\n").repeat(50 * 1024 / (paragraph.length() + 2) + 1)
 
 
 ## Send twice with one click each, Send then Stop at once, Stop twice, and Esc while the command
@@ -173,13 +173,14 @@ func _huge_reply() -> void:
 		count += 1
 	s.metric("huge_worst_frame", worst, "ms")
 	await s.frames(6)
-	var expected := huge_reply().strip_edges()
-	var shown := s.reply_shown().strip_edges()
+	# Paragraph breaks show as breaks, not as the blank lines typed: compare the words.
+	var expected := huge_reply().replace("\n", "")
+	var shown := s.reply_shown().replace("\n", "")
 	s.check(
 		shown.length() == expected.length(),
 		"The 50 KB reply arrives whole (%d of %d chars)" % [shown.length(), expected.length()]
 	)
-	s.check(worst < 1000.0, "No frame takes a second while it streams (%.0f ms)" % worst)
+	s.check(worst < 500.0, "No frame takes half a second while it streams (%.0f ms)" % worst)
 	var scroll := s.transcript() as ScrollContainer
 	var bar := scroll.get_v_scroll_bar()
 	s.check(bar.max_value - bar.page - scroll.scroll_vertical <= 8, "It ends at the newest")
@@ -204,7 +205,11 @@ func _long_chat() -> void:
 	await s.frames(2)
 	var took := Time.get_ticks_msec() - started
 	s.metric("long_chat_open", took, "ms")
-	s.check(took < 30000, "2,000 messages open in under 30 s (%d ms)" % took)
+	s.expect_bug(
+		took < 5000,
+		"2,000 messages open in under 5 s (%d ms)" % took,
+		"each request card takes several ms to build, and a reopened chat builds them all at once"
+	)
 	var scroll := s.transcript() as ScrollContainer
 	var worst := 0.0
 	for step: int in 20:

@@ -203,6 +203,9 @@ func run(only: Array = []) -> bool:
 		await _hosts_end()
 		_no_errors()
 	OS.remove_logger(_errors)
+	# The scenarios hold this runner and it holds them: let go, so nothing is in use at exit.
+	_cases.set("s", null)
+	_edges.set("s", null)
 	return not _failed
 
 
