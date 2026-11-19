@@ -11,7 +11,10 @@ the same plain way everywhere:
     The disk is full (2 GB free). Free space, then Retry.
     Docker isn't running. Start Docker Desktop, then Retry.
 
-Nothing here starts, stops or changes Docker: it is only asked for its version.
+Docker is asked about only when the project's work runs in it (one of its tools
+has a worker image); the disk is checked for every project. Nothing here starts,
+stops or changes Docker: it is only asked for its version (about 0.2 s when it is
+up).
 """
 
 from __future__ import annotations
@@ -158,15 +161,41 @@ def provider_failure(text: str) -> bool:
     return _PROVIDER_FAILED.search(text) is not None
 
 
+def docker_needed(project: Path) -> bool:
+    """Whether this project's work runs in Docker workers: one of its tools, as
+    ``joinery doctor`` and setup select them (``joinery.toml`` plus the required
+    ones), has a worker image. Godot's own checks are the ``godot`` tool's worker.
+    A folder without a readable ``joinery.toml`` isn't asked about Docker."""
+    from joinery import tools
+    from joinery.catalog import load_catalog, load_project_tools, selection_ids
+
+    config = project / "joinery.toml"
+    if not config.is_file():
+        return False
+    try:
+        ids = selection_ids(load_catalog(), load_project_tools(config))
+    except (OSError, ValueError):
+        return False  # Never block on a guess; a failed call still says why.
+    return any(
+        tools.REGISTRY[tool_id].worker_image
+        for tool_id in ids
+        if tool_id in tools.REGISTRY
+    )
+
+
 def checker(project: Path) -> Check:
     """The check a chat host runs before a turn and while a long step runs: the
-    project's disk and Docker's, then Docker itself."""
+    project's disk, and, when the project's work runs in Docker
+    (:func:`docker_needed`), Docker's disk and whether Docker answers."""
 
     async def check() -> str:
         if os.environ.get(SWITCH, "").lower() == "off":
             return ""
-        places = [project, *docker_data()]
+        docker = await asyncio.to_thread(docker_needed, project)
+        places = [project, *(docker_data() if docker else [])]
         found = await asyncio.to_thread(disk_problem, places)
-        return found or await docker_problem()
+        if found or not docker:
+            return found
+        return await docker_problem()
 
     return check

@@ -20,6 +20,7 @@ from joinery import gateway as gateway_module
 from joinery import machine_health as mh
 from joinery import submission
 from joinery.authoring import WorkerTimeout
+from joinery.catalog import load_catalog, load_project_tools, selection_ids
 from joinery.gateway import ProjectGateway
 from joinery.gateway_rpc import GatewayRPC
 from joinery.runner import Result
@@ -117,6 +118,7 @@ def test_docker_is_asked_for_its_version_and_a_stopped_or_hung_one_is_down(
 def test_the_hosts_check_is_disk_first_then_docker_and_can_be_off(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, two_gb_free: None
 ) -> None:
+    (tmp_path / "joinery.toml").write_text("[tools]\nenabled = []\n")
     check = mh.checker(tmp_path)
     assert asyncio.run(check()) == ""  # Off in tests (conftest).
     monkeypatch.setenv(mh.SWITCH, "on")
@@ -248,3 +250,54 @@ def test_a_turn_on_a_full_disk_stops_before_the_agent_starts(
         e for e in events if e.get("kind") == "done"
     ).items()
     assert next(e for e in events if e.get("kind") == "timing")["outcome"] == "failed"
+
+
+def _stopped_docker(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    asked: list[int] = []
+
+    async def stopped(timeout: float = 0) -> str:
+        asked.append(1)
+        return mh.DOCKER_DOWN
+
+    monkeypatch.setenv(mh.SWITCH, "on")
+    monkeypatch.setattr(mh, "free_bytes", lambda _path: 90_000_000_000)
+    monkeypatch.setattr(mh, "docker_problem", stopped)
+    return asked
+
+
+def test_a_project_whose_work_needs_no_docker_is_never_held_by_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asked = _stopped_docker(monkeypatch)
+    # Its engine is the user's own tool and nothing else is enabled: no worker.
+    (tmp_path / "joinery.toml").write_text(
+        '[tools]\nenabled = []\n\n[[tools.custom]]\nid = "my-engine"\n'
+        'name = "My engine"\ndomain = "engine"\nserver = "my-engine"\n'
+        'command = "my-engine-mcp"\n'
+    )
+    # Read as doctor reads it: the user's engine stands in for Godot.
+    chosen = load_project_tools(tmp_path / "joinery.toml")
+    assert selection_ids(load_catalog(), chosen) == []
+    assert not mh.docker_needed(tmp_path)
+    assert asyncio.run(mh.checker(tmp_path)()) == ""
+    assert asked == []
+    # Not a Joinery project at all: never asked either.
+    (tmp_path / "joinery.toml").unlink()
+    assert not mh.docker_needed(tmp_path)
+    # The disk is still checked for it.
+    monkeypatch.setattr(mh, "free_bytes", lambda _path: 2_100_000_000)
+    monkeypatch.setattr(mh, "MIN_FREE", 3_000_000_000)
+    assert asyncio.run(mh.checker(tmp_path)()) == FULL
+
+
+def test_a_project_whose_tools_run_in_workers_is_held_by_a_stopped_docker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asked = _stopped_docker(monkeypatch)
+    # Godot is every project's required tool; its checks run in its worker.
+    (tmp_path / "joinery.toml").write_text("[tools]\nenabled = []\n")
+    assert mh.docker_needed(tmp_path)
+    assert asyncio.run(mh.checker(tmp_path)()) == mh.DOCKER_DOWN
+    (tmp_path / "joinery.toml").write_text('[tools]\nenabled = ["blender"]\n')
+    assert asyncio.run(mh.checker(tmp_path)()) == mh.DOCKER_DOWN
+    assert asked == [1, 1]
