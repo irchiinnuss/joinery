@@ -1,0 +1,72 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ninjacornix <milanvrankic@gmail.com>
+Date: Thu, 19 Nov 2026 10:44:51 +0100
+Subject: [PATCH] fix(editor): skip scenes closed or reloaded during a reimport
+
+EditorNode records the instance nodes of every open scene that uses a
+reimported scene on resources_reimporting and swaps them for the new
+import on resources_reimported. Progress dialogs run the main loop in
+between, so a plugin or script can close or reload one of those scenes,
+freeing the recorded nodes; the swap then read freed memory and crashed.
+Record each scene's root, find the scene by it when swapping, and skip
+a scene that is gone (a reloaded scene already loads the new import).
+---
+ editor/editor_node.cpp | 21 +++++++++++++++++++--
+ editor/editor_node.h   |  3 +++
+ 2 files changed, 22 insertions(+), 2 deletions(-)
+
+diff --git a/editor/editor_node.cpp b/editor/editor_node.cpp
+index 44b9853..01bd521 100644
+--- a/editor/editor_node.cpp
++++ b/editor/editor_node.cpp
+@@ -7393,6 +7393,7 @@ void EditorNode::preload_reimporting_with_path_in_edited_scenes(const List<Strin
+ 
+ 		if (edited_scene_root) {
+ 			SceneModificationsEntry scene_modifications;
++			scene_modifications.root_id = edited_scene_root->get_instance_id();
+ 
+ 			for (const String &instance_path : p_scenes) {
+ 				if (editor_data.get_scene_path(current_scene_idx) == instance_path) {
+@@ -7468,10 +7469,26 @@ void EditorNode::reload_instances_with_path_in_edited_scenes() {
+ 	int original_edited_scene_idx = editor_data.get_edited_scene();
+ 
+ 	for (KeyValue<int, SceneModificationsEntry> &scene_modifications_elem : scenes_modification_table) {
+-		// Set the current scene.
+-		int current_scene_idx = scene_modifications_elem.key;
+ 		SceneModificationsEntry *scene_modifications = &scene_modifications_elem.value;
+ 
++		// Progress dialogs run the main loop while files import, so a plugin or script may have
++		// closed or reloaded this scene since its instances were recorded. Its nodes are freed
++		// then (a reloaded scene already loads the new import), and closing another tab shifts
++		// the indices: find the scene by its root, and skip it when it is gone.
++		int current_scene_idx = -1;
++		for (int i = 0; i < editor_data.get_edited_scene_count(); i++) {
++			Node *root = editor_data.get_edited_scene_root(i);
++			if (root && root->get_instance_id() == scene_modifications->root_id) {
++				current_scene_idx = i;
++				break;
++			}
++		}
++		if (current_scene_idx == -1) {
++			continue;
++		}
++
++		// Set the current scene.
++
+ 		editor_data.set_edited_scene(current_scene_idx);
+ 		Node *current_edited_scene = editor_data.get_edited_scene_root(current_scene_idx);
+ 
+diff --git a/editor/editor_node.h b/editor/editor_node.h
+index 01db129..b794673 100644
+--- a/editor/editor_node.h
++++ b/editor/editor_node.h
+@@ -911,6 +911,9 @@ public:
+ 	};
+ 
+ 	struct SceneModificationsEntry {
++		// The scene's root when its instances were recorded. Closing or reloading the scene
++		// before the reimport ends frees every node recorded here.
++		ObjectID root_id;
+ 		List<InstanceModificationsEntry> instance_list;
+ 		HashMap<NodePath, ModificationNodeEntry> other_instances_modifications;
+ 	};
