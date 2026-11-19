@@ -20,6 +20,19 @@ func _init() -> void:
 	set_process(false)
 
 
+## The Review panel from [param path] (review_panel.gd), or a plain stand-in when it can't load.
+static func make_panel(path: String) -> Control:
+	var panel: Control = null
+	if ResourceLoader.exists(path):
+		var script := load(path) as Script
+		if script != null and script.can_instantiate():
+			panel = script.new() as Control
+	if panel == null:
+		panel = VBoxContainer.new()
+	panel.name = "Review"
+	return panel
+
+
 ## Run [param open] now, or once the user stops typing. [param key] names what it opens.
 func request(open: Callable, key := "main") -> void:
 	_waiting.erase(key)

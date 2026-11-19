@@ -183,7 +183,7 @@ func _ready() -> void:
 	_slash.finished.connect(_on_slash_finished)
 	_slash.feature_planned.connect(_on_feature_planned)
 	_slash.feature_applied.connect(_on_feature_applied)
-	_slash.readiness_changed.connect(_header.notice.show_readiness)
+	_slash.readiness_changed.connect(_on_readiness)
 	_slash.revertible_changed.connect(_on_revertible)
 	add_child(_slash)
 	_reverts = REVERTS.new(self, _slash, _composer)
@@ -597,6 +597,11 @@ func _on_feature_applied(ok: bool, message: String, transaction_id: String) -> v
 		EditorInterface.get_resource_filesystem().scan()
 
 
+## The header's notice names the apps that need something, with the button that fixes it.
+func _on_readiness(report: Dictionary) -> void:
+	_header.notice.show_readiness(report)
+
+
 ## Which accepted changes can still be reverted, from `joinery transactions list`.
 func _on_revertible(states: Dictionary) -> void:
 	for id: String in states:
@@ -968,14 +973,7 @@ func _decide(kind: String, text: String, ask: Signal) -> void:
 
 
 func _make_review() -> Control:
-	var panel: Control = null
-	if ResourceLoader.exists(REVIEW_PATH):
-		var script := load(REVIEW_PATH) as Script
-		if script != null and script.can_instantiate():
-			panel = script.new() as Control
-	if panel == null:
-		panel = VBoxContainer.new()
-	panel.name = "Review"
+	var panel := OPENER.make_panel(REVIEW_PATH)
 	var links := {
 		"accept_pressed": _on_accept,
 		"reject_pressed": _on_reject,
