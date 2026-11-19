@@ -3,9 +3,10 @@ extends VBoxContainer
 ## The sidebar's top. When all is well it holds only the "Journeyman" title on the left (the
 ## app's heading style, JoineryTitle) and the icon buttons on the right: no status, no dot.
 ## It says "Connecting…" with the activity dots while Journeyman connects, and a red dot with
-## "Offline" after a failure (one short word, so it fits beside the title when narrow). When Journeyman is not reachable a banner offers
-## the one action that fixes it, in a danger-tinted banner. First-run setup (no agent yet) is a
-## step, not a failure: the empty chat's blankslate offers Connect then, and the header is quiet.
+## "Offline" after a failure; a sidebar too narrow for the word keeps the dot alone, never a
+## word cut short. When Journeyman is not reachable a banner offers the one action that fixes
+## it, in a danger-tinted banner. First-run setup (no agent yet) is a step, not a failure: the
+## empty chat's blankslate offers Connect then, and the header is quiet.
 ## The banner keeps SPACE.5 above and below, like other sections.
 ##
 ## Below the banner, one notice can say what Joinery or the project's apps need, with a button
@@ -116,6 +117,7 @@ func _init() -> void:
 	row.add_child(_indicator)
 	_name = UI.label("", "JoineryCaption")
 	_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_name.resized.connect(_fit_name)
 	row.add_child(_name)
 	unplayed = UI.quiet_link("")
 	unplayed.name = "Unplayed"
@@ -208,6 +210,7 @@ func show_state(state: String, agent: String, detail := "", with_banner := true)
 	var words := {"connecting": "Connecting…", "error": "" if banner else "Offline"}
 	_name.text = str(words.get(state, ""))
 	_name.tooltip_text = _name.text
+	_fit_name()
 	if state == "connected":
 		_show_count()
 	if state == "error" and with_banner:
@@ -379,3 +382,16 @@ func _paint_banner() -> void:
 		return
 	var role := "accent_tint" if _banner_kind == "none" else "danger_tint"
 	_banner_style.bg_color = _banner.get_theme_color(role, "Joinery")
+
+
+## A status word that would be cut short ("Offli") is left out in a narrow sidebar: the dot
+## and its tooltip still say it. Its room never depends on its words, so this never flickers.
+func _fit_name() -> void:
+	var font := _name.get_theme_font("font")
+	# Only the connection's word: the agents' count keeps its own short form.
+	if font == null or not _name.text in ["Offline", "Connecting…"]:
+		_name.self_modulate.a = 1.0
+		return
+	var size := _name.get_theme_font_size("font_size")
+	var need := font.get_string_size(_name.text, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+	_name.self_modulate.a = 1.0 if need <= _name.size.x + 0.5 else 0.0
