@@ -56,6 +56,7 @@ from joinery.roles import (
     CALL_TOOLS,
     READ_TOOL,
     ROLE_ENV,
+    ShellPlace,
     native_writer,
     read_only_command,
     role_violation,
@@ -241,6 +242,20 @@ def rule_zero(event: Event) -> Verdict | None:
     return None
 
 
+def shell_place(event: Event, raw: dict[str, Any]) -> ShellPlace:
+    """Where ``raw``'s shell command runs: its own working folder (Codex's
+    ``workdir``, Gemini's ``directory``), else the call's cwd, else the project."""
+    values = raw.get("tool_input") or raw.get("args") or {}
+    folder = ""
+    if isinstance(values, Mapping):
+        folder = str(values.get("workdir") or values.get("directory") or "")
+    folder = folder or str(raw.get("cwd") or raw.get("directory") or "")
+    cwd = Path(folder) if folder else event.project_dir
+    if not cwd.is_absolute():
+        cwd = event.project_dir / cwd
+    return ShellPlace(cwd, event.project_dir)
+
+
 def staged_folders(event: Event, raw: dict[str, Any], role: str) -> Verdict | None:
     """The provider's own shell and file tools against ``.joinery/transactions/``.
 
@@ -260,7 +275,11 @@ def staged_folders(event: Event, raw: dict[str, Any], role: str) -> Verdict | No
         )
     except ValueError:
         read_only = True
-    why = unknown_reader(event.command) if event.kind == "bash" else ""
+    why = (
+        unknown_reader(event.command, shell_place(event, raw))
+        if event.kind == "bash"
+        else ""
+    )
     writes = bool(why) if event.kind == "bash" else native_writer(native)
     return stage_violation(allowed, values, read_only=read_only, writes=writes, why=why)
 
@@ -309,6 +328,7 @@ def violation(raw: dict[str, Any]) -> Verdict | None:
             str(raw.get("tool_name") or raw.get("tool") or ""),
             values if isinstance(values, dict) else {},
             event.project_dir,
+            shell_place(event, raw) if event.kind == "bash" else None,
         )
         return refused or verdict
     if os.environ.get("JOINERY_INSPECTION_ONLY") == "1":
@@ -357,10 +377,12 @@ def search_allowed(raw: dict[str, Any]) -> bool:
     :func:`violation` has passed the call, so Rule Zero, the denylist and the
     staged-change folders have judged it first."""
     event = normalise_event(raw)
-    return event.kind == "bash" and shell_search({"command": event.command})
+    return event.kind == "bash" and shell_search(
+        {"command": event.command}, shell_place(event, raw)
+    )
 
 
-def shell_search(arguments: object) -> bool:
+def shell_search(arguments: object, place: ShellPlace | None = None) -> bool:
     """``arguments`` (a shell tool's input: ``command`` or ``cmd``) only read the
     project, and nothing in it is refused by Rule Zero or the denylist. The one
     test every agent's own shell is let through by (the hook for Claude Code,
@@ -371,7 +393,7 @@ def shell_search(arguments: object) -> bool:
     if isinstance(command, list):
         command = " ".join(str(part) for part in command)
     command = str(command)
-    if not command.strip() or not read_only_command(command):
+    if not command.strip() or not read_only_command(command, place):
         return False
     return (
         command_violation(command, load_denylist()) is None

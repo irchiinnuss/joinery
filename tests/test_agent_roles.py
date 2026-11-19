@@ -18,11 +18,13 @@ from joinery.policy import Severity
 from joinery.roles import (
     ROLE_ENV,
     SPECS,
+    ShellPlace,
     read_only_command,
     reviewer_settings,
     set_reviewer,
     spec,
 )
+from joinery.stage_access import STAGE_ENV
 
 
 def payload(
@@ -188,10 +190,9 @@ def test_read_only_roles_reach_audited_reads_only(
         ("cat a 2>&1 > out.txt", False),
         ("awk '{print > \"f\"}' a", False),
         ("ls | xargs rm", False),
-        # git's global options before a read; the subcommand is what's judged.
-        ("git -C /p/yard-day diff --no-index a b", True),
-        ("git --no-pager -C x log --oneline -3", True),
-        ("git --git-dir=x/.git --work-tree=x status", True),
+        # git's global options before a read; the subcommand is what's judged
+        # (where -C, --work-tree and --git-dir may point: the test below).
+        ("git --no-pager log --oneline -3", True),
         ("git -c color.ui=never show HEAD", True),
         ("git -C x commit -am y", False),
         ("git -C x push", False),
@@ -205,7 +206,7 @@ def test_read_only_roles_reach_audited_reads_only(
         ("git -C", False),
         ("git -C x diff --output=out.txt", False),
         ("GIT_EXTERNAL_DIFF=./evil git diff", False),
-        ("LC_ALL=C git -C x log", True),
+        ("LC_ALL=C git log", True),
         # Readers Journeyman's reviewers and debugger reached for.
         ("ls -la .godot/imported; date", True),
         ("date +%s", True),
@@ -236,6 +237,87 @@ def test_read_only_roles_run_only_reading_commands(
             "cwd": str(project),
         }
         assert judged(monkeypatch, role, raw) == (None if allowed else Severity.DENY)
+
+
+def test_git_reads_only_the_projects_own_repository(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "game"
+    (root / ".git").mkdir(parents=True)
+    (root / "sub").mkdir()
+    (root / "joinery.toml").write_text('[tools]\nenabled=["godot"]\n')
+    # A folder in the project holding its own repository (its config could run a
+    # program on a read), and one outside the project.
+    (root / "planted/.git").mkdir(parents=True)
+    (root / "gitfile").mkdir()
+    (root / "gitfile/.git").write_text("gitdir: /tmp/elsewhere\n")
+    outside = tmp_path / "x"
+    (outside / ".git").mkdir(parents=True)
+    mine, other = "a" * 32, "b" * 32
+    for change in (mine, other):
+        (root / f".joinery/transactions/{change}/stage").mkdir(parents=True)
+    (root / f".joinery/transactions/{mine}/stage/nested/.git").mkdir(parents=True)
+    for name in ("CLAUDE_PROJECT_DIR", "CODEX_PROJECT_DIR", "JOINERY_INSPECTION_ONLY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv(STAGE_ENV, mine)
+    place = ShellPlace(root, root)
+    stage = f".joinery/transactions/{mine}/stage"
+    allowed = [
+        f"git -C {root} diff",
+        f"git -C {root}/sub log",
+        "git -C sub log --oneline",
+        "git --no-pager -C sub log",
+        f"git --git-dir={root}/.git log",
+        f"git --git-dir {root}/.git --work-tree={root} status",
+        "cd sub && git status",
+        f"cd {stage} && git diff --no-index a.gd b.gd",
+        f"git -C {stage} status",
+        "LC_ALL=C git -C sub log",
+    ]
+    refused = [
+        f"git -C {outside} status",
+        "git -C ../x status",
+        "git -C /tmp/x status",
+        f"git --git-dir={outside}/.git log",
+        "git --git-dir=/tmp/x/.git log",
+        f"git --work-tree={outside} status",
+        "git -C planted log",
+        "git -C planted/deeper log",
+        "cd planted && git status",
+        "cd gitfile && git log",
+        "git --work-tree=planted status",
+        f"git -C {stage}/nested log",
+        f"cd {stage}/nested && git status",
+        f"git -C .joinery/transactions/{other}/stage diff",
+        "git -C .joinery log",
+        "cd ~ && git log",
+        "cd $HOME && git log",
+        "git -C sub* log",
+        "cd .. && git log",
+    ]
+    for command in allowed:
+        assert read_only_command(command, place), command
+    for command in refused:
+        assert not read_only_command(command, place), command
+    # Through the hook, as each read-only role's shell call is judged.
+    for role in ("reviewer", "debugger"):
+        monkeypatch.setenv(ROLE_ENV, role)
+        for command, ok in [(c, True) for c in allowed] + [(c, False) for c in refused]:
+            raw = {
+                "tool_name": "Bash",
+                "tool_input": {"command": command},
+                "cwd": str(root),
+            }
+            verdict = violation(raw)
+            assert (verdict is None) is ok, (role, command, verdict)
+    # Not knowing where it runs, git keeps to the session's own folder.
+    assert read_only_command("git log")
+    for command in (
+        f"git -C {root} diff",
+        "cd sub && git log",
+        "git --git-dir=.git log",
+    ):
+        assert not read_only_command(command), command
 
 
 def test_a_refused_command_says_which_program_isnt_known_to_read(

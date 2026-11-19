@@ -38,6 +38,7 @@ model-facing API, and the read-only roles can't write anything at all.
 
 from __future__ import annotations
 
+import os
 import re
 import tomllib
 from collections.abc import Mapping
@@ -48,6 +49,7 @@ from typing import Any, Literal, get_args
 from joinery.policy import Severity, Verdict
 from joinery.read_access import read_only
 from joinery.shell_words import simple_commands
+from joinery.stage_access import STAGE_ENV, stage_id
 
 Role = Literal[
     "lead",
@@ -548,16 +550,123 @@ _HARMLESS_REDIRECT = re.compile(
 )
 
 
-def not_read_only(command: str) -> str:
+@dataclass(frozen=True)
+class ShellPlace:
+    """Where a shell command runs: the folder it starts in and the project root.
+
+    git reads the configuration of the repository it finds, and that configuration
+    can run programs on a plain read (core.fsmonitor, core.pager, diff.external, a
+    textconv driver). So git only reads when the repository is the project's own:
+    every folder git is pointed at (``cd``, ``-C``, ``--work-tree``) lies in the
+    project, no other ``.git`` sits between it and the project root, and
+    ``--git-dir`` is the project's ``.git``."""
+
+    cwd: Path
+    project: Path
+
+
+def _git_value_options(args: list[str]) -> list[tuple[str, str]]:
+    """git's folder options before the subcommand, in order: (-C, dir)…"""
+    found: list[tuple[str, str]] = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        name, joined, value = arg.partition("=")
+        if joined and name in _GIT_GLOBAL_VALUE and name.startswith("--"):
+            found.append((name, value))
+        elif arg in _GIT_GLOBAL_VALUE and i + 1 < len(args):
+            found.append((arg, args[i + 1]))
+            i += 1
+        elif arg == "-c":
+            i += 1
+        elif not arg.startswith("-"):
+            break
+        i += 1
+    return found
+
+
+def _literal_path(value: str) -> bool:
+    """A folder named as it is: no ~, $, glob or ``cd -``."""
+    return bool(value) and value != "-" and not re.search(r"[~$*?\[{`]", value)
+
+
+def _projects_own(folder: Path, place: ShellPlace) -> bool:
+    """``folder`` (resolved) is in the project, outside every staged change but the
+    session's own, and git finds the project's repository from it: no other ``.git``
+    between it and the project root."""
+    root = place.project.resolve()
+    if folder != root and root not in folder.parents:
+        return False
+    changes = root / ".joinery"
+    if folder == changes or changes in folder.parents:
+        allowed = stage_id(os.environ.get(STAGE_ENV, ""))
+        mine = changes / "transactions" / allowed if allowed else None
+        if mine is None or (folder != mine and mine not in folder.parents):
+            return False
+    probe = folder
+    while probe != root:
+        if (probe / ".git").exists() or (probe / ".git").is_symlink():
+            return False  # a nearer repository: git would read its config
+        probe = probe.parent
+    return True
+
+
+def _git_where(args: list[str], here: Path | None, place: ShellPlace | None) -> bool:
+    """git run from ``here`` with ``args`` reads the project's own repository.
+
+    With no place known, only a plain git in the session's own folder passes
+    (``here`` is None once a ``cd`` moved it)."""
+    options = _git_value_options(args)
+    if place is None:
+        return here is not None and not options
+    if here is None:
+        return False
+    folder = here
+    for name, value in options:
+        if not _literal_path(value):
+            return False
+        target = (folder / value).resolve()
+        if name == "-C":
+            folder = target
+            if not _projects_own(folder, place):
+                return False
+        elif name == "--work-tree":
+            if not _projects_own(target, place):
+                return False
+        elif name == "--git-dir":
+            if target != (place.project / ".git").resolve():
+                return False
+        else:
+            return False  # --namespace and the like: not needed for a read
+    return _projects_own(folder, place)
+
+
+def not_read_only(command: str, place: ShellPlace | None = None) -> str:
     """Why ``command`` isn't known to only read: the first program that may write or
-    run another, or "a redirection or substitution"; "" when every part only reads."""
+    run another, or "a redirection or substitution"; "" when every part only reads.
+    ``place``: where it runs, so git is held to the project's own repository."""
     inner = _HARMLESS_REDIRECT.sub(" ", _unwrap(command))
     if re.search(r"[<>`]|\$\(|&(?!&)", inner.replace("&&", "")):
         return "a redirection or substitution"
     segments = _segments(inner)
     if segments is None:
         return "a command Joinery can't parse"
+    # Where each part runs: the session's folder until a cd moves it (None: not
+    # known, or moved where no place is given to check it against).
+    here: Path | None = place.cwd.resolve() if place is not None else Path(".")
     for words in segments:
+        bare = [w for w in words if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=\S*", w)]
+        if bare and Path(bare[0]).name == "cd":
+            targets = [w for w in bare[1:] if not w.startswith("-")]
+            if place is None or here is None or len(targets) != 1:
+                here = None
+            elif _literal_path(targets[0]):
+                here = (here / targets[0]).resolve()
+            else:
+                here = None
+        git = bare and Path(bare[0]).name == "git" and _reads(words)
+        if git and not _git_where(bare[1:], here, place):
+            return "`git` outside the project's own repository"
         if not _reads(words):
             program = next(
                 (
@@ -575,16 +684,16 @@ def not_read_only(command: str) -> str:
     return ""
 
 
-def read_only_command(command: str) -> bool:
+def read_only_command(command: str, place: ShellPlace | None = None) -> bool:
     """True when every part of ``command`` only reads: no redirection (beyond
     dropping or joining error output), no substitution, nothing run in the
-    background, only known readers."""
-    return not not_read_only(command)
+    background, only known readers, git only on the project's own repository."""
+    return not not_read_only(command, place)
 
 
-def unknown_reader(command: str) -> str:
+def unknown_reader(command: str, place: ShellPlace | None = None) -> str:
     """The refusal's reason for a shell command a read-only role may not run."""
-    why = not_read_only(command)
+    why = not_read_only(command, place)
     return (
         f"This agent only reads: {why} isn't a command Joinery knows only reads "
         "(cat, ls, rg, stat, git log/diff/show and other plain readers are)."
@@ -666,8 +775,11 @@ def role_violation(
     native: str = "",
     arguments: Mapping[str, Any] | None = None,
     project: Path | None = None,
+    place: ShellPlace | None = None,
 ) -> Verdict | None:
     """What ``role`` may not do, beyond Rule Zero (which the caller judges first).
+
+    ``place``: where a shell command runs (default: the project root, when known).
 
     ``kind`` is the hook's canonical event kind: "mcp", "bash", "fetch" or "other";
     ``native`` is the provider's own tool name for "other".
@@ -707,7 +819,9 @@ def role_violation(
             return Verdict(Severity.DENY, refusal(role))
         return Verdict(Severity.DENY, refusal(role))
     if kind == "bash":
-        why = unknown_reader(command)
+        if place is None and project is not None:
+            place = ShellPlace(project, project)
+        why = unknown_reader(command, place)
         return Verdict(Severity.DENY, f"{refusal(role)} {why}") if why else None
     if kind == "fetch":
         return Verdict(Severity.DENY, "Read-only agents work offline; no web access.")

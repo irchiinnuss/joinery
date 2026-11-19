@@ -36,7 +36,7 @@ from joinery.chat_attachments import encoded
 from joinery.hook import shell_search
 from joinery.mcp_runtime import PolicyStop, validate_arguments
 from joinery.platform_support import launch_argv
-from joinery.roles import ROLE_ENV
+from joinery.roles import ROLE_ENV, ShellPlace
 from joinery.stage_access import NO_STAGE, STAGE_ENV
 
 
@@ -131,6 +131,19 @@ class ACPUsage:
 
 
 class ACPSession:
+    def _shell_place(self, raw: object) -> ShellPlace | None:
+        """Where an ACP shell call runs, so git is held to the project's own
+        repository (joinery.roles.ShellPlace); None before a project is open."""
+        if not self.project.is_absolute():
+            return None
+        folder = ""
+        if isinstance(raw, dict):
+            folder = str(raw.get("cwd") or raw.get("workdir") or "")
+        cwd = Path(folder) if folder else self.project
+        return ShellPlace(
+            cwd if cwd.is_absolute() else self.project / cwd, self.project
+        )
+
     def __init__(self, agent: str) -> None:
         self.agent = agent
         self.gateway_socket: Path | None = None
@@ -492,7 +505,10 @@ class ACPSession:
             allowed = (
                 call.get("kind") in {"read", "search"}
                 or "joinery-registry" in title
-                or (call.get("kind") == "execute" and shell_search(raw))
+                or (
+                    call.get("kind") == "execute"
+                    and shell_search(raw, self._shell_place(raw))
+                )
             )
         except PolicyStop as exc:
             await self.events.put(
