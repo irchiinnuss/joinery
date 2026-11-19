@@ -200,22 +200,31 @@ func _run_revert_and_gate() -> void:
 		chat._transcript.revert_requested.disconnect(link["callable"])
 	chat._transcript.revert_requested.connect(func(id: String) -> void: asked.append(id))
 	card._revert.pressed.emit()
+	var question: Control = card._line.asking()
+	_check(question != null and asked.is_empty(), "Revert asks first and runs nothing yet")
+	question.get("action").pressed.emit()
 	_check(asked == ["tx-new"], "Revert asks Joinery to revert that change")
 	_check(
 		card.state == "accepted" and card.reverting() and card._reverting.is_visible_in_tree(),
 		"Revert shows Reverting… and keeps the change accepted until confirmed"
 	)
 	_check(not card._revert.visible, "Revert can't be pressed twice")
-	chat._on_reverted("tx-new", false, "door.blend changed since")
+	chat._reverts.on_reverted("tx-new", false, "door.blend changed since")
 	_check(
 		card.state == "accepted" and card._revert.visible and card._error.visible,
 		"A failed revert says why in place and offers Revert again"
 	)
 	card._revert.pressed.emit()
-	chat._on_reverted("tx-new", true, "")
+	card._line.asking().get("action").pressed.emit()
+	chat._reverts.on_reverted("tx-new", true, "")
 	_check(
 		card.state == "reverted" and card._outcome_text.text == "Reverted",
 		"The card reads Reverted once Joinery confirms"
+	)
+	_check(card._line.undo_revert.visible, "A reverted change offers Undo revert")
+	_check(
+		chat._reverts.toast.visible and chat._reverts.toast.transaction_id == "tx-new",
+		"Right after a revert the toast offers Undo"
 	)
 	# The art gate holds a request; approval sends it again without retyping.
 	var gate_reviews := [0]

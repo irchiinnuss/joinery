@@ -9,6 +9,8 @@ extends VBoxContainer
 ## once more than one person is on the list). Who, how many files and when sit in its tooltip.
 ## Entries load 50 at a time. Clicking one opens its files (timeline_entry.gd), where Restore
 ## is each file's secondary action and stages an ordinary reviewed change in the Review tab.
+## The revert of a change still reverted has Undo revert on its line, which puts that change
+## back as accepted (a "Restore: …" entry); files edited since are asked about under it.
 ##
 ## Named Timeline because Godot's own History dock is the undo history. A project without git
 ## is a blankslate with "Start timeline"; nothing starts without that click. A scene edit
@@ -32,6 +34,7 @@ const STYLE := preload("sidebar_style.gd")
 const COMMAND := preload("command_job.gd")
 const REVIEW_TAB := preload("review_tab.gd")
 const ENTRY := preload("timeline_entry.gd")
+const REVERT_ASK := preload("revert_ask.gd")
 const SELF_PATH := "res://addons/joinery/timeline_tab.gd"
 const FILTER_DELAY := 0.25
 const OFFER_TITLE := "Keep a timeline"
@@ -87,6 +90,10 @@ var _sync_note: HBoxContainer
 var _sync_text: Label
 var _sync_review: Button
 var _fetched_at := -1.0e9
+## Undo revert running, by transaction id.
+var _undo_busy: Dictionary = {}
+## What Undo revert said, by transaction id: ["conflict" | "error", message].
+var _undo_notes: Dictionary = {}
 
 
 ## Accepted changes nobody has played since, from played_watch.gd: their entries say so.
@@ -550,6 +557,9 @@ func _render(appended := false) -> void:
 		var row := _row(entry, now, authors.size() > 1)
 		_rows.add_child(row)
 		added.append(row)
+		var reverted := str(entry.get("reverted_change", ""))
+		if _undo_notes.has(reverted):
+			_rows.add_child(_undo_note(reverted))
 	# Rows arriving on an empty list or as an older page settle in; a refresh does not move.
 	if appended or shown == 0:
 		UI_MOTION.stagger(added)
@@ -644,12 +654,89 @@ func _row(entry: Dictionary, now: float, named: bool) -> HBoxContainer:
 		who.name = "Author"
 		who.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		line.add_child(who)
+	var reverted := str(entry.get("reverted_change", ""))
+	if not reverted.is_empty():
+		# The revert of a change still reverted: Undo revert puts that change back.
+		if _undo_busy.has(reverted):
+			var working := UI.label("Putting back…", "JoineryCaption")
+			working.name = "Working"
+			working.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			line.add_child(working)
+		else:
+			var undo := UI.quiet("Undo revert")
+			undo.name = "UndoRevert"
+			undo.tooltip_text = "Put this change back as it was accepted"
+			undo.accessibility_name = "Undo this revert: " + subject
+			undo.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			undo.pressed.connect(undo_revert.bind(reverted, false))
+			UI.bind_height(undo, "xs")
+			line.add_child(undo)
 	var meta := UI.label(clock_text(float(entry.get("time", 0))), "JoineryNumeric")
 	meta.name = "Meta"
 	meta.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
 	meta.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	line.add_child(meta)
 	return line
+
+
+## Undo revert for the change [param transaction_id] (`joinery transactions unrevert`). Files
+## edited since the revert are asked about under the entry: Keep my files or Replace them
+## ([param overwrite]).
+func undo_revert(transaction_id: String, overwrite := false) -> void:
+	if not cli_enabled or _undo_busy.has(transaction_id):
+		return
+	_undo_busy[transaction_id] = true
+	_undo_notes.erase(transaction_id)
+	var args := ["transactions", "unrevert", "--project", _project(), "--id", transaction_id]
+	if overwrite:
+		args.append("--overwrite")
+	if not _start("unrevert", args, _on_unreverted.bind(transaction_id)):
+		_on_unreverted({"error": "Couldn't start Joinery. Is uv installed?"}, transaction_id)
+		return
+	_render()
+
+
+func _on_unreverted(data: Dictionary, transaction_id: String) -> void:
+	_undo_busy.erase(transaction_id)
+	if data.has("error"):
+		var conflict: Variant = data.get("conflict", [])
+		var asked := conflict is Array and not (conflict as Array).is_empty()
+		_undo_notes[transaction_id] = [
+			"conflict" if asked else "error", _why(data, "Couldn't undo the revert.")
+		]
+		_render()
+		return
+	refresh()
+	if Engine.is_editor_hint():
+		EditorInterface.get_resource_filesystem().scan()
+	# The chat's change cards and the Review tab follow.
+	var dock: Variant = _plugin.get("_dock") if _plugin != null else null
+	if dock is Object and (dock as Object).has_method("refresh_revertible"):
+		(dock as Object).call("refresh_revertible")
+	var review: Variant = _plugin.get("_review_tab") if _plugin != null else null
+	if review is Object and (review as Object).has_method("refresh"):
+		(review as Object).call("refresh")
+
+
+## What Undo revert said under the entry of [param transaction_id]: the question about edited
+## files, or why it couldn't.
+func _undo_note(transaction_id: String) -> Control:
+	var note: Array = _undo_notes[transaction_id]
+	if str(note[0]) != "conflict":
+		var error := UI.label(str(note[1]), "JoineryError", true)
+		error.name = "UndoError"
+		return error
+	var ask: Control = REVERT_ASK.for_conflict(str(note[1]))
+	ask.connect(
+		"answered",
+		func(replace: bool) -> void:
+			_undo_notes.erase(transaction_id)
+			if replace:
+				undo_revert(transaction_id, true)
+			else:
+				_render()
+	)
+	return ask
 
 
 func _show_load_error(why := "") -> void:

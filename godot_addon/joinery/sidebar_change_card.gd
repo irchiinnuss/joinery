@@ -11,10 +11,9 @@ extends VBoxContainer
 ## accepted file changes) is placed by the transcript at the end of the turn, after the reply
 ## ([signal outcome_placing]).
 ##
-## Revert is not optimistic: the line says "Reverting…" until Joinery confirms, then
-## "Reverted", or shows the error in place with Revert offered again. A change whose restore
-## data is gone says "Too old to revert" instead of offering the button
-## ([method set_revertible]).
+## Revert asks first, in place (change_revert.gd), and is not optimistic: "Reverting…" until
+## Joinery confirms, then "Reverted" with Undo revert, or the error with Revert again. A change
+## whose restore data is gone says "Too old to revert" ([method set_revertible]).
 ##
 ## When asset work needs the look approved first, the card holds the request (the art gate,
 ## sidebar_art_gate.gd): the current step reads "Waiting for the look", over a card with a
@@ -49,6 +48,8 @@ signal retry_requested
 ## The request could not be sent; [param reason] says why ("" when unknown).
 signal failed(reason: String)
 signal revert_requested(transaction_id: String)
+## Undo revert: put the reverted change back; [param overwrite] replaces files edited since.
+signal unrevert_requested(transaction_id: String, overwrite: bool)
 ## The decision line is about to show; the transcript moves [param row] to the end of the turn.
 ## Without a listener the row is shown under the card's own steps.
 signal outcome_placing(row: Control)
@@ -63,7 +64,6 @@ signal gate_describe_requested
 ## A file named on the work trail was pressed ([param path] is res://).
 signal file_opened(path: String)
 
-const UI_THEME := preload("ui_theme.gd")
 const UI_MOTION := preload("ui_motion.gd")
 const UI := preload("ui_components.gd")
 const STYLE := preload("sidebar_style.gd")
@@ -76,10 +76,12 @@ const UNPLAYED := preload("sidebar_unplayed.gd")
 const TRAIL := preload("sidebar_trail.gd")
 const WORDS := preload("sidebar_turn_words.gd")
 const REFUSALS := preload("sidebar_refusals.gd")
+const CHANGE_REVERT := preload("change_revert.gd")
+const APP_BADGE := preload("sidebar_app_badge.gd")
 ## Apps recognised in step text; the card shows each one it sees once.
 const APPS := ["Blender", "Krita", "GIMP", "Material Maker", "Surge XT", "SuperCollider", "Godot"]
 ## Shown instead of Revert once the change's restore data is gone.
-const TOO_OLD := "Too old to revert"
+const TOO_OLD := CHANGE_REVERT.TOO_OLD
 ## Step lines that only say the assistant is busy; the footer shows these, not the card.
 const GENERIC_STEPS := ["Thinking…", "Preparing your request…", "Sending…"]
 ## The live line while the reply's words arrive ([method reply_started]).
@@ -103,6 +105,9 @@ var transaction_id := ""
 ## Live scene edits kept without asking (review_flow.gd): Undo takes them back first, then
 ## reverts the files, if any. Returns "" or why it couldn't.
 var undo_live := Callable()
+## The change's name and file count (`joinery transactions list`) for Revert's question.
+var change_summary := ""
+var file_count := 0
 ## The RichTextLabel holding the request text (selectable).
 var text_label: RichTextLabel
 var _bubble: PanelContainer
@@ -134,11 +139,11 @@ var _ready_row: REVIEW_ROW
 var _outcome: HBoxContainer
 var _outcome_icon: TextureRect
 var _outcome_text: Label
+## Revert, Undo revert, their progress and questions (change_revert.gd), then its parts.
+var _line: CHANGE_REVERT
 var _revert: Button
 var _reverting: HBoxContainer
 var _too_old: Label
-## False once `joinery transactions list` says the restore data is gone.
-var _revertible := true
 var _gate: ART_GATE
 ## The "Waiting for the look" step while the gate holds the request.
 var _gate_step: Control
@@ -295,35 +300,28 @@ func _init(text := "", context: Array = []) -> void:
 	# label never trims: wrapping with an ellipsis sizes it to no lines at all.
 	_outcome_text = UI.label("", "JoineryCaption", true)
 	_outcome.add_child(_outcome_text)
-	_revert = UI.quiet("Revert")
-	_revert.accessibility_name = "Revert this accepted change"
-	_revert.tooltip_text = "Put back the files from before this change"
-	_revert.pressed.connect(_on_revert)
-	UI.bind_height(_revert, "xs")
-	_outcome.add_child(_revert)
-	_reverting = HBoxContainer.new()
-	_reverting.theme_type_variation = "JoineryRowTight"
-	_reverting.accessibility_name = "Reverting this change"
-	var dots := INDICATOR.new()
-	dots.set("running", true)
-	_reverting.add_child(dots)
-	var reverting_text := UI.label("Reverting…", "JoineryCaption")
-	reverting_text.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
-	_reverting.add_child(reverting_text)
-	_reverting.hide()
-	_outcome.add_child(_reverting)
-	_too_old = UI.label(TOO_OLD, "JoineryCaption")
-	_too_old.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
-	_too_old.tooltip_text = "Its restore data was cleared. Ask Journeyman to change it back."
-	_too_old.mouse_filter = Control.MOUSE_FILTER_PASS
-	_too_old.hide()
-	_outcome.add_child(_too_old)
+	_line = CHANGE_REVERT.new()
+	_line.home = _column
+	_line.revert.pressed.connect(_on_revert)
+	_line.revert_confirmed.connect(_do_revert)
+	_line.unrevert_requested.connect(
+		func(overwrite: bool) -> void:
+			_error.hide()
+			_sync_activity()
+			unrevert_requested.emit(transaction_id, overwrite)
+	)
+	_outcome.add_child(_line)
+	_revert = _line.revert
+	_reverting = _line.working
+	_too_old = _line.too_old
 	_outcome.hide()
 	_set_sending_look(true)
 
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_PREDELETE:
+		if is_instance_valid(_line):
+			_line.close_ask()
 		if is_instance_valid(_outcome) and _outcome.get_parent() == null:
 			_outcome.free()
 		if is_instance_valid(_ready_row) and _ready_row.get_parent() == null:
@@ -467,7 +465,7 @@ func _note_apps(line: String, id := "", state := "") -> void:
 			continue
 		if not _seen_apps.has(app):
 			_seen_apps.append(app)
-			var badge := _app_badge(app)
+			var badge := APP_BADGE.new(app)
 			badge.name = app
 			_apps.add_child(badge)
 		var calls: Dictionary = _app_calls.get_or_add(app, {})
@@ -683,7 +681,9 @@ func set_outcome(kind: String, text: String, optimistic := false) -> void:
 	_error.hide()
 	var kept := kind in ["success", "auto"]
 	_tick_current("success" if kept else "stopped")
-	state = "accepted" if kept else {"rejected": "rejected", "stopped": "stopped"}.get(kind, "done")
+	var ends := {"rejected": "rejected", "stopped": "stopped", "reverted": "reverted"}
+	state = "accepted" if kept else str(ends.get(kind, "done"))
+	_line.close_ask()
 	var spec: Array = OUTCOMES.get(kind, OUTCOMES["info"])
 	_outcome_icon.visible = not str(spec[0]).is_empty()
 	if _outcome_icon.visible:
@@ -759,35 +759,61 @@ func decide(kind: String, text: String) -> bool:
 	return true
 
 
-## The revert finished. On success the line reads "Reverted"; on failure it stays accepted,
-## offers Revert again and shows why in place.
+## The revert finished. On success the line reads "Reverted" with Undo revert; on failure it
+## stays accepted, offers Revert again and shows why in place.
 func revert_finished(ok: bool, message := "") -> void:
-	_reverting.hide()
 	if ok:
 		state = "reverted"
 		_sync_unplayed()
-		_outcome_text.text = "Reverted"
-		STYLE.set_glyph(_outcome_icon, "reload", "text_muted")
-		_outcome_icon.show()
-		_revert.hide()
-		_too_old.hide()
-		UI_MOTION.pulse(_outcome)
+		_settle_line("Reverted", "reload", "text_muted")
 		return
 	_sync_revert(true)
 	show_error("Couldn't revert. " + message if not message.is_empty() else "Couldn't revert.")
 
 
+## Undo revert finished: "Restored" with Revert again, the question about files edited since
+## the revert ([param conflict], named in [param message]), or why it couldn't.
+func unrevert_finished(ok: bool, message := "", conflict: Array = []) -> void:
+	if ok:
+		state = "accepted"
+		_line.revertible = true
+		_settle_line("Restored", "success", "success")
+		_sync_unplayed()
+		return
+	_sync_revert(false)
+	if not conflict.is_empty():
+		_line.ask_conflict(message)
+	else:
+		var why := "Couldn't undo the revert."
+		show_error(why + " " + message if not message.is_empty() else why)
+
+
+func _settle_line(words: String, icon: String, role: String) -> void:
+	_outcome_text.text = words
+	STYLE.set_glyph(_outcome_icon, icon, role)
+	_outcome_icon.show()
+	_sync_revert(state == "accepted")
+	_sync_activity()
+	UI_MOTION.pulse(_outcome)
+
+
+## This change as `joinery transactions list` reports it ({summary, file_count, …}).
+func describe(entry: Dictionary) -> void:
+	change_summary = str(entry.get("summary", change_summary))
+	file_count = int(entry.get("file_count", file_count))
+
+
 ## Whether this change can still be reverted (`revertible` from `joinery transactions
 ## list`). A change that can't shows "Too old to revert" instead of the button.
 func set_revertible(on: bool) -> void:
-	_revertible = on
-	if state == "accepted" and not _reverting.visible:
+	_line.revertible = on
+	if state == "accepted" and not _line.busy():
 		_sync_revert(true)
 
 
-## True while a revert of this change is running.
+## True while a revert, or an Undo revert, of this change is running.
 func reverting() -> bool:
-	return _reverting.visible
+	return _line.busy()
 
 
 ## Hold the request until the look is approved. [param app] names the app that was about to
@@ -832,21 +858,37 @@ func _look_approved() -> void:
 		_gate_step = null
 
 
-## Revert, "Reverting…" or "Too old to revert" on the accepted line.
+## Revert, "Reverting…" or "Too old to revert" on the accepted line; Undo revert on a
+## reverted one.
 func _sync_revert(accepted: bool) -> void:
 	var file_change := accepted and not transaction_id.is_empty()
 	var live := accepted and undo_live.is_valid()
-	_revert.visible = (file_change and _revertible) or live
-	_revert.disabled = false
-	_too_old.visible = file_change and not _revertible and not live
-	_reverting.hide()
+	_line.sync(file_change, live, state == "reverted" and not transaction_id.is_empty())
 
 
+## Revert asks first, in place (change_revert.gd); only its answer runs it (_do_revert).
 func _on_revert() -> void:
+	if state == "accepted" and not _line.busy():
+		_line.ask_revert(display_name(), file_count)
+
+
+## The change's name: its summary, else the request, else the ready row's line.
+func display_name() -> String:
+	if not change_summary.is_empty():
+		return change_summary
+	return request if not request.strip_edges().is_empty() else _ready_row.line_text()
+
+
+## Undo revert: put the change back as it was accepted (the button, or the toast's Undo).
+func undo_revert() -> void:
+	if state == "reverted" and not _line.busy():
+		_line.start_unrevert(false)
+
+
+func _do_revert() -> void:
 	# Not optimistic: the line says "Reverting…" until Joinery confirms (revert_finished).
-	if state != "accepted" or _reverting.visible:
+	if state != "accepted" or _line.busy():
 		return
-	_revert.hide()
 	_error.hide()
 	if undo_live.is_valid():
 		var why: String = undo_live.call()
@@ -857,8 +899,7 @@ func _on_revert() -> void:
 		if transaction_id.is_empty():
 			revert_finished(true)
 			return
-	_reverting.show()
-	UI_MOTION.fade_in(_reverting)
+	_line.start("Reverting…")
 	_sync_activity()
 	revert_requested.emit(transaction_id)
 
@@ -903,7 +944,7 @@ func _sync_activity() -> void:
 	_place_timer()
 	var timed := _summary != null and _summary.visible
 	var clock := _timer.visible and _timer.get_parent() == _status
-	var ended := state in ["accepted", "done"] or state == _finished_as
+	var ended := state in ["accepted", "reverted", "done"] or state == _finished_as
 	_done_mark.visible = _fold.visible or (timed and ended)
 	_joiner.visible = _apps.visible and (timed or clock or _fold.visible)
 	_status.visible = _sending.visible or _apps.visible or clock or timed or _fold.visible
@@ -945,43 +986,6 @@ func _icon(icon_name: String, role: String) -> TextureRect:
 	var picture := STYLE.glyph(role)
 	STYLE.set_glyph(picture, icon_name, role)
 	return picture
-
-
-func _app_badge(app: String) -> Control:
-	# The app's icon at text size with its name beside it: the header of the steps below.
-	var badge := HBoxContainer.new()
-	badge.theme_type_variation = "JoineryRowTight"
-	badge.accessibility_name = app
-	var slug := app.to_lower().replace(" ", "_")
-	var base := (get_script() as Script).resource_path.get_base_dir()
-	for name: String in [slug, slug.replace("_", "-"), slug.replace("_", "")]:
-		if UI_THEME.has_app_logo(name):
-			# The app's official logo, in its own colours (no tint role).
-			var logo := STYLE.glyph("")
-			STYLE.on_theme(logo, func() -> void: logo.texture = UI_THEME.app_logo(logo, name))
-			badge.add_child(logo)
-			break
-		var path := base.path_join("icons/tools/%s.svg" % name)
-		if FileAccess.file_exists(path):
-			var picture := STYLE.glyph("text_muted")
-			STYLE.on_theme(
-				picture,
-				func() -> void:
-					var image := Image.new()
-					var svg := FileAccess.get_file_as_string(path)
-					if image.load_svg_from_string(svg, UI_THEME.unit(picture)) == OK:
-						picture.texture = ImageTexture.create_from_image(image)
-			)
-			badge.add_child(picture)
-			break
-	# The name keeps its full width: it is the glyph's meaning, never cut to an ellipsis.
-	var label := UI.label(app, "JoineryCaption")
-	label.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
-	label.clip_text = false
-	label.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	badge.add_child(label)
-	return badge
 
 
 func _row(parent: Control) -> HBoxContainer:

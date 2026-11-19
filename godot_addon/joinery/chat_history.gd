@@ -29,6 +29,8 @@ extends ScrollContainer
 signal example_chosen(text: String)
 signal retry_requested(card: Control)
 signal revert_requested(transaction_id: String)
+## Undo revert on a change card; [param overwrite] replaces files edited since the revert.
+signal unrevert_requested(transaction_id: String, overwrite: bool)
 signal remember_requested(text: String)
 ## Connect (or "Which one?") on the empty chat's blankslate, shown while no agent is connected.
 signal connect_requested
@@ -38,6 +40,7 @@ const UI_MOTION := preload("ui_motion.gd")
 const UI := preload("ui_components.gd")
 const STYLE := preload("sidebar_style.gd")
 const CARD := preload("sidebar_change_card.gd")
+const FEATURE_PLAN := preload("feature_plan_card.gd")
 const QUEUE := preload("sidebar_queue.gd")
 const INDICATOR := preload("activity_indicator.gd")
 const REMEMBER := preload("chat_remember.gd")
@@ -254,6 +257,9 @@ func add_request(text: String, targets: Array = []) -> Control:
 	card.outcome_placing.connect(_place_outcome.bind(_turn))
 	card.review_placing.connect(_place_outcome.bind(_turn))
 	card.revert_requested.connect(func(id: String) -> void: revert_requested.emit(id))
+	card.unrevert_requested.connect(
+		func(id: String, overwrite: bool) -> void: unrevert_requested.emit(id, overwrite)
+	)
 	for pair: Array in card.scalables():
 		_scale(pair[0], pair[1])
 	_cards.append(card)
@@ -754,13 +760,13 @@ func offer_texts() -> PackedStringArray:
 
 
 ## A feature plan from `joinery feature … --plan --json` as a card: what it adds, which
-## settings change, and notes. Nothing changes until Apply ([signal FeaturePlan.apply_pressed]).
-func add_plan(plan: Dictionary, title: String) -> FeaturePlan:
+## settings change, and notes. Nothing changes until Apply (feature_plan_card.gd).
+func add_plan(plan: Dictionary, title: String) -> FEATURE_PLAN:
 	_hide_empty()
 	_turn = VBoxContainer.new()
 	_turn.theme_type_variation = "JoineryStack"
 	_add_turn(_turn)
-	var card := FeaturePlan.new()
+	var card := FEATURE_PLAN.new()
 	card.build(plan, title)
 	_turn.add_child(card)
 	for pair: Array in card.scalables():
@@ -770,225 +776,3 @@ func add_plan(plan: Dictionary, title: String) -> FeaturePlan:
 	_last_notice = ""
 	_dirty = true
 	return card
-
-
-## The plan for adding or removing a game feature. States: planned, applying, applied,
-## cancelled, failed (Apply again).
-class FeaturePlan:
-	extends PanelContainer
-
-	signal apply_pressed
-	signal cancel_pressed
-	signal revert_pressed(transaction_id: String)
-
-	## Files listed before "and N more".
-	const MAX_FILES := 6
-
-	var state := "planned"
-	var plan: Dictionary = {}
-	var transaction_id := ""
-	var title_label: Label
-	var _column: VBoxContainer
-	var _lines: Array[Label] = []
-	var _headings: Array[Label] = []
-	var _error: Label
-	var _actions: HBoxContainer
-	var _apply: Button
-	var _cancel: Button
-	var _outcome: HBoxContainer
-	var _outcome_icon: TextureRect
-	var _outcome_text: Label
-	var _revert: Button
-	var _working: Control
-
-	func build(data: Dictionary, title: String) -> void:
-		plan = data.duplicate(true)
-		STYLE.boxed(self, "JoineryChangeCard")
-		size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		accessibility_name = title
-		_column = VBoxContainer.new()
-		_column.theme_type_variation = "JoineryStack"
-		add_child(_column)
-		var head := VBoxContainer.new()
-		head.theme_type_variation = "JoineryTight"
-		_column.add_child(head)
-		title_label = STYLE.card_title(title, true)
-		head.add_child(title_label)
-		_lines.append(_caption(head, "Nothing changes until you apply it."))
-		var files := _files(plan.get("changes", []))
-		if not files.is_empty():
-			_group("Files", files)
-		var settings := _settings(plan.get("config_edits", []))
-		if not settings.is_empty():
-			_group("Settings", settings)
-		var notes: Array[String] = []
-		for note: Variant in plan.get("notes", []):
-			notes.append(str(note))
-		if not notes.is_empty():
-			_group("Notes", notes)
-		_error = UI.label("", "JoineryError", true)
-		_error.hide()
-		_column.add_child(_error)
-		var conflicts: Array = plan.get("conflicts", [])
-		if not conflicts.is_empty():
-			_error.text = " ".join(conflicts.map(func(c: Variant) -> String: return str(c)))
-			_error.show()
-		_actions = HBoxContainer.new()
-		_actions.theme_type_variation = "JoineryRow"
-		_actions.alignment = BoxContainer.ALIGNMENT_END
-		_column.add_child(_actions)
-		_working = INDICATOR.new()
-		_working.hide()
-		_actions.add_child(_working)
-		_cancel = UI.secondary("Cancel")
-		_cancel.accessibility_name = "Cancel this change"
-		_cancel.pressed.connect(_on_cancel)
-		_apply = UI.primary("Apply")
-		_apply.accessibility_name = "Apply: " + title
-		_apply.disabled = not conflicts.is_empty()
-		_apply.pressed.connect(_on_apply)
-		var ordered := (
-			[_apply, _cancel] if DisplayServer.get_swap_cancel_ok() else [_cancel, _apply]
-		)
-		for button: Button in ordered:
-			_actions.add_child(button)
-		_outcome = HBoxContainer.new()
-		_outcome.theme_type_variation = "JoineryRowTight"
-		_outcome.hide()
-		_column.add_child(_outcome)
-		_outcome_icon = STYLE.glyph()
-		_outcome.add_child(_outcome_icon)
-		_outcome_text = UI.label("", "JoineryCaption", true)
-		_outcome_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		_outcome.add_child(_outcome_text)
-		_revert = UI.quiet("Revert")
-		_revert.tooltip_text = "Put back the files from before this change"
-		_revert.hide()
-		UI.bind_height(_revert, "xs")
-		_revert.pressed.connect(func() -> void: revert_pressed.emit(transaction_id))
-		_outcome.add_child(_revert)
-
-	## Controls whose text follows the transcript text size, as [control, TYPE step] pairs.
-	func scalables() -> Array:
-		var pairs: Array = [[title_label, "body"], [_outcome_text, "caption"]]
-		for line: Label in _lines:
-			pairs.append([line, "caption"])
-		for heading: Label in _headings:
-			pairs.append([heading, "body"])
-		return pairs
-
-	## The visible texts of the card, top to bottom (for tests and captures).
-	func texts() -> PackedStringArray:
-		var found := PackedStringArray()
-		for label: Node in find_children("*", "Label", true, false):
-			if (label as Label).is_visible_in_tree():
-				found.append((label as Label).text)
-		return found
-
-	## Apply is running: both buttons wait, with dots, until [method set_applied].
-	func set_applying() -> void:
-		state = "applying"
-		_apply.disabled = true
-		_cancel.disabled = true
-		_apply.text = "Applying…"
-		_working.show()
-		_working.set("running", true)
-		_error.hide()
-
-	## Applied: the buttons give way to the outcome, with Revert when there is a transaction.
-	func set_applied(text: String, transaction := "") -> void:
-		state = "applied"
-		transaction_id = transaction
-		_settle("success", "success", text)
-		_revert.visible = not transaction.is_empty()
-		UI_MOTION.pulse(_outcome)
-
-	## The apply failed: say why in place and offer Apply again.
-	func set_failed(text: String) -> void:
-		state = "failed"
-		_working.set("running", false)
-		_working.hide()
-		_apply.text = "Apply"
-		_apply.disabled = false
-		_cancel.disabled = false
-		_error.text = text
-		UI_MOTION.fade_in(_error)
-
-	## A revert of the applied change finished.
-	func set_reverted(ok: bool, message := "") -> void:
-		if ok:
-			_revert.hide()
-			_settle("reload", "text_muted", "Reverted")
-			return
-		_error.text = (
-			"Couldn't revert. " + message if not message.is_empty() else "Couldn't revert."
-		)
-		UI_MOTION.fade_in(_error)
-
-	func _on_apply() -> void:
-		if state in ["planned", "failed"] and not _apply.disabled:
-			set_applying()
-			apply_pressed.emit()
-
-	func _on_cancel() -> void:
-		if state in ["planned", "failed"]:
-			state = "cancelled"
-			_settle("close", "text_muted", "Cancelled. Nothing changed.")
-			cancel_pressed.emit()
-
-	func _settle(icon_name: String, role: String, text: String) -> void:
-		_working.set("running", false)
-		_actions.hide()
-		_error.hide()
-		STYLE.set_glyph(_outcome_icon, icon_name, role)
-		_outcome_text.text = text
-		_outcome.show()
-
-	func _group(heading: String, lines: Array[String]) -> void:
-		var group := VBoxContainer.new()
-		group.theme_type_variation = "JoineryTight"
-		_column.add_child(group)
-		var title := UI.label(heading)
-		group.add_child(title)
-		_headings.append(title)
-		for line: String in lines:
-			_lines.append(_caption(group, line))
-
-	func _caption(parent: Control, text: String) -> Label:
-		var label := UI.label(text, "JoineryCaption", true)
-		parent.add_child(label)
-		return label
-
-	## Changed paths without the .uid sidecars, at most MAX_FILES then "and N more".
-	static func _files(changes: Array) -> Array[String]:
-		var paths: Array[String] = []
-		for change: Variant in changes:
-			var path := str(change.get("path", "")) if change is Dictionary else str(change)
-			if not path.is_empty() and not path.ends_with(".uid"):
-				paths.append(path)
-		if paths.size() > MAX_FILES:
-			var more := paths.size() - (MAX_FILES - 1)
-			paths = paths.slice(0, MAX_FILES - 1)
-			paths.append("and %d more" % more)
-		return paths
-
-	## project.godot edits as plain lines: "Adds autoload Controller", "Changes input: pause,
-	## move left". Values stay out: they are engine text, not something to read here.
-	static func _settings(edits: Array) -> Array[String]:
-		var groups := {}
-		for edit: Variant in edits:
-			if not edit is Dictionary:
-				continue
-			var verb := (
-				"Adds"
-				if edit.get("before") == null
-				else "Removes" if edit.get("after") == null else "Changes"
-			)
-			var key := "%s %s" % [verb, str(edit.get("section", "")).replace("_", " ")]
-			if not groups.has(key):
-				groups[key] = []
-			groups[key].append(str(edit.get("key", "")).replace("_", " "))
-		var lines: Array[String] = []
-		for key: String in groups:
-			lines.append("%s: %s" % [key, ", ".join(groups[key])])
-		return lines

@@ -65,6 +65,7 @@ const BRIEF := preload("res://addons/joinery/sidebar_brief.gd")
 const FILE_OPEN := preload("res://addons/joinery/sidebar_file_open.gd")
 const NOTIFY := preload("res://addons/joinery/desktop_notify.gd")
 const WORDS := preload("res://addons/joinery/sidebar_turn_words.gd")
+const REVERTS := preload("res://addons/joinery/sidebar_reverts.gd")
 ## Minimum dock width in font sizes: in Joinery's layout, the whole visible sidebar.
 const MIN_EM := 26
 ## The same below the Inspector (classic layout): a wider shared column crowds a laptop screen.
@@ -124,6 +125,8 @@ var _suggestions: SUGGESTIONS
 var _opener: OPENER
 ## True between an art approval and sending the request the art gate held.
 var _resume_ready := false
+## Revert's outcome, Undo revert and the toast after a revert (sidebar_reverts.gd).
+var _reverts: REVERTS
 
 
 func _init() -> void:
@@ -177,12 +180,12 @@ func _ready() -> void:
 	_slash.requested.connect(_on_slash_requested)
 	_slash.started.connect(func(_command: String) -> void: _sync())
 	_slash.finished.connect(_on_slash_finished)
-	_slash.reverted.connect(_on_reverted)
 	_slash.feature_planned.connect(_on_feature_planned)
 	_slash.feature_applied.connect(_on_feature_applied)
 	_slash.readiness_changed.connect(_on_readiness)
 	_slash.revertible_changed.connect(_on_revertible)
 	add_child(_slash)
+	_reverts = REVERTS.new(self, _slash, _composer)
 	_brief = BRIEF.new(self, _slash)
 	_review = _make_review()
 	_suggestions = SUGGESTIONS.new(self)
@@ -208,6 +211,7 @@ func make_transcript() -> HISTORY_SCRIPT:
 	view.connect_requested.connect(func() -> void: connect_requested.emit())
 	view.retry_requested.connect(_retry)
 	view.revert_requested.connect(func(id: String) -> void: _slash.revert(id))
+	view.unrevert_requested.connect(func(id: String, o: bool) -> void: _slash.unrevert(id, o))
 	var shown := _transcript
 	var wire := func() -> void:
 		view.queue.edit_requested.connect(_edit_queued)
@@ -557,16 +561,6 @@ func _on_slash_finished(_command: String, text: String, kind: String) -> void:
 	_drain.call_deferred()
 
 
-func _on_reverted(transaction_id: String, ok: bool, message: String) -> void:
-	var card := _transcript.card_for(transaction_id)
-	if card != null:
-		card.revert_finished(ok, message)
-	if is_instance_valid(_plan_card) and _plan_card.transaction_id == transaction_id:
-		_plan_card.set_reverted(ok, message)
-	if ok:
-		change_reverted.emit(transaction_id)
-
-
 ## Bring a draft of the look in the first layout to the new one without asking (the art page
 ## does this on open). Tried once per version; a failure leaves the draft as it is.
 func upgrade_bible(version := "") -> void:
@@ -584,6 +578,7 @@ func _on_feature_planned(plan: Dictionary) -> void:
 	_plan = {"action": action, "feature": id}
 	card.connect("apply_pressed", func() -> void: _slash.apply_feature(action, id))
 	card.connect("revert_pressed", func(tx: String) -> void: _slash.revert(tx))
+	card.connect("unrevert_pressed", func(tx: String, o: bool) -> void: _slash.unrevert(tx, o))
 
 
 func _on_feature_applied(ok: bool, message: String, transaction_id: String) -> void:

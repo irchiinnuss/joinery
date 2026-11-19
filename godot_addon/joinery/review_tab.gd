@@ -8,7 +8,8 @@ extends VBoxContainer
 ## any other change shows its files under the row. The review's rail comes back here (All
 ## approvals) and steps through the changes waiting (review_queue.gd). Then the art bible's
 ## approval as one row, and Decided: accepted, discarded and reverted changes, newest first,
-## with Revert while the change can still be put back.
+## with Revert while the change can still be put back (it asks first, in place under the row:
+## revert_ask.gd), and Undo revert on a reverted one.
 ##
 ## The list comes from `joinery transactions list` (command_job.gd), read when the tab is
 ## shown, on focus, when a turn ends and when a change is staged or decided; it never polls.
@@ -25,6 +26,8 @@ signal decision_requested(transaction_id: String, accepted: bool, live: bool)
 signal changes_applied(transaction_id: String, paths: PackedStringArray, changes: Array)
 ## Revert on a decided row. With [method attach] the sidebar runs it and reports back.
 signal revert_requested(transaction_id: String)
+## Undo revert on a reverted row; [param overwrite] replaces files edited since.
+signal unrevert_requested(transaction_id: String, overwrite: bool)
 ## "Open" on the art bible row: show the art direction (/art).
 signal art_requested
 
@@ -37,9 +40,10 @@ const SLASH := preload("slash_commands.gd")
 const WORDS := preload("review_words.gd")
 const QUEUE := preload("review_queue.gd")
 const TEAM := preload("review_team.gd")
+const REVERT := preload("review_revert.gd")
 const EMPTY_WAITING := "Nothing waits for your review."
 const EMPTY_DECIDED := "No decisions yet."
-const TOO_OLD := "Too old to revert"
+const TOO_OLD := REVERT.TOO_OLD
 ## Decided rows shown at most; older ones stay in the project history.
 const DECIDED_ROWS := 50
 ## Outcome of a decided change -> [word, glyph, colour role].
@@ -79,8 +83,11 @@ var _decided_more: Label
 var _listing: Dictionary = {}
 var _loaded := false
 var _live: Dictionary = {}
-## Rows busy with a decision or a revert: {id: "accepting" | "discarding" | "reverting"}.
+## Rows busy with a decision or a revert: {id: "accepting" | "discarding" | "reverting" |
+## "unreverting"}.
 var _busy: Dictionary = {}
+## Revert and Undo revert on the decided rows (review_revert.gd).
+var _reverts: REVERT
 ## The last error per row: {id: text}.
 var _errors: Dictionary = {}
 ## Non-live pending rows whose files are open.
@@ -103,6 +110,7 @@ func _init() -> void:
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	size_flags_vertical = Control.SIZE_EXPAND_FILL
 	accessibility_name = "Changes waiting for your review, and the ones you decided"
+	_reverts = REVERT.new(self)
 	_build_list()
 	_detail_view = VBoxContainer.new()
 	_detail_view.theme_type_variation = "JoineryTight"
@@ -172,6 +180,8 @@ func attach(slash: Variant, legacy_button: Button = null) -> void:
 		_slash = slash as Object
 		if _slash.has_signal("reverted"):
 			_slash.connect("reverted", revert_finished)
+		if _slash.has_signal("unreverted"):
+			_slash.connect("unreverted", unrevert_finished)
 	_show_count()
 
 
@@ -392,6 +402,7 @@ func apply_listing(data: Dictionary) -> void:
 		if (
 			(busy in ["accepting", "discarding"] and state != "review")
 			or (busy == "reverting" and state != "accepted")
+			or (busy == "unreverting" and state != "reverted")
 		):
 			_busy.erase(id)
 	_render()
@@ -410,17 +421,16 @@ static func tab_title(count: int) -> String:
 	return "Review" if count <= 0 else "Review %d" % count
 
 
-## A revert started from this tab finished.
+## A revert finished (review_revert.gd).
 func revert_finished(transaction_id: String, ok: bool, message := "") -> void:
-	_busy.erase(transaction_id)
-	if ok:
-		_errors.erase(transaction_id)
-	else:
-		_errors[transaction_id] = (
-			"Couldn't revert. " + message if not message.is_empty() else "Couldn't revert."
-		)
-	_render()
-	refresh()
+	_reverts.reverted(transaction_id, ok, message)
+
+
+## Undo revert finished (review_revert.gd).
+func unrevert_finished(
+	transaction_id: String, ok: bool, message := "", conflict: Array = [], _f := []
+) -> void:
+	_reverts.unreverted(transaction_id, ok, message, conflict)
 
 
 ## "Blender · 2 min ago": the apps that made a change and when, from [param entry].
@@ -782,33 +792,7 @@ func _decided_row(entry: Dictionary, now: float) -> VBoxContainer:
 	meta.name = "Meta"
 	meta.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	line.add_child(meta)
-	if state == "accepted":
-		if str(_busy.get(id, "")) == "reverting":
-			var working := HBoxContainer.new()
-			working.theme_type_variation = "JoineryRowTight"
-			working.name = "Working"
-			var dots := INDICATOR.new()
-			dots.running = true
-			working.add_child(dots)
-			working.add_child(UI.label("Reverting…", "JoineryCaption"))
-			working.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-			line.add_child(working)
-		elif bool(entry.get("revertible", true)):
-			var revert := UI.quiet("Revert")
-			revert.name = "Revert"
-			revert.set_meta("focus_key", id + ":revert")
-			revert.tooltip_text = "Put back the files from before this change"
-			revert.accessibility_name = "Revert " + title.text
-			revert.pressed.connect(_on_revert.bind(id))
-			line.add_child(revert)
-		else:
-			var old := UI.label(TOO_OLD, "JoineryFaint")
-			old.name = "TooOld"
-			old.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
-			old.tooltip_text = "Its restore data was cleared. Ask Journeyman to change it back."
-			old.mouse_filter = Control.MOUSE_FILTER_PASS
-			old.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-			line.add_child(old)
+	_reverts.add_to(line, box, id, entry)
 	_add_error(box, id)
 	return box
 
@@ -911,17 +895,6 @@ func _decide(id: String, accepted: bool, live: bool) -> void:
 		_busy.erase(id)
 		_errors[id] = "Couldn't start Joinery. Is uv installed?"
 		_render()
-
-
-func _on_revert(id: String) -> void:
-	if _busy.has(id):
-		return
-	_busy[id] = "reverting"
-	_errors.erase(id)
-	_render()
-	revert_requested.emit(id)
-	if _slash != null:
-		_slash.call("revert", id)
 
 
 # --- CLI ---------------------------------------------------------------------------------------

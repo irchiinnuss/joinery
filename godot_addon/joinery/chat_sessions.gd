@@ -428,6 +428,9 @@ func show_states(report: Dictionary) -> void:
 		var entry: Dictionary = known.get(id, {"state": "gone", "revertible": false})
 		var state := str(entry.get("state", "gone"))
 		var revertible := bool(entry.get("revertible", true))
+		if is_instance_valid(_changes[id][0]) and _changes[id][0].has_method("describe"):
+			# Revert's question names the change and counts its files.
+			_changes[id][0].call("describe", entry)
 		if bool(entry.get("auto_accepted", false)) and _changes[id].size() > 2:
 			_changes[id][2] = true
 			var notes := _notes(entry.get("auto_notes", []))

@@ -306,6 +306,12 @@ func _check_auto_accepted(chat: FakeChat, plugin: FakePlugin) -> void:
 	var asked: Array[String] = []
 	real.revert_requested.connect(func(id: String) -> void: asked.append(id))
 	undo.pressed.emit()
+	var question: Control = real.get("_line").asking()
+	_check(
+		question != null and question.get("text").text.begins_with("Undo “Make the door open”?"),
+		"Undo asks first, in its own word"
+	)
+	question.get("action").pressed.emit()
 	_check(asked == ["a1"], "Undo is the change's own revert")
 	real.revert_finished(true)
 	_check(real.state == "reverted", "And it reads Reverted after")
@@ -408,6 +414,7 @@ func _check_live_kept(chat: FakeChat, plugin: FakePlugin, flow: Node) -> void:
 	var asked: Array[String] = []
 	real.revert_requested.connect(func(id: String) -> void: asked.append(id))
 	undo.pressed.emit()
+	real.get("_line").asking().get("action").pressed.emit()
 	_check(undone == [true] and asked.is_empty(), "Undo takes the live edits back, no file revert")
 	_check(real.state == "reverted", "And it reads Reverted")
 	real.queue_free()

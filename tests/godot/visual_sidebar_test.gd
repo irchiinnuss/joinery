@@ -756,6 +756,9 @@ func _changes(light: bool, width: int) -> void:
 	var newest: Control = transcript.call("current_card")
 	_check(newest.get("_revert").visible, "A recent change offers Revert")
 	newest.get("_revert").pressed.emit()
+	# Revert asks first, in place under the line.
+	await _shot("revert-ask", light, width, chat)
+	newest.get("_line").asking().get("action").pressed.emit()
 	chat.call("_on_submit", "Add a creak to the door")
 	chat.set_chat_busy(true)
 	chat.show_file_review("Add a creak", "", [], [], "tx-creak")

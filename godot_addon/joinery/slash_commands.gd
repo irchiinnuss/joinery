@@ -18,6 +18,13 @@ signal started(command: String)
 signal finished(command: String, text: String, kind: String)
 ## A revert finished.
 signal reverted(transaction_id: String, ok: bool, message: String)
+## Undo revert finished. [param conflict] lists the files edited since the revert (then
+## [param message] names them and nothing changed); [param files] are the change's paths.
+signal unreverted(
+	transaction_id: String, ok: bool, message: String, conflict: Array, files: PackedStringArray
+)
+## Every change `joinery transactions list` reports ({id, state, summary, file_count, …}).
+signal changes_listed(entries: Array)
 ## "/debug [what goes wrong]": debug the last error Godot reported (sidebar_debug.gd).
 signal debug_requested(details: String)
 ## "/feature add|remove <id>" planned the change: `joinery feature … --plan --json`.
@@ -138,6 +145,7 @@ var finder: RefCounted = SCENE_FINDER.new()
 var _jobs: Dictionary = {}
 var _running := ""
 var _revert_id := ""
+var _unrevert_id := ""
 var _readiness_polls := 0
 
 
@@ -290,6 +298,23 @@ func revert(transaction_id: String) -> void:
 	_revert_id = transaction_id
 	if not _start("revert", args, _on_revert_done):
 		reverted.emit(transaction_id, false, "Couldn't start Joinery.")
+
+
+## Undo revert: put a reverted change back as it was accepted. With [param overwrite], files
+## edited since the revert are replaced (Joinery saves them first). [signal unreverted] reports.
+func unrevert(transaction_id: String, overwrite := false) -> void:
+	if _jobs.has("revert") or transaction_id.is_empty():
+		unreverted.emit(
+			transaction_id, false, "Another revert is still running.", [], PackedStringArray()
+		)
+		return
+	var args := _base_args()
+	args.append_array(["transactions", "unrevert", "--project", _project(), "--id", transaction_id])
+	if overwrite:
+		args.append("--overwrite")
+	_unrevert_id = transaction_id
+	if not _start("revert", args, _on_unrevert_done):
+		unreverted.emit(transaction_id, false, "Couldn't start Joinery.", [], PackedStringArray())
 
 
 ## Apply a planned feature change. Only the plan card's Apply calls this.
@@ -446,6 +471,21 @@ func _on_revert_done(result: Dictionary) -> void:
 	check_revertible()
 
 
+func _on_unrevert_done(result: Dictionary) -> void:
+	var output := str(result.get("output", ""))
+	var data := parse_json(output)
+	var ok := int(result.get("code", 1)) == 0
+	var files := PackedStringArray()
+	for entry: Variant in data.get("transactions", []):
+		if entry is Dictionary:
+			for item: Variant in entry.get("files", []):
+				if item is Dictionary:
+					files.append(str(item.get("path", "")))
+	var conflict: Array = data.get("conflict", []) if data.get("conflict") is Array else []
+	unreverted.emit(_unrevert_id, ok, "" if ok else _first_error(output), conflict, files)
+	check_revertible()
+
+
 func _on_applied(result: Dictionary) -> void:
 	var output := str(result.get("output", ""))
 	var data := parse_json(output)
@@ -497,11 +537,15 @@ func _on_readiness(result: Dictionary) -> void:
 func _on_listed(result: Dictionary) -> void:
 	var data := parse_json(str(result.get("output", "")))
 	var states := {}
+	var listed: Array = []
 	for entry: Variant in data.get("transactions", []):
+		if entry is Dictionary:
+			listed.append(entry)
 		if entry is Dictionary and str(entry.get("state", "")) == "accepted":
 			states[str(entry.get("id", ""))] = bool(entry.get("revertible", true))
 	if int(result.get("code", 1)) == 0:
 		revertible_changed.emit(states)
+		changes_listed.emit(listed)
 
 
 ## The JSON object in a CLI's output (one object, or the last object line), or {}.

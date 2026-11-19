@@ -264,6 +264,8 @@ func _run() -> void:
 		var reverted: Array[String] = []
 		chat._transcript.revert_requested.connect(func(id: String) -> void: reverted.append(id))
 		change._revert.pressed.emit()
+		_check(reverted.is_empty(), "Revert asks first")
+		change._line.asking().get("action").pressed.emit()
 		_check(
 			reverted == ["tx-1"] and change.state == "accepted" and change.reverting(),
 			"Revert waits for Joinery: Reverting…"

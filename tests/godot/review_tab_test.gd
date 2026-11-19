@@ -286,14 +286,35 @@ func _check_discard(tab: TAB) -> void:
 	_check(_counts.back() == 1, "The badge follows")
 
 
-func _check_revert(tab: TAB) -> void:
-	var row: Node
+func _decided_of(tab: TAB, id: String) -> Node:
 	for candidate: Node in _rows(tab._decided_body):
-		if str(candidate.get_meta("transaction_id")) == "a1":
-			row = candidate
-	(_find(row, "Revert") as Button).pressed.emit()
+		if str(candidate.get_meta("transaction_id")) == id:
+			return candidate
+	return null
+
+
+func _check_revert(tab: TAB) -> void:
+	(_find(_decided_of(tab, "a1"), "Revert") as Button).pressed.emit()
+	await _frames(4)
+	var ask := _find(_decided_of(tab, "a1"), "RevertAsk")
+	_check(_reverts.is_empty(), "Revert runs nothing before the answer")
+	_check(
+		ask != null and ask.get("text").text.begins_with("Revert “Darken the door wood”? "),
+		"Revert asks first, in place under the row"
+	)
+	var cancel: Button = ask.get("cancel") if ask != null else null
+	_check(cancel != null and cancel.has_focus(), "Focus starts on Cancel")
+	if cancel != null:
+		cancel.pressed.emit()
+	await _frames(4)
+	_check(_find(_decided_of(tab, "a1"), "RevertAsk") == null, "Cancel closes the question")
+	_check(_reverts.is_empty(), "Cancel reverts nothing")
+	(_find(_decided_of(tab, "a1"), "Revert") as Button).pressed.emit()
+	await _frames(4)
+	(_find(_decided_of(tab, "a1"), "RevertAsk").get("action") as Button).pressed.emit()
 	await _frames()
 	_check(_reverts == ["a1"], "Revert asks for that change")
+	await _check_undo_revert(tab)
 	tab.revert_finished("a1", false, "Cannot revert over newer manual edits.")
 	await _frames()
 	for candidate: Node in _rows(tab._decided_body):
@@ -303,6 +324,35 @@ func _check_revert(tab: TAB) -> void:
 				error != null and error.text.begins_with("Couldn't revert."), "Revert failure shown"
 			)
 			_check(_find(candidate, "Revert") != null, "Revert can be tried again")
+
+
+## The reverted row offers Undo revert; files edited since are asked about under it.
+func _check_undo_revert(tab: TAB) -> void:
+	var asked: Array = []
+	tab.unrevert_requested.connect(func(id: String, o: bool) -> void: asked.append([id, o]))
+	var undo := _find(_decided_of(tab, "v1"), "UndoRevert") as Button
+	_check(undo != null, "A reverted row offers Undo revert")
+	if undo == null:
+		return
+	undo.pressed.emit()
+	await _frames()
+	_check(asked == [["v1", false]], "Undo revert asks for that change: %s" % [asked])
+	_check(_find(_decided_of(tab, "v1"), "Working") != null, "It shows Putting back…")
+	var message := "art/props/door.glb was changed since the revert. Keep your files…"
+	tab.unrevert_finished("v1", false, message, ["art/props/door.glb"])
+	await _frames(4)
+	var ask := _find(_decided_of(tab, "v1"), "RevertConflict")
+	_check(ask != null and ask.get("text").text == message, "The conflict is asked in place")
+	_check(
+		ask != null and (ask.get("cancel") as Button).text == "Keep my files",
+		"Keeping the files is the safe answer"
+	)
+	if ask != null:
+		(ask.get("action") as Button).pressed.emit()
+	await _frames()
+	_check(asked.back() == ["v1", true], "Replace them overwrites, after saving them")
+	tab.unrevert_finished("v1", true)
+	await _frames()
 
 
 func _check_bible(tab: TAB) -> void:
