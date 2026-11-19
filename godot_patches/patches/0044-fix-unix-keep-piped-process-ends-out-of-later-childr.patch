@@ -1,0 +1,42 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ninjacornix <milanvrankic@gmail.com>
+Date: Thu, 19 Nov 2026 10:54:15 +0100
+Subject: [PATCH] fix(unix): keep piped process ends out of later children
+
+OS.execute_with_pipe left the parent's pipe ends inheritable, so every
+process started afterwards (a game run from the editor, say) held a copy
+of the write end of the piped child's stdin. When the parent died, the
+child never read EOF and kept running. Mark the pipe ends close-on-exec;
+the new process gets its own ends through dup2, which clears the flag.
+---
+ drivers/unix/os_unix.cpp | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/unix/os_unix.cpp b/drivers/unix/os_unix.cpp
+index 21e0abf..b3fb3a0 100644
+--- a/drivers/unix/os_unix.cpp
++++ b/drivers/unix/os_unix.cpp
+@@ -106,9 +106,7 @@
+ #define UNIX_GET_ENTROPY
+ #endif
+ 
+-#if !defined(UNIX_GET_ENTROPY) && !defined(NO_URANDOM)
+ #include <fcntl.h>
+-#endif
+ 
+ /// Clock Setup function (used by get_ticks_usec)
+ static uint64_t _clock_start = 0;
+@@ -754,6 +752,13 @@ Dictionary OS_Unix::execute_with_pipe(const String &p_path, const List<String> &
+ 		ERR_FAIL_V(ret);
+ 	}
+ 
++	// Keep every end out of processes started later: a child that inherited the write end
++	// of this process's stdin would hold it open, so it never reads EOF when we exit.
++	// The new process gets its own ends through dup2, which clears the flag.
++	for (int fd : { pipe_in[0], pipe_in[1], pipe_out[0], pipe_out[1], pipe_err[0], pipe_err[1] }) {
++		fcntl(fd, F_SETFD, fcntl(fd, F_GETFD) | FD_CLOEXEC);
++	}
++
+ 	// Create process.
+ 	pid_t pid = fork();
+ 	if (pid < 0) {
