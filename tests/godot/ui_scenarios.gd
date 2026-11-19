@@ -71,6 +71,7 @@ const ALL := [
 	"crash-two-chats",
 	"revert-elsewhere",
 	"queue-follows",
+	"busy-status",
 	"editor-life",
 	"reopen",
 ]

@@ -202,6 +202,10 @@ static func _text_types(t: Theme, c: Dictionary, m: Dictionary, context: Node) -
 		t.set_type_variation(type_name, "BoxContainer")
 		var step: int = boxes[type_name]
 		t.set_constant("separation", type_name, int(_sp(m, step)) if step > 0 else 0)
+	# A row of words and marks that wraps onto a second line rather than widen its column.
+	t.set_type_variation("JoineryRowFlow", "HFlowContainer")
+	t.set_constant("h_separation", "JoineryRowFlow", int(_sp(m, 2)))
+	t.set_constant("v_separation", "JoineryRowFlow", int(_sp(m, 1)))
 	# A split between two columns (asset list | detail) keeps one SPACE.3 gutter.
 	t.set_constant("separation", "HSplitContainer", int(_sp(m, 3)))
 	t.set_type_variation("JoineryInset", "MarginContainer")

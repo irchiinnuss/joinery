@@ -21,10 +21,9 @@ extends VBoxContainer
 ## After approval the card leaves, the step reads "Look approved", and the dock sends the same
 ## request again, so nothing is retyped.
 ##
-## The status line is the turn's one header in every state: the app glyph and name, then
-## "· 0:14" while it runs and "· Completed in 1:12" with its disclosure chevron when done. Steps
-## always sit below it, so only its content changes as the turn moves on. The status line is
-## CONTROL_H.xs tall in every state, so the gap under the bubble never changes.
+## The status line is the turn's one header in every state, CONTROL_H.xs tall: the app glyph
+## and name, then "· 0:14" while it runs and "· Completed in 1:12" with its chevron when done.
+## Steps sit below it. In a sidebar too narrow for it, it wraps rather than widen the sidebar.
 ##
 ## A turn keeps one rhythm: the bubble, the progress (status line and steps), the thumbnail and
 ## the error are SPACE.3 apart (JoineryStack); rows inside the progress stay SPACE.1 apart.
@@ -113,9 +112,9 @@ var text_label: RichTextLabel
 var _bubble: PanelContainer
 var _activity: MarginContainer
 var _column: VBoxContainer
-## The status line, the failure line, the steps and the timing details: one tight group.
+## The status line, failure line, steps and timing details: one tight group.
 var _progress: VBoxContainer
-var _status: HBoxContainer
+var _status: HFlowContainer
 var _apps: HBoxContainer
 ## " · " between the apps and the timer or timing line ("Blender · 0:14").
 var _joiner: Label
@@ -217,8 +216,9 @@ func _init(text := "", context: Array = []) -> void:
 	_progress = VBoxContainer.new()
 	_progress.theme_type_variation = "JoineryTight"
 	_column.add_child(_progress)
-	_status = _row(_progress)
-	_status.theme_type_variation = "JoineryRow"
+	_status = HFlowContainer.new()  # Wraps, never widening a narrow sidebar ("· Done in …").
+	_status.theme_type_variation = "JoineryRowFlow"
+	_progress.add_child(_status)
 	UI.bind_height(_status, "xs", false)
 	_sending = INDICATOR.new()
 	_sending.set("running", true)

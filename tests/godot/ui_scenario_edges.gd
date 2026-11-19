@@ -18,6 +18,7 @@ const FAIL_SLOWLY := "Fail after a while"
 const TOGETHER := "Finish at the same time"
 const LIVE := "Stream while the editor changes"
 const OTHER := "Name three harbour sounds"
+const BUSY_STATUS := "Model the sign in Blender, then paint it in Krita"
 ## Emoji, CJK, right-to-left and combining text in one reply.
 const SCRIPTS := "Lanterns 🏮🚢 — 港の灯台 · 등대 · منارة الميناء · מגדלור · é ok"
 ## Markdown that never closes, and stars inside code.
@@ -53,6 +54,25 @@ const SCRIPT := {
 		{"raise": "The provider returned an internal error (HTTP 502)."},
 	],
 	TOGETHER: [{"wait": 600}, {"stream": "Together.", "chunk": 9, "every_ms": 1}],
+	BUSY_STATUS:
+	[
+		{"execution": {}},
+		{"trail": {"id": "b", "text": "Opening sign.blend in Blender", "state": "running"}},
+		{"trail": {"id": "b", "text": "Opening sign.blend in Blender", "state": "done"}},
+		{"trail": {"id": "k", "text": "Opening sign.kra in Krita", "state": "running"}},
+		{"trail": {"id": "k", "text": "Opening sign.kra in Krita", "state": "failed"}},
+		{
+			"activity":
+			{
+				"server": "krita",
+				"tool": "open_document",
+				"allowed": false,
+				"reason": "Krita isn't enabled for this project.",
+				"call_id": "k"
+			}
+		},
+		{"stream": "The sign is modelled; painting it needs Krita.", "chunk": 12, "every_ms": 20},
+	],
 	LIVE:
 	[
 		{"execution": {}},
@@ -614,19 +634,25 @@ func _reopen() -> void:
 	# Viewed read-only (with Continue), it still fits the sidebar it is in.
 	var room := (s.dock.get_parent() as Control).size.x
 	var wide := s.dock.get_combined_minimum_size().x
-	var what := "The earlier chat fits the sidebar (%.0f of %.0f px)" % [wide, room]
-	if room >= 480.0:
-		s.check(wide <= room + 1.0, what)
-	else:
-		s.expect_bug(
-			wide <= room + 1.0,
-			what,
-			(
-				"reopened, a refused call's app badge shows (the record keeps the step as it"
-				+ " started), and the timing line beside it never shrinks: too wide at 340 px"
-			)
-		)
+	s.check(
+		wide <= room + 1.0, "The earlier chat fits the sidebar (%.0f of %.0f px)" % [wide, room]
+	)
 	await s.shot("reopened")
+
+
+## A turn that used an app and had a call refused: its status line (the app, then "Done in
+## under 1 s, 1 step not run") fits even the narrowest sidebar.
+func _busy_status() -> void:
+	if not await s.connect_host():
+		return
+	s.send(BUSY_STATUS)
+	await s.wait_until(func() -> bool: return s.visible_text().contains("not run"), 8000)
+	await s.frames(3)
+	var room := (s.dock.get_parent() as Control).size.x
+	var wide := s.dock.get_combined_minimum_size().x
+	s.check(wide <= room + 1.0, "The turn's status line fits (%.0f of %.0f px)" % [wide, room])
+	s.check(s.visible_text().contains("1 step not run"), "It still says the step was not run")
+	await s.shot("status")
 
 
 ## What a chat shows, part by part, to compare a live chat with the same chat reopened.
