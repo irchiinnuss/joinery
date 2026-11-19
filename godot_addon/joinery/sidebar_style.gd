@@ -28,6 +28,13 @@ static func boxed(control: Control, variation: String, step := 2) -> void:
 	)
 
 
+## A card in the sidebar's card area (to-do, errors, playtest, a task, a check): the decision
+## card's lifted surface with its SPACE.3 padding, so every card's words start on the same line
+## as the change card's and the message box's.
+static func task_card(control: Control) -> void:
+	boxed(control, "JoineryChangeCard", 3)
+
+
 ## How far an icon button's glyph sits inside its square (CONTROL_H.md around an ICON.sm
 ## glyph): a row of them reaches this far past the gutter, so the glyphs end on it.
 static func icon_inset(control: Control) -> int:

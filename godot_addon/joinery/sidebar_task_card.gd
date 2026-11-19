@@ -52,16 +52,7 @@ func _init(identifier := "", name_text := "") -> void:
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	accessibility_name = "Task: " + name_text
 	# The queued card's outline: a task is quieter than the user's own request.
-	STYLE.on_theme_overrides(
-		self,
-		func() -> void:
-			var source := get_theme_stylebox("panel", "JoineryChangeCard")
-			if source == null:
-				return
-			var box := source.duplicate() as StyleBox
-			box.set_content_margin_all(float(UI_THEME.space(self, 2)))
-			add_theme_stylebox_override("panel", box)
-	)
+	STYLE.task_card(self)
 	var column := VBoxContainer.new()
 	column.theme_type_variation = "JoineryTight"
 	add_child(column)
