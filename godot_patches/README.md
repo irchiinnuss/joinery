@@ -49,4 +49,6 @@ openable in stock Godot; the addon degrades without these.
 The Windows native OpenGL initialization fix is a separate upstream candidate
 with an exact-file scope exception ([ADR 0018](../docs/adr/0018-windows-software-opengl.md)).
 Normal Windows process-pipe EOF handling is another independent upstream
-candidate ([ADR 0019](../docs/adr/0019-windows-process-pipe-eof.md)).
+candidate ([ADR 0019](../docs/adr/0019-windows-process-pipe-eof.md)), and so is
+close-on-exec for piped processes on Unix
+([ADR 0092](../docs/adr/0092-unix-pipe-close-on-exec.md)).

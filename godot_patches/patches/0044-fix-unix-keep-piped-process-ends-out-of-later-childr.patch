@@ -8,6 +8,8 @@ process started afterwards (a game run from the editor, say) held a copy
 of the write end of the piped child's stdin. When the parent died, the
 child never read EOF and kept running. Mark the pipe ends close-on-exec;
 the new process gets its own ends through dup2, which clears the flag.
+
+Meant for upstream: a general POSIX process fix (ADR 0092).
 ---
  drivers/unix/os_unix.cpp | 9 +++++++--
  1 file changed, 7 insertions(+), 2 deletions(-)

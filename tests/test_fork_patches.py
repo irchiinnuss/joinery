@@ -162,6 +162,9 @@ def test_patches_target_only_expected_areas() -> None:
         "0022-test-windows-trace-fail-fast-exits-in-test-editors.patch": {
             "platform/windows/godot_windows.cpp": "docs/adr/0032-background-test-editors.md",
         },
+        "0044-fix-unix-keep-piped-process-ends-out-of-later-childr.patch": {
+            "drivers/unix/os_unix.cpp": "docs/adr/0092-unix-pipe-close-on-exec.md",
+        },
         "0027-feat-editor-wear-Joinery-s-icon-in-the-editor.patch": {
             path: "docs/adr/0084-joinery-icon.md"
             for path in (

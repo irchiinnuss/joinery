@@ -10,6 +10,8 @@ between, so a plugin or script can close or reload one of those scenes,
 freeing the recorded nodes; the swap then read freed memory and crashed.
 Record each scene's root, find the scene by it when swapping, and skip
 a scene that is gone (a reloaded scene already loads the new import).
+
+Meant for upstream: a general use-after-free fix in EditorNode.
 ---
  editor/editor_node.cpp | 21 +++++++++++++++++++--
  editor/editor_node.h   |  3 +++
