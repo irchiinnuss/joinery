@@ -29,6 +29,7 @@ from bridge.chat_record import ChatRecorder
 from bridge.check_runner import Checks
 from bridge.crew import NO_FREE_TURN, Crew
 from bridge.designer import Designer
+from bridge.early_input import EarlyInput, connect_or_end
 from bridge.error_fixer import ErrorFixer
 from bridge.host import Bridge
 from bridge.idle_queue import IdleQueue
@@ -649,7 +650,13 @@ async def _serve(
         await rpc_server.start()
         bridge.bind_gateway(rpc_server.path)
         connection_timing = TurnTiming()
-        await bridge.connect(project, profile_id)
+        early = EarlyInput(reader)
+        if not await connect_or_end(bridge.connect(project, profile_id), early):
+            # The editor went (or restarted its chat) before the agent answered.
+            if early.shutdown is not None and early.shutdown.get("keep_reviews"):
+                gateway.keep_reviews = True
+                gateway.held_by = "chat restart"
+            return 0
         specialists = Specialists(gateway, agent_id, profile_id, policy_stop)
         rpc_path = rpc_server.path
 
@@ -1089,7 +1096,7 @@ async def _serve(
                 calm = 0 if idle_busy() else calm + 1
             emit({"kind": "quiet"})
 
-        while line := await reader.readline():
+        while line := await early.readline():
             try:
                 data = json.loads(line)
                 if not isinstance(data, dict):

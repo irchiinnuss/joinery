@@ -149,3 +149,127 @@ def test_without_an_editor_pid_the_host_waits_for_its_input(
         return await asyncio.wait_for(host, 10)
 
     assert asyncio.run(go()) == 0
+
+
+class _NeverConnects(FakeBridge):
+    """An agent whose connection never completes (a login prompt nobody answers)."""
+
+    async def connect(self, _project: Path, _profile: str = "") -> None:
+        await asyncio.Event().wait()
+
+
+def test_a_host_still_connecting_ends_on_eof(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "project.godot").write_text("config_version=5\n")
+    _quiet_host(monkeypatch, _NeverConnects)
+    streams: list[asyncio.StreamReader] = []
+
+    async def reader(_stream: Any) -> tuple[asyncio.StreamReader, Any]:
+        streams.append(asyncio.StreamReader())
+        return streams[0], type("T", (), {"close": lambda self: None})()
+
+    monkeypatch.setattr(stdio, "input_reader", reader)
+
+    async def go() -> int:
+        host = asyncio.create_task(stdio.serve(tmp_path, "claude"))
+        await asyncio.sleep(0.3)
+        assert not host.done(), "the host waits for its agent"
+        streams[0].feed_eof()
+        return await asyncio.wait_for(host, 10)
+
+    assert asyncio.run(go()) == 0
+
+
+def test_a_host_still_connecting_ends_with_its_editor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "project.godot").write_text("config_version=5\n")
+    _quiet_host(monkeypatch, _NeverConnects)
+
+    async def reader(_stream: Any) -> tuple[asyncio.StreamReader, Any]:
+        return asyncio.StreamReader(), type("T", (), {"close": lambda self: None})()
+
+    monkeypatch.setattr(stdio, "input_reader", reader)
+    editor = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+
+    async def go() -> int:
+        host = asyncio.create_task(
+            stdio.serve(tmp_path, "claude", editor_pid=editor.pid)
+        )
+        await asyncio.sleep(0.3)
+        assert not host.done()
+        editor.kill()
+        editor.wait()
+        return await asyncio.wait_for(host, 10)
+
+    try:
+        assert asyncio.run(go()) == 0
+    finally:
+        if editor.poll() is None:
+            editor.kill()
+            editor.wait()
+
+
+def test_lines_sent_while_connecting_are_kept_for_after(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Watching for the end while connecting reads the input; what it read still counts."""
+    (tmp_path / "project.godot").write_text("config_version=5\n")
+    gateways: list[Any] = []
+
+    class Slow(FakeBridge):
+        async def connect(self, _project: Path, _profile: str = "") -> None:
+            await asyncio.sleep(0.2)
+
+    def gateway(project: Path) -> FakeGateway:
+        gateways.append(FakeGateway(project))
+        return gateways[-1]
+
+    _quiet_host(monkeypatch, Slow)
+    monkeypatch.setattr(stdio, "ProjectGateway", gateway)
+    events: list[dict[str, Any]] = []
+    monkeypatch.setattr(stdio, "emit", events.append)
+
+    streams: list[asyncio.StreamReader] = []
+
+    async def reader(_stream: Any) -> tuple[asyncio.StreamReader, Any]:
+        streams.append(asyncio.StreamReader())
+        streams[0].feed_data(b'{"kind": "no such thing"}\n')
+        return streams[0], type("T", (), {"close": lambda self: None})()
+
+    monkeypatch.setattr(stdio, "input_reader", reader)
+
+    async def go() -> int:
+        host = asyncio.create_task(stdio.serve(tmp_path, "claude"))
+        await asyncio.sleep(0.6)  # Connected by now.
+        streams[0].feed_data(b'{"kind": "shutdown", "keep_reviews": true}\n')
+        return await asyncio.wait_for(host, 10)
+
+    assert asyncio.run(go()) == 0
+    assert gateways[0].keep_reviews is True
+    said = [e.get("text") for e in events if e.get("kind") == "message"]
+    assert "Unknown chat message." in said, "the early line was read after connecting"
+
+
+def test_a_restart_while_connecting_keeps_reviews(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "project.godot").write_text("config_version=5\n")
+    gateways: list[Any] = []
+
+    def gateway(project: Path) -> FakeGateway:
+        gateways.append(FakeGateway(project))
+        return gateways[-1]
+
+    _quiet_host(monkeypatch, _NeverConnects)
+    monkeypatch.setattr(stdio, "ProjectGateway", gateway)
+
+    async def reader(_stream: Any) -> tuple[asyncio.StreamReader, Any]:
+        stream = asyncio.StreamReader()
+        stream.feed_data(b'{"kind": "shutdown", "keep_reviews": true}\n')
+        return stream, type("T", (), {"close": lambda self: None})()
+
+    monkeypatch.setattr(stdio, "input_reader", reader)
+    assert asyncio.run(asyncio.wait_for(stdio.serve(tmp_path, "claude"), 10)) == 0
+    assert gateways[0].keep_reviews is True
