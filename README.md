@@ -18,10 +18,10 @@ in a real tool, kept as an editable source file, and has a recipe that rebuilds
 it. Games made with Joinery are plain Godot projects and open in stock Godot.
 
 What changed in this version, and what is still missing:
-[0.7.2 release notes](docs/releases/0.7.2.md). Earlier:
+[0.7.3 release notes](docs/releases/0.7.3.md). Earlier:
 [0.6.0](docs/releases/0.6.0.md), [0.6.1](docs/releases/0.6.1.md),
-[0.6.2](docs/releases/0.6.2.md), [0.7.0](docs/releases/0.7.0.md) and
-[0.7.1](docs/releases/0.7.1.md).
+[0.6.2](docs/releases/0.6.2.md), [0.7.0](docs/releases/0.7.0.md),
+[0.7.1](docs/releases/0.7.1.md) and [0.7.2](docs/releases/0.7.2.md).
 
 ## How a change works
 
