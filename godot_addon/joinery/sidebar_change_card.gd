@@ -734,6 +734,11 @@ func awaiting_decision() -> bool:
 	return state in ["ready", "applying"]
 
 
+## True while a decision shown at once ([method set_outcome] optimistic) is on its way.
+func deciding() -> bool:
+	return not _previous_outcome.is_empty()
+
+
 ## Settle a decision reported by the editor. An optimistic outcome of the same kind is kept
 ## (no second animation); otherwise the outcome is shown now. Returns false when the card is
 ## not waiting for a decision, or a stop arrives after the work finished.

@@ -182,7 +182,7 @@ func _ready() -> void:
 	_slash.finished.connect(_on_slash_finished)
 	_slash.feature_planned.connect(_on_feature_planned)
 	_slash.feature_applied.connect(_on_feature_applied)
-	_slash.readiness_changed.connect(_on_readiness)
+	_slash.readiness_changed.connect(_header.notice.show_readiness)
 	_slash.revertible_changed.connect(_on_revertible)
 	add_child(_slash)
 	_reverts = REVERTS.new(self, _slash, _composer)
@@ -601,11 +601,6 @@ func _on_feature_applied(ok: bool, message: String, transaction_id: String) -> v
 		EditorInterface.get_resource_filesystem().scan()
 
 
-## The header's notice names the apps that need something, with the button that fixes it.
-func _on_readiness(report: Dictionary) -> void:
-	_header.notice.show_readiness(report)
-
-
 ## Which accepted changes can still be reverted, from `joinery transactions list`.
 func _on_revertible(states: Dictionary) -> void:
 	for id: String in states:
@@ -954,17 +949,22 @@ func _open_review(media: Array) -> void:
 
 
 func _on_accept() -> void:
-	var card := _card()
-	if card != null and card.awaiting_decision():
-		card.set_outcome("success", "Change accepted", true)
-	accept_edit_requested.emit()
+	_decide("success", "Change accepted", accept_edit_requested)
 
 
 func _on_reject() -> void:
+	_decide("rejected", DISCARDED, reject_edit_requested)
+
+
+## The card shows the decision at once, then [param ask] asks for it: once, never again while
+## that decision is on its way (a second Accept, or ⌘↩ after the button).
+func _decide(kind: String, text: String, ask: Signal) -> void:
 	var card := _card()
+	if card != null and card.deciding():
+		return
 	if card != null and card.awaiting_decision():
-		card.set_outcome("rejected", DISCARDED, true)
-	reject_edit_requested.emit()
+		card.set_outcome(kind, text, true)
+	ask.emit()
 
 
 func _make_review() -> Control:
