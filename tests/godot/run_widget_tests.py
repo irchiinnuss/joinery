@@ -90,6 +90,7 @@ CASES = {
     "update_dialog_test.gd": "update dialog: ok",
     "setup_notice_test.gd": "setup notice: ok",
     "departures_test.gd": "departures: ok",
+    "revert_confirm_test.gd": "revert confirm: ok",
     # The sidebar end to end against the real chat host and a scripted provider, headless:
     # one width and theme (run_ui_scenarios.py runs every width with screenshots).
     "ui_scenario_dock.gd": "ui scenarios dock: ok",

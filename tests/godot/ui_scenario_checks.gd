@@ -92,3 +92,57 @@ static func quiet_actions(s: Variant) -> void:
 		),
 		"Preview and Try other ways are alike quiet buttons, side by side"
 	)
+
+
+## After an accepted change: Revert asks first, in place under the line, with Cancel focused,
+## and Escape answers Cancel; right after the revert the toast offers Undo, which puts the
+## change back. Joinery's own revert is stood in for: the scripted change has no files.
+static func revert_undo(s: Variant) -> void:
+	var card: Control = s.card()
+	var line: Control = card.get("_line")
+	var revert: Button = line.get("revert")
+	s.check(card.get("state") == "accepted" and revert.is_visible_in_tree(), "Revert is offered")
+	var transcript: Object = s.transcript()
+	for name: String in ["revert_requested", "unrevert_requested"]:
+		for link: Dictionary in transcript.get_signal_connection_list(name):
+			transcript.disconnect(name, link["callable"])
+	var asked: Array[String] = []
+	transcript.connect("revert_requested", func(id: String) -> void: asked.append(id))
+	transcript.connect(
+		"unrevert_requested", func(id: String, _o: bool) -> void: asked.append("undo " + id)
+	)
+	(transcript as ScrollContainer).ensure_control_visible(revert)
+	await s.frames(2)
+	await s.click(revert)
+	await s.frames(3)
+	var ask: Control = line.call("asking")
+	s.check(ask != null and s.on_screen(ask), "Revert asks first, in place under the line")
+	var words := str(ask.get("text").text) if ask != null else ""
+	s.check(words.ends_with("You can undo this."), "It says what goes back: " + words)
+	s.check(ask != null and ask.get("cancel").has_focus(), "Focus starts on Cancel")
+	s.check(asked.is_empty(), "Nothing is reverted before the answer")
+	await s.shot("revert-ask")
+	s.key(KEY_ESCAPE)
+	await s.frames(3)
+	s.check(line.call("asking") == null and asked.is_empty(), "Escape answers Cancel")
+	await s.click(revert)
+	await s.frames(3)
+	ask = line.call("asking")
+	if ask != null:
+		await s.click(ask.get("action"))
+	s.check(asked.size() == 1, "Revert in the question reverts the change")
+	var id := str(card.get("transaction_id"))
+	var reverts: Object = s.dock.get("_reverts")
+	reverts.call("on_reverted", id, true, "")
+	await s.frames(3)
+	var toast: Control = reverts.get("toast")
+	s.check(s.on_screen(toast.get("undo")), "Right after the revert, the toast offers Undo")
+	s.check((line.get("undo_revert") as Control).is_visible_in_tree(), "The card: Undo revert")
+	await s.shot("reverted-undo")
+	await s.click(toast.get("undo"))
+	s.check(asked.back() == "undo " + id, "Undo puts that change back")
+	s.check(not toast.visible, "The toast goes once used")
+	reverts.call("_on_unreverted", id, true, "", [], PackedStringArray())
+	await s.frames(3)
+	s.check(card.get("state") == "accepted" and revert.is_visible_in_tree(), "Restored")
+	await s.shot("restored")

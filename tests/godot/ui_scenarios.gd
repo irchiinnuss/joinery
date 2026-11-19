@@ -43,6 +43,7 @@ const ALL := [
 	"denied-call",
 	"review-accept",
 	"review-reject",
+	"revert-undo",
 	"queued",
 	"two-chats",
 	"switch-mid-stream",

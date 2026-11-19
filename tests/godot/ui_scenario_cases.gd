@@ -618,6 +618,12 @@ func _review_reject() -> void:
 	await _review(false)
 
 
+## Revert asks first, in place; right after it the toast's Undo puts the change back.
+func _revert_undo() -> void:
+	await _review(true)
+	await CHECKS.revert_undo(s)
+
+
 func _review(accept: bool) -> void:
 	if not await s.connect_host():
 		return
