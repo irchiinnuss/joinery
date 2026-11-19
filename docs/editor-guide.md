@@ -287,7 +287,20 @@ too, beside Output). Its title counts what waits for you: **Review 2**.
   "Needs your approval before new art or audio" with **Review** (`/art`).
 - **Decided**: accepted, discarded and reverted changes, newest first, with
   **Revert** while the change can still be put back and **Too old to revert**
-  once its restore data is gone (the same Revert as in the chat).
+  once its restore data is gone (the same Revert as in the chat), and
+  **Undo revert** on a reverted change.
+
+Revert never runs on one click. Wherever it appears (the chat's change
+cards, the Chats page, a feature plan, this tab) it first asks under its
+line: "Revert “Hedge has small leaves…”? Its 7 files go back to how they were
+before it. You can undo this." with **Revert** and **Cancel**; Cancel has the
+focus and Escape answers it. Right after a revert, a line above the message
+box offers **Undo** for a few seconds. **Undo revert** (also on the Timeline's
+revert entry) puts the change back as it was accepted, as its own
+"Restore: …" Timeline entry. If a file was changed since the revert, it says
+which and asks: **Keep my files** (nothing changes) or **Replace them** (your
+versions are saved, so Revert brings them back). From a terminal or an agent:
+`joinery transactions unrevert --project <path> --id <id> [--overwrite]`.
 
 The list comes from `joinery transactions list --project <path>`, which
 prints each change's state, summary, apps, times, files and the art bible's
@@ -1363,8 +1376,9 @@ brought to the current versions as one change in the Review tab. A file edited
 since Joinery installed it (by you or an agent; installed hashes are in the game
 manifest and `.joinery/core-files.json`, else the file's first git commit) is
 listed and kept unless `--force`.
-`transactions list|accept|reject|recover|revert --project ... [--id ...]`
-decides a waiting change and provides durable file recovery/revert. Native scene edits remain in Godot's undo history and must be
+`transactions list|accept|reject|recover|revert|unrevert --project ... [--id ...]`
+decides a waiting change and provides durable file recovery/revert; `unrevert`
+puts a reverted change back (`--overwrite` replaces files edited since). Native scene edits remain in Godot's undo history and must be
 saved normally. A new authoring connection recovers interrupted file commits and
 discards abandoned previews before accepting requests. Concurrent authoring
 hosts for one project are refused.
