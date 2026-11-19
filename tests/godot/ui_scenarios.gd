@@ -20,8 +20,11 @@ extends RefCounted
 ## scenario waiting the same way in turn.
 
 const UI_CHECKS_FILE := "ui_checks.gd"
-## The scenarios themselves, one function each.
+## The scenarios themselves, one function each: the everyday ones, then the edge cases.
 const CASES_FILE := "ui_scenario_cases.gd"
+const EDGES_FILE := "ui_scenario_edges.gd"
+## A failed check's own error line (not an error of the sidebar's).
+const FAILED_CHECK := "Scenario check failed: "
 ## The longest one scenario may take (they take a few seconds each).
 const SCENARIO_MS := 60000
 ## Every scenario, in the order they run (ui_scenario_cases.gd has one function each).
@@ -53,6 +56,19 @@ const ALL := [
 	"console-errors",
 	"auto-fix",
 	"idle",
+	"rapid-input",
+	"odd-content",
+	"huge-reply",
+	"long-chat",
+	"noisy-host",
+	"never-ready",
+	"queued-retry",
+	"accept-twice",
+	"accept-offline",
+	"switch-in-review",
+	"finish-together",
+	"editor-life",
+	"reopen",
 ]
 
 ## Builds a fresh sidebar for each scenario: returns [dock, chat bridge], wired and in the tree.
@@ -68,6 +84,7 @@ var chat: Node
 var notifications: PackedStringArray = []
 var _checks: GDScript
 var _cases: RefCounted
+var _edges: RefCounted
 var _script_path := ""
 var _scenario := ""
 var _failed := false
@@ -78,6 +95,57 @@ var _host_job: RefCounted
 ## Why the remaining scenarios are not run (a host that never connects, a scenario that never
 ## ends): each would only wait the same way.
 var _halted := ""
+## Every error Godot printed while a scenario ran (a known gotcha shows only there).
+var _errors := ErrorLog.new()
+
+
+## Records the errors Godot prints (push_error, failed checks in the engine, script errors).
+class ErrorLog:
+	extends Logger
+	var lines: PackedStringArray = []
+	## Only errors raised from Joinery's own scripts count (inside the editor, others print too).
+	var only_joinery := false
+	var _lock := Mutex.new()
+
+	func _log_error(
+		function: String,
+		file: String,
+		line: int,
+		code: String,
+		rationale: String,
+		_editor_notify: bool,
+		error_type: int,
+		script_backtraces: Array[ScriptBacktrace]
+	) -> void:
+		if error_type == ERROR_TYPE_WARNING:
+			return
+		var where := "%s (%s:%d)" % [function, file.get_file(), line]
+		var ours := file.contains("addons/joinery")
+		for trace: ScriptBacktrace in script_backtraces:
+			if trace.get_frame_count() > 0:
+				where = (
+					"%s:%d %s"
+					% [
+						trace.get_frame_file(0).get_file(),
+						trace.get_frame_line(0),
+						trace.get_frame_function(0)
+					]
+				)
+				ours = ours or trace.format().contains("addons/joinery")
+		var said := rationale if not rationale.is_empty() else code
+		if said.begins_with(FAILED_CHECK) or (only_joinery and not ours):
+			return
+		_lock.lock()
+		lines.append("%s at %s" % [said, where])
+		_lock.unlock()
+
+	## Take what was recorded so far.
+	func take() -> PackedStringArray:
+		_lock.lock()
+		var taken := lines.duplicate()
+		lines.clear()
+		_lock.unlock()
+		return taken
 
 
 func _init(scene_tree: SceneTree) -> void:
@@ -86,6 +154,10 @@ func _init(scene_tree: SceneTree) -> void:
 	_checks = load(here.path_join(UI_CHECKS_FILE))
 	_cases = load(here.path_join(CASES_FILE)).new()
 	_cases.set("s", self)
+	_edges = load(here.path_join(EDGES_FILE)).new()
+	_edges.set("s", self)
+	_errors.only_joinery = Engine.is_editor_hint()
+	OS.add_logger(_errors)
 
 
 ## Run every scenario (or JOINERY_SCENARIOS); true when nothing failed unexpectedly.
@@ -99,6 +171,7 @@ func run(only: Array = []) -> bool:
 		if not wanted.is_empty() and not wanted.has(scenario):
 			continue
 		_scenario = scenario
+		_errors.take()
 		if not _halted.is_empty():
 			_line("fail", "Not run: %s" % _halted)
 			_failed = true
@@ -110,8 +183,9 @@ func run(only: Array = []) -> bool:
 		_quiet_notifications()
 		await frames(2)
 		var finished := [false]
+		var function := "_" + scenario.replace("-", "_")
 		var play := func() -> void:
-			await _cases.call("_" + scenario.replace("-", "_"))
+			await (_cases if _cases.has_method(function) else _edges).call(function)
 			finished[0] = true
 		play.call()
 		var started := Time.get_ticks_msec()
@@ -127,7 +201,18 @@ func run(only: Array = []) -> bool:
 			await teardown.call()
 		await frames(2)
 		await _hosts_end()
+		_no_errors()
+	OS.remove_logger(_errors)
 	return not _failed
+
+
+## Nothing printed an error while the scenario ran, or as its sidebar went away.
+func _no_errors() -> void:
+	var printed := _errors.take()
+	var first := printed[0] if not printed.is_empty() else ""
+	check(printed.is_empty(), "Nothing printed an error (%d): %s" % [printed.size(), first])
+	for line: String in printed.slice(1, 4):
+		print("SCENARIO-ERROR %s %s" % [_scenario, line])
 
 
 # --- Reporting ---------------------------------------------------------------------------------
@@ -138,7 +223,7 @@ func check(ok: bool, what: String) -> void:
 	_line("pass" if ok else "fail", what)
 	if not ok:
 		_failed = true
-		push_error("%s: %s" % [_scenario, what])
+		push_error("%s%s: %s" % [FAILED_CHECK, _scenario, what])
 
 
 ## A check that fails today because of a known bug ([param why]); passing again is reported.
@@ -220,17 +305,27 @@ func wait_ms(ms: int) -> void:
 	await tree.create_timer(ms / 1000.0).timeout
 
 
-## Start the scripted chat host and wait until the sidebar shows it connected.
-func connect_host() -> bool:
+## Start the scripted chat host and wait until the sidebar shows it connected; with
+## [param wait] false, return once it started. [param changes] go into this host's script
+## ({"connect_ms": …}).
+func connect_host(wait := true, changes := {}) -> bool:
 	chat.call("close")
 	var job: RefCounted = load("res://addons/joinery/command_job.gd").new()
+	var script := _script_path
+	if not changes.is_empty():
+		script = _script_path.get_basename() + "-changed.json"
+		var data: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(_script_path))
+		data.merge(changes, true)
+		var file := FileAccess.open(script, FileAccess.WRITE)
+		file.store_string(JSON.stringify(data))
+		file.close()
 	var args := PackedStringArray(
 		[
 			_host_script(),
 			"--project",
 			ProjectSettings.globalize_path("res://").rstrip("/"),
 			"--script",
-			_script_path,
+			script,
 		]
 	)
 	if job.call("start", OS.get_environment("JOINERY_TEST_PYTHON"), args) != OK:
@@ -242,6 +337,8 @@ func connect_host() -> bool:
 	chat.set("_job", job)
 	dock.call("set_chat_agent", "codex")
 	chat.emit_signal("status_changed", "connecting", "Connecting to Codex CLI…")
+	if not wait:
+		return true
 	var ok := await wait_until(func() -> bool: return bool(chat.call("is_ready")), 20000)
 	check(ok, "The sidebar connects to the scripted chat host")
 	if not ok:
@@ -265,6 +362,14 @@ func _host_output() -> void:
 	var stderr: PackedByteArray = _host_job.get("_stderr")
 	print("SCENARIO-HOST %s pid %d %s, stderr:" % [_scenario, pid, state])
 	print(stderr.get_string_from_utf8().strip_edges())
+
+
+## The scripted hosts die at once, as a crash would. Killed from outside (OS.kill would also
+## reap them, which the sidebar's own job then can't).
+func kill_hosts() -> void:
+	for pid: int in _hosts:
+		if pid > 0 and OS.is_process_running(pid):
+			OS.execute("kill", ["-9", str(pid)])
 
 
 ## scripted_host.py: JOINERY_SCRIPTED_HOST, or the one beside this script.
@@ -328,10 +433,11 @@ func click(control: Control) -> void:
 	await frames(2)
 
 
-## Every word the sidebar shows now (labels, rich text and buttons in view).
-func visible_text() -> String:
+## Every word the sidebar shows now (labels, rich text and buttons in view); with [param root],
+## only those under it.
+func visible_text(root: Node = null) -> String:
 	var words := PackedStringArray()
-	for node: Node in dock.find_children("*", "Control", true, false):
+	for node: Node in (root if root != null else dock).find_children("*", "Control", true, false):
 		var control := node as Control
 		if not control.is_visible_in_tree():
 			continue
@@ -476,6 +582,10 @@ func control_name(control: Control) -> String:
 
 func _write_script() -> void:
 	var script: Dictionary = _cases.call("script_data")
+	var turns: Dictionary = script["turns"]
+	turns.merge(_edges.get("SCRIPT").duplicate(true))
+	turns[_edges.get("ODD")][-1]["stream"] = _edges.call("odd_reply")
+	turns[_edges.get("HUGE")][-1]["stream"] = _edges.call("huge_reply")
 	DirAccess.make_dir_recursive_absolute(OS.get_cache_dir())
 	_script_path = OS.get_cache_dir().path_join(
 		"joinery-ui-scenarios-%d.json" % OS.get_process_id()

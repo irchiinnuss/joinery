@@ -27,6 +27,9 @@ events. Steps, in order:
 - ``{"activity": {...}}``: a tool call and the gate's verdict (``ToolActivity``);
 - ``{"usage": {...}}``: token use;
 - ``{"emit": {...}}``: any event, straight to the sidebar (cards, change previews…);
+- ``{"raw": text}``: text written to the sidebar as is (a line that is not JSON, half a line);
+- ``{"raw_split": {...}}``: an event written in two pieces a moment apart, split inside its
+  first multi-byte character, as a pipe may deliver it;
 - ``{"raise": text}``, ``{"raise_os": text}``, ``{"timeout": text}``: the provider fails;
 - ``{"policy_stop": reason}``: the project policy stops the turn (a Rule Zero stop);
 - ``{"exit": code}``: the host process dies (the connection drops);
@@ -166,6 +169,17 @@ class ScriptedBridge:
             yield Usage.model_validate(step["usage"])
         elif "emit" in step:
             stdio.emit(dict(step["emit"]))
+        elif "raw" in step:
+            sys.stdout.write(str(step["raw"]))
+            sys.stdout.flush()
+        elif "raw_split" in step:
+            data = (json.dumps(step["raw_split"], ensure_ascii=False) + "\n").encode()
+            middle = next(i for i, byte in enumerate(data) if byte >= 0x80) + 1
+            sys.stdout.buffer.write(data[:middle])
+            sys.stdout.flush()
+            await asyncio.sleep(0.2)
+            sys.stdout.buffer.write(data[middle:])
+            sys.stdout.flush()
         elif "raise" in step:
             raise RuntimeError(str(step["raise"]))
         elif "raise_os" in step:

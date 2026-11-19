@@ -119,14 +119,14 @@ func _wire(dock: Control, chat: Node) -> void:
 				str(event.get("transaction_id", ""))
 			)
 	)
-	dock.connect(
-		"accept_edit_requested",
-		func() -> void: chat.call("decide_files", str(review.get("transaction_id", "")), true)
-	)
-	dock.connect(
-		"reject_edit_requested",
-		func() -> void: chat.call("decide_files", str(review.get("transaction_id", "")), false)
-	)
+	# As plugin.gd decides: never while the chat host is away (the decision would go nowhere).
+	var decide := func(accept: bool) -> void:
+		if not bool(chat.call("is_ready")):
+			dock.call("show_review_error", "Journeyman isn't connected. Reconnect, then decide.")
+			return
+		chat.call("decide_files", str(review.get("transaction_id", "")), accept)
+	dock.connect("accept_edit_requested", decide.bind(true))
+	dock.connect("reject_edit_requested", decide.bind(false))
 	chat.connect(
 		"file_decision",
 		func(event: Dictionary) -> void:

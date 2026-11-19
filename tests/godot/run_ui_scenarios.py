@@ -112,6 +112,7 @@ def editor(
             "ui_scenarios.gd",
             "ui_scenario_cases.gd",
             "ui_scenario_checks.gd",
+            "ui_scenario_edges.gd",
             "playtest_fixture.gd",
         ],
         "ui scenarios editor:",
