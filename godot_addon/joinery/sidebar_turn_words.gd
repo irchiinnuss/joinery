@@ -19,6 +19,11 @@ static func timing_line(outcome: String, seconds: float) -> String:
 	return "Failed within 1 s" if quick else "Failed after " + clock
 
 
+## [param seconds] as a clock ("0:12"), or "under 1 s" for less than a second, never "0:00".
+static func duration(seconds: float) -> String:
+	return "under 1 s" if seconds < 1.0 else UI_MOTION.format_clock(seconds)
+
+
 ## [param line] (a done turn's timing line) for a turn in which [param count] calls were
 ## refused: "Done in 0:12, 1 step not run". A line already counted is counted again.
 static func with_refusals(line: String, count: int) -> String:

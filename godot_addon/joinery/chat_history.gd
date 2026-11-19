@@ -416,12 +416,10 @@ func show_timing(event: Dictionary) -> bool:
 			route.append(str(event["effort"]).capitalize())
 		lines.append(" · ".join(route))
 	if event.get("first_response_ms") != null:
-		lines.append(
-			"First response " + UI_MOTION.format_clock(float(event["first_response_ms"]) / 1000.0)
-		)
+		lines.append("First response " + WORDS.duration(float(event["first_response_ms"]) / 1000.0))
 	for phase: String in event.get("phases_ms", {}):
 		var phase_seconds := float(event["phases_ms"][phase]) / 1000.0
-		lines.append("%s %s" % [phase.capitalize(), UI_MOTION.format_clock(phase_seconds)])
+		lines.append("%s %s" % [phase.capitalize(), WORDS.duration(phase_seconds)])
 	record["details"].text = "\n".join(lines)
 	var card := current_card()
 	if card != null and card.get_parent() == _turn:
