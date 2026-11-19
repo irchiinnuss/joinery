@@ -825,3 +825,38 @@ def test_the_fixer_counts_one_problem_per_file_that_didnt_import(
     ((request, _task),) = desk.crew.started
     assert "leaf_rake.glb didn't import" in request.error
     assert copy_of(RAKE) in request.output
+
+
+JOINERY_OWN = (
+    "ERROR: The object does not have any 'meta' values with the key"
+    " '_joinery_tween_presence'.\n"
+    "   at: get_meta (core/object/object.cpp:1023)\n"
+    'ERROR: Class "PushMower" hides a global script class.\n'
+    "   at: res://.joinery/transactions/7b2fbe44/original/game/mower.gd:1\n"
+    "SCRIPT ERROR: Invalid call\n"
+    "   at: f (res://.joinery/addon-backups/1794-bd47/chat_rewind.gd:3)\n"
+    "ERROR: Something broke\n"
+    "   at: _ready (res://addons/joinery/ui_motion.gd:530)\n"
+)
+
+
+def test_joinerys_own_errors_never_reach_the_debugger_and_are_logged(
+    tmp_path: Path,
+) -> None:
+    entries = ce.parse(JOINERY_OWN)
+    assert [ce.triage_entry(e) for e in entries] == ["joinery"] * 4
+    # A game's own name that merely contains the word is still the game's.
+    mine = "SCRIPT ERROR: x\n   at: f (res://game/my_joinery_bits.gd:3)\n"
+    assert ce.triage_entry(ce.parse(mine, "game")[0]) == ""
+
+    desk = Desk(tmp_path, 'fix_errors = "auto"\nfix_errors_cooldown = 0\n')
+    run(lambda: desk.fixer.take_text("output", JOINERY_OWN))
+    run(lambda: desk.fixer.take_text("game", JOINERY_OWN))
+    run(lambda: desk.fixer.fix())
+    assert not desk.crew.started
+    statuses = {g["status"] for g in desk.last()["groups"]}
+    assert statuses == {"joinery"}
+    log = (tmp_path / ce.OWN_LOG).read_text().splitlines()
+    # Each one once, for Joinery to read.
+    assert len(log) == 4
+    assert "_joinery_tween_presence" in json.loads(log[0])["message"]

@@ -16,7 +16,8 @@ No agent turn is spent on what isn't the game's: errors from Godot's import cach
 being briefly out of date are read again from disk first
 (:func:`joinery.console_errors.fold_imports`), and each new group is triaged first
 (:func:`joinery.console_errors.triage`), and an editor message or a Joinery bug is
-listed as such at once. Errors that wait together go to one debugger turn (up to
+listed as such at once. A Joinery bug (its addon, a ``_joinery_`` meta key, the copies
+kept in ``.joinery/``) is also logged for Joinery in ``.joinery/joinery-errors.jsonl``. Errors that wait together go to one debugger turn (up to
 ``BATCH``), not one turn each in series.
 
 The automatic mode keeps to its limits: ``fix_errors_at_once`` fixes at a time and
@@ -222,6 +223,9 @@ class ErrorFixer:
         note = ce.JOINERY_NOTE if verdict == ce.JOINERY else ce.EDITOR_NOTE
         group.settle(verdict, now, note)
         self.book.totals["triaged"] += 1
+        if verdict == ce.JOINERY:
+            # Never the debugger's: kept for Joinery instead.
+            ce.log_own(self.project, group, now)
 
     def _recurred(self, group: ce.Group) -> bool:
         """An accepted fix's error came back: that fix failed; it is open again."""

@@ -67,7 +67,20 @@ STATE = ".joinery/errors.json"
 
 #: Joinery's own lines (its addon, the playtest bot, the backups and stages it keeps in
 #: ``.joinery/``): listed as a Joinery bug, never sent to the fixer.
-OWN = ("addons/joinery", "joinery/playtest_bot/", "[Joinery]", "/.joinery/")
+OWN = (
+    "addons/joinery",
+    "addons\\joinery",
+    "joinery/playtest_bot/",
+    "[Joinery]",
+    "/.joinery/",
+    "\\.joinery\\",
+)
+#: A meta key Joinery's addon sets on the editor's nodes ("The object does not have
+#: any 'meta' values with the key '_joinery_tween_presence'"): no game change fixes it.
+_OWN_META = re.compile(r"(?<![A-Za-z0-9])_joinery_\w+")
+#: Joinery's own errors, kept for Joinery's bug reports (one line each, newest last).
+OWN_LOG = ".joinery/joinery-errors.jsonl"
+OWN_LOG_KEEP = 200
 #: Engine noise every run prints: never listed. The project adds its own with
 #: ``[agents] ignore_errors``.
 NOISE = (
@@ -481,13 +494,36 @@ def triage(
 
     Anything the running game, a playtest or a test printed is the game's."""
     trace = _trace(line, context) if line else ""
-    if any(own in f"{message} {where} {line} {trace}" for own in OWN):
+    text = f"{message} {where} {line} {trace}"
+    if any(own in text for own in OWN) or _OWN_META.search(text):
         return JOINERY
     if _project_where(where) or set(sources) - {"output"}:
         return ""
     if _REMOTE.match(line) or _RES_LINE.search(f"{message}\n{trace}"):
         return ""
     return EDITOR if engine_place(message, line, context) else ""
+
+
+def log_own(project: Path, group: Group, now: float) -> None:
+    """Keep a Joinery error for Joinery's bug reports (``.joinery/joinery-errors.jsonl``):
+    the debugger never gets it, so this is where it is told. The newest
+    :data:`OWN_LOG_KEEP` are kept."""
+    path = project / OWN_LOG
+    record = {
+        "time": round(now, 3),
+        "id": group.id,
+        "message": group.message,
+        "where": group.where,
+        "line": group.line,
+        "context": group.context[-2000:],
+    }
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
+        lines = [*lines, json.dumps(record, ensure_ascii=False)][-OWN_LOG_KEEP:]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    except OSError:
+        pass  # A full or read-only disk: the Errors list still shows it.
 
 
 def triage_entry(entry: Entry) -> str:
