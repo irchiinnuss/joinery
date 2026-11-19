@@ -444,7 +444,7 @@ func set_show_timings(on: bool) -> void:
 		summary.visible = on and not summary.text.is_empty()
 		if not on:
 			record["details"].hide()
-		var card: Variant = summary.get_meta("_joinery_card", null)
+		var card: Variant = summary.get_meta("_joinery_card", false)
 		if card is Control and is_instance_valid(card):
 			if not on:
 				card.set_details_open(false)
@@ -473,7 +473,7 @@ func _toggle_details(summary: Button, details: Label) -> void:
 	var open := not bool(summary.get_meta("_joinery_open", details.visible))
 	summary.set_meta("_joinery_open", open)
 	UI.bind_icon(summary, "disclosure_open" if open else "disclosure_closed")
-	var card: Variant = summary.get_meta("_joinery_card", null)
+	var card: Variant = summary.get_meta("_joinery_card", false)
 	if card is Control and is_instance_valid(card):
 		# The card shows its steps and the details together, fading them in.
 		card.set_details_open(open, true)

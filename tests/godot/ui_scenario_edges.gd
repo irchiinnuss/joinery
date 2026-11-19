@@ -397,13 +397,16 @@ func _finish_together() -> void:
 	s.check(not (s.composer().get("stop") as Button).visible, "Nothing is left running")
 
 
-## While a reply streams, the sidebar is closed and opened again, the theme switches, the
-## sidebar is resized and the editor loses focus: the reply finishes whole.
+## While a reply streams, timings are hidden and shown again in Settings, the sidebar is closed
+## and opened again, the theme switches, the sidebar is resized and the editor loses focus: the
+## reply finishes whole.
 func _editor_life() -> void:
 	if not await s.connect_host():
 		return
 	s.send(LIVE)
 	await s.wait_until(func() -> bool: return s.reply_shown().length() > 10, 8000)
+	s.dock.call("apply_preferences", {"show_timings": false})
+	s.dock.call("apply_preferences", {"show_timings": true})
 	var theme: GDScript = load("res://addons/joinery/ui_theme.gd")
 	theme.call("set_pref", "theme", "light" if s.theme_name.contains("dark") else "dark")
 	await s.frames(3)
