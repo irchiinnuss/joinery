@@ -27,9 +27,16 @@ def main() -> int:
         action="store_true",
         help="One real Codex inference in an isolated scene",
     )
+    parser.add_argument(
+        "--mode",
+        choices=["existing", "empty", "import"],
+        action="append",
+        help="Run only these modes (all by default)",
+    )
     args = parser.parse_args()
-    # The level open, no scene open, and a fresh editor for the accepted-import order.
-    for mode in ("existing", "empty", "import"):
+    # The level open, no scene open, and a fresh editor for the accepted-import order and a
+    # Revert that replaces a model open scenes use.
+    for mode in args.mode or ("existing", "empty", "import"):
         empty = mode == "empty"
         script, passed = (
             ("accept_import_editor_test.gd", "editor accept import: ok")

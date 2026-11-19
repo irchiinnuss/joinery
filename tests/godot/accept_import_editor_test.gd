@@ -3,6 +3,8 @@ extends EditorPlugin
 ## Accept and Revert in a real editor: a change's new model is imported before the scenes
 ## that use it load, and the console error feed holds the errors that race brings.
 
+const SETTLE := preload("res://addons/joinery/file_settle.gd")
+
 var _failed := false
 
 
@@ -58,6 +60,7 @@ func _run() -> void:
 	_check(plugin != null, "Joinery plugin must load")
 	if plugin != null:
 		await _accepted_instanced_model(plugin)
+		await _reverted_open_model(plugin)
 		plugin._workspace._clear_preview()
 		plugin._chat.close()
 	await get_tree().process_frame
@@ -170,6 +173,87 @@ func _accepted_instanced_model(plugin: EditorPlugin) -> void:
 	EditorInterface.set_main_screen_editor("3D")
 
 
+## A Revert restores a model that an open scene instances, in a change accepted in an earlier
+## session (so every open scene reloads). The editor reimports the model and, from
+## resources_reimporting to resources_reimported, holds the open scenes' instance nodes to swap
+## in the new import; its progress dialog runs frames meanwhile. A scene the sidebar reloaded in
+## that window freed those nodes, and the editor crashed swapping them (Yard Day's hedge).
+func _reverted_open_model(plugin: EditorPlugin) -> void:
+	_write_model("res://art/props/hedge.glb", BoxMesh.new())
+	var hedge := FileAccess.open("res://game/hedge.tscn", FileAccess.WRITE)
+	var text := (
+		"[gd_scene load_steps=2 format=3]\n\n"
+		+ '[ext_resource type="PackedScene" path="res://art/props/hedge.glb" id="1"]\n\n'
+		+ '[node name="Hedge" type="Node3D"]\n'
+	)
+	for i in 5:
+		text += '\n[node name="Section%d" parent="." instance=ExtResource("1")]\n' % i
+	hedge.store_string(text)
+	hedge.close()
+	var landed: Array[String] = ["res://art/props/hedge.glb", "res://game/hedge.tscn"]
+	await SETTLE.scan(landed)
+	EditorInterface.open_scene_from_path("res://main.tscn")
+	EditorInterface.open_scene_from_path("res://game/hedge.tscn")
+	var files := EditorInterface.get_resource_filesystem()
+	var window := {"open": false, "seen": false, "closed": []}
+	var began := func(paths: PackedStringArray) -> void:
+		if paths.has("res://art/props/hedge.glb"):
+			window["open"] = true
+			window["seen"] = true
+	var ended := func(_paths: PackedStringArray) -> void: window["open"] = false
+	var closed := func(path: String) -> void:
+		if window["open"]:
+			window["closed"].append(path)
+	files.resources_reimporting.connect(began)
+	files.resources_reimported.connect(ended)
+	scene_closed.connect(closed)
+	# Revert: the gateway puts back the earlier model. The editor sees a change by its modified
+	# time, in whole seconds.
+	await get_tree().create_timer(1.1).timeout
+	_write_model("res://art/props/hedge.glb", SphereMesh.new())
+	await plugin._on_change_reverted("hedge-earlier-session")
+	files.resources_reimporting.disconnect(began)
+	files.resources_reimported.disconnect(ended)
+	scene_closed.disconnect(closed)
+	_check(window["seen"], "Revert reimports the restored model")
+	_check(
+		(window["closed"] as Array).is_empty(),
+		"No open scene is reloaded while the editor reimports: %s" % [window["closed"]]
+	)
+	var root := EditorInterface.get_edited_scene_root()
+	_check(
+		root != null and root.scene_file_path == "res://game/hedge.tscn",
+		"The model's scene is open after Revert"
+	)
+	if root == null:
+		return
+	_check(root.get_child_count() == 5, "The open scene keeps its five instances of the model")
+	var section := root.get_node_or_null("Section0")
+	var meshes: Array[Node] = []
+	if section != null:
+		meshes = section.find_children("*", "MeshInstance3D", true, false)
+	# The restored model is a sphere: far more vertices than the box it replaces.
+	var mesh: Mesh = (meshes[0] as MeshInstance3D).mesh if not meshes.is_empty() else null
+	_check(
+		mesh != null and mesh.surface_get_array_len(0) > 100,
+		"The open scene shows the restored model"
+	)
+
+
+func _write_model(path: String, mesh: Mesh) -> void:
+	var model := Node3D.new()
+	var instance := MeshInstance3D.new()
+	instance.mesh = mesh
+	model.add_child(instance)
+	instance.owner = model
+	var document := GLTFDocument.new()
+	var state := GLTFState.new()
+	_check(document.append_from_scene(model, state) == OK, "Export " + path)
+	model.free()
+	DirAccess.make_dir_recursive_absolute(path.get_base_dir())
+	_check(document.write_to_filesystem(state, path) == OK, "Write " + path)
+
+
 ## The console error feed (sidebar_debug.gd) while the new model waits for its import:
 ## errors naming it, or its imported copy, are held; an unrelated error goes out at once.
 func _error_feed() -> Dictionary:
@@ -201,7 +285,7 @@ func _error_feed() -> Dictionary:
 
 ## Once the import settles, held errors whose files load are dropped; the rest are reported.
 func _error_feed_settles(feed: Dictionary) -> void:
-	var settle: GDScript = load("res://addons/joinery/file_settle.gd")
+	var settle: GDScript = SETTLE
 	var deadline := Time.get_ticks_msec() + 30000
 	while settle.call("settling") and Time.get_ticks_msec() < deadline:
 		await get_tree().process_frame

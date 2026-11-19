@@ -7,6 +7,13 @@ extends RefCounted
 ## EditorFileSystem's scan thread clears its scanning flag before the editor imports what it
 ## found, so is_scanning() alone reads idle a frame too early. The scan is awaited through
 ## filesystem_changed instead, which the editor emits once those imports are done.
+##
+## No open scene is reloaded while the editor reimports: from resources_reimporting to
+## resources_reimported it holds the open scenes' nodes that use the files to swap in the new
+## import, and its progress dialog runs frames meanwhile, so an awaiting coroutine resumes in the
+## middle. is_importing() reads false before resources_reimported, so that window is tracked
+## through the two signals ([method watch]). A scene reloaded inside it freed those nodes and the
+## editor crashed swapping them.
 
 const TIMEOUT_MSEC := 60000
 ## Milliseconds after a scan ends that errors naming its files still count as import noise.
@@ -22,6 +29,10 @@ const NATIVE := [
 static var recent := {}
 ## Scans still running.
 static var _busy := 0
+## Reimports the editor has begun and not finished (resources_reimporting, not yet
+## resources_reimported).
+static var _reimports := 0
+static var _watching := false
 static var _paths := RegEx.create_from_string("res://[^\\s'\"(),]+")
 ## Errors that mean a resource couldn't be read: only these hold a file that has a .import.
 static var _load_failed := RegEx.create_from_string(
@@ -30,6 +41,42 @@ static var _load_failed := RegEx.create_from_string(
 		+ "|No loader found for resource|Error loading resource)"
 	)
 )
+
+
+## Follows the editor's reimports ([method importing]). Call it as the editor starts, so a reimport
+## that begins before the first scan is seen.
+static func watch() -> void:
+	if _watching or not Engine.is_editor_hint():
+		return
+	_watching = true
+	var files := EditorInterface.get_resource_filesystem()
+	files.resources_reimporting.connect(_reimport_began)
+	files.resources_reimported.connect(_reimport_ended)
+
+
+## True from the editor's resources_reimporting until its resources_reimported, and while it
+## imports: no open scene may be reloaded or closed then.
+static func importing() -> bool:
+	if not Engine.is_editor_hint():
+		return false
+	return _reimports > 0 or EditorInterface.get_resource_filesystem().is_importing()
+
+
+## Returns once the editor is not reimporting ([method importing]), or after the timeout.
+static func imports_done() -> void:
+	watch()
+	var tree := Engine.get_main_loop() as SceneTree
+	var deadline := Time.get_ticks_msec() + TIMEOUT_MSEC
+	while importing() and Time.get_ticks_msec() < deadline:
+		await tree.process_frame
+
+
+static func _reimport_began(_paths: PackedStringArray) -> void:
+	_reimports += 1
+
+
+static func _reimport_ended(_paths: PackedStringArray) -> void:
+	_reimports = maxi(_reimports - 1, 0)
 
 
 ## Scans the project and returns once the editor has indexed and imported what it found.
@@ -46,6 +93,7 @@ static func scan(paths: Array[String] = []) -> void:
 
 
 static func _scan() -> void:
+	watch()
 	var tree := Engine.get_main_loop() as SceneTree
 	var files := EditorInterface.get_resource_filesystem()
 	var deadline := Time.get_ticks_msec() + TIMEOUT_MSEC
@@ -61,7 +109,7 @@ static func _scan() -> void:
 	# process step.
 	while not done["changed"] and Time.get_ticks_msec() < deadline:
 		await tree.process_frame
-		if not done["changed"] and not files.is_scanning() and not files.is_importing():
+		if not done["changed"] and not files.is_scanning() and not importing():
 			# Nothing new reported within a frame of going idle: a scan that found no change.
 			await tree.process_frame
 			break
@@ -80,7 +128,7 @@ static func loadable(scene: String) -> bool:
 	for path: String in missing:
 		if FileAccess.file_exists(path) and _importable(path):
 			pending.append(path)
-	if pending.is_empty() or files.is_importing():
+	if pending.is_empty() or importing():
 		return false
 	for path: String in pending:
 		files.update_file(path)
@@ -119,8 +167,11 @@ static func dependencies(scene: String) -> PackedStringArray:
 
 
 ## Reloads the open [param scenes] that use none of the [param touched] files, before a scan:
-## the editor then stops holding files a revert removed. Returns the scenes left to reload.
+## the editor then stops holding files a revert removed. Returns the scenes left to reload: all
+## of them while the editor reimports.
 static func reload_untouched(scenes: Array[String], touched: Array[String]) -> Array[String]:
+	if importing():
+		return scenes.duplicate()
 	var unsaved := EditorInterface.get_unsaved_scenes()
 	var left: Array[String] = []
 	for path: String in scenes:
@@ -136,12 +187,15 @@ static func reload_untouched(scenes: Array[String], touched: Array[String]) -> A
 
 
 ## Reloads the open [param scenes] once their files are imported. Returns a note for each one
-## left as it is: a scene with unsaved edits (they would be lost) or one that uses missing files.
+## left as it is: a scene with unsaved edits (they would be lost), one that uses missing files,
+## or every one while the editor still reimports.
 static func reload_open(scenes: Array[String]) -> Array[String]:
 	var unsaved := EditorInterface.get_unsaved_scenes()
 	var kept: Array[String] = []
 	for path: String in scenes:
-		if unsaved.has(path):
+		if importing():
+			kept.append(path.get_file() + " (still importing)")
+		elif unsaved.has(path):
 			kept.append(path.get_file() + " (unsaved edits)")
 		elif not loadable(path):
 			kept.append(path.get_file() + " (uses missing files)")
@@ -161,7 +215,7 @@ static func settling() -> bool:
 	if not Engine.is_editor_hint():
 		return false
 	var files := EditorInterface.get_resource_filesystem()
-	return files.is_scanning() or files.is_importing()
+	return files.is_scanning() or importing()
 
 
 ## The files an error line names that are still being imported: an imported copy under
@@ -267,7 +321,7 @@ static func reimport(paths: PackedStringArray) -> void:
 	if paths.is_empty() or not Engine.is_editor_hint():
 		return
 	var files := EditorInterface.get_resource_filesystem()
-	if files.is_importing():
+	if importing():
 		return
 	for path: String in paths:
 		files.update_file(path)
@@ -296,4 +350,4 @@ static func _idle(tree: SceneTree, files: EditorFileSystem, deadline: int) -> vo
 	var quiet := 0
 	while quiet < 2 and Time.get_ticks_msec() < deadline:
 		await tree.process_frame
-		quiet = 0 if files.is_scanning() or files.is_importing() else quiet + 1
+		quiet = 0 if files.is_scanning() or importing() else quiet + 1

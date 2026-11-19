@@ -94,6 +94,7 @@ func _enter_tree() -> void:
 		return
 	_edits = EDITS_SCRIPT.new()
 	_shell = SHELL_SCRIPT.new()
+	FILE_SETTLE.watch()
 	scene_changed.connect(_on_edit_scene_changed)
 	_workspace = WORKSPACE_SCRIPT.new()
 	get_editor_interface().get_editor_main_screen().add_child(_workspace)
@@ -962,8 +963,8 @@ func _on_change_reverted(transaction_id: String) -> void:
 	for path: String in EditorInterface.get_open_scenes():
 		if (not known or restored.has(path)) and FileAccess.file_exists(path):
 			scenes.append(path)
-	# Scenes that load as restored go back before the scan, so the editor stops holding
-	# files the revert removed; the rest once the restored files are imported.
+	# Restored scenes that load go back before the scan, the rest once imported (file_settle.gd).
+	await FILE_SETTLE.imports_done()
 	if known:
 		scenes = FILE_SETTLE.reload_untouched(scenes, restored)
 	await FILE_SETTLE.scan(restored)
