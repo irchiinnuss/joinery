@@ -520,6 +520,14 @@ func _queue_follows() -> void:
 			"Request %d has its own timing line: %s" % [index + 1, said.left(200)]
 		)
 		s.check(str(card.get("state")) == "done", "Request %d ends done" % (index + 1))
+	# Sent the moment a failed turn ends, a message goes out; it never waits in a paused queue.
+	s.send("Try the broken provider")
+	await s.wait_until(func() -> bool: return not bool(s.dock.get("_busy")), 8000)
+	s.send(SAY_HELLO)
+	await s.frames(2)
+	var queue: Object = s.transcript().get("queue")
+	s.check(int(queue.call("size_queued")) == 0, "Right after a failed turn, a message goes out")
+	await s.wait_until(func() -> bool: return s.card_state() == "done", 8000)
 
 
 ## The kept chat Journeyman works in.
@@ -602,6 +610,18 @@ func _reopen() -> void:
 		)
 	s.dock.call("apply_preferences", {"show_timings": false})
 	s.dock.call("apply_preferences", {"show_timings": true})
+	await s.frames(2)
+	# Viewed read-only (with Continue), it still fits the sidebar it is in.
+	var room := (s.dock.get_parent() as Control).size.x
+	var wide := s.dock.get_combined_minimum_size().x
+	s.expect_bug(
+		wide <= room + 1.0,
+		"The earlier chat fits the sidebar (%.0f of %.0f px)" % [wide, room],
+		(
+			"reopened, a refused call's app badge shows (the record keeps the step as it started),"
+			+ " and the timing line beside it never shrinks"
+		)
+	)
 	await s.shot("reopened")
 
 

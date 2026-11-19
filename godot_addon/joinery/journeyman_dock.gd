@@ -427,8 +427,7 @@ func _start_request(entry: String, targets: Array) -> void:
 ## A request runs, is on its way, or a change waits for review: new messages queue.
 func _occupied() -> bool:
 	var card := _card()
-	var sending: bool = card != null and card.state == "sending"
-	return _busy or _review_pending or _turn_end.waiting() or sending
+	return _busy or _review_pending or (card != null and card.state == "sending")
 
 
 # --- Queue -------------------------------------------------------------------------------------
@@ -459,7 +458,7 @@ func _drain() -> void:
 	var queue := _transcript.queue
 	if queue.size_queued() == 0 or queue.paused or gated or _chats.turns.busy_in(_transcript):
 		return
-	if connection_state != "connected" or not _slash.running().is_empty():
+	if connection_state != "connected" or not _slash.running().is_empty() or _turn_end.waiting():
 		return
 	if _occupied():  # Journeyman works in another chat: it may start once an agent is free.
 		_chats.turns.drain(_transcript)
@@ -771,6 +770,7 @@ func set_chat_busy(busy: bool) -> void:
 		_last_elapsed = -1
 		_progress = ""
 		_outcome = "done"
+		_turn_end.started()
 		_command_popup.close()
 	else:
 		_started_msec = 0
