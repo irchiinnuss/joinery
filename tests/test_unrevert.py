@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -131,7 +132,10 @@ def test_undo_revert_puts_the_change_back_as_accepted(tmp_path: Path) -> None:
     tx = hedge(project)
     accepted = snapshot(project, HEDGE_PATHS)
     tx.revert()
-    assert snapshot(project, HEDGE_PATHS) == {**dict.fromkeys(HEDGE_PATHS), **HEDGE_BEFORE}
+    assert snapshot(project, HEDGE_PATHS) == {
+        **dict.fromkeys(HEDGE_PATHS),
+        **HEDGE_BEFORE,
+    }
     assert tx.redo.is_dir()
 
     loaded = FileTransaction.load(project, tx.id)
@@ -182,13 +186,14 @@ def test_a_file_edited_since_the_revert_is_never_replaced_silently(
     tx = hedge(project)
     accepted = snapshot(project, HEDGE_PATHS)
     tx.revert()
-    (project / "joinery.lock").write_bytes(b"# my own edit\n")
+    mine = b"glTF\x02\x00my own sculpted hedge"
+    (project / "art/props/hedge.glb").write_bytes(mine)
     reverted = snapshot(project, HEDGE_PATHS)
 
     with pytest.raises(RevertConflict) as caught:
         FileTransaction.load(project, tx.id).unrevert()
-    assert caught.value.paths == ["joinery.lock"]
-    assert "joinery.lock was changed since the revert" in str(caught.value)
+    assert caught.value.paths == ["art/props/hedge.glb"]
+    assert "art/props/hedge.glb was changed since the revert" in str(caught.value)
     assert snapshot(project, HEDGE_PATHS) == reverted
     assert FileTransaction.load(project, tx.id).state == "reverted"
 
@@ -196,7 +201,42 @@ def test_a_file_edited_since_the_revert_is_never_replaced_silently(
     FileTransaction.load(project, tx.id).unrevert(overwrite=True)
     assert snapshot(project, HEDGE_PATHS) == accepted
     FileTransaction.load(project, tx.id).revert()
-    assert (project / "joinery.lock").read_bytes() == b"# my own edit\n"
+    assert (project / "art/props/hedge.glb").read_bytes() == mine
+
+
+def test_an_unreadable_lock_edited_since_is_a_conflict(tmp_path: Path) -> None:
+    project = make_project(tmp_path / "game")
+    tx = hedge(project)
+    tx.revert()
+    (project / "joinery.lock").write_bytes(b"[[asset]\nnot a lock")
+    with pytest.raises(RevertConflict) as caught:
+        FileTransaction.load(project, tx.id).unrevert()
+    assert caught.value.paths == ["joinery.lock"]
+    assert (project / "joinery.lock").read_bytes() == b"[[asset]\nnot a lock"
+
+
+def test_a_lock_another_change_added_to_since_is_merged_entry_by_entry(
+    tmp_path: Path,
+) -> None:
+    """The hedge's case: later changes added their own assets to joinery.lock after
+    the revert. Its entries go back beside theirs; theirs are never dropped."""
+    project = make_project(tmp_path / "game")
+    tx = hedge(project)
+    tx.revert()
+    later = HEDGE_BEFORE["joinery.lock"] + (
+        b'\n[[asset]]\npath = "art/props/trimmer.glb"\nrecipe = "77aa"\n'
+    )
+    (project / "joinery.lock").write_bytes(later)
+
+    FileTransaction.load(project, tx.id).unrevert()
+
+    lock = tomllib.loads((project / "joinery.lock").read_text())
+    recipes = {entry["path"]: entry["recipe"] for entry in lock["asset"]}
+    assert recipes == {"art/props/hedge.glb": "be2e", "art/props/trimmer.glb": "77aa"}
+    assert (project / "recipes/be2e.py").read_bytes() == HEDGE_CHANGE["recipes/be2e.py"]
+    # Reverted again, the lock is as it was just before: the trimmer's entry stays.
+    FileTransaction.load(project, tx.id).revert()
+    assert (project / "joinery.lock").read_bytes() == later
 
 
 def test_the_command_line_names_the_conflict_and_its_choices(

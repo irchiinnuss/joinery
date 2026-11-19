@@ -60,6 +60,8 @@ HELD = "held.json"
 #: The files of a reverted change as it was accepted, kept so the revert can be
 #: undone (FileTransaction.unrevert). Older reverts read them from the Timeline.
 REDO = "redo"
+#: The asset lock, merged entry by entry when a revert is undone (rebase.merge_lock).
+LOCK = "joinery.lock"
 NOT_REVERTED = "Only a reverted change can be put back."
 
 
@@ -927,6 +929,23 @@ class FileTransaction:
             return True
         return self._from_timeline(entry["path"], after, kept)
 
+    def _merge_lock(self, entries: list[dict[str, str]], now: str) -> str:
+        """This change's joinery.lock entries put into the project's lock as it is
+        now, or "" when the locks can't be read or the accepted one is gone."""
+        from joinery.rebase import merge_lock  # Late: rebase imports this module.
+
+        entry = next(e for e in entries if e["path"] == LOCK)
+        if not now or now == DIRECTORY or not self._has_redo(entry):
+            return ""
+        try:
+            return merge_lock(
+                (self.project / LOCK).read_text(encoding="utf-8"),
+                (self.redo / LOCK).read_text(encoding="utf-8"),
+                {e["path"] for e in entries},
+            )
+        except (OSError, ValueError, UnicodeDecodeError):
+            return ""
+
     def unrevert(self, overwrite: bool = False) -> list[dict[str, str]]:
         """Put a reverted change back as it was accepted (Undo revert).
 
@@ -955,6 +974,15 @@ class FileTransaction:
                 for entry in entries
                 if now[entry["path"]] not in {entry["before"], entry["after"]}
             )
+            # Every change that makes an asset adds to joinery.lock: this change's own
+            # entries go back into the lock as it is now, entry by entry, as accept
+            # does (rebase.merge_lock), instead of replacing later changes' entries.
+            moved = set(edited)
+            afters: dict[str, str] = {}
+            merged = self._merge_lock(entries, now[LOCK]) if LOCK in edited else ""
+            if merged:
+                edited.remove(LOCK)
+                afters[LOCK] = hashlib.sha256(merged.encode("utf-8")).hexdigest()
             if edited and not overwrite:
                 raise RevertConflict(edited)
             for path in edited:
@@ -970,12 +998,13 @@ class FileTransaction:
                     )
 
             def rebased(entry: dict[str, str]) -> dict[str, str]:
-                path, after = entry["path"], entry["after"]
-                before = now[path] if path in edited else entry["before"]
+                path = entry["path"]
+                after = afters.get(path, entry["after"])
+                before = now[path] if path in moved else entry["before"]
                 kind = (
                     "created" if not before else "deleted" if not after else "modified"
                 )
-                return {**entry, "before": before, "change": kind}
+                return {**entry, "before": before, "after": after, "change": kind}
 
             changes = [rebased(entry) for entry in self.changes]
             carried = [
@@ -983,8 +1012,18 @@ class FileTransaction:
                 for e in map(rebased, self.carried)
             ]
             todo = [e for e in [*changes, *carried] if now[e["path"]] != e["after"]]
-            missing = [entry["path"] for entry in todo if not self._has_redo(entry)]
+            # Written from here instead of REDO: the merged lock.
+            sources: dict[str, Path] = {}
+            if merged:
+                sources[LOCK] = self.directory / "merged-lock"
+                sources[LOCK].write_bytes(merged.encode("utf-8"))
+            missing = [
+                entry["path"]
+                for entry in todo
+                if entry["path"] not in sources and not self._has_redo(entry)
+            ]
             if missing:
+                self._discard(*sources.values())
                 more = f" and {len(missing) - 1} more" if len(missing) > 1 else ""
                 raise ValueError(
                     f"Joinery no longer has {missing[0]}{more} as this change made it, "
@@ -999,27 +1038,32 @@ class FileTransaction:
                 for path in self._capture([*changes, *carried])
                 if not self._from_timeline(path, befores[path], self.snapshot / path)
             ]
+            reverted = self.changes, self.carried
             self.changes, self.carried = changes, carried
             self.state = "committing"
             self._record(changes=changes)
             applied: list[dict[str, str]] = []
             try:
                 for entry in sorted(todo, key=_apply_order):
-                    target = self.project / entry["path"]
+                    path = entry["path"]
+                    target = self.project / path
                     if entry["after"] == DIRECTORY:
                         target.mkdir(parents=True, exist_ok=True)
                     elif entry["before"] == DIRECTORY:
                         target.rmdir()
                     elif entry["after"]:
-                        place_file(self.redo / entry["path"], target)
+                        place_file(sources.get(path, self.redo / path), target)
                     elif target.exists():
                         target.unlink()
                     applied.append(entry)
             except BaseException:
                 self._restore(applied)
                 self.state = "reverted"
-                self._record(changes=changes)
+                self.changes, self.carried = reverted
+                self._record(changes=self.changes)
                 raise
+            if not self.history:  # A revert from before decisions were listed.
+                self.history.append({"state": "reverted", "at": self.decided})
             self.state = "accepted"
             self.revertible = not lost
             self.decided = time.time()
@@ -1027,7 +1071,7 @@ class FileTransaction:
                 {"state": "accepted", "at": self.decided, "by": "undo revert"}
             )
             self._record(changes=changes)
-            self._discard(self.redo)
+            self._discard(self.redo, *sources.values())
         self._add_to_timeline(changes, reverted=False, restored=True)
         self._note_commit()
         self._stamp_unplayed(changes)

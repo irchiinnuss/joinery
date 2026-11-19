@@ -37,8 +37,13 @@ revert by hand, which also left the change's journal saying "reverted".
   Timeline: each file's newest commit (or its parent) whose bytes hash to the
   journal's `after`, checked out through Git's filters, so LFS models come
   back as models. Without either, nothing changes and Joinery says so.
-- **Never over newer edits.** A file changed since the revert stops the undo
-  with the files named and two choices: keep them (nothing changes), or
+- **The lock is merged.** Later changes add their own assets to
+  `joinery.lock`, so a lock changed since the revert is not a conflict: the
+  change's own entries go back into the lock as it is now, entry by entry
+  (`rebase.merge_lock`, as accept does), and a later Revert puts that lock
+  back. Only a lock that can't be read is asked about.
+- **Never over newer edits.** Any other file changed since the revert stops
+  the undo with the files named and two choices: keep them (nothing changes), or
   `--overwrite` (sidebar: Replace them), which saves the edited copies first,
   so a later Revert brings them back. A file already as accepted (a `git
   revert` of the revert by hand) is left alone; the journal is just put right,
