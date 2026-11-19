@@ -520,7 +520,10 @@ class ACPSession:
         """The ACP prompt: the text, then each attached image when the agent takes images."""
         inline = self.image_input and bool(prompt.attachments)
         text = prompt_text(
-            prompt, images_inline=inline, instructions=self.needs_instructions()
+            prompt,
+            images_inline=inline,
+            instructions=self.needs_instructions(),
+            agent=self.agent,
         )
         blocks: list[dict[str, Any]] = [{"type": "text", "text": text}]
         if inline:

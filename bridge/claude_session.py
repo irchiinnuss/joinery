@@ -43,6 +43,7 @@ from joinery.hook import shell_search
 from joinery.platform_support import launch_argv
 from joinery.roles import CLAUDE_READ_TOOLS, ROLE_ENV, spec
 from joinery.stage_access import NO_STAGE, STAGE_ENV
+from joinery.tool_names import for_agent
 
 #: The tools a Joinery-run Claude session's policy hook judges: the project's own
 #: gate, plus Claude's file tools, so the staged-change folders hold for them too.
@@ -153,9 +154,12 @@ def user_input(prompt: Prompt, known: str = "") -> bytes:
     instructions are the session's system prompt (``--append-system-prompt``), so the
     turn carries only its own text (ADR 0056)."""
     if not prompt.attachments:
-        return turn_text(prompt, known=known).encode()
+        return turn_text(prompt, known=known, agent="claude").encode()
     content: list[dict[str, Any]] = [
-        {"type": "text", "text": turn_text(prompt, images_inline=True, known=known)}
+        {
+            "type": "text",
+            "text": turn_text(prompt, images_inline=True, known=known, agent="claude"),
+        }
     ]
     for path in prompt.attachments:
         media, data = encoded(Path(path))
@@ -495,7 +499,7 @@ class ClaudeSession:
             "mcp__joinery-registry__*",
             "mcp__joinery_registry__*",
             "--append-system-prompt",
-            INSTRUCTIONS,
+            for_agent(INSTRUCTIONS, "claude"),
             "--settings",
             json.dumps(settings),
             "--mcp-config",
@@ -542,7 +546,7 @@ class ClaudeSession:
         # The turn's text first: Claude Code gives up on stdin after 3 s, and a cold
         # project map can take longer than that to build.
         # A resumed session holds the map and rules from its last turn already.
-        stable = await asyncio.to_thread(stable_text, prompt)
+        stable = await asyncio.to_thread(stable_text, prompt, "claude")
         known = stable if self.started and self._holds(stable) else ""
         data = await asyncio.to_thread(user_input, prompt, known)
         self.process = await asyncio.create_subprocess_exec(

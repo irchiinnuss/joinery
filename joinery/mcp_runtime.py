@@ -25,6 +25,7 @@ from joinery import docker_cli
 from joinery.hook import mcp_violation
 from joinery.policy import Severity, command_violation, load_denylist, normalise
 from joinery.read_access import read_only
+from joinery.roles import REGISTRY_TOOLS
 from joinery.rw_lock import ReadWriteLock
 
 
@@ -641,6 +642,12 @@ class MCPConnection:
         await self.connect()
         definition = self.tools.get(tool)
         if definition is None:
+            if tool in REGISTRY_TOOLS:
+                raise ValueError(
+                    f"{self.spec.name} does not expose {tool}: {tool} is a "
+                    "joinery-registry tool of its own. Call it directly, not "
+                    "through call_tool or read_tool."
+                )
             raise ValueError(f"{self.spec.name} does not expose {tool}.")
         error = next(
             Draft202012Validator(definition.input_schema).iter_errors(arguments), None

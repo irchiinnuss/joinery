@@ -24,12 +24,13 @@ from joinery.connection import status
 from joinery.project_map import cached as cached_map
 from joinery.project_map import near_line
 from joinery.provider_support import WINDOWS_BOUNDARY_REASON, require_supported
+from joinery.tool_names import callable_names, for_agent
 from joinery.wiring import _command_str
 
 INSTRUCTIONS = (
     "You operate Joinery's current Godot project. Use the connected joinery-registry MCP gateway: "
     "inspect_editor for live scene identities, edit_scene for reversible live node changes, and "
-    "discover_tools/call_tool for native creative apps and staged saved-file edits. "
+    "discover_tools and call_tool for native creative apps and staged saved-file edits. "
     "Do not give manual editor steps when a connected tool can do the requested work. "
     "Raw project files are read-only in this agent process. The gateway owns mutations and user review; "
     "never claim staged changes are accepted or saved. "
@@ -120,10 +121,11 @@ def clone_check(prompt: Prompt) -> str:
     return "\n" + note if note else ""
 
 
-def turn_part(prompt: Prompt, images_inline: bool = False) -> str:
+def turn_part(prompt: Prompt, images_inline: bool = False, agent: str = "") -> str:
     """What only this turn has: the summary, the editor's per-turn keys, the
     selection and the files near it, the request and the attached images (listed
-    by path unless the provider takes them inline)."""
+    by path unless the provider takes them inline). Joinery's tools the request
+    names are written as ``agent`` calls them (joinery.tool_names)."""
     volatile = {
         k: prompt.editor_context[k] for k in TURN_KEYS if k in prompt.editor_context
     }
@@ -137,7 +139,7 @@ def turn_part(prompt: Prompt, images_inline: bool = False) -> str:
         + scoped(prompt)
         + clone_check(prompt)
         + "\n\nUser:\n"
-        + prompt.text
+        + callable_names(prompt.text, agent)
         + ("" if images_inline else listed(prompt.attachments))
     )
 
@@ -151,38 +153,44 @@ def project_memory(prompt: Prompt) -> str:
     return found + "\n\n" if found else ""
 
 
-def stable_text(prompt: Prompt) -> str:
+def stable_text(prompt: Prompt, agent: str = "") -> str:
     """The turn's stable parts: the role's rules (with the art bible and brief),
     the project memory and the project map, the same bytes from turn to turn while
-    the project's files are the same."""
-    rules = prompt.rules.strip()
+    the project's files are the same. The rules name Joinery's tools as ``agent``
+    calls them."""
+    rules = callable_names(prompt.rules.strip(), agent)
     return (
         (rules + "\n\n" if rules else "") + project_memory(prompt) + project_map(prompt)
     )
 
 
-def turn_text(prompt: Prompt, images_inline: bool = False, *, known: str = "") -> str:
+def turn_text(
+    prompt: Prompt, images_inline: bool = False, *, known: str = "", agent: str = ""
+) -> str:
     """The turn as every provider gets it, stable parts first: the role's rules
     (with the art bible and brief), the project memory, the project map, then the
     turn (ADR 0056, ADR 0077). ``known``: the stable parts the provider's resumed
     session already holds from an earlier turn; when they are unchanged only the
     turn is sent, so a continued chat doesn't carry the map twice."""
-    stable = stable_text(prompt)
+    stable = stable_text(prompt, agent)
     if known and stable == known:
         return "(Project rules, memory and map: unchanged since the last turn.)\n\n" + (
-            turn_part(prompt, images_inline)
+            turn_part(prompt, images_inline, agent)
         )
-    return stable + turn_part(prompt, images_inline)
+    return stable + turn_part(prompt, images_inline, agent)
 
 
 def prompt_text(
-    prompt: Prompt, images_inline: bool = False, instructions: bool = True
+    prompt: Prompt,
+    images_inline: bool = False,
+    instructions: bool = True,
+    agent: str = "",
 ) -> str:
     """The turn with Joinery's instructions ahead of it, for a provider without a
     system prompt of its own; ``instructions=False`` when the session already holds
-    them."""
-    return (INSTRUCTIONS + "\n\n" if instructions else "") + turn_text(
-        prompt, images_inline
+    them. Tools are named as ``agent`` calls them."""
+    return (for_agent(INSTRUCTIONS, agent) + "\n\n" if instructions else "") + (
+        turn_text(prompt, images_inline, agent=agent)
     )
 
 

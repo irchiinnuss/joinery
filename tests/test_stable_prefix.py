@@ -52,6 +52,7 @@ from joinery.roles import (
     offered_tools,
     registry_allowed,
 )
+from joinery.tool_names import for_agent
 from servers.joinery_registry.proxy import make_server
 
 #: Tools that change the project or start agents: never offered to a read-only role.
@@ -340,18 +341,21 @@ def test_a_writing_claude_session_is_offered_only_tools_that_can_run() -> None:
 
 def test_acp_sends_the_instructions_once_while_it_can_see_the_context() -> None:
     session = ACPSession("gemini")
+    # The instructions name Joinery's tools as Gemini CLI calls them.
+    told = for_agent(INSTRUCTIONS, "gemini")
     first = session.prompt_blocks(turn("one", 1))[0]["text"]
-    assert first.startswith(INSTRUCTIONS)
+    assert first.startswith(told)
     session.instructed = True
     session._context({"used": 9000, "size": 100000})
     second = session.prompt_blocks(turn("two", 2))[0]["text"]
-    assert INSTRUCTIONS not in second
+    assert told not in second
     # The agent compacted its history: they go again.
     session._context({"used": 3000, "size": 100000})
-    assert session.prompt_blocks(turn("three", 3))[0]["text"].startswith(INSTRUCTIONS)
+    assert session.prompt_blocks(turn("three", 3))[0]["text"].startswith(told)
 
 
 def test_acp_without_a_context_report_always_sends_them() -> None:
     session = ACPSession("opencode")
     session.instructed = True
-    assert session.prompt_blocks(turn("two", 2))[0]["text"].startswith(INSTRUCTIONS)
+    told = for_agent(INSTRUCTIONS, "opencode")
+    assert session.prompt_blocks(turn("two", 2))[0]["text"].startswith(told)

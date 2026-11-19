@@ -63,6 +63,7 @@ from joinery.roles import (
     unknown_reader,
 )
 from joinery.stage_access import STAGE_ENV, stage_violation
+from joinery.tool_names import callable_names
 
 # Env vars an agent may set to tell the hook its project directory, in order.
 _PROJECT_DIR_ENVS = ("CLAUDE_PROJECT_DIR", "CODEX_PROJECT_DIR")
@@ -532,12 +533,16 @@ def main(agent_id: str | None = None) -> int:
                 pass  # The original hook verdict still stops/denies the child.
         stop_mode: StopMode = "exit"
         event_name = "PreToolUse"
+        said = verdict
         if agent_id:
             agent = get_agent(agent_id)
             stop_mode = agent.stop_mode
             event_name = agent.pre_tool_event
+            # The refusal names Joinery's tools as this agent calls them; the
+            # verdict itself is unchanged.
+            said = Verdict(verdict.severity, callable_names(verdict.reason, agent_id))
         event_name = str(raw.get("hook_event_name") or event_name)
-        return _emit(verdict, stop_mode, event_name)
+        return _emit(said, stop_mode, event_name)
     except Exception as exc:  # noqa: BLE001 - a broken policy check must block, not pass.
         print(f"Joinery policy check failed: {exc}", file=sys.stderr)
         return 2

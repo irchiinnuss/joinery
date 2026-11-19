@@ -35,6 +35,7 @@ from joinery.editor_ops import SCENE_TOOL, validate_edit
 from joinery.platform_support import launch_argv
 from joinery.roles import REGISTRY_TOOLS, ROLE_ENV, offered_tools
 from joinery.stage_access import NO_STAGE, STAGE_ENV
+from joinery.tool_names import for_agent
 from joinery.wiring import _command_str
 
 
@@ -305,7 +306,7 @@ class CodexSession:
             "cwd": str(self.project),
             "sandbox": "read-only",
             "approvalPolicy": "never",
-            "developerInstructions": (
+            "developerInstructions": for_agent(
                 "You are Journeyman, the user's game-project assistant. "
                 "For general tool work first discover actual tools through the joinery-registry MCP, "
                 "read their schemas, then call them. Missing connections must be reported accurately. "
@@ -333,7 +334,8 @@ class CodexSession:
                     " You are a read-only specialist. Inspect only; never change files, scenes, documents, approvals or settings."
                     if self.inspection_only
                     else " Use inspect_in_parallel for independent read-only inspections on complex tasks when helpful. Keep simple edits on this thread; never delegate document mutations."
-                )
+                ),
+                "codex",
             ),
         }
 
@@ -532,7 +534,12 @@ class CodexSession:
                     "input": [
                         # The developer instructions hold Joinery's rules; the turn's
                         # text is laid out like every provider's (ADR 0056).
-                        {"type": "text", "text": turn_text(prompt, images_inline=True)},
+                        {
+                            "type": "text",
+                            "text": turn_text(
+                                prompt, images_inline=True, agent="codex"
+                            ),
+                        },
                         # Attached images go in as the app server's local image input.
                         *(
                             {"type": "localImage", "path": path}
