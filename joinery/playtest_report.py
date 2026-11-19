@@ -16,7 +16,9 @@ growing, a pause that does nothing), ``low`` (warnings, text that doesn't fit) a
 
 from __future__ import annotations
 
+import collections
 import itertools
+import math
 import re
 from collections.abc import Iterable
 from typing import Any
@@ -54,6 +56,7 @@ _KIND_SEVERITY = {
     "text": "low",
     "balance": "note",
     "coverage": "note",
+    "coverage_time": "note",
     "joinery": "low",
 }
 
@@ -76,8 +79,11 @@ _TITLES = {
     "text": "Text doesn't fit",
     "balance": "Balance",
     "coverage": "Parts of the level unreached",
+    "coverage_time": "Not reached in this run; a longer run would cover more",
     "joinery": "Joinery bug",
 }
+#: Kinds of item no change to the game fixes: they are offered for nothing ("fixable" false).
+UNFIXABLE = frozenset({"coverage_time"})
 #: What a Joinery bug's item adds: it is never the game's to fix.
 JOINERY_DETAIL = (
     " (in Joinery's own playtest code, not your game; report it to Joinery)"
@@ -297,15 +303,22 @@ def balance_notes(bot: dict[str, Any]) -> list[dict[str, Any]]:
     return [{"kind": "balance", **note} for note in notes]
 
 
-def coverage_summary(raw: dict[str, Any], options: dict[str, Any]) -> dict[str, Any]:
+def coverage_summary(
+    raw: dict[str, Any], options: dict[str, Any], fps: int = 60
+) -> dict[str, Any]:
     """The bot's coverage grid with the unreached areas found in it.
 
     ``unreached`` lists the biggest groups of navigable cells nobody stood in (up to five),
-    each with its size in cells and its centre in world units on the ground plane (x, z in
-    3D; x, y in 2D), so an agent can say where they are, and the named area it lies in
-    when the level has rooms. ``areas`` are those rooms, ``{name, rect: [col, row, cols,
+    each with its size in cells, its centre in world units on the ground plane (x, z in
+    3D; x, y in 2D), so an agent can say where they are, the named area it lies in when
+    the level has rooms, and ``walk``: how far it is from the start in world units along
+    the grid's floor (straight across when the text grid shows no way there: a short jump
+    joins cells it can't). ``areas`` are those rooms, ``{name, rect: [col, row, cols,
     rows]}`` in cells, for the map's labels. ``map`` names the picture, which
-    ``joinery.playtest`` fills in with the run's folder.
+    ``joinery.playtest`` fills in with the run's folder. ``travelled`` is how far the
+    player walked on the level; ``first_found`` and ``last_found`` are when (seconds of
+    play) it first stood in its earliest and its newest cell, from the bot's ``found``
+    frames. Each is None when the bot didn't say.
     """
     grid = raw.get("grid")
     if not isinstance(grid, list) or not grid:
@@ -337,6 +350,12 @@ def coverage_summary(raw: dict[str, Any], options: dict[str, Any]) -> dict[str, 
             groups.append(group)
     groups.sort(key=lambda g: (-len(g), min(g)))
     areas = _areas(raw.get("areas"))
+    start = raw.get("start", [-1, -1])
+    steps = _steps_from(rows, start)
+    # The frames the player first stood in its earliest and its newest cell.
+    found = raw.get("found")
+    if not (isinstance(found, list) and len(found) == 2):
+        found = [None, None]
     unreached = []
     for group in groups[:5]:
         mx = sum(x for x, _ in group) / len(group)
@@ -348,6 +367,9 @@ def coverage_summary(raw: dict[str, Any], options: dict[str, Any]) -> dict[str, 
                 round(float(origin[1]) + (my + 0.5) * cell, 1),
             ],
         }
+        walk = _walk(group, steps, start)
+        if walk is not None:
+            place["walk"] = round(walk * cell, 1)
         area = area_at(areas, mx + 0.5, my + 0.5)
         if area:
             place["area"] = area
@@ -366,8 +388,65 @@ def coverage_summary(raw: dict[str, Any], options: dict[str, Any]) -> dict[str, 
         "unreached": unreached,
         "areas": areas,
         "path": _path(raw.get("path")),
+        "travelled": _number(raw.get("travelled")),
+        "first_found": _seconds(found[0], fps),
+        "last_found": _seconds(found[1], fps),
         "map": "",
     }
+
+
+def _number(value: Any) -> float | None:
+    """A non-negative number from the bot, or None when it gave none."""
+    if isinstance(value, bool) or not isinstance(value, int | float) or value < 0:
+        return None
+    return float(value)
+
+
+def _seconds(frame: Any, fps: int) -> float | None:
+    """A frame of play in seconds, or None when there is none (-1, missing)."""
+    number = _number(frame)
+    return None if number is None else round(number / max(fps, 1), 2)
+
+
+def _steps_from(rows: list[str], start: Any) -> dict[tuple[int, int], int]:
+    """Steps from the start cell to each floor cell the grid joins to it (4 ways)."""
+    if not (
+        isinstance(start, list)
+        and len(start) == 2
+        and all(isinstance(v, int) and not isinstance(v, bool) for v in start)
+    ):
+        return {}
+    sx, sy = start
+    if not (0 <= sy < len(rows) and 0 <= sx < len(rows[sy])) or rows[sy][sx] == " ":
+        return {}
+    steps = {(sx, sy): 0}
+    queue = collections.deque([(sx, sy)])
+    while queue:
+        cx, cy = queue.popleft()
+        for nx, ny in ((cx + 1, cy), (cx - 1, cy), (cx, cy + 1), (cx, cy - 1)):
+            if (
+                0 <= ny < len(rows)
+                and 0 <= nx < len(rows[ny])
+                and rows[ny][nx] != " "
+                and (nx, ny) not in steps
+            ):
+                steps[(nx, ny)] = steps[(cx, cy)] + 1
+                queue.append((nx, ny))
+    return steps
+
+
+def _walk(
+    group: list[tuple[int, int]], steps: dict[tuple[int, int], int], start: Any
+) -> float | None:
+    """Cells from the start to the nearest cell of [group]: along the grid's floor when it
+    joins them, else straight across (a lower bound); None without a start."""
+    along = [steps[spot] for spot in group if spot in steps]
+    if along:
+        return float(min(along))
+    if not steps:
+        return None
+    sx, sy = start
+    return min(math.hypot(x - sx, y - sy) for x, y in group)
 
 
 def _path(raw: Any) -> list[list[float]]:
@@ -409,22 +488,86 @@ def area_at(areas: list[dict[str, Any]], col: float, row: float) -> str:
     return best
 
 
+#: The bot ran out of places it could get to when it found no new floor for this long, or
+#: for this share of its time on the level, before the run ended.
+SETTLED_SECONDS = 15.0
+SETTLED_SHARE = 0.2
+#: Times over the bot walks a floor's area, one cell wide, to see all of it: it retraces its
+#: steps between the places it heads for.
+SWEEPS = 2.0
+
+
 def coverage_note(coverage: dict[str, Any], played: float) -> dict[str, Any] | None:
-    """A note when a run of a minute or more left much of the level unseen."""
+    """What a run of a minute or more that left much of the level unseen says about it.
+
+    Unreached floor is a problem (``coverage``, offered for fixing) only when the bot had
+    the time to get there: it stopped finding new floor well before the run ended, or it
+    walked enough to sweep the whole floor twice and still saw under half; and the place
+    is near enough to walk to in the run. Every unreached cell is one the bot's map found a
+    way to from the start (bot_cover.gd floods the floor from there; floor it can't get to
+    is never counted), so a place the bot had time for and never got to is hard to find
+    or to get to. Otherwise the run was too short for a level this size (the bot's walking
+    speed × the run's length against the floor's area): that is information
+    (``coverage_time``), and nothing in the game is offered for fixing.
+    """
     if not coverage or played < 60 or coverage["percent"] >= 60:
         return None
-    where = ""
-    if coverage["unreached"]:
-        biggest = coverage["unreached"][0]
+    first = coverage.get("first_found")
+    last = coverage.get("last_found")
+    on_level = max(played - (first or 0.0), 1.0)
+    settled = last is not None and played - last >= max(
+        SETTLED_SECONDS, SETTLED_SHARE * on_level
+    )
+    travelled = coverage.get("travelled")
+    speed = travelled / on_level if travelled else None
+    cell = float(coverage.get("cell") or 1)
+    area = float(coverage.get("navigable") or 0) * cell * cell
+    # The seconds the bot needs at its pace to see the whole floor.
+    needs = area * SWEEPS / (speed * cell) if speed else None
+    looped = needs is not None and needs <= on_level and coverage["percent"] < 50
+    near = [
+        place
+        for place in coverage["unreached"]
+        if speed is not None
+        and place.get("walk") is not None
+        and place["walk"] / speed <= on_level
+    ]
+    if (settled or looped) and near:
+        biggest = near[0]
         x, y = biggest["at"]
         where = f"; the biggest unreached area is around ({x:g}, {y:g})"
         if biggest.get("area"):
             where += f", in {biggest['area']}"
+        why = (
+            f" It found no new floor after {stamp(last)}."
+            if settled and last is not None
+            else " It walked enough to cover the floor twice over."
+        )
+        return {
+            "kind": "coverage",
+            "detail": (
+                f"In {stamp(played)} the bot reached {coverage['percent']:g}% of the "
+                f"level's floor{where}.{why} Those places may be hard to find or get to; "
+                "the map marks them."
+            ),
+            "t": None,
+        }
+    pace = (
+        f" At its pace the whole floor takes about {stamp(needs)}."
+        if needs is not None and needs > on_level
+        else ""
+    )
+    why = (
+        "the places it missed are farther than it could walk to in that time"
+        if settled
+        else "was still finding new floor when the run ended"
+    )
     return {
-        "kind": "coverage",
+        "kind": "coverage_time",
+        "title": f"Not reached in {stamp(played)}; a longer run would cover more",
         "detail": (
-            f"In {stamp(played)} the bot reached {coverage['percent']:g}% of the level's "
-            f"floor{where}. Those places may be hard to find or get to; the map marks them."
+            f"The bot reached {coverage['percent']:g}% of the level's floor and {why}."
+            f"{pace} Nothing in the game needs fixing for this."
         ),
         "t": None,
     }
@@ -512,7 +655,7 @@ def build(
     for extra in (_hitches(perf, fps), _memory(perf.get("samples", []), fps)):
         if extra is not None:
             raw.append(extra)
-    coverage = coverage_summary((bot or {}).get("coverage") or {}, options)
+    coverage = coverage_summary((bot or {}).get("coverage") or {}, options, fps)
     if bot is not None and status == "played" and not bot.get("route"):
         raw.extend(balance_notes(bot))
         note = coverage_note(coverage, played)
@@ -602,7 +745,9 @@ def _item(index: int, entry: dict[str, Any], options: dict[str, Any]) -> dict[st
         "id": f"p{index + 1}",
         "severity": _KIND_SEVERITY.get(kind, "medium"),
         "kind": kind,
-        "title": _TITLES.get(kind, kind.replace("_", " ").capitalize()),
+        "title": str(
+            entry.get("title") or _TITLES.get(kind, kind.replace("_", " ").capitalize())
+        ),
         "detail": str(entry.get("detail", "")),
         "where": where,
         "t": t_value,
@@ -612,6 +757,7 @@ def _item(index: int, entry: dict[str, Any], options: dict[str, Any]) -> dict[st
         "seed": options["seed"],
         "repro": repro(options, t_value, where),
         "shot": "",
+        "fixable": kind not in UNFIXABLE,
     }
 
 

@@ -70,6 +70,8 @@ func _report() -> Dictionary:
 					"kind": "softlock" if index == 0 else "text",
 					"repro": "Replay seed 4821 (2:00 run); watch around 0:05 of play.",
 					"shot": ProjectSettings.globalize_path(SHOT) if index == 0 else "",
+					# The last is information no change to the game fixes.
+					"fixable": index != 5,
 				}
 			)
 		)
@@ -240,6 +242,13 @@ func _run() -> void:
 	_check(not prompt.text.contains("joinery") and not prompt.text.contains("--"), prompt.text)
 	_check(not prompt.text.to_lower().contains("playtest"), "It doesn't ask for a playtest")
 	_check(not _sent(job, "prompt").size(), "Nothing is sent until the user sends it")
+
+	# Information no change to the game fixes (a run too short for the level) offers no fix.
+	var shown: Array[Control] = card.call("item_rows")
+	var info: Control = shown[shown.size() - 1]
+	(info.find_children("", "Button", true, false)[0] as Button).button_pressed = true
+	_check(info.get_child(1).visible, "Information opens too")
+	_check(_button(info.get_child(1), "Fix this") == null, "Information offers no Fix this")
 
 	# The playtester's words go to the transcript; its follow-ups are offers.
 	var log := str(dock.get("_transcript").get("_log"))

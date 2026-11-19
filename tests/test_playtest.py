@@ -327,6 +327,7 @@ def test_for_agent_trims_the_report() -> None:
         "count",
         "repro",
         "shot",
+        "fixable",
     }
     assert "bot" in data["note"]
     assert "states" not in data
@@ -474,7 +475,7 @@ def test_the_level_s_rooms_name_where_the_unreached_floor_is() -> None:
         {"name": "broken", "rect": [1, 2]},
     ]
     report = playtest_report.build(
-        _bot(coverage=_coverage(areas=rooms)), "", 0, options=OPTIONS
+        _bot(coverage=_coverage(areas=rooms, **SETTLED)), "", 0, options=OPTIONS
     )
     coverage = report["coverage"]
     # Kept for the map's labels when well formed; the smallest room holding a place names it.
@@ -485,21 +486,119 @@ def test_the_level_s_rooms_name_where_the_unreached_floor_is() -> None:
     assert "around (2, -8), in Office" in notes[0]["detail"]
 
 
-def test_a_long_run_that_saw_little_of_the_level_gets_a_note() -> None:
-    report = playtest_report.build(_bot(coverage=_coverage()), "", 0, options=OPTIONS)
-    notes = [item for item in report["items"] if item["kind"] == "coverage"]
-    assert len(notes) == 1 and notes[0]["severity"] == "note"
-    assert "36.4% of the level" in notes[0]["detail"]
-    assert "around (2, -8)" in notes[0]["detail"]
+#: A bot that walked 200 units in its 2:00 and found its newest floor at 0:30 (frames at 60).
+SETTLED = {"travelled": 200.0, "found": [0, 1800]}
+
+
+def _kinds(report: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {
+        item["kind"]: item
+        for item in report["items"]
+        if item["kind"] in ("coverage", "coverage_time")
+    }
+
+
+def test_a_bot_that_ran_out_of_places_to_go_reports_the_unreached_floor() -> None:
+    report = playtest_report.build(
+        _bot(coverage=_coverage(**SETTLED)), "", 0, options=OPTIONS
+    )
+    coverage = report["coverage"]
+    assert coverage["travelled"] == 200.0
+    assert coverage["first_found"] == 0.0 and coverage["last_found"] == 30.0
+    # Along the floor from the start; straight across where the grid shows no way.
+    assert coverage["unreached"][0]["walk"] == 4.0
+    assert coverage["unreached"][2]["walk"] == 6.0
+    notes = _kinds(report)
+    assert list(notes) == ["coverage"]
+    note = notes["coverage"]
+    assert note["severity"] == "note" and note["fixable"] is True
+    assert "36.4% of the level" in note["detail"]
+    assert "around (2, -8)" in note["detail"]
+    assert "found no new floor after 0:30" in note["detail"]
     # A short run, or a well explored level, says nothing.
     short = playtest_report.build(
-        _bot(coverage=_coverage(), seconds_played=20.0), "", 0, options=OPTIONS
+        _bot(coverage=_coverage(**SETTLED), seconds_played=20.0),
+        "",
+        0,
+        options=OPTIONS,
     )
-    assert not [item for item in short["items"] if item["kind"] == "coverage"]
+    assert not _kinds(short)
     seen = playtest_report.build(
-        _bot(coverage=_coverage(percent=80.0)), "", 0, options=OPTIONS
+        _bot(coverage=_coverage(percent=80.0, **SETTLED)), "", 0, options=OPTIONS
     )
-    assert not [item for item in seen["items"] if item["kind"] == "coverage"]
+    assert not _kinds(seen)
+
+
+def test_a_bot_that_walked_the_floor_twice_over_and_saw_little_reports_it() -> None:
+    # Still finding floor at the end, but it walked far more than the level needs.
+    looped = {"travelled": 2000.0, "found": [0, 7100]}
+    report = playtest_report.build(
+        _bot(coverage=_coverage(**looped)), "", 0, options=OPTIONS
+    )
+    note = _kinds(report)["coverage"]
+    assert "walked enough to cover the floor twice over" in note["detail"]
+
+
+def _yard(visited_rows: float) -> dict[str, Any]:
+    """A 24 × 20 m yard (2 m cells) the bot saw the first rows of."""
+    whole = int(visited_rows)
+    grid = ["#" * 12] * whole + ["#" * 6 + "." * 6] * (visited_rows > whole)
+    grid += ["." * 12] * (10 - len(grid))
+    seen = sum(line.count("#") for line in grid)
+    return {
+        "mode": "3d",
+        "cell": 2.0,
+        "origin": [-12.0, -10.0],
+        "cols": 12,
+        "rows": 10,
+        "start": [0, 0],
+        "navigable": 120,
+        "visited": seen,
+        "percent": round(100 * seen / 120, 1),
+        "grid": grid,
+    }
+
+
+def test_a_minute_in_a_big_yard_is_information_not_a_problem() -> None:
+    # The bot walks 4 m/s and was still finding new floor at 0:58 of a 1:00 run.
+    coverage = _yard(4.5) | {"travelled": 240.0, "found": [0, 3480]}
+    report = playtest_report.build(
+        _bot(coverage=coverage, seconds_played=60.0), "", 0, options=OPTIONS
+    )
+    assert report["coverage"]["percent"] == 45.0
+    notes = _kinds(report)
+    assert list(notes) == ["coverage_time"]
+    info = notes["coverage_time"]
+    assert info["title"] == "Not reached in 1:00; a longer run would cover more"
+    assert info["severity"] == "note" and info["fixable"] is False
+    assert "still finding new floor when the run ended" in info["detail"]
+    # 480 m² walked twice over, one 2 m cell wide, at 4 m/s.
+    assert "the whole floor takes about 2:00" in info["detail"]
+    # The agent and the card see that it is not for fixing.
+    agent = playtest.for_agent(report)
+    assert [i["fixable"] for i in agent["items"] if i["title"] == info["title"]] == [
+        False
+    ]
+
+
+def test_coverage_without_the_bot_s_pace_is_never_called_a_problem() -> None:
+    # A bot that doesn't say how far it walked or when it last found floor: no proof it had
+    # the time, so information only.
+    report = playtest_report.build(_bot(coverage=_coverage()), "", 0, options=OPTIONS)
+    notes = _kinds(report)
+    assert list(notes) == ["coverage_time"]
+    assert notes["coverage_time"]["title"].startswith("Not reached in 2:00")
+    assert report["coverage"]["travelled"] is None
+
+
+def test_floor_too_far_to_walk_to_in_the_run_is_information() -> None:
+    # It stopped finding floor early but barely walked: the rest was out of its reach in time.
+    slow = {"travelled": 2.0, "found": [0, 600]}
+    report = playtest_report.build(
+        _bot(coverage=_coverage(**slow)), "", 0, options=OPTIONS
+    )
+    info = _kinds(report)["coverage_time"]
+    assert "farther than it could walk to in that time" in info["detail"]
 
 
 def test_no_grid_means_no_coverage() -> None:

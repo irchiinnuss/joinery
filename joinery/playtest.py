@@ -532,6 +532,7 @@ def for_agent(report: dict[str, Any], limit: int = 25) -> dict[str, Any]:
                 "count",
                 "repro",
                 "shot",
+                "fixable",
             }
         }
         for item in report.get("items", [])[:limit]

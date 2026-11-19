@@ -679,15 +679,17 @@ func _item_row(item: Dictionary) -> VBoxContainer:
 	var picture := _thumbnail(str(item.get("shot", "")))
 	if picture != null:
 		body.add_child(picture)
-	var fix := UI.secondary("Fix this")
-	STYLE.on_card(fix)
-	fix.tooltip_text = "Puts a request in the message box; nothing is sent until you send it"
-	fix.accessibility_name = "Ask Journeyman to fix: " + title
-	fix.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	UI.bind_height(fix, "sm")
-	UI_MOTION.press_feedback(fix)
-	fix.pressed.connect(func() -> void: fix_requested.emit(fix_request(item)))
-	body.add_child(fix)
+	# Information no change to the game fixes (a run too short for the level) offers no fix.
+	if bool(item.get("fixable", true)):
+		var fix := UI.secondary("Fix this")
+		STYLE.on_card(fix)
+		fix.tooltip_text = "Puts a request in the message box; nothing is sent until you send it"
+		fix.accessibility_name = "Ask Journeyman to fix: " + title
+		fix.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+		UI.bind_height(fix, "sm")
+		UI_MOTION.press_feedback(fix)
+		fix.pressed.connect(func() -> void: fix_requested.emit(fix_request(item)))
+		body.add_child(fix)
 	toggle.toggled.connect(
 		func(open: bool) -> void:
 			body.visible = open
