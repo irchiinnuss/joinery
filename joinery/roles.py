@@ -641,16 +641,9 @@ def _git_where(args: list[str], here: Path | None, place: ShellPlace | None) -> 
     return _projects_own(folder, place)
 
 
-def not_read_only(command: str, place: ShellPlace | None = None) -> str:
-    """Why ``command`` isn't known to only read: the first program that may write or
-    run another, or "a redirection or substitution"; "" when every part only reads.
-    ``place``: where it runs, so git is held to the project's own repository."""
-    inner = _HARMLESS_REDIRECT.sub(" ", _unwrap(command))
-    if re.search(r"[<>`]|\$\(|&(?!&)", inner.replace("&&", "")):
-        return "a redirection or substitution"
-    segments = _segments(inner)
-    if segments is None:
-        return "a command Joinery can't parse"
+def _git_elsewhere(segments: list[list[str]], place: ShellPlace | None) -> bool:
+    """Some git read in ``segments`` reaches a repository other than the project's
+    own, following each ``cd`` from where the line starts."""
     # Where each part runs: the session's folder until a cd moves it (None: not
     # known, or moved where no place is given to check it against).
     here: Path | None = place.cwd.resolve() if place is not None else Path(".")
@@ -664,9 +657,39 @@ def not_read_only(command: str, place: ShellPlace | None = None) -> str:
                 here = (here / targets[0]).resolve()
             else:
                 here = None
-        git = bare and Path(bare[0]).name == "git" and _reads(words)
-        if git and not _git_where(bare[1:], here, place):
-            return "`git` outside the project's own repository"
+        if _is_git(words) and _reads(words) and not _git_where(bare[1:], here, place):
+            return True
+    return False
+
+
+#: A backslash: mostly an escape to a POSIX shell (Git Bash), a path separator to
+#: PowerShell and cmd. Not a line continuation, which every reading drops.
+_BACKSLASH = re.compile(r"\\(?![\r\n])")
+
+
+def not_read_only(command: str, place: ShellPlace | None = None) -> str:
+    """Why ``command`` isn't known to only read: the first program that may write or
+    run another, or "a redirection or substitution"; "" when every part only reads.
+    ``place``: where it runs, so git is held to the project's own repository.
+
+    A backslash means different folders to different shells (``sub\\..\\..`` is
+    ``sub....`` to bash and two folders up to PowerShell), and the hook can't tell
+    which shell runs the line. So git's folders must be the project's own under
+    both readings."""
+    inner = _HARMLESS_REDIRECT.sub(" ", _unwrap(command))
+    if re.search(r"[<>`]|\$\(|&(?!&)", inner.replace("&&", "")):
+        return "a redirection or substitution"
+    segments = _segments(inner)
+    if segments is None:
+        return "a command Joinery can't parse"
+    elsewhere = "`git` outside the project's own repository"
+    if _git_elsewhere(segments, place):
+        return elsewhere
+    if "\\" in inner and any(_is_git(words) for words in segments):
+        separators = _segments(_BACKSLASH.sub("/", inner))
+        if separators is None or _git_elsewhere(separators, place):
+            return elsewhere
+    for words in segments:
         if not _reads(words):
             program = next(
                 (
@@ -682,6 +705,11 @@ def not_read_only(command: str, place: ShellPlace | None = None) -> str:
                 return f"`git {sub}`" if sub else "`git` with those options"
             return f"`{name}`"
     return ""
+
+
+def _is_git(words: list[str]) -> bool:
+    bare = [w for w in words if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=\S*", w)]
+    return bool(bare) and Path(bare[0]).name == "git"
 
 
 def read_only_command(command: str, place: ShellPlace | None = None) -> bool:

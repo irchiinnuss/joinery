@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shlex
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -262,25 +263,32 @@ def test_git_reads_only_the_projects_own_repository(
     monkeypatch.setenv(STAGE_ENV, mine)
     place = ShellPlace(root, root)
     stage = f".joinery/transactions/{mine}/stage"
+
+    def q(path: Path) -> str:
+        return shlex.quote(str(path))  # a Windows path as one word, backslashes kept
+
     allowed = [
-        f"git -C {root} diff",
-        f"git -C {root}/sub log",
+        f"git -C {q(root)} diff",
+        f"git -C {q(root / 'sub')} log",
         "git -C sub log --oneline",
         "git --no-pager -C sub log",
-        f"git --git-dir={root}/.git log",
-        f"git --git-dir {root}/.git --work-tree={root} status",
+        f"git --git-dir={q(root / '.git')} log",
+        f"git --git-dir {q(root / '.git')} --work-tree={q(root)} status",
         "cd sub && git status",
         f"cd {stage} && git diff --no-index a.gd b.gd",
         f"git -C {stage} status",
         "LC_ALL=C git -C sub log",
+        # A backslash folder that is the project's own to bash and PowerShell alike.
+        "git -C 'sub\\deeper' log",
+        'cd "sub\\deeper" && git log',
     ]
     refused = [
-        f"git -C {outside} status",
+        f"git -C {q(outside)} status",
         "git -C ../x status",
         "git -C /tmp/x status",
-        f"git --git-dir={outside}/.git log",
+        f"git --git-dir={q(outside / '.git')} log",
         "git --git-dir=/tmp/x/.git log",
-        f"git --work-tree={outside} status",
+        f"git --work-tree={q(outside)} status",
         "git -C planted log",
         "git -C planted/deeper log",
         "cd planted && git status",
@@ -294,6 +302,17 @@ def test_git_reads_only_the_projects_own_repository(
         "cd $HOME && git log",
         "git -C sub* log",
         "cd .. && git log",
+        # Backslashes: bash drops them, PowerShell and cmd separate folders with them.
+        # Either reading leaving the project's own repository refuses the read.
+        "git -C sub\\..\\..\\x status",
+        "git -C 'sub\\..\\..' status",
+        "git -C planted\\deeper log",
+        "cd planted\\deeper && git log",
+        "git --work-tree=planted\\deeper status",
+        "git -C .\\. log",
+        "cd sub && git -C ..\\.. log",
+        f"git -C {stage}\\nested log",
+        "git --git-dir=.git\\..\\planted\\.git log",
     ]
     for command in allowed:
         assert read_only_command(command, place), command
