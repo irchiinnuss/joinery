@@ -188,6 +188,41 @@ def test_read_only_roles_reach_audited_reads_only(
         ("cat a 2>&1 > out.txt", False),
         ("awk '{print > \"f\"}' a", False),
         ("ls | xargs rm", False),
+        # git's global options before a read; the subcommand is what's judged.
+        ("git -C /p/yard-day diff --no-index a b", True),
+        ("git --no-pager -C x log --oneline -3", True),
+        ("git --git-dir=x/.git --work-tree=x status", True),
+        ("git -c color.ui=never show HEAD", True),
+        ("git -C x commit -am y", False),
+        ("git -C x push", False),
+        ("git -c core.editor=vim commit", False),
+        ("git --work-tree=x checkout -- a.gd", False),
+        ("git --git-dir x/.git reset --hard", False),
+        ("git -c core.pager=rm log", False),
+        ("git -c core.fsmonitor=./evil status", False),
+        ("git -c diff.external=./evil diff", False),
+        ("git --exec-path=x log", False),
+        ("git -C", False),
+        ("git -C x diff --output=out.txt", False),
+        ("GIT_EXTERNAL_DIFF=./evil git diff", False),
+        ("LC_ALL=C git -C x log", True),
+        # Readers Journeyman's reviewers and debugger reached for.
+        ("ls -la .godot/imported; date", True),
+        ("date +%s", True),
+        ("date -u", True),
+        ("date -s 12:00", False),
+        ("date 010112002026", False),
+        ("md5 -q art/a.png && md5sum a && shasum -a 256 a", True),
+        ("xxd -l 64 art/a.png", True),
+        ("xxd -l64 -c 16 art/a.png | head", True),
+        ("xxd -r dump.hex", False),
+        ("xxd -r -p dump.hex out.bin", False),
+        ("xxd -pr dump.hex", False),
+        ("xxd art/a.png out.hex", False),
+        ("xxd art/a.png > out.hex", False),
+        ("od -An -tx1 a.bin | head", True),
+        ("strings -n 8 a.bin", True),
+        ("strings a.bin > out.txt", False),
     ],
 )
 def test_read_only_roles_run_only_reading_commands(
@@ -201,6 +236,26 @@ def test_read_only_roles_run_only_reading_commands(
             "cwd": str(project),
         }
         assert judged(monkeypatch, role, raw) == (None if allowed else Severity.DENY)
+
+
+def test_a_refused_command_says_which_program_isnt_known_to_read(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(ROLE_ENV, "debugger")
+    for command, named in (
+        ("ls; python3 -c 1", "`python3`"),
+        ("git -C x commit -m y", "`git commit`"),
+        ("cat a > b", "a redirection or substitution"),
+    ):
+        verdict = violation(
+            {
+                "tool_name": "Bash",
+                "tool_input": {"command": command},
+                "cwd": str(project),
+            }
+        )
+        assert verdict is not None and named in verdict.reason, command
+        assert "can't write" not in verdict.reason
 
 
 def test_rule_zero_still_stops_every_role_first(

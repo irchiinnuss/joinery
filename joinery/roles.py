@@ -363,6 +363,15 @@ _READERS = frozenset(
         "basename",
         "dirname",
         "realpath",
+        "date",
+        "md5",
+        "md5sum",
+        "shasum",
+        "sha1sum",
+        "sha256sum",
+        "xxd",
+        "od",
+        "strings",
     }
 )
 _GIT_READS = frozenset({"log", "show", "diff", "status", "blame", "ls-files"})
@@ -398,8 +407,114 @@ def _segments(command: str) -> list[list[str]] | None:
     return simple_commands(command)
 
 
+#: Git options before the subcommand that only say where or how to read.
+_GIT_GLOBAL_VALUE = frozenset({"-C", "--git-dir", "--work-tree", "--namespace"})
+_GIT_GLOBAL_FLAGS = frozenset(
+    {
+        "--no-pager",
+        "--bare",
+        "--no-replace-objects",
+        "--literal-pathspecs",
+        "--no-optional-locks",
+    }
+)
+#: ``git -c key=value``: only display settings. Others (core.pager, core.fsmonitor,
+#: diff.external, a textconv driver…) can make a read run a program.
+_GIT_SAFE_CONFIG = re.compile(
+    r"^(?:color(?:\.[\w.-]+)?|core\.quotepath|core\.abbrev|diff\.noprefix|"
+    r"diff\.renames|diff\.mnemonicprefix|log\.date|log\.decorate|i18n\.[\w.-]+)="
+    r"[^\s]*$",
+    re.IGNORECASE,
+)
+#: Environment assignments before a command that only change how it prints.
+_SAFE_ENV = re.compile(
+    r"^(?:LC_[A-Z]+|LANG|LANGUAGE|TZ|NO_COLOR|CLICOLOR|COLUMNS|TERM)=\S*$"
+)
+
+
+def git_subcommand(args: list[str]) -> str | None:
+    """The subcommand of ``git <args>`` after its global options; None when an
+    option isn't one known to leave reads alone (``-c core.pager=…``, ``--exec-path``)."""
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        name, joined, _ = arg.partition("=")
+        if arg in _GIT_GLOBAL_FLAGS or (
+            joined and name.startswith("--") and name in _GIT_GLOBAL_VALUE
+        ):
+            i += 1  # --no-pager, --git-dir=x
+        elif arg in _GIT_GLOBAL_VALUE:
+            if i + 1 >= len(args):
+                return None
+            i += 2
+        elif arg == "-c":
+            if i + 1 >= len(args) or not _GIT_SAFE_CONFIG.match(args[i + 1]):
+                return None
+            i += 2
+        elif arg.startswith("-"):
+            return None
+        else:
+            return arg
+    return None
+
+
+#: ``xxd`` options that take a value (``-l 64``); its second file operand is written.
+_XXD_VALUE = frozenset(
+    {
+        "-c",
+        "-cols",
+        "-g",
+        "-groupsize",
+        "-l",
+        "-len",
+        "-n",
+        "-name",
+        "-o",
+        "-s",
+        "-seek",
+    }
+)
+
+
+def _xxd_reads(args: list[str]) -> bool:
+    """``xxd`` reads unless it reverts (``-r``) or names an output file."""
+    operands = 0
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg.startswith("-") and "r" in arg and arg not in _XXD_VALUE:
+            return False  # -r, -revert, -pr: write binary back out
+        if arg in _XXD_VALUE:
+            i += 2
+            continue
+        if not arg.startswith("-") or arg == "-":
+            operands += 1
+        i += 1
+    return operands <= 1
+
+
+_DATE_FLAGS = frozenset({"-u", "--utc", "-R", "--rfc-2822"})
+
+
+def _date_reads(args: list[str]) -> bool:
+    """``date``, ``date +%s``, ``date -u``, ``date -r file``: no setting the clock."""
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "-r":
+            i += 2
+            continue
+        if arg.startswith(("+", "-I", "--iso-8601")) or arg in _DATE_FLAGS:
+            i += 1
+            continue
+        return False  # date -s, date --set, date 0101…: set the clock
+    return True
+
+
 def _reads(tokens: list[str]) -> bool:
     while tokens and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=\S*", tokens[0]):
+        if not _SAFE_ENV.match(tokens[0]):
+            return False  # GIT_EXTERNAL_DIFF=…, PAGER=… make a read run a program
         tokens = tokens[1:]  # LC_ALL=C grep …
     if not tokens:
         return True
@@ -408,7 +523,7 @@ def _reads(tokens: list[str]) -> bool:
     if any(arg.split("=", 1)[0] in _WRITE_FLAGS.get(program, ()) for arg in args):
         return False  # rg --pre runs a program; sort -o and git diff --output write
     if program == "git":
-        return bool(args) and args[0] in _GIT_READS
+        return git_subcommand(args) in _GIT_READS
     if program not in _READERS:
         return False
     if program == "find":
@@ -419,6 +534,10 @@ def _reads(tokens: list[str]) -> bool:
             return False
         scripts = [a for a in args if not a.startswith("-")]
         return bool(scripts) and bool(_SED_PRINT.match(scripts[0]))
+    if program == "xxd":
+        return _xxd_reads(args)
+    if program == "date":
+        return _date_reads(args)
     return True
 
 
@@ -429,15 +548,49 @@ _HARMLESS_REDIRECT = re.compile(
 )
 
 
+def not_read_only(command: str) -> str:
+    """Why ``command`` isn't known to only read: the first program that may write or
+    run another, or "a redirection or substitution"; "" when every part only reads."""
+    inner = _HARMLESS_REDIRECT.sub(" ", _unwrap(command))
+    if re.search(r"[<>`]|\$\(|&(?!&)", inner.replace("&&", "")):
+        return "a redirection or substitution"
+    segments = _segments(inner)
+    if segments is None:
+        return "a command Joinery can't parse"
+    for words in segments:
+        if not _reads(words):
+            program = next(
+                (
+                    w
+                    for w in words
+                    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=\S*", w)
+                ),
+                words[0] if words else "",
+            )
+            name = Path(program).name
+            if name == "git":
+                sub = git_subcommand(words[words.index(program) + 1 :])
+                return f"`git {sub}`" if sub else "`git` with those options"
+            return f"`{name}`"
+    return ""
+
+
 def read_only_command(command: str) -> bool:
     """True when every part of ``command`` only reads: no redirection (beyond
     dropping or joining error output), no substitution, nothing run in the
     background, only known readers."""
-    inner = _HARMLESS_REDIRECT.sub(" ", _unwrap(command))
-    if re.search(r"[<>`]|\$\(|&(?!&)", inner.replace("&&", "")):
-        return False
-    segments = _segments(inner)
-    return segments is not None and all(_reads(words) for words in segments)
+    return not not_read_only(command)
+
+
+def unknown_reader(command: str) -> str:
+    """The refusal's reason for a shell command a read-only role may not run."""
+    why = not_read_only(command)
+    return (
+        f"This agent only reads: {why} isn't a command Joinery knows only reads "
+        "(cat, ls, rg, stat, git log/diff/show and other plain readers are)."
+        if why
+        else ""
+    )
 
 
 # --- The policy -----------------------------------------------------------------------
@@ -554,11 +707,8 @@ def role_violation(
             return Verdict(Severity.DENY, refusal(role))
         return Verdict(Severity.DENY, refusal(role))
     if kind == "bash":
-        return (
-            None
-            if read_only_command(command)
-            else Verdict(Severity.DENY, refusal(role))
-        )
+        why = unknown_reader(command)
+        return Verdict(Severity.DENY, f"{refusal(role)} {why}") if why else None
     if kind == "fetch":
         return Verdict(Severity.DENY, "Read-only agents work offline; no web access.")
     if native_writer(native):

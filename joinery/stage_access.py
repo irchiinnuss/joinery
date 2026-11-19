@@ -93,11 +93,19 @@ def names_changes(arguments: Any) -> bool:
 
 
 def stage_violation(
-    allowed: str, arguments: Any, *, read_only: bool, writes: bool
+    allowed: str,
+    arguments: Any,
+    *,
+    read_only: bool,
+    writes: bool,
+    why: str = "",
 ) -> Verdict | None:
-    """A provider-native call's verdict on staged-change folders (see the module)."""
+    """A provider-native call's verdict on staged-change folders (see the module).
+
+    ``why`` is the refusal's real reason when ``writes`` only means "not known to
+    read" (a shell command with a program Joinery doesn't know only reads)."""
     if read_only and writes and names_changes(arguments):
-        return Verdict(Severity.DENY, READ_ONLY)
+        return Verdict(Severity.DENY, why or READ_ONLY)
     if touches_changes(arguments, stage_id(allowed)):
         return Verdict(Severity.DENY, REFUSED)
     return None

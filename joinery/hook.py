@@ -60,6 +60,7 @@ from joinery.roles import (
     read_only_command,
     role_violation,
     spec,
+    unknown_reader,
 )
 from joinery.stage_access import STAGE_ENV, stage_violation
 
@@ -258,12 +259,9 @@ def staged_folders(event: Event, raw: dict[str, Any], role: str) -> Verdict | No
         )
     except ValueError:
         read_only = True
-    writes = (
-        not read_only_command(event.command)
-        if event.kind == "bash"
-        else native_writer(native)
-    )
-    return stage_violation(allowed, values, read_only=read_only, writes=writes)
+    why = unknown_reader(event.command) if event.kind == "bash" else ""
+    writes = bool(why) if event.kind == "bash" else native_writer(native)
+    return stage_violation(allowed, values, read_only=read_only, writes=writes, why=why)
 
 
 def read_tool_violation(event: Event) -> Verdict | None:

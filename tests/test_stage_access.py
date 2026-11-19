@@ -142,6 +142,25 @@ def test_a_read_only_role_never_writes_into_a_staged_change(
 
 
 @pytest.mark.parametrize("provider", PROVIDERS)
+def test_a_reviewer_compares_its_stage_with_the_project_by_git(
+    project: Path, monkeypatch: pytest.MonkeyPatch, provider: str
+) -> None:
+    stage = f".joinery/transactions/{MINE}/stage"
+    compare = f"cd {stage} && cat a.gd && git -C {project} diff --no-index a.gd b.gd"
+    raw = shell(provider, compare, project)
+    assert judged(monkeypatch, "reviewer", MINE, raw) is None
+    for command, named in (
+        (f"git -C {stage} commit -am x", "`git commit`"),
+        (f"cd {stage} && python3 a.py", "`python3`"),
+        (f"xxd -r a.hex {stage}/a.bin", "`xxd`"),
+    ):
+        raw = shell(provider, command, project)
+        assert judged(monkeypatch, "reviewer", MINE, raw) == Severity.DENY
+        reason = str(violation(raw))
+        assert named in reason and "can't write" not in reason, reason
+
+
+@pytest.mark.parametrize("provider", PROVIDERS)
 def test_authors_reach_their_own_change_only(
     project: Path, monkeypatch: pytest.MonkeyPatch, provider: str
 ) -> None:
