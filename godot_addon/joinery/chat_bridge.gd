@@ -819,5 +819,20 @@ func close() -> bool:
 	return stopped
 
 
+## Moving the sidebar (another dock slot, a floating window) takes it out of the tree and back
+## at once: only a bridge that stays out ends its chat. One freed ends the host's session too.
 func _exit_tree() -> void:
-	close()
+	_close_if_gone.call_deferred()
+
+
+func _close_if_gone() -> void:
+	if not is_inside_tree():
+		close()
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_PREDELETE and _job != null:
+		# No signals here: the sidebar listening to them may be going too.
+		_job.send_line(JSON.stringify({"kind": "shutdown", "keep_reviews": true}))
+		_job.close_pipes()
+		_job = null

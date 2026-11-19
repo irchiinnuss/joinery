@@ -56,7 +56,7 @@ const SCRIPT := {
 	[
 		{"execution": {}},
 		{"stream": "The harbour lamps flicker as the tide comes in. ", "chunk": 6, "every_ms": 25},
-		{"stream": "Each lamp gets its own light.", "chunk": 6, "every_ms": 25},
+		{"stream": "Each lamp gets its own light.", "chunk": 6, "every_ms": 25, "new": false},
 	],
 }
 
@@ -397,8 +397,8 @@ func _finish_together() -> void:
 	s.check(not (s.composer().get("stop") as Button).visible, "Nothing is left running")
 
 
-## While a reply streams, timings are hidden and shown again in Settings, the sidebar is closed
-## and opened again, the theme switches, the sidebar is resized and the editor loses focus: the
+## While a reply streams, timings are hidden and shown again in Settings, the sidebar is moved
+## to another dock slot, the theme switches, the sidebar is resized and the editor loses focus: the
 ## reply finishes whole.
 func _editor_life() -> void:
 	if not await s.connect_host():
@@ -412,8 +412,8 @@ func _editor_life() -> void:
 	await s.frames(3)
 	var parent := s.dock.get_parent()
 	if not Engine.is_editor_hint():
+		# Moved to another dock slot, or made floating: out of the tree and back in one go.
 		parent.remove_child(s.dock)
-		await s.frames(3)
 		parent.add_child(s.dock)
 		s.dock.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		s.tree.root.size = Vector2i(s.width + 200, s.tree.root.size.y)
@@ -425,7 +425,7 @@ func _editor_life() -> void:
 	if not Engine.is_editor_hint():
 		s.tree.root.size = Vector2i(s.width, s.tree.root.size.y)
 	await s.frames(4)
-	s.check(done, "The reply finishes (%s)" % s.card_state())
+	s.check(done, "The reply finishes (%s): %s" % [s.card_state(), _turn_text().left(300)])
 	s.check(s.reply_shown().ends_with("own light."), "It arrives whole: " + s.reply_shown())
 	s.check(not (s.composer().get("stop") as Button).visible, "Send is back")
 	await s.shot("after")
