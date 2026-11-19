@@ -13,7 +13,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import BinaryIO
+from typing import Any, BinaryIO
 
 
 def lock_file(stream: BinaryIO) -> None:
@@ -224,6 +224,89 @@ def editor_running(project: Path) -> bool:
         ):
             return True
     return False
+
+
+class ProcessWatch:
+    """Whether one process, such as the editor that started this host, still runs.
+
+    Only looks: the watched process is never signalled or stopped. Windows and Linux
+    hold a handle to the process from the start, so a pid the system later gives to
+    another process never reads as it; macOS checks the pid with signal 0. A process
+    this account may not inspect counts as running, so a host never ends early.
+    """
+
+    def __init__(self, pid: int) -> None:
+        self.pid = pid
+        self._gone = pid <= 0
+        self._handle = 0
+        self._pidfd = -1
+        if self._gone:
+            return
+        if os.name == "nt":
+            self._open_windows()
+        elif hasattr(os, "pidfd_open"):
+            try:
+                self._pidfd = os.pidfd_open(pid)
+            except ProcessLookupError:
+                self._gone = True
+            except OSError:
+                pass  # An older kernel: signal 0 below.
+
+    def _open_windows(self) -> None:
+        import ctypes
+
+        native: Any = ctypes  # WinDLL exists only on Windows.
+        kernel = native.WinDLL("kernel32", use_last_error=True)
+        kernel.OpenProcess.restype = ctypes.c_void_p
+        kernel.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+        synchronize = 0x00100000
+        handle = kernel.OpenProcess(synchronize, False, self.pid)
+        if handle:
+            self._handle = int(handle)
+        # ERROR_INVALID_PARAMETER: no such process. Anything else (access denied)
+        # leaves it counted as running.
+        elif native.get_last_error() == 87:
+            self._gone = True
+
+    def alive(self) -> bool:
+        if self._gone:
+            return False
+        if self._handle:
+            import ctypes
+
+            native: Any = ctypes
+            kernel = native.WinDLL("kernel32", use_last_error=True)
+            kernel.WaitForSingleObject.restype = ctypes.c_uint32
+            kernel.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+            # WAIT_OBJECT_0: the process has ended. WAIT_TIMEOUT: still running.
+            self._gone = kernel.WaitForSingleObject(self._handle, 0) == 0
+        elif self._pidfd >= 0:
+            import select
+
+            # A pidfd reads ready once its process has ended.
+            ready, _, _ = select.select([self._pidfd], [], [], 0)
+            self._gone = bool(ready)
+        elif os.name != "nt":
+            try:
+                os.kill(self.pid, 0)
+            except ProcessLookupError:
+                self._gone = True
+            except PermissionError:
+                pass
+        return not self._gone
+
+    def close(self) -> None:
+        if self._handle:
+            import ctypes
+
+            native: Any = ctypes
+            kernel = native.WinDLL("kernel32", use_last_error=True)
+            kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+            kernel.CloseHandle(self._handle)
+            self._handle = 0
+        if self._pidfd >= 0:
+            os.close(self._pidfd)
+            self._pidfd = -1
 
 
 def hook_command(argv: list[str]) -> str:

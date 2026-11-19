@@ -68,6 +68,7 @@ from joinery.debugging import debug_request
 from joinery.editor_ops import validate_edit
 from joinery.gateway import ProjectGateway, waiting_note
 from joinery.gateway_rpc import GatewayRPC
+from joinery.platform_support import ProcessWatch
 from joinery.routing import routing_settings
 from joinery.timing import TurnTiming
 from joinery.turn import TurnController
@@ -170,9 +171,14 @@ class ThreadInput:
         loop = asyncio.get_running_loop()
 
         def deliver(callback: Callable[..., None], *values: Any) -> None:
+            def call() -> None:
+                # Closed meanwhile (the editor is gone): the reader has its EOF.
+                if not self.closed.is_set():
+                    callback(*values)
+
             if not self.closed.is_set():
                 with contextlib.suppress(RuntimeError):
-                    loop.call_soon_threadsafe(callback, *values)
+                    loop.call_soon_threadsafe(call)
 
         def pump() -> None:
             try:
@@ -238,15 +244,45 @@ async def input_reader(stream: BinaryIO) -> tuple[asyncio.StreamReader, InputTra
     return reader, transport
 
 
+#: How often the host looks whether the editor that started it still runs.
+EDITOR_POLL_SECONDS = 1.0
+
+
+async def end_with_editor(
+    editor_pid: int, reader: asyncio.StreamReader, transport: InputTransport
+) -> None:
+    """End the editor's input once the editor process is gone, as its EOF would.
+
+    An editor that crashes may never close this pipe: a game it ran inherited the
+    pipe's other end and keeps it open. The host then ends the same way it does on
+    EOF and stops everything it started. Only looks at the editor, never signals it.
+    """
+    watch = ProcessWatch(editor_pid)
+    try:
+        while watch.alive():
+            await asyncio.sleep(EDITOR_POLL_SECONDS)
+    finally:
+        watch.close()
+    transport.close()
+    reader.feed_eof()
+
+
 async def serve(
-    project: Path, agent_id: str, profile_id: str = "", keep_reviews: bool = False
+    project: Path,
+    agent_id: str,
+    profile_id: str = "",
+    keep_reviews: bool = False,
+    editor_pid: int = 0,
 ) -> int:
     """``keep_reviews``: a headless run (``joinery run``, ADR 0077) keeps the changes
-    still waiting for review when it closes, for the user to decide later."""
+    still waiting for review when it closes, for the user to decide later.
+    ``editor_pid``: the editor that started this host; the host ends with it."""
     global _recorder
     recorder = _recorder = ChatRecorder(project, agent_id, profile_id)
     try:
-        return await _serve(project, agent_id, profile_id, recorder, keep_reviews)
+        return await _serve(
+            project, agent_id, profile_id, recorder, keep_reviews, editor_pid
+        )
     finally:
         _recorder = None
 
@@ -257,6 +293,7 @@ async def _serve(
     profile_id: str,
     recorder: ChatRecorder,
     keep_reviews: bool = False,
+    editor_pid: int = 0,
 ) -> int:
     bridge: Bridge | None = None
     active: asyncio.Task[None] | None = None
@@ -436,6 +473,11 @@ async def _serve(
         emit(connect_errors.event(agent_id, agent_name, exc))
         return 1
     assert rpc_server is not None
+    editor_watch = (
+        asyncio.create_task(end_with_editor(editor_pid, reader, transport))
+        if editor_pid > 0
+        else None
+    )
 
     async def turn(data: dict[str, Any]) -> None:
         assert bridge is not None
@@ -1421,9 +1463,18 @@ async def _serve(
             await specialists.close()
         await rpc_server.close()
         transport.close()
+        if editor_watch is not None:
+            editor_watch.cancel()
+            await asyncio.gather(editor_watch, return_exceptions=True)
 
 
 def run(
-    project: Path, agent_id: str, profile_id: str = "", keep_reviews: bool = False
+    project: Path,
+    agent_id: str,
+    profile_id: str = "",
+    keep_reviews: bool = False,
+    editor_pid: int = 0,
 ) -> int:
-    return asyncio.run(serve(project.resolve(), agent_id, profile_id, keep_reviews))
+    return asyncio.run(
+        serve(project.resolve(), agent_id, profile_id, keep_reviews, editor_pid)
+    )

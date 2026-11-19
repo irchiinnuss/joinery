@@ -1646,6 +1646,12 @@ def _parser() -> argparse.ArgumentParser:
     chat.add_argument("--profile", default="")
     chat.add_argument("--addon-protocol", type=int, default=0)
     chat.add_argument(
+        "--editor-pid",
+        type=int,
+        default=0,
+        help="the editor that started this chat; the chat ends when it is gone",
+    )
+    chat.add_argument(
         "--keep-reviews",
         action="store_true",
         help="keep changes waiting for review when the chat closes (joinery run)",
@@ -1929,7 +1935,9 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
             return 1
-        return run(args.project, args.agent, args.profile, args.keep_reviews)
+        return run(
+            args.project, args.agent, args.profile, args.keep_reviews, args.editor_pid
+        )
 
     if args.command == "connect":
         try:

@@ -166,6 +166,9 @@ func start(agent: String, profile: String, engine: String, project: String) -> v
 			project,
 			"--addon-protocol",
 			"2",
+			# The chat ends with this editor even when a game it ran keeps the pipe open.
+			"--editor-pid",
+			str(OS.get_process_id()),
 		]
 	)
 	if not profile.is_empty():

@@ -1,9 +1,12 @@
-"""The editor restarting its chat (another agent, Reconnect) keeps changes in review."""
+"""The editor restarting its chat (another agent, Reconnect) keeps changes in review,
+and the chat host ends with its editor."""
 
 from __future__ import annotations
 
 import asyncio
 import json
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
@@ -70,3 +73,79 @@ def test_a_change_kept_by_a_restart_says_who_kept_it(
         return str(json.loads((tx.directory / HELD).read_text())["by"])
 
     assert asyncio.run(go()) == "chat restart"
+
+
+def _quiet_host(monkeypatch: pytest.MonkeyPatch, bridge: type = FakeBridge) -> None:
+    monkeypatch.setattr(stdio, "emit", lambda _event: None)
+    monkeypatch.setattr(stdio, "Bridge", bridge)
+    monkeypatch.setattr(stdio, "ProjectGateway", FakeGateway)
+    monkeypatch.setattr(stdio, "GatewayRPC", FakeRPC)
+    monkeypatch.setattr(stdio, "Specialists", lambda *_a: AsyncMock())
+    monkeypatch.setattr(stdio, "game_suggestions", lambda _p: {"kind": "suggestions"})
+    monkeypatch.setattr(stdio, "EDITOR_POLL_SECONDS", 0.02)
+
+
+def test_the_host_ends_with_its_editor_while_the_pipe_stays_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A crashed editor's game kept the chat's stdin open, so no EOF ever came."""
+    (tmp_path / "project.godot").write_text("config_version=5\n")
+    closed: list[str] = []
+
+    class Closing(FakeBridge):
+        async def close(self) -> None:
+            closed.append("agent")
+
+    class Transport:
+        def close(self) -> None:
+            closed.append("input")
+
+    _quiet_host(monkeypatch, Closing)
+
+    async def reader(_stream: Any) -> tuple[asyncio.StreamReader, Any]:
+        return asyncio.StreamReader(), Transport()  # Open, and never written to.
+
+    monkeypatch.setattr(stdio, "input_reader", reader)
+    editor = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+
+    async def go() -> int:
+        host = asyncio.create_task(
+            stdio.serve(tmp_path, "claude", editor_pid=editor.pid)
+        )
+        await asyncio.sleep(0.3)
+        assert not host.done(), "the host runs while its editor does"
+        editor.kill()
+        editor.wait()
+        return await asyncio.wait_for(host, 10)
+
+    try:
+        assert asyncio.run(go()) == 0
+    finally:
+        if editor.poll() is None:
+            editor.kill()
+            editor.wait()
+    assert "input" in closed
+
+
+def test_without_an_editor_pid_the_host_waits_for_its_input(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``joinery run`` and connection checks start the host with no editor to follow."""
+    (tmp_path / "project.godot").write_text("config_version=5\n")
+    _quiet_host(monkeypatch)
+    streams: list[asyncio.StreamReader] = []
+
+    async def reader(_stream: Any) -> tuple[asyncio.StreamReader, Any]:
+        streams.append(asyncio.StreamReader())
+        return streams[0], type("T", (), {"close": lambda self: None})()
+
+    monkeypatch.setattr(stdio, "input_reader", reader)
+
+    async def go() -> int:
+        host = asyncio.create_task(stdio.serve(tmp_path, "claude"))
+        await asyncio.sleep(0.3)
+        assert not host.done()
+        streams[0].feed_eof()
+        return await asyncio.wait_for(host, 10)
+
+    assert asyncio.run(go()) == 0

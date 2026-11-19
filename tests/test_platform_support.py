@@ -9,6 +9,7 @@ import shlex
 import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -221,6 +222,81 @@ def test_a_leftover_game_run_does_not_hold_back_an_addon_update(
     rows["args="] += f"14502 godot --editor --path {project}\n"
     rows["comm="] += "14502 godot\n"
     assert platform_support.editor_running(project)
+
+
+def test_a_process_watch_sees_its_process_end_and_never_touches_it() -> None:
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    watch = platform_support.ProcessWatch(child.pid)
+    try:
+        assert watch.alive()
+        assert watch.alive(), "looking twice changes nothing"
+        assert child.poll() is None
+        child.kill()
+        child.wait()
+        deadline = time.monotonic() + 5
+        while watch.alive() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert not watch.alive()
+    finally:
+        watch.close()
+        if child.poll() is None:
+            child.kill()
+            child.wait()
+    assert not platform_support.ProcessWatch(0).alive()
+    assert not platform_support.ProcessWatch(-1).alive()
+
+
+def test_a_process_watch_counts_one_it_may_not_inspect_as_running() -> None:
+    if os.name == "nt":
+        pytest.skip("POSIX permissions")
+    watch = platform_support.ProcessWatch(1)  # init/launchd: another account's.
+    try:
+        assert watch.alive()
+    finally:
+        watch.close()
+
+
+def test_the_real_editor_pipe_ends_when_the_editor_is_gone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The real stdin reader, with the pipe's write end still held open elsewhere."""
+    from bridge import stdio
+
+    monkeypatch.setattr(stdio, "EDITOR_POLL_SECONDS", 0.02)
+    read_end, write_end = os.pipe()
+    open_ends = [write_end]
+    editor = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+
+    async def go() -> bytes:
+        with os.fdopen(read_end, "rb", buffering=0) as stream:
+            if os.name == "nt":
+                # input_reader's own reader, without swapping this process's stdin.
+                reader = asyncio.StreamReader()
+                transport: stdio.InputTransport = ThreadInput(stream, reader)
+            else:
+                reader, transport = await stdio.input_reader(stream)
+            watcher = asyncio.create_task(
+                stdio.end_with_editor(editor.pid, reader, transport)
+            )
+            os.write(write_end, b'{"kind": "ping"}\n')
+            first = await asyncio.wait_for(reader.readline(), 5)
+            editor.kill()
+            editor.wait()
+            assert await asyncio.wait_for(reader.readline(), 5) == b""
+            await asyncio.wait_for(watcher, 5)
+            transport.close()
+            # Let a reader thread blocked on the pipe finish before its end closes.
+            os.close(open_ends.pop())
+            return first
+
+    try:
+        assert asyncio.run(go()) == b'{"kind": "ping"}\n'
+    finally:
+        for end in open_ends:
+            os.close(end)
+        if editor.poll() is None:
+            editor.kill()
+            editor.wait()
 
 
 def test_a_windows_game_run_is_not_an_editor(
