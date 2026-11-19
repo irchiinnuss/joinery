@@ -70,7 +70,9 @@ static func name_of(path: String, kind: String) -> String:
 	return words + " " + kind
 
 
-## "Changed in SuperCollider: engine sound", "Changed: door model and 2 more".
+## The change card's headline: what changed, by name, and the tool that owns it ("Engine
+## sound in SuperCollider", "Door model and 2 more in Blender", "Door script"). The card is
+## the change, so it never says "Changed".
 static func line(items: Array) -> String:
 	if items.is_empty():
 		return ""
@@ -79,7 +81,8 @@ static func line(items: Array) -> String:
 	# A scene or script is Godot's own: the editor the user is in goes without saying.
 	if tool == "Godot":
 		tool = ""
-	var head := "Changed in %s: " % tool if not tool.is_empty() else "Changed: "
+	var name := str(first.get("name", ""))
 	var more := items.size() - 1
 	var tail := " and %d more" % more if more > 0 else ""
-	return head + str(first.get("name", "")) + tail
+	var place := " in " + tool if not tool.is_empty() else ""
+	return name.substr(0, 1).to_upper() + name.substr(1) + tail + place

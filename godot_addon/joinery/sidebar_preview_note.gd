@@ -1,14 +1,14 @@
 @tool
 extends VBoxContainer
-## A calm note on a ready change's card, before Accept: what the change made or changed, by
-## name and with the tool that owns it ("Changed in SuperCollider: engine sound"), and two quiet
+## The headline of a ready change's card, before Accept: what the change made or changed, by
+## name and with the tool that owns it ("Engine sound in SuperCollider"), and two quiet
 ## buttons, "Preview" and "Ask to fix" ([member links]; the change card puts them on its row of
 ## quiet buttons beside "Try other ways"). Preview shows that asset in the Review panel's
 ## preview (a model turning, a sound to play, before and after); Ask to fix puts the asset on
 ## the message and focuses the message box, so Journeyman can be asked to fix it first.
 ##
-## Never a popup, a sound or a stack of toasts: one line in the card, faded in once (still
-## with reduced motion). Accept and Discard stay as they are.
+## Never a popup, a sound or a stack of toasts: one line in body text at the top of the card,
+## faded in once (still with reduced motion). Accept and Discard stay as they are.
 
 signal preview_requested(path: String)
 signal fix_requested(path: String)
@@ -32,7 +32,7 @@ func _init() -> void:
 	theme_type_variation = "JoineryFlush"
 	accessibility_name = "Look before you accept"
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_text = UI.label("", "JoineryCaption", true)
+	_text = UI.label("", "", true)
 	_text.name = "Changed"
 	_text.mouse_filter = Control.MOUSE_FILTER_PASS
 	add_child(_text)
@@ -60,7 +60,7 @@ func show_items(items: Array, can_fix: bool) -> void:
 	for item: Variant in items:
 		paths.append(str((item as Dictionary).get("path", "")))
 	_text.tooltip_text = "\n".join(paths)
-	_preview.accessibility_name = "Preview " + line.get_slice(": ", 1)
+	_preview.accessibility_name = "Preview " + line
 	_fix.visible = can_fix
 	var was := visible
 	visible = not line.is_empty()

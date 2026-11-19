@@ -130,7 +130,7 @@ static func preview_note(suite: Variant, light: bool, width: int, chat: Control)
 	var card: Control = chat.get("_transcript").call("current_card")
 	var row: Control = card.call("review_row")
 	suite._check(
-		row.call("note_text") == "Changed in SuperCollider: engine sound",
+		row.call("note_text") == "Engine sound in SuperCollider",
 		"The note names the asset and its tool: %s" % row.call("note_text")
 	)
 	await suite._shot("review-note", light, width, chat)

@@ -2,8 +2,9 @@
 extends PanelContainer
 ## The change waiting for a decision, inside its chat card: the change large (its turntable or
 ## picture at 16:9 across the card, at most 360 px tall; before and after side by side, each
-## labelled, when the change has a before picture), one caption line naming it
-## ("door.blend · +1 sound ›", the chevron opens the Review panel), one row of quiet buttons
+## labelled, when the change has a before picture), a headline naming what changed ("Door model
+## in Blender", sidebar_preview_note.gd), one caption line of facts under it ("door.blend · +1
+## sound ›", the chevron opens the Review panel), one row of quiet buttons
 ## ("Preview", "Ask to fix", "Try other ways"; it wraps in a narrow sidebar), and the decision
 ## row: Discard and Accept (the view's one accent) on the trailing edge. A
 ## bigger change (several assets, many lines, a reviewer's warning) offers "Review 2 changes"
@@ -47,7 +48,7 @@ var _actions: HBoxContainer
 var _discard: Button
 var _accept: Button
 var _open: Button
-## "Changed in SuperCollider: engine sound · Preview · Ask to fix".
+## The headline, "Engine sound in SuperCollider"; its Preview and Ask to fix join _quiet.
 var _note: NOTE
 ## The caption and the note, one tight group.
 var _facts: VBoxContainer
@@ -140,7 +141,9 @@ func _init() -> void:
 			if _review != null and _review.has_method("ask_to_fix"):
 				_review.call("ask_to_fix", path)
 	)
+	# The headline leads; the facts line reads as its caption.
 	_facts.add_child(_note)
+	_facts.move_child(_note, 0)
 	_quiet = HFlowContainer.new()
 	_quiet.name = "QuietActions"
 	STYLE.on_theme_overrides(
