@@ -326,6 +326,7 @@ func _row(group: Dictionary) -> Control:
 		caption.hide()
 		name_label.reparent(meta, false)
 		meta.move_child(name_label, 0)
+		STYLE.first_line(meta, mark, name_label)
 	var corner := _corner(group, row)
 	if corner != null:
 		row.add_child(corner)
