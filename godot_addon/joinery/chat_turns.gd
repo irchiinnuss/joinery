@@ -158,6 +158,24 @@ func stop_in(view: Control) -> bool:
 	return true
 
 
+## The connection to the chat host ended (or a new one starts): no turn of another chat goes on.
+## Each one on its way or working ends failed, as Journeyman's own request does; a change waiting
+## for review stays for the Review tab.
+func connection_lost() -> void:
+	for ref: String in _pending:
+		var card: Control = _pending[ref]["card"]
+		if is_instance_valid(card):
+			card.call("set_failed")
+	_pending.clear()
+	_stopped.clear()
+	for id: String in _turns.keys():
+		var turn: Dictionary = _turns[id]
+		if turn["state"] in ["", "working"]:
+			_finish(turn["card"], "failed")
+			_turns.erase(id)
+	_follow()
+
+
 ## One event from the host (chat_bridge.gd's task_event). True when it belongs to a turn of
 ## another chat; the task cards never see those.
 func take(event: Dictionary) -> bool:

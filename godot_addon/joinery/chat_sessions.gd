@@ -173,6 +173,14 @@ func _on_dock_child(node: Node) -> void:
 		_bridge.set("chat_id", _current_id)
 		if node.has_signal("busy_changed"):
 			_bridge.connect("busy_changed", func(_busy: bool) -> void: _mark_working())
+		if node.has_signal("status_changed"):
+			# Other chats' turns end with the connection; a new one starts none of them.
+			_bridge.connect("status_changed", _on_status)
+
+
+func _on_status(state: String, _detail: String) -> void:
+	if state in ["error", "connecting"] and turns != null:
+		turns.connection_lost()
 
 
 ## The agent ran out of quota mid-request (ADR 0080): one action under the transcript carries
