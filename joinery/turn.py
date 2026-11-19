@@ -1711,7 +1711,11 @@ class TurnController:
             return result
         try:
             remaining = await asyncio.to_thread(
-                provenance_hold.block, tx.stage, tx.original, blocked
+                provenance_hold.block,
+                tx.stage,
+                tx.original,
+                blocked,
+                self.gateway.project,
             )
             found = tx.diff()
         except (OSError, ValueError):

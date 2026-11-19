@@ -124,13 +124,19 @@ def _snapshot(stage: Path) -> dict[str, bytes]:
 
 
 def _broken_elsewhere(stage: Path) -> Callable[[], None]:
-    """Another recipe claims a file that is gone, so the lock can't be written."""
-    recipe = stage / "recipes/lost.toml"
-    recipe.write_text(
+    """A file no recipe made sits in art/, so the lock can't be written."""
+    stray = stage / "art/textures/lost.png"
+    stray.parent.mkdir(parents=True, exist_ok=True)
+    stray.write_bytes(b"from nowhere")
+    return lambda: stray.unlink()
+
+
+def _lost_elsewhere(stage: Path) -> None:
+    """Another recipe claims a file that is gone from disk."""
+    (stage / "recipes/lost.toml").write_text(
         'version = 1\ntool = "krita"\nscript = "recipes/lost.py"\n'
         'outputs = ["art/sources/lost.kra", "art/textures/lost.png"]\n'
     )
-    return lambda: recipe.unlink()
 
 
 def test_an_edit_whose_lock_cannot_be_written_is_undone(
@@ -184,3 +190,18 @@ def test_a_failed_application_run_puts_every_file_back(
         _edit(stage)
     assert _snapshot(stage) == before
     _consistent(stage)
+
+
+def test_another_recipes_lost_output_never_refuses_an_edit(
+    stage: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The Yard Day case: a recipe still lists a file gone from disk. An edit of
+    # another model goes ahead and says how to fix it.
+    _made_with_a_map(stage, monkeypatch)
+    _lost_elsewhere(stage)
+    _blender(stage, monkeypatch, {SOURCE: b"chair flat", MODEL: b"glb flat"})
+    result = _edit(stage)
+    warnings = result["warnings"]
+    assert isinstance(warnings, list) and len(warnings) == 2
+    assert warnings[1].startswith("art/textures/lost.png is gone from disk")
+    assert all("recipes/lost.toml" in w for w in warnings)

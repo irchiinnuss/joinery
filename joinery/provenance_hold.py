@@ -26,12 +26,16 @@ def _inside(root: Path, rel: str) -> Path | None:
     return root / rel
 
 
-def block(stage: Path, original: Path, paths: list[str]) -> list[str]:
+def block(
+    stage: Path, original: Path, paths: list[str], project: Path | None = None
+) -> list[str]:
     """Take ``paths`` out of the change staged in ``stage``.
 
     ``original`` holds the files as they were before the change. Returns the
     provenance problems the stage still has afterwards: empty means the rest of
-    the change passes the gate and may wait for review.
+    the change passes the gate and may wait for review. With ``project``, only
+    problems with what the change still touches count, as at submit
+    (``step_assets.gate``).
     """
     before = {entry.path: entry for entry in read_assets(original)}
     restored = []
@@ -58,6 +62,10 @@ def block(stage: Path, original: Path, paths: list[str]) -> list[str]:
         if rel in before:
             restored.append(before[rel])
     write_assets(stage, set(paths), restored)
+    if project is not None:
+        from joinery import step_assets
+
+        return step_assets.gate(project, stage)[0]
     return check_assets(stage, load_catalog())
 
 

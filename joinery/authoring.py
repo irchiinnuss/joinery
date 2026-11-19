@@ -480,11 +480,22 @@ def _checked_document(
 
 
 def _textures(project: Path, source: str) -> tuple[str, ...]:
-    """The texture files a Blender source's last edit wrote."""
+    """The texture files a Blender source's last edit wrote, and those a recipe
+    still claims in its texture folder that are gone from disk: the next edit
+    takes them over too, so a map lost since can never block the model."""
     folder = confined(project, texture_dir(source))
-    return tuple(
-        p.relative_to(project).as_posix() for p in sorted(folder.glob("*.png"))
-    )
+    found = {p.relative_to(project).as_posix() for p in folder.glob("*.png")}
+    prefix = folder.relative_to(project).as_posix() + "/"
+    for path in recipe_paths(project):
+        for out in load_recipe(path).outputs:
+            if (
+                out.startswith(prefix)
+                and "/" not in out[len(prefix) :]
+                and out.endswith(".png")
+                and not (project / out).exists()
+            ):
+                found.add(out)
+    return tuple(sorted(found))
 
 
 @dataclass(frozen=True)
@@ -942,11 +953,17 @@ def _fingerprint_runner() -> Runner:
     return SandboxRunner(image=IMAGE)
 
 
-def _lock(project: Path) -> None:
-    """Write joinery.lock from the recipes; refuse when provenance is missing."""
-    problems = write_lock(project)
+def _lock(project: Path, touched: tuple[str, ...] | None = None) -> list[str]:
+    """Write joinery.lock from the recipes; refuse when provenance is missing.
+
+    With ``touched`` (the operation's outputs and the files it took over), a
+    recipe it didn't touch whose output is gone from disk doesn't refuse it: the
+    plain words for it are returned, for the result."""
+    warnings: list[str] = []
+    problems = write_lock(project, touched, warnings)
     if problems:
         raise ValueError("Provenance recording failed: " + "; ".join(problems))
+    return warnings
 
 
 async def _record(
@@ -983,15 +1000,17 @@ async def _record(
         history.mkdir(exist_ok=True)
         for previous in replacements:
             previous.rename(history / previous.name)
-    if lock:
-        _lock(project)
-    return {
+    warnings = _lock(project, (*recipe.outputs, *replaces)) if lock else []
+    done: dict[str, Any] = {
         "source": recipe.outputs[0],
         "outputs": list(recipe.outputs),
         "recipe": path.relative_to(project).as_posix(),
         "status": "staged",
         "requires_review": True,
     }
+    if warnings:
+        done["warnings"] = warnings
+    return done
 
 
 async def edit_graph(

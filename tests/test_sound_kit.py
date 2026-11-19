@@ -150,7 +150,14 @@ def test_make_sounds_batches_supercollider_and_runs_surge_side_by_side(
     monkeypatch.setattr(make, "_prepare", prepare)
     monkeypatch.setattr(make, "_render_together", together)
     locks: list[Path] = []
-    monkeypatch.setattr(make.authoring, "_lock", locks.append)
+    touched: list[tuple[str, ...]] = []
+
+    def lock(project: Path, outputs: tuple[str, ...] | None = None) -> list[str]:
+        locks.append(project)
+        touched.append(outputs or ())
+        return []
+
+    monkeypatch.setattr(make.authoring, "_lock", lock)
     sounds = [make.SoundArgument(kind="pickup", name=f"s{i}") for i in range(6)]
     sounds += [make.SoundArgument(kind="jump", name=f"j{i}") for i in range(3)]
     sounds.append(make.SoundArgument(kind="nope", name="bad"))
@@ -159,6 +166,8 @@ def test_make_sounds_batches_supercollider_and_runs_surge_side_by_side(
     assert most == 3 and batches == [["j0", "j1", "j2"]]
     # The side-by-side sounds write the lock once, after they all finished.
     assert locks == [tmp_path]
+    # Scoped to the sounds it made: another asset's lost file never refuses it.
+    assert "audio/sfx/s0.wav" in touched[0]
     assert len(result["made"]) == 8
     assert result["failed"] == [
         {"name": "j1", "error": "render failed"},
@@ -237,7 +246,9 @@ def test_a_batch_records_each_sound_alone_and_one_failure_undoes_only_it(
 
     monkeypatch.setattr(authoring, "run_offline", render)
     monkeypatch.setattr(authoring, "_record", record)
-    monkeypatch.setattr(authoring, "_lock", locked.append)
+    monkeypatch.setattr(
+        authoring, "_lock", lambda project, _outputs=None: locked.append(project)
+    )
     made, failed = asyncio.run(make._render_together(stage, sounds))
     assert isinstance(made, dict) and made["sound"]["name"] == "hit"
     assert isinstance(failed, RuntimeError)

@@ -182,7 +182,7 @@ def blender(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
 
     monkeypatch.setattr(authoring, "run_offline", run_offline)
     monkeypatch.setattr(authoring, "record", record)
-    monkeypatch.setattr(authoring, "write_lock", lambda _project: [])
+    monkeypatch.setattr(authoring, "write_lock", lambda _project, *_a: [])
     return runs
 
 
@@ -341,7 +341,9 @@ def test_a_batch_the_lock_refuses_puts_every_step_back(
     _start(stage)
     before, recipes, history = _outputs(stage), _kept(stage), _log(stage)
     monkeypatch.setattr(
-        authoring, "write_lock", lambda _p: ["art/x.png: no recipe produces this file"]
+        authoring,
+        "write_lock",
+        lambda _p, *_a: ["art/x.png: no recipe produces this file"],
     )
     steps = [DocumentStep(code, note) for note, code in EDITS[:2]]
     with pytest.raises(ValueError, match="art/x.png"):

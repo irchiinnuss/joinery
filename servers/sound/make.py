@@ -319,7 +319,14 @@ async def _render_together(
         try:
             # One lock for the batch: every made sound has its recipe now.
             async with ops._recording():
-                authoring._lock(project)
+                authoring._lock(
+                    project,
+                    tuple(
+                        out
+                        for index in recorded
+                        for out in staged[index].recipe.outputs
+                    ),
+                )
         except ValueError as exc:
             for index in recorded:
                 done = staged[index]
@@ -378,9 +385,17 @@ async def make_sounds(
     # Side by side, every render's files are on disk before its recipe is, so
     # the lock is written once, when every finished sound has its recipe.
     await asyncio.gather(*(one(i) for i in alone))
-    if any(isinstance(results[i], dict) for i in alone):
+    made_alone = [results[i] for i in alone if isinstance(results[i], dict)]
+    if made_alone:
         async with ops._recording():
-            authoring._lock(project)
+            authoring._lock(
+                project,
+                tuple(
+                    str(out)
+                    for one_made in made_alone
+                    for out in one_made.get("outputs", ())  # type: ignore[union-attr]
+                ),
+            )
     # Then the SuperCollider session, which writes the lock for its own sounds.
     if together:
         rendered = await _render_together(project, [p for _, p in together])

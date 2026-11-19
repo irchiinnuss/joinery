@@ -19,6 +19,7 @@ import hashlib
 import json
 import struct
 import tomllib
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -119,10 +120,41 @@ def record_lock(project: Path) -> tuple[str, list[str]]:
             f'recipe = "{recipe}"',
         ]
     unmade = sorted(set(claims) - set(files))
-    problems += [
-        f"{rel}: a recipe claims this output but it is not on disk" for rel in unmade
-    ]
+    problems += [f"{rel}: {UNMADE}" for rel in unmade]
     return "\n".join(lines) + "\n", problems
+
+
+#: A recipe output that is not on disk.
+UNMADE = "a recipe claims this output but it is not on disk"
+
+
+def stale_note(rel: str, recipe: str) -> str:
+    """The plain words for a recipe output gone from disk that an operation didn't
+    touch: said, never a reason to refuse the operation."""
+    return (
+        f"{rel} is gone from disk, but its recipe {recipe} still lists it. This "
+        "operation doesn't touch it, so it went ahead. To fix it, make that asset "
+        "again from its source (one operation on it exports it again), or remove "
+        "the asset and its recipe."
+    )
+
+
+def _scoped(
+    project: Path, problems: list[str], touched: set[str], warnings: list[str]
+) -> list[str]:
+    """``problems`` without the stale claims of recipes the operation didn't touch,
+    which go to ``warnings``. Everything about the touched files stays a problem."""
+    claims = claimed_outputs(project)
+    recipes = {claims[rel][1] for rel in touched if rel in claims}
+    kept: list[str] = []
+    for problem in problems:
+        rel, _sep, what = problem.partition(": ")
+        owner = claims.get(rel)
+        if what == UNMADE and owner and rel not in touched and owner[1] not in recipes:
+            warnings.append(stale_note(rel, owner[1]))
+        else:
+            kept.append(problem)
+    return kept
 
 
 #: Import settings for a model Joinery exports. Godot's default extracts each
@@ -156,12 +188,26 @@ def write_model_imports(project: Path) -> list[str]:
     return written
 
 
-def write_lock(project: Path) -> list[str]:
+def write_lock(
+    project: Path,
+    touched: Iterable[str] | None = None,
+    warnings: list[str] | None = None,
+) -> list[str]:
+    """Write joinery.lock; the problems that refused it ([] when written).
+
+    With ``touched`` (the files an operation made or replaced), a recipe it didn't
+    touch whose output is gone from disk refuses nothing: the lock is written
+    without that file and the plain words go to ``warnings``. Every problem with
+    the touched files still refuses it."""
     # A tool's first write into a source folder keeps it out of Godot's imports.
     source_folders.mark(project)
     write_model_imports(project)
     migrate_model_expectations(project)
     text, problems = record_lock(project)
+    if touched is not None:
+        problems = _scoped(
+            project, problems, set(touched), warnings if warnings is not None else []
+        )
     if not problems:
         (project / LOCK_NAME).write_text(text)
     return problems

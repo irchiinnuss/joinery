@@ -30,6 +30,7 @@ from joinery import (
     replays,
     saves,
     scene_variants,
+    step_assets,
     worker_platform,
 )
 from joinery import (
@@ -416,7 +417,9 @@ def keep_refusal(
             is_reference(p) for p in assets
         ):
             return "asset work needs the art bible approved first."
-        problems = check_assets(tx.stage, load_catalog())
+        problems, _elsewhere = step_assets.gate(
+            project, tx.stage, assets, check_assets(tx.stage, load_catalog())
+        )
         if problems:
             return "asset provenance: " + "; ".join(problems[:3])
     problems = check_deps(tx.stage, load_denylist())
@@ -545,8 +548,17 @@ async def validate(
         if not bible_ok and not all(is_reference(p) for p in asset_changes):
             found.gate = gateway.art_gate_event()
             return found
-        problems = check_assets(tx.stage, load_catalog())
+        # Only what this change touched holds it; an asset it didn't touch is
+        # said, with how to fix it (step_assets.gate).
+        problems, elsewhere = step_assets.gate(
+            gateway.project,
+            tx.stage,
+            asset_changes,
+            check_assets(tx.stage, load_catalog()),
+        )
         found.ran.append("provenance")
+        if elsewhere:
+            found.info.append(step_assets.elsewhere_note(elsewhere))
         if problems:
             found.problems.append(
                 Problem(
