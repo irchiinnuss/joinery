@@ -181,6 +181,8 @@ func _build_browser(split: HSplitContainer) -> void:
 	_groups.setup(_assets, _kind_of, SECTIONS)
 	_groups.changed.connect(_filter)
 	add_child(_groups)
+	_listing.add_child(_groups.bar)
+	_listing.move_child(_groups.bar, _assets.get_index())
 	_browser.add_child(_kits.list)
 
 
@@ -621,6 +623,7 @@ func _update_list_state() -> void:
 	_empty.text = message
 	_empty.visible = not message.is_empty()
 	_assets.visible = not _rows.is_empty()
+	_groups.bar.visible = _assets.visible
 
 
 func select_resource(path: String) -> void:

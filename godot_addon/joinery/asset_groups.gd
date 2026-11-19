@@ -3,18 +3,24 @@ extends Node
 ## The Assets list's groups: the user's own categories first, in their order, then a group per
 ## kind (Models, Sounds, …) for every asset in no category. Every group folds from its header
 ## (remembered per project in the editor's project metadata); while searching, groups with
-## matches stay open. Right-click an asset to move it to a category, start a new one or take it
-## out; right-click a category's header to rename, move or delete it; drag an asset onto a
-## header, or a category's header onto another. Categories are saved in
-## design/asset_categories.toml (asset_categories.gd) so they travel with the project.
+## matches stay open. Above the list, [member bar] has a New category button and, while there
+## are no categories, a line saying how grouping works. An asset's ⋯ (or right-click, the Menu
+## key, Shift+F10) moves it to a category, starts a new one or takes it out; a category's ⋯
+## renames, moves or deletes it (F2 renames, Delete asks to delete). Deleting asks first, in
+## place, and only forgets the category: its assets go back to their kind's group and no file
+## is touched. Drag an asset onto a header, or a category's header onto another. Categories
+## are saved in design/asset_categories.toml (asset_categories.gd) so they travel with the
+## project.
 
 signal changed
 
 const CATEGORIES_SCRIPT := preload("asset_categories.gd")
 const SECTION_SCRIPT := preload("asset_list_section.gd")
 const WORDING := preload("asset_wording.gd")
+const UI_COMPONENTS := preload("ui_components.gd")
 const FOLDED_KEY := "asset_groups_folded"
 const EMPTY_TEXT := "Drag assets here"
+const HINT_TEXT := "Group assets: start a category, then drag assets onto it."
 ## Menu ids.
 const NEW := 1
 const REMOVE := 2
@@ -28,6 +34,12 @@ static var _folded_here := PackedStringArray()
 
 ## The categories as last read or written.
 var model: CATEGORIES_SCRIPT
+## Above the list: [member hint], then [member new_button]. The workspace places it.
+var bar: VBoxContainer
+## How grouping works, shown while there are no categories.
+var hint: Label
+## Starts a category and types its name in place.
+var new_button: Button
 var _list: Control
 var _kind_of: Callable
 var _titles: Dictionary
@@ -57,6 +69,7 @@ func setup(
 	model.reload_if_changed()
 	_folded = _load_folded()
 	list.set("drag_rows", true)
+	list.set("row_menus", true)
 	list.set("can_drop", _can_drop)
 	list.connect("section_toggled", _on_toggled)
 	list.connect("section_menu_requested", _on_section_menu)
@@ -64,6 +77,7 @@ func setup(
 	list.connect("item_dropped", _on_item_dropped)
 	list.connect("section_dropped", _on_section_dropped)
 	list.connect("section_renamed", _on_renamed)
+	list.connect("section_delete_requested", _on_delete_requested)
 	_menu = PopupMenu.new()
 	_menu.name = "AssetMenu"
 	_menu.id_pressed.connect(_on_menu)
@@ -72,6 +86,27 @@ func setup(
 	_move_menu.index_pressed.connect(_on_move)
 	_menu.add_child(_move_menu)
 	list.add_child(_menu)
+	_build_bar()
+
+
+func _build_bar() -> void:
+	bar = VBoxContainer.new()
+	bar.name = "GroupBar"
+	bar.theme_type_variation = "JoineryTight"
+	# The hint's words start where the group titles do; the quiet button's own padding puts
+	# its words there too.
+	var inset := MarginContainer.new()
+	inset.theme_type_variation = "JoineryInset"
+	bar.add_child(inset)
+	hint = UI_COMPONENTS.label(HINT_TEXT, "JoineryCaption", true)
+	hint.name = "Hint"
+	inset.add_child(hint)
+	new_button = UI_COMPONENTS.quiet("New category")
+	new_button.name = "NewCategory"
+	new_button.tooltip_text = "Start a category and name it"
+	new_button.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	new_button.pressed.connect(func() -> void: create())
+	bar.add_child(new_button)
 
 
 ## Read the file again if it changed on disk; true when the groups need filling again.
@@ -87,6 +122,7 @@ func fill(
 	found: Array[Dictionary], searching: bool, filtered: bool, known: Dictionary
 ) -> Array[Dictionary]:
 	_known = known
+	hint.get_parent().visible = model.categories.is_empty() and not filtered
 	if not searching:
 		_search_folded.clear()
 	_searching = searching
@@ -214,10 +250,63 @@ func rename(old: String, name: String) -> bool:
 	return true
 
 
+## Forget category [param name]; its assets go back to their kind's group. No file is touched.
 func delete(name: String) -> void:
 	model.delete(name)
 	_rekey("category:" + name, "")
 	_commit()
+
+
+## Ask under category [param name]'s header whether to delete it, saying where its assets go.
+func ask_delete(name: String) -> void:
+	var key := "category:" + name
+	var section: Variant = _list.call("get_section", key)
+	if section == null:
+		return
+	var index := model.find(name)
+	var assets := PackedStringArray()
+	if index >= 0:
+		assets = model.categories[index]["assets"]
+	(section as SECTION_SCRIPT).ask(
+		delete_question(name, assets), "Delete category", _confirm_delete.bind(name)
+	)
+
+
+## "Delete “Doors”? Its 3 assets go back to Models and Sounds. No files are deleted."
+func delete_question(name: String, assets: PackedStringArray) -> String:
+	var groups := PackedStringArray()
+	var count := 0
+	for path: String in assets:
+		if not _known.is_empty() and not _known.has(path):
+			continue
+		count += 1
+		var kind := str(_kind_of.call(_known[path])) if _known.has(path) else "other"
+		var title := str(_titles.get(kind, _titles.get("other", "Other files")))
+		if not groups.has(title):
+			groups.append(title)
+	var text := "Delete “%s”? " % name
+	if count == 0:
+		return text + "It has no assets. No files are deleted."
+	var where := groups[0]
+	if groups.size() > 1:
+		where = ", ".join(groups.slice(0, groups.size() - 1)) + " and " + groups[-1]
+	var many := "Its asset goes" if count == 1 else "Its %d assets go" % count
+	return text + "%s back to %s. No files are deleted." % [many, where]
+
+
+func _confirm_delete(name: String) -> void:
+	var keys: PackedStringArray = _list.call("section_keys")
+	var at := keys.find("category:" + name)
+	delete(name)
+	keys = _list.call("section_keys")
+	if not keys.is_empty():
+		var next: Variant = _list.call("get_section", keys[clampi(at, 0, keys.size() - 1)])
+		(next as SECTION_SCRIPT).header.grab_focus()
+
+
+func _on_delete_requested(key: String) -> void:
+	if key.begins_with("category:"):
+		ask_delete(key.trim_prefix("category:"))
 
 
 func shift(name: String, by: int) -> void:
@@ -269,7 +358,7 @@ func _on_section_menu(key: String, at: Vector2) -> void:
 		_menu.set_item_disabled(_menu.item_count - 1, index <= 0)
 		_menu.add_item("Move down", DOWN)
 		_menu.set_item_disabled(_menu.item_count - 1, index >= model.categories.size() - 1)
-		_menu.add_item("Delete category", DELETE)
+		_menu.add_item("Delete category…", DELETE)
 		_menu.add_separator()
 	_menu.add_item("New category…", NEW)
 	_popup(at)
@@ -296,7 +385,7 @@ func _on_menu(id: int) -> void:
 		DOWN:
 			shift(category, 1)
 		DELETE:
-			delete(category)
+			ask_delete(category)
 
 
 func _on_move(index: int) -> void:
