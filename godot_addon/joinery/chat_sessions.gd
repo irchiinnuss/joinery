@@ -43,6 +43,7 @@ const SLASH := preload("slash_commands.gd")
 const ATTACHMENTS := preload("chat_attachments.gd")
 const REWIND := preload("chat_rewind.gd")
 const TURNS := preload("chat_turns.gd")
+const NOTICES := preload("chat_notices.gd")
 const PERSONA := "Journeyman"
 const DISCARDED := "Discarded"
 const QUEUED := "Send or remove this chat's queued message first."
@@ -336,6 +337,8 @@ func render(entries: Array) -> void:
 				var kind := (
 					"info" if level == "info" else ("divider" if level == "divider" else "error")
 				)
+				if kind == "error" and text.begins_with(NOTICES.POLICY_STOP):
+					kind = "policy"  # A Rule Zero stop keeps its own notice, as it was shown.
 				_transcript.call("add_notice", text, kind)
 			"change":
 				var id := str(entry.get("transaction_id", ""))
