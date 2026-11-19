@@ -46,7 +46,7 @@ def plan_set_pivot(
     return Step(
         source,
         model.set_pivot_code(pivot),
-        f"Move the model's pivot to its {pivot}",
+        f"Move the model's pivot to its {model.pivot_name(pivot)}",
         exports,
     )
 

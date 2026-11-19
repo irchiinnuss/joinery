@@ -205,10 +205,18 @@ def apply_scale_code(objects: list[str]) -> str:
     return _code(f"_joinery_apply_scale({objects!r})", tuple(objects))
 
 
-def set_pivot_code(pivot: str) -> str:
-    if pivot not in {"bottom-centre", "centre"}:
+def pivot_name(pivot: str) -> str:
+    """``bottom_centre``, ``Bottom Center``, ``center`` -> the spelling set_pivot
+    takes ("bottom-centre" or "centre"); anything else is refused."""
+    name = "-".join(str(pivot).strip().lower().replace("_", " ").split())
+    name = name.replace("center", "centre")
+    if name not in {"bottom-centre", "centre"}:
         raise ValueError('pivot is "bottom-centre" or "centre".')
-    return _code(f"_joinery_set_pivot({pivot!r})")
+    return name
+
+
+def set_pivot_code(pivot: str) -> str:
+    return _code(f"_joinery_set_pivot({pivot_name(pivot)!r})")
 
 
 def reduce_triangles_code(max_triangles: int) -> str:

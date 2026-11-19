@@ -737,7 +737,8 @@ class ProjectGateway:
         applied, sent on as ``content`` (joinery.text_patch)."""
         tx = self.transaction
         assert tx is not None
-        if "content" in arguments:
+        # An empty content beside a patch says nothing: the patch is the change.
+        if arguments.get("content") not in (None, ""):
             raise ValueError("Give write_file either content or patch, not both.")
         relative = str(arguments.get("filePath", "")).removeprefix("res://")
         stage = tx.stage.resolve()
@@ -752,7 +753,7 @@ class ProjectGateway:
         if applied.note():
             self._write_notes.append(applied.note())
         return {
-            **{k: v for k, v in arguments.items() if k != "patch"},
+            **{k: v for k, v in arguments.items() if k not in {"patch", "content"}},
             "content": content,
         }
 

@@ -46,6 +46,20 @@ class ServerSpec(BaseModel):
 WORKDIR = "/work"
 
 
+def input_problem(error: Any, schema: dict[str, Any]) -> str:
+    """What is wrong with a tool's input, in words the agent can act on: a missing
+    argument by name, with the ones the tool takes."""
+    if error.validator == "required" and isinstance(error.instance, dict):
+        wanted = [n for n in error.validator_value if n not in error.instance]
+        known = sorted((schema.get("properties") or {}).keys())
+        return (
+            f"missing {', '.join(wanted)}"
+            + (f" (it takes {', '.join(known)})" if known else "")
+            + "."
+        )
+    return f"{error.validator} constraint failed."
+
+
 def map_paths(value: Any, project: PurePath, stage: PurePath) -> Any:
     """Move every absolute path under `project` to the same place under `stage`."""
     if isinstance(value, dict):
@@ -634,7 +648,8 @@ class MCPConnection:
         if error is not None:
             location = ".".join(str(part) for part in error.path) or "arguments"
             raise ValueError(
-                f"Invalid {self.spec.name}.{tool} input at {location}: {error.validator} constraint failed."
+                f"Invalid {self.spec.name}.{tool} input at {location}: "
+                + input_problem(error, definition.input_schema)
             )
         root = worker_root(self.spec)
         if root is not None:

@@ -170,8 +170,11 @@ def notes_from(payload: Any) -> list[ReviewNote]:
         path = str(entry.get("file", "") or "").strip()
         if severity not in SEVERITIES:
             raise ValueError("severity is one of info, warn or block.")
-        if not 1 <= len(text) <= NOTE_CHARS:
+        if not text:
             raise ValueError(f"Each note's text is one to {NOTE_CHARS} characters.")
+        if len(text) > NOTE_CHARS:
+            # Cut short, not refused: the reviewer hears it in the result.
+            text = text[: NOTE_CHARS - 1].rstrip() + "\u2026"
         if len(path) > 400 or "\n" in path:
             raise ValueError("file is one project path.")
         rule = str(entry.get("rule", "") or "").strip().lower()

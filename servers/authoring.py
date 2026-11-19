@@ -35,9 +35,9 @@ def make_server(project: Path, family: str) -> MCPServer[Any]:
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True))
     @tool_errors
-    async def inspect_document(tool: str, source: str) -> dict[str, Any]:
-        """Inspect actual named objects/materials/layers or native graph/patch content before editing a source. Never saves the source document."""
-        return await inspect_native(project, tool, source)
+    async def inspect_document(source: str, tool: str = "") -> dict[str, Any]:
+        """Inspect actual named objects/materials/layers or native graph/patch content before editing a source (a project path; res:// works too). tool: the owning app, inferred from the source's file type when this server has one app for it. Never saves the source document."""
+        return await inspect_native(project, tool or owning_app(family, source), source)
 
     if family == "joinery-blender-ops":
 
@@ -155,28 +155,36 @@ def make_server(project: Path, family: str) -> MCPServer[Any]:
             keep_macro_shape_keys: bool | None = None,
             seed: int | None = None,
         ) -> dict[str, Any]:
-            """Operate a native document in its actual offline app. Blender code uses bpy from factory settings; code that names MPFB2 (extension bl_ext.system.mpfb) or Rigify gets it enabled first, as addon_utils.enable(name, default_set=True); Krita code receives app/document (use Krita for pixel art too); GIMP code is GIMP 3 Python-Fu (gi.repository Gimp, Gegl) that receives `image` (None for a new .xcf: create it with Gimp.Image.new); target parts with find_layer(image, name) (searches groups) and find_channel(image, name) plus image.select_item; colours via Gegl.Color.new('#rrggbb') (Color.set_rgba is linear); exports are PNGs, the composite unless layer_exports[path] = 'layer name' exports one layer; SuperCollider code is a complete NRT patch with output paths and exit; every SynthDef gets `RandID.ir(0); RandSeed.ir(1, seed)` inserted after its declarations (seed: the one given, else the patch's own RandSeed, else one derived from the source path; the recipe records it), so noise renders byte for byte on replay; pass seed for another take. Surge XT code is the JSON source: {"synth": "surge-xt", "seconds", "sample_rate", "parameters": {name: value in Surge's display units}, "notes": [{"pitch", "start", "duration", "velocity"}]} with WAV exports; inspect a Surge source to list every parameter with its default. Audacity code is JSON {"steps": [...]} replayed in a fresh Audacity from the user's own recordings into an .aup3 under audio/ (exports: WAV mixdowns, optionally one label .txt); steps: import {path, name}, noise_reduction {track, profile: [start, end] of pure noise, region, reduction_db, sensitivity, smoothing} (one per project), spectral_edit {track, time, low_hz, high_hz, gain_db (omit to delete the band)}, label {time: [start, end] or at, text}, track {track, name, gain_db, pan, mute}, move {track, start}, and macro {commands, why} as a logged raw fallback; inspect an .aup3 for its step list and send the whole list back with the change. Save/export and replay recording are automatic except the SuperCollider render. Use art/sources/ for .blend and art/models/ for GLB exports. Read document/source context first; retain existing named parts. Requires approved art direction and user review. Blender GLB exports bake MPFB2's body-shape macro shape keys ($md-…) into the mesh and keep other shape keys (expressions) as morph targets; keep_macro_shape_keys=true keeps the macros too, and the model remembers the choice (omit it to keep the current one)."""
+            """Operate a native document in its actual offline app. Blender code uses bpy from factory settings; code that names MPFB2 (extension bl_ext.system.mpfb) or Rigify gets it enabled first, as addon_utils.enable(name, default_set=True); Krita code receives app/document (use Krita for pixel art too); GIMP code is GIMP 3 Python-Fu (gi.repository Gimp, Gegl) that receives `image` (None for a new .xcf: create it with Gimp.Image.new); target parts with find_layer(image, name) (searches groups) and find_channel(image, name) plus image.select_item; colours via Gegl.Color.new('#rrggbb') (Color.set_rgba is linear); exports are PNGs, the composite unless layer_exports[path] = 'layer name' exports one layer; SuperCollider code is a complete NRT patch with output paths and exit; every SynthDef gets `RandID.ir(0); RandSeed.ir(1, seed)` inserted after its declarations (seed: the one given, else the patch's own RandSeed, else one derived from the source path; the recipe records it), so noise renders byte for byte on replay; pass seed for another take (SuperCollider only; other apps ignore it). Surge XT code is the JSON source: {"synth": "surge-xt", "seconds", "sample_rate", "parameters": {name: value in Surge's display units}, "notes": [{"pitch", "start", "duration", "velocity"}]} with WAV exports; inspect a Surge source to list every parameter with its default. Audacity code is JSON {"steps": [...]} replayed in a fresh Audacity from the user's own recordings into an .aup3 under audio/ (exports: WAV mixdowns, optionally one label .txt); steps: import {path, name}, noise_reduction {track, profile: [start, end] of pure noise, region, reduction_db, sensitivity, smoothing} (one per project), spectral_edit {track, time, low_hz, high_hz, gain_db (omit to delete the band)}, label {time: [start, end] or at, text}, track {track, name, gain_db, pan, mute}, move {track, start}, and macro {commands, why} as a logged raw fallback; inspect an .aup3 for its step list and send the whole list back with the change. Save/export and replay recording are automatic except the SuperCollider render. Use art/sources/ for .blend and art/models/ for GLB exports. Read document/source context first; retain existing named parts. Requires approved art direction and user review. Blender GLB exports bake MPFB2's body-shape macro shape keys ($md-…) into the mesh and keep other shape keys (expressions) as morph targets; keep_macro_shape_keys=true keeps the macros too, and the model remembers the choice (omit it to keep the current one)."""
             if tool not in allowed:
                 raise ValueError("Use this application's owning server.")
             if keep_macro_shape_keys is not None and tool != "blender":
                 raise ValueError("keep_macro_shape_keys is a Blender export option.")
+            ignored: dict[str, Any] = {}
             if seed is not None and tool != "supercollider":
-                raise ValueError("seed fixes a SuperCollider patch's randomness.")
+                ignored = {
+                    "ignored": [
+                        f"seed: only a SuperCollider patch takes one; {tool} ran without it."
+                    ]
+                }
+                seed = None
             if seed is not None:
                 return await edit_document(
                     project, tool, source, code, exports, note, seed=seed
                 )
             if keep_macro_shape_keys is None:
-                return await edit_document(project, tool, source, code, exports, note)
-            return await edit_document(
-                project,
-                tool,
-                source,
-                code,
-                exports,
-                note,
-                keep_macro_shape_keys=keep_macro_shape_keys,
-            )
+                done = await edit_document(project, tool, source, code, exports, note)
+            else:
+                done = await edit_document(
+                    project,
+                    tool,
+                    source,
+                    code,
+                    exports,
+                    note,
+                    keep_macro_shape_keys=keep_macro_shape_keys,
+                )
+            return {**done, **ignored}
 
     if family == "joinery-materialmaker":
 
@@ -203,6 +211,16 @@ def make_server(project: Path, family: str) -> MCPServer[Any]:
         importlib.import_module(f"servers.{package}.ops").register(server, project)
 
     return server
+
+
+def owning_app(family: str, source: str) -> str:
+    """The one app of ``family`` that owns ``source``'s file type."""
+    suffix = Path(source).suffix.lower()
+    apps = [m.id for m in tools.family_tools(family) if m.suffix == suffix]
+    if len(apps) != 1:
+        choices = ", ".join(m.id for m in tools.family_tools(family))
+        raise ValueError(f"Name the tool that owns {source}: one of {choices}.")
+    return apps[0]
 
 
 def _finite(value: object) -> bool:

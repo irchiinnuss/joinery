@@ -32,7 +32,7 @@ from joinery.debugging import diagnosis_from
 from joinery.errors import DONT_REPEAT, said
 from joinery.gateway import ProjectGateway
 from joinery.mcp_runtime import PolicyStop
-from joinery.peer_review import notes_from
+from joinery.peer_review import NOTE_CHARS, notes_from
 from joinery.platform_support import private_directory
 from joinery.read_access import not_a_read, read_only
 from joinery.roles import (
@@ -181,6 +181,22 @@ TASK_LIVE = (
     "open as staged files, or leave this to the main request."
 )
 NO_NESTED_TASKS = "A task can't start further tasks; do this part yourself."
+
+
+def call_arguments(value: Any) -> dict[str, Any]:
+    """call_tool's ``arguments``: an object, or a string holding one as JSON (some
+    agents send it so). Anything else is refused. The parsed object is judged like
+    any other call's arguments."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value) if value.strip() else {}
+        except ValueError:
+            raise ValueError(
+                "Tool arguments must be an object (a string must be a JSON object)."
+            ) from None
+    if not isinstance(value, dict):
+        raise TypeError("Tool arguments must be an object.")
+    return value
 
 
 def task_request(params: dict[str, Any]) -> dict[str, Any]:
@@ -389,9 +405,7 @@ class GatewayRPC:
                     raise ValueError(
                         "Specialists can only inspect project tools; mutations stay on the main thread."
                     )
-                arguments = params.get("arguments", {})
-                if not isinstance(arguments, dict):
-                    raise ValueError("Tool arguments must be an object.")
+                arguments = call_arguments(params.get("arguments", {}))
                 result = await self.gateway.call(
                     str(params["server"]),
                     str(params["tool"]),
@@ -605,6 +619,12 @@ class GatewayRPC:
                     "recorded": len(notes),
                     "next": "Your review is recorded. End your turn now.",
                 }
+                cut = [n.text for n in notes if n.text.endswith("\u2026")]
+                if cut:
+                    data["trimmed"] = (
+                        f"{len(cut)} note(s) ran past {NOTE_CHARS} characters "
+                        "and were cut short."
+                    )
             elif method == "report_diagnosis":
                 if self.role != "debugger":
                     raise ValueError("Only the debugger reports a diagnosis.")

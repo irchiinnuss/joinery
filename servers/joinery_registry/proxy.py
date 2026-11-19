@@ -22,7 +22,7 @@ class ReviewNoteArgument(BaseModel):
     """One finding of a review."""
 
     severity: Literal["info", "warn", "block"]
-    text: Annotated[str, Field(min_length=1, max_length=400)]
+    text: Annotated[str, Field(min_length=1, max_length=4000)]
     file: str | None = None
     rule: (
         Literal["request", "art_bible", "brief", "broken", "work_lost", "other"] | None
@@ -32,7 +32,7 @@ class ReviewNoteArgument(BaseModel):
 class DoneWhenArgument(BaseModel):
     """One item of a to-do's "done when": what done means, and what checks it."""
 
-    text: Annotated[str, Field(min_length=1, max_length=160)]
+    text: Annotated[str, Field(min_length=1, max_length=1000)]
     kind: Literal["reach", "no_errors", "test", "check", "look"] = "look"
     target: Annotated[str, Field(max_length=200)] | None = None
     seconds: Annotated[float, Field(ge=10, le=300)] | None = None
@@ -41,8 +41,8 @@ class DoneWhenArgument(BaseModel):
 class StepArgument(BaseModel):
     """One step of a to-do: the short line the user sees and what the build needs."""
 
-    title: Annotated[str, Field(min_length=1, max_length=80)]
-    detail: Annotated[str, Field(max_length=600)] | None = None
+    title: Annotated[str, Field(min_length=1, max_length=1000)]
+    detail: Annotated[str, Field(max_length=4000)] | None = None
 
 
 class DesignEvidenceArgument(BaseModel):
@@ -325,9 +325,9 @@ def make_server(socket: Path, role: str | None = None) -> MCPServer[Any]:
     async def todo_step(
         step: Annotated[int, Field(ge=1, le=8)],
         state: Literal["started", "done", "skipped"],
-        note: Annotated[str, Field(max_length=160)] | None = None,
+        note: Annotated[str, Field(max_length=2000)] | None = None,
     ) -> dict[str, Any]:
-        """While building your to-do after Go: say a step (its number) is 'started', 'done' or 'skipped' (note: why, one line). The user's to-do card checks it off at once."""
+        """While building your to-do after Go: say a step (its number) is 'started', 'done' or 'skipped' (note: why, one line; past 160 characters it is cut short). The user's to-do card checks it off at once."""
         return await rpc(
             socket,
             "todo_step",
@@ -612,7 +612,7 @@ def make_server(socket: Path, role: str | None = None) -> MCPServer[Any]:
     @server.tool(annotations=ToolAnnotations(read_only_hint=True))
     @tool_errors
     async def read_tool(
-        server: str, tool: str, arguments: dict[str, Any]
+        server: str, tool: str, arguments: dict[str, Any] | str
     ) -> CallToolResult:
         """Run a read-only project tool (discover_tools marks them read: validate_script, read_file, inspect_document, ...). Calls run side by side, so send independent reads together. Anything else is refused: use call_tool."""
         return _project_result(
@@ -626,7 +626,7 @@ def make_server(socket: Path, role: str | None = None) -> MCPServer[Any]:
     @server.tool()
     @tool_errors
     async def call_tool(
-        server: str, tool: str, arguments: dict[str, Any]
+        server: str, tool: str, arguments: dict[str, Any] | str
     ) -> CallToolResult:
         """Operate a connected project tool; changes are staged, policy-checked, and require user review. For a read-only tool, read_tool runs beside other calls."""
         return _project_result(

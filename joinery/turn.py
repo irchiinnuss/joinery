@@ -337,6 +337,8 @@ BUILD_NEXT = (
     "Your plan is saved. End your turn now without changing anything; Joinery starts "
     "the build from this plan in a fresh session."
 )
+#: A todo_step note's length on the card; a longer note is cut short, not refused.
+STEP_NOTE_CHARS = 160
 #: A step marked done while the change's assets fail the lock gate.
 STEP_ASSETS_NOT_DONE = (
     "Step {n} is not done yet: these asset files don't match joinery.lock. Fix each "
@@ -604,7 +606,8 @@ class TurnController:
             raise ValueError(
                 "This request has its to-do already; work through it and submit."
             )
-        todo = done_when.proposal(params, self.request)
+        trimmed: list[str] = []
+        todo = done_when.proposal(params, self.request, trimmed)
         if self._set_aside:
             # The user's message reworked the list waiting for Go: the same card updates.
             todo = replace(todo, id=self._set_aside)
@@ -634,20 +637,28 @@ class TurnController:
         self.emit(
             {"kind": "todo", **todo.as_dict(), "state": "waiting" if wait else "going"}
         )
+        cut = {"trimmed": sorted(set(trimmed))} if trimmed else {}
         if wait:
             return {
                 "status": "waiting_for_go",
                 "todo_id": todo.id,
                 "next": "The user sees your to-do and may edit it. " + WAITING_FOR_GO,
+                **cut,
             }
         if split:
-            return {"status": "build_next", "todo_id": todo.id, "next": BUILD_NEXT}
+            return {
+                "status": "build_next",
+                "todo_id": todo.id,
+                "next": BUILD_NEXT,
+                **cut,
+            }
         if together:
             return {
                 "status": "running_steps",
                 "todo_id": todo.id,
                 "steps": [i + 1 for i in together],
                 "next": STEPS_RUNNING,
+                **cut,
             }
         return {
             "status": "go",
@@ -656,6 +667,7 @@ class TurnController:
                 "Work through the steps as one change and submit it. Joinery checks each "
                 "done-when item after the change passes its checks."
             ),
+            **cut,
         }
 
     def _unattended(self) -> bool:
@@ -725,9 +737,11 @@ class TurnController:
         if state not in done_when.STEP_STATES:
             raise ValueError("state is started, done or skipped.")
         note = params.get("note") or ""
-        if not isinstance(note, str) or len(note) > 160:
-            raise ValueError("note is one short line.")
+        if not isinstance(note, str):
+            raise TypeError("note is one short line.")
         note = " ".join(note.split())
+        cut = len(note) > STEP_NOTE_CHARS
+        note = done_when.clipped(note, STEP_NOTE_CHARS)
         if problems and state == "done":
             return {
                 "status": "not_done",
@@ -754,6 +768,10 @@ class TurnController:
         if problems:
             answer["left_behind"] = problems
             answer["next"] = STEP_ASSETS_LEFT
+        if cut:
+            answer["trimmed"] = (
+                f"The note ran past {STEP_NOTE_CHARS} characters and was cut short."
+            )
         return answer
 
     def todo_event(self, state: str, **extra: Any) -> None:

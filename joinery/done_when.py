@@ -232,13 +232,26 @@ class Result:
         }
 
 
-def _line(value: Any, what: str, limit: int) -> str:
+def clipped(text: str, limit: int) -> str:
+    """``text`` cut to ``limit`` characters with an ellipsis, when it runs longer."""
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "\u2026"
+
+
+def _trim(text: str, what: str, limit: int, trimmed: list[str] | None) -> str:
+    """``text`` cut to ``limit`` with an ellipsis; what was cut is noted in
+    ``trimmed`` so the agent hears it, instead of the call being refused."""
+    if len(text) > limit and trimmed is not None:
+        trimmed.append(f"A {what} ran past {limit} characters and was cut short.")
+    return clipped(text, limit)
+
+
+def _line(value: Any, what: str, limit: int, trimmed: list[str] | None = None) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"Each {what} is a short line of words.")
     text = " ".join(value.split())
-    if len(text) > limit:
+    if len(text) > limit and trimmed is None:
         raise ValueError(f"Keep each {what} under {limit} characters.")
-    return text
+    return _trim(text, what, limit, trimmed)
 
 
 #: Where a long step's first clause ends: a colon, semicolon, dash or bracket, a comma
@@ -310,27 +323,27 @@ def same_step(first: str, second: str) -> bool:
     return SequenceMatcher(None, a, b).ratio() >= 0.92
 
 
-def _detail(value: Any) -> str:
+def _detail(value: Any, trimmed: list[str] | None = None) -> str:
     if value is None:
         return ""
     if not isinstance(value, str):
         raise TypeError("A step's detail is text.")
     lines = [" ".join(line.split()) for line in value.strip().splitlines()]
     text = "\n".join(line for line in lines if line)
-    if len(text) > DETAIL_CHARS:
+    if len(text) > DETAIL_CHARS and trimmed is None:
         raise ValueError(f"Keep each step's detail under {DETAIL_CHARS} characters.")
-    return text
+    return _trim(text, "step's detail", DETAIL_CHARS, trimmed)
 
 
-def _step(value: Any) -> tuple[str, str]:
+def _step(value: Any, trimmed: list[str] | None = None) -> tuple[str, str]:
     """A proposed step: {title, detail?}, or one line of words (its first clause becomes
     the title, the whole line the detail). A title that runs long is shortened the same
     way, with the whole of it kept in the detail."""
     if isinstance(value, dict):
-        title = _line(value.get("title"), "step title", DETAIL_CHARS)
-        detail = _detail(value.get("detail"))
+        title = _line(value.get("title"), "step title", DETAIL_CHARS, trimmed)
+        detail = _detail(value.get("detail"), trimmed)
     else:
-        title, detail = _line(value, "step", DETAIL_CHARS), ""
+        title, detail = _line(value, "step", DETAIL_CHARS, trimmed), ""
     short = short_title(title)
     if short != title:
         detail = (
@@ -374,9 +387,14 @@ def _kept(
     return kept_titles, kept_details, kept_after
 
 
-def proposal(params: dict[str, Any], request: str = "") -> Todo:
+def proposal(
+    params: dict[str, Any], request: str = "", trimmed: list[str] | None = None
+) -> Todo:
     """The agent's ``propose_todo`` arguments, checked: {steps, done_when, after?}. Each
-    step is {title, detail?} or one line of words; a step said twice is kept once."""
+    step is {title, detail?} or one line of words; a step said twice is kept once.
+
+    Given ``trimmed``, text past its length is cut short with an ellipsis and noted
+    there instead of refused."""
     steps = params.get("steps")
     if not isinstance(steps, list) or not 1 <= len(steps) <= MAX_STEPS:
         raise ValueError(f"steps is a list of 1 to {MAX_STEPS} steps.")
@@ -414,13 +432,13 @@ def proposal(params: dict[str, Any], request: str = "") -> Todo:
         criteria.append(
             Criterion(
                 id=f"d{index + 1}",
-                text=_line(item.get("text"), "done_when text", 160),
+                text=_line(item.get("text"), "done_when text", 160, trimmed),
                 kind=kind,
                 target=target,
                 seconds=float(seconds),
             )
         )
-    shaped = [_step(step) for step in steps]
+    shaped = [_step(step, trimmed) for step in steps]
     titles, details, after = _kept(
         [title for title, _ in shaped],
         [detail for _, detail in shaped],
