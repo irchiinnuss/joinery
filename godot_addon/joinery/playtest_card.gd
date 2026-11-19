@@ -103,7 +103,7 @@ var _status: TextureRect
 var _step: Label
 var _timer: Label
 var _about: Label
-var _counts: HBoxContainer
+var _counts: HFlowContainer
 var _items: VBoxContainer
 var _body: VBoxContainer
 var _more: Button
@@ -128,16 +128,7 @@ func _init(identifier := "") -> void:
 	playtest_id = identifier
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	accessibility_name = "Playtest"
-	STYLE.on_theme_overrides(
-		self,
-		func() -> void:
-			var source := get_theme_stylebox("panel", "JoineryChangeCard")
-			if source == null:
-				return
-			var box := source.duplicate() as StyleBox
-			box.set_content_margin_all(float(UI_THEME.space(self, 2)))
-			add_theme_stylebox_override("panel", box)
-	)
+	STYLE.task_card(self)
 	var column := VBoxContainer.new()
 	column.theme_type_variation = "JoineryTight"
 	add_child(column)
@@ -155,6 +146,8 @@ func _init(identifier := "") -> void:
 	_timer.hide()
 	head.add_child(_timer)
 	stop = _small_icon("stop", "Stop the playtest")
+	# Framed like every other Stop (the message box's, a task's), so it reads as a button.
+	stop.theme_type_variation = "JoineryStopButton"
 	stop.pressed.connect(_on_stop)
 	head.add_child(stop)
 	close = _small_icon("close", "Dismiss the playtest")
@@ -181,8 +174,14 @@ func _init(identifier := "") -> void:
 	_about.accessibility_name = "What the playtest did"
 	_about.hide()
 	column.add_child(_about)
-	_counts = HBoxContainer.new()
-	_counts.theme_type_variation = "JoineryRow"
+	# The counts wrap in a narrow sidebar rather than push the card past its edge.
+	_counts = HFlowContainer.new()
+	STYLE.on_theme_overrides(
+		_counts,
+		func() -> void:
+			_counts.add_theme_constant_override("h_separation", UI_THEME.space(_counts, 2))
+			_counts.add_theme_constant_override("v_separation", 0)
+	)
 	_counts.accessibility_name = "Findings by kind"
 	_counts.hide()
 	column.add_child(_counts)
