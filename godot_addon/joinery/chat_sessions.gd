@@ -338,6 +338,11 @@ func render(entries: Array) -> void:
 			"step":
 				if card != null:
 					card.call("add_step", text)
+			"refusal":
+				# A call the gate refused: the card says why and never reads "Completed".
+				if card != null:
+					var refused := {"kind": "tool_activity", "allowed": false}
+					card.call("add_trail", refused.merged(entry))
 			"agent":
 				_transcript.call("add_message", PERSONA, text)
 			"notice":

@@ -301,6 +301,13 @@ class ChatRecorder:
                         self.project, self.chat_id, {"type": "step", "text": text}
                     )
                 )
+        elif kind == "tool_activity" and not event.get("allowed", True):
+            # A call the gate refused: a reopened chat says it, as the turn did.
+            refusal = {"type": "refusal"} | {
+                key: str(event.get(key, ""))
+                for key in ("server", "tool", "reason", "call_id")
+            }
+            self._save(lambda: chats.append(self.project, self.chat_id, refusal))
         elif kind == "notice":
             # Joinery's own line ("didn't pass its checks", "fresh session").
             self._flush()

@@ -446,3 +446,31 @@ def test_new_chat_starts_a_fresh_provider_session(
     assert first["chat_id"] != second["chat_id"]
     assert FakeBridge.instances[-1].fresh == 1
     assert chats.read(project, second["chat_id"])[0]["handle"] == "thread-fresh-1"
+
+
+def test_a_refused_call_is_kept_so_a_reopened_chat_says_it(tmp_path: Path) -> None:
+    from bridge.chat_record import ChatRecorder
+
+    record = ChatRecorder(tmp_path, "codex")
+    record.begin({"text": "Paint the sign"}, ())
+    refused = {
+        "kind": "tool_activity",
+        "server": "krita",
+        "tool": "open_document",
+        "allowed": False,
+        "reason": "Krita isn't enabled for this project.",
+        "call_id": "k",
+    }
+    record.observe(refused)
+    record.observe({**refused, "allowed": True, "call_id": "ok"})
+    _meta, entries = chats.read(tmp_path, record.chat_id)
+    kept = [e for e in entries if e["type"] == "refusal"]
+    assert [{k: v for k, v in e.items() if k != "at"} for e in kept] == [
+        {
+            "type": "refusal",
+            "server": "krita",
+            "tool": "open_document",
+            "reason": "Krita isn't enabled for this project.",
+            "call_id": "k",
+        }
+    ]

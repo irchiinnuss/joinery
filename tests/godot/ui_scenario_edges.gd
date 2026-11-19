@@ -623,6 +623,8 @@ func _summary() -> Dictionary:
 		"policy stop notice": s.transcript().find_child("PolicyStop", true, false) != null,
 		"accepted line": text.count("Change accepted"),
 		"error line": text.count("HTTP 500"),
+		"steps not run": text.count("not run"),
+		"completed lines": text.count("Completed"),
 	}
 
 

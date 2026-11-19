@@ -67,6 +67,7 @@ ENTRY_TYPES = {
     "task",
     "variants",
     "rewind",
+    "refusal",
 }
 #: What a branched chat's title says after the original's.
 BRANCH_MARK = " (branch)"
