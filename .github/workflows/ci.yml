@@ -88,7 +88,8 @@ jobs:
         # get all three; a hand-started run gets what it asks for.
         os: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'pull_request') && '["ubuntu-24.04"]' || (inputs.os && inputs.os != 'all') && format('["{0}"]', inputs.os) || '["ubuntu-24.04","macos-15","windows-2025"]') }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    # Windows runs the same suite about half again as slowly (processes start slower).
+    timeout-minutes: ${{ matrix.os == 'windows-2025' && 30 || 20 }}
     env:
       PYTHONUTF8: '1'
     steps:
