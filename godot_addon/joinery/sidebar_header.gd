@@ -3,7 +3,7 @@ extends VBoxContainer
 ## The sidebar's top. When all is well it holds only the "Journeyman" title on the left (the
 ## app's heading style, JoineryTitle) and the icon buttons on the right: no status, no dot.
 ## It says "Connecting…" with the activity dots while Journeyman connects, and a red dot with
-## "Not connected" after a failure. When Journeyman is not reachable a banner offers
+## "Offline" after a failure (one short word, so it fits beside the title when narrow). When Journeyman is not reachable a banner offers
 ## the one action that fixes it, in a danger-tinted banner. First-run setup (no agent yet) is a
 ## step, not a failure: the empty chat's blankslate offers Connect then, and the header is quiet.
 ## The banner keeps SPACE.5 above and below, like other sections.
@@ -205,7 +205,7 @@ func show_state(state: String, agent: String, detail := "", with_banner := true)
 	_dot.visible = state == "error" and not banner
 	_dot.set("state", "attention" if state == "error" else "off")
 	_dot.tooltip_text = detail if state == "error" and not detail.is_empty() else "Not connected"
-	var words := {"connecting": "Connecting…", "error": "" if banner else "Not connected"}
+	var words := {"connecting": "Connecting…", "error": "" if banner else "Offline"}
 	_name.text = str(words.get(state, ""))
 	_name.tooltip_text = _name.text
 	if state == "connected":
