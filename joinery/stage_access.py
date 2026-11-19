@@ -46,12 +46,29 @@ def stage_id(value: str) -> str:
     return value
 
 
+#: A search tool's file filter (Claude's Grep ``glob``, ripgrep-style ``include``),
+#: where a leading ``!`` excludes what it matches.
+_FILTER_KEYS = frozenset({"glob", "include"})
+_EXCLUSION = re.compile(r"![^\s,{}]+")
+
+
+def _excludes(key: object, value: Any) -> bool:
+    """``glob: "!**/.joinery/**"``: one negated glob, which keeps a search out of
+    what it names rather than reading it."""
+    return (
+        key in _FILTER_KEYS
+        and isinstance(value, str)
+        and bool(_EXCLUSION.fullmatch(value))
+    )
+
+
 def _strings(value: Any) -> Iterator[str]:
     if isinstance(value, str):
         yield value
     elif isinstance(value, Mapping):
-        for item in value.values():
-            yield from _strings(item)
+        for key, item in value.items():
+            if not _excludes(key, item):
+                yield from _strings(item)
     elif isinstance(value, list | tuple):
         for item in value:
             yield from _strings(item)

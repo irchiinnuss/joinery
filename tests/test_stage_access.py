@@ -160,6 +160,30 @@ def test_a_reviewer_compares_its_stage_with_the_project_by_git(
         assert named in reason and "can't write" not in reason, reason
 
 
+def test_a_search_that_excludes_joinery_is_not_a_read_of_it(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def grep(**extra: Any) -> dict[str, Any]:
+        tool_input = {"pattern": "PushMower", "path": str(project), **extra}
+        return {"tool_name": "Grep", "tool_input": tool_input, "cwd": str(project)}
+
+    for role in ("reviewer", "lead"):
+        for glob in ("!**/.joinery/**", "!.joinery/transactions/**"):
+            assert judged(monkeypatch, role, MINE, grep(glob=glob)) is None, glob
+        refused = [
+            grep(glob="**/.joinery/**"),
+            grep(glob=".joinery/transactions/*/stage/*.gd"),
+            grep(glob="!a.gd .joinery/transactions/**"),
+            grep(glob="{!x,.joinery/*/x}"),
+            grep(glob="!x", path=str(project / ".joinery/transactions" / OTHER)),
+            shell("claude", "! cat .joinery/transactions/x/a.gd", project),
+        ]
+        for raw in refused:
+            assert judged(monkeypatch, role, MINE, raw) == Severity.DENY, raw
+    assert not touches_changes({"include": "!**/.joinery/**"})
+    assert touches_changes({"command": "!**/.joinery/**"})
+
+
 @pytest.mark.parametrize("provider", PROVIDERS)
 def test_authors_reach_their_own_change_only(
     project: Path, monkeypatch: pytest.MonkeyPatch, provider: str
