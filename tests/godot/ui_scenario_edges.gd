@@ -17,6 +17,7 @@ const GARBAGE := "Answer through a noisy pipe"
 const FAIL_SLOWLY := "Fail after a while"
 const TOGETHER := "Finish at the same time"
 const LIVE := "Stream while the editor changes"
+const OTHER := "Name three harbour sounds"
 ## Emoji, CJK, right-to-left and combining text in one reply.
 const SCRIPTS := "Lanterns 🏮🚢 — 港の灯台 · 등대 · منارة الميناء · מגדלור · é ok"
 ## Markdown that never closes, and stars inside code.
@@ -400,6 +401,72 @@ func _finish_together() -> void:
 	s.check(s.card_state() == "done", "The first chat's turn ends done too (%s)" % s.card_state())
 	s.check(s.reply_shown() == "Together.", "Its reply is its own: " + s.reply_shown())
 	s.check(not (s.composer().get("stop") as Button).visible, "Nothing is left running")
+
+
+## Stop pressed in another chat before the host took its message: that message never runs
+## out of sight, and nothing it would have said shows anywhere.
+func _other_chat_stop() -> void:
+	if not await s.connect_host():
+		return
+	var states := PackedStringArray()
+	s.chat.connect(
+		"task_event",
+		func(event: Dictionary) -> void:
+			if event.get("kind") == "task" and event.get("origin") == "chat":
+				states.append(str(event.get("state", "")))
+	)
+	s.send(KEEP_GOING)
+	await s.wait_until(func() -> bool: return s.reply_shown().length() > 10, 8000)
+	var sessions: Node = s.dock.get("_chats")
+	sessions.call("new_chat")
+	await s.frames(2)
+	s.send(OTHER)
+	(s.composer().get("stop") as Button).pressed.emit()
+	await s.frames(2)
+	var mine: Control = s.transcript().call("current_card")
+	var state := str(mine.get("state")) if mine != null else "none"
+	s.check(state == "failed", "Stopped before it started, it says so (%s)" % state)
+	await s.wait_ms(1500)
+	s.check(not states.has("done"), "The stopped message never runs (%s)" % ", ".join(states))
+	s.check(not s.visible_text().contains("Gulls"), "Nothing it would have said shows")
+	s.check(not (s.composer().get("stop") as Button).visible, "This chat has nothing running")
+	sessions.call("open_chat", _kept_id(sessions, _first_view(sessions)))
+	await s.frames(2)
+	(s.composer().get("stop") as Button).pressed.emit()
+	await s.wait_until(func() -> bool: return not bool(s.dock.get("_busy")), 6000)
+
+
+## The host dies while two chats work: both requests end, and neither chat is left with Stop.
+func _crash_two_chats() -> void:
+	if not await s.connect_host():
+		return
+	s.send(KEEP_GOING)
+	await s.wait_until(func() -> bool: return s.reply_shown().length() > 10, 8000)
+	var first := s.transcript()
+	var sessions: Node = s.dock.get("_chats")
+	sessions.call("new_chat")
+	await s.frames(2)
+	s.send(KEEP_GOING)
+	await s.wait_until(func() -> bool: return s.reply_shown().length() > 10, 8000)
+	s.kill_hosts()
+	await s.wait_until(func() -> bool: return s.dock.get("connection_state") == "error", 6000)
+	await s.frames(4)
+	var mine: Control = s.transcript().call("current_card")
+	var state := str(mine.get("state")) if mine != null else "none"
+	s.check(state != "working", "This chat's request ends (%s)" % state)
+	s.check(not (s.composer().get("stop") as Button).visible, "This chat has no Stop left")
+	var turns: Object = sessions.get("turns")
+	s.check(int(turns.call("working_count")) == 0, "No other chat counts as working")
+	sessions.call("open_chat", _kept_id(sessions, first))
+	await s.frames(3)
+	s.check(s.card_state() != "working", "The first chat's request ends (%s)" % s.card_state())
+	s.check(not (s.composer().get("stop") as Button).visible, "The first chat has no Stop left")
+
+
+## The kept chat Journeyman works in.
+func _first_view(sessions: Node) -> Control:
+	var kept: Dictionary = sessions.get("_kept")
+	return kept.values()[0] if not kept.is_empty() else null
 
 
 ## While a reply streams, timings are hidden and shown again in Settings, the sidebar is moved

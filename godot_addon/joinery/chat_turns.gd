@@ -32,6 +32,8 @@ var sessions: Node
 var _pending: Dictionary = {}
 ## Taken: task id -> {view, card, chat, state, open, offer, transaction_id}.
 var _turns: Dictionary = {}
+## Refs stopped before the host took them: each is cancelled the moment the host takes it.
+var _stopped: Dictionary = {}
 
 
 func _init(sidebar: Control, chats: Node) -> void:
@@ -145,8 +147,10 @@ func stop_in(view: Control) -> bool:
 		return false
 	if found.begins_with("ref:"):
 		# Not taken yet: it never starts, and its card says so.
-		var waiting: Dictionary = _pending[found.trim_prefix("ref:")]
-		_pending.erase(found.trim_prefix("ref:"))
+		var ref := found.trim_prefix("ref:")
+		var waiting: Dictionary = _pending[ref]
+		_pending.erase(ref)
+		_stopped[ref] = true
 		waiting["card"].call("set_failed")
 	else:
 		bridge.call("cancel_task", found)
@@ -175,6 +179,13 @@ func take(event: Dictionary) -> bool:
 func _apply(id: String, event: Dictionary) -> void:
 	if not _turns.has(id):
 		var ref := str(event.get("ref", ""))
+		if _stopped.has(ref):
+			# The line was on its way when Stop was pressed: the host took it all the same.
+			_stopped.erase(ref)
+			var bridge := _bridge()
+			if bridge != null:
+				bridge.call("cancel_task", id)
+			return
 		if not _pending.has(ref):
 			return
 		var taken: Dictionary = _pending[ref]

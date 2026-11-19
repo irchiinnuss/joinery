@@ -67,6 +67,8 @@ const ALL := [
 	"accept-offline",
 	"switch-in-review",
 	"finish-together",
+	"other-chat-stop",
+	"crash-two-chats",
 	"editor-life",
 	"reopen",
 ]
