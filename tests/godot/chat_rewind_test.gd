@@ -165,7 +165,7 @@ func _run() -> void:
 		labels.append(label.text)
 	_check(labels[0] == "Edit and resend from here?", "Asks plainly: %s" % [labels])
 	_check(
-		labels[1].contains("the 1 after it leave the chat") and labels[1].contains("Your files"),
+		labels[1].contains("the one after it leaves the chat") and labels[1].contains("Your files"),
 		"Says what leaves and that files stay: %s" % [labels]
 	)
 	var undo: CheckBox = rewinder.get("undo_box")

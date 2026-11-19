@@ -205,14 +205,12 @@ func ask(card: Control, turn: int) -> void:
 	confirm.add_child(stack)
 	var title := UI.label("Edit and resend from here?", "", true)
 	stack.add_child(title)
-	var words := (
-		"This message comes back to the message box."
-		if after <= 0
-		else (
-			"This message comes back to the message box, and the %d after it leave the chat."
-			% after
-		)
-	)
+	var words := "This message comes back to the message box"
+	if after == 1:
+		words += ", and the one after it leaves the chat"
+	elif after > 1:
+		words += ", and the %d after it leave the chat" % after
+	words += "."
 	var note := UI.label(words + " Your files stay as they are.", "JoineryCaption", true)
 	stack.add_child(note)
 	undo_box = null
