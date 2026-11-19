@@ -382,8 +382,10 @@ def main() -> int:
     parser.add_argument("--agent", default="codex")
     args = parser.parse_args()
     # A host that won't end can be asked where it is: SIGUSR1 writes every stack here.
-    trace = _trace_path("stacks")
-    faulthandler.register(signal.SIGUSR1, file=trace.open("w"), all_threads=True)
+    # Windows has neither the signal nor faulthandler.register; there the test just ends it.
+    if hasattr(signal, "SIGUSR1") and hasattr(faulthandler, "register"):
+        trace = _trace_path("stacks")
+        faulthandler.register(signal.SIGUSR1, file=trace.open("w"), all_threads=True)
     ScriptedBridge.script = json.loads(args.script.read_text(encoding="utf-8"))
     stand_ins: dict[str, Any] = {
         "Bridge": ScriptedBridge,
