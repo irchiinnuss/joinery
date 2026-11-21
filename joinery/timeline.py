@@ -47,6 +47,8 @@ from typing import Any
 ACCEPTED_LINE = "Accepted in Joinery"
 REVERTED_LINE = "Reverted in Joinery"
 RESTORED_LINE = "Restored in Joinery"
+#: The git trailer naming the paired device a decision came from (joinery.remote).
+DECIDED_FROM = "Decided-From: "
 #: Commits looked through for a file's earlier bytes (find_blob).
 FIND_DEPTH = 50
 STARTED_MESSAGE = "Timeline starts here"
@@ -472,11 +474,16 @@ def _drop_marker(project: Path) -> None:
 
 
 def message_for(
-    summary: str, reverted: bool = False, request: str = "", restored: bool = False
+    summary: str,
+    reverted: bool = False,
+    request: str = "",
+    restored: bool = False,
+    decided_from: str = "",
 ) -> str:
     """The commit message: the change's summary, then the request it answered
     (when that says more than the summary), then where it was decided. A revert
-    reads "Revert: …", and an undone revert "Restore: …"."""
+    reads "Revert: …", and an undone revert "Restore: …". A decision made on a paired
+    device (joinery.remote) ends with a ``Decided-From:`` trailer naming it."""
     lines = [line.strip() for line in summary.strip().splitlines() if line.strip()]
     subject = lines[0] if lines else "Project changes"
     body = lines[1:]
@@ -496,6 +503,9 @@ def message_for(
     parts.append(
         REVERTED_LINE if reverted else RESTORED_LINE if restored else ACCEPTED_LINE
     )
+    device = " ".join(decided_from.split())
+    if device:
+        parts.append(DECIDED_FROM + device)
     return "\n\n".join(parts)
 
 
@@ -649,6 +659,7 @@ def record(
     reverted: bool = False,
     request: str = "",
     restored: bool = False,
+    decided_from: str = "",
 ) -> dict[str, str]:
     """Add one decided change to the timeline, if this project keeps one.
 
@@ -676,7 +687,7 @@ def record(
             "state": "failed",
             "message": f"Couldn't add this to the Timeline. {exc}",
         }
-    message = message_for(summary, reverted, request, restored)
+    message = message_for(summary, reverted, request, restored, decided_from)
     queue = [*_owed(project), {"paths": sorted(set(mine)), "message": message}]
     commit, reason = "", ""
     still: list[dict[str, Any]] = []

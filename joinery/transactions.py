@@ -381,9 +381,12 @@ class FileTransaction:
         self.chat_id = ""
         #: Kept for review before Joinery's checks ran on it (a run that stopped).
         self.unchecked = False
-        #: Each decision in order: [{state, at, by?, commit?}], so a change reverted
-        #: and put back again says so.
+        #: Each decision in order: [{state, at, by?, from?, commit?}], so a change
+        #: reverted and put back again says so.
         self.history: list[dict[str, Any]] = []
+        #: The paired device the next decision comes from ("Ana's iPhone"), "" for the
+        #: editor or the CLI (joinery.remote). Its Timeline entry says so.
+        self.decided_from = ""
 
     @property
     def original(self) -> Path:
@@ -603,7 +606,9 @@ class FileTransaction:
             self._carry()
             self.state = "accepted"
             self.decided = time.time()
-            self.history.append({"state": "accepted", "at": self.decided})
+            self.history.append(
+                {"state": "accepted", "at": self.decided, **self._from()}
+            )
             self._record(changes=changes)
         except BaseException:
             self._uncarry()
@@ -668,7 +673,12 @@ class FileTransaction:
             reverted,
             request=self.request,
             restored=restored,
+            decided_from="" if reverted or restored else self.decided_from,
         )
+
+    def _from(self) -> dict[str, str]:
+        """The decision's device, for its history entry ({} from the editor)."""
+        return {"from": self.decided_from} if self.decided_from else {}
 
     def _note_commit(self) -> None:
         """Keep the timeline entry the last decision made with that decision, so the
@@ -704,7 +714,13 @@ class FileTransaction:
             self.project,
             self._timeline_paths(self.changes),
             self.timeline.get("commit", ""),
-            timeline.message_for(self.summary, request=self.request),
+            timeline.message_for(
+                self.summary,
+                request=self.request,
+                decided_from=str(self.history[-1].get("from", ""))
+                if self.history
+                else "",
+            ),
         )
         if outcome.get("state") == "committed":
             self.timeline = outcome
@@ -837,6 +853,10 @@ class FileTransaction:
             raise ValueError("This transaction is not pending.")
         self.state = "rejected"
         self.decided = time.time()
+        if self.decided_from:
+            self.history.append(
+                {"state": "rejected", "at": self.decided, **self._from()}
+            )
         self._record()
         self._discard(self.stage, self.snapshot)
         self._housekeep()

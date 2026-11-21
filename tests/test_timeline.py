@@ -607,3 +607,35 @@ def test_agents_cannot_restore_or_start_a_timeline(tmp_path: Path) -> None:
         verdict = violation(bash(command))
         assert verdict is not None and verdict.severity == Severity.DENY
     assert violation(bash("uv run joinery timeline list --project . --json")) is None
+
+
+def test_a_decision_from_a_paired_device_names_it(tmp_path: Path) -> None:
+    """Joinery Remote (ADR 0093): the entry ends with a Decided-From trailer."""
+    project = started(tmp_path / "game")
+    tx = FileTransaction(project)
+    tx.begin("Taller hedge")
+    (tx.stage / "hedge.gd").write_text("extends Node\n")
+    tx.review()
+    tx.decided_from = "Ana's iPhone"
+    tx.accept()
+    message = git(project, "log", "-1", "--format=%B").strip()
+    assert message.endswith("Accepted in Joinery\n\nDecided-From: Ana's iPhone")
+    trailers = git(project, "log", "-1", "--format=%(trailers:key=Decided-From)")
+    assert trailers.strip() == "Decided-From: Ana's iPhone"
+    assert tx.history[-1]["from"] == "Ana's iPhone"
+    # A revert is the editor's: no trailer.
+    tx.revert()
+    assert "Decided-From" not in git(project, "log", "-1", "--format=%B")
+
+
+def test_a_discard_from_a_device_is_in_its_history(tmp_path: Path) -> None:
+    project = started(tmp_path / "game")
+    tx = FileTransaction(project)
+    tx.begin("Taller hedge")
+    (tx.stage / "hedge.gd").write_text("extends Node\n")
+    tx.review()
+    tx.decided_from = "Ana's iPhone"
+    tx.reject()
+    assert tx.history == [
+        {"state": "rejected", "at": tx.decided, "from": "Ana's iPhone"}
+    ]
