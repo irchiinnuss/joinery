@@ -52,6 +52,7 @@ func _check_states() -> void:
 	_check(not setting.switch_row.is_on(), "Off")
 	_check(setting.where.text.begins_with("Off."), "Off says devices stay paired")
 	_check(setting.pair_button.disabled, "Pairing waits for Remote to be on")
+	_check(not setting.helper_row.visible, "Off, the helper switch waits too")
 	setting.apply_status(
 		{"enabled": true, "tailscale": {"running": false, "message": "Tailscale isn't installed."}}
 	)
@@ -64,12 +65,15 @@ func _check_states() -> void:
 				"url": "https://mac.tail1.ts.net",
 				"tailscale": {"running": true},
 				"devices": [{"id": "d_1", "name": "Ana's iPhone", "scopes": ["watch"]}],
+				"helper": true,
 			}
 		)
 	)
 	_check(setting.where.text.ends_with("https://mac.tail1.ts.net"), "Says where a phone opens it")
 	_check(not setting.pair_button.disabled, "Pair a device, once on")
+	_check(setting.helper_row.visible and setting.awake_row.visible, "On: the helper and awake")
 	_check(setting.devices.get_child_count() == 1, "The paired device is listed")
+	_check(setting.helper_row.is_on() and not setting.awake_row.is_on(), "Each switch as told")
 	setting.free()
 
 

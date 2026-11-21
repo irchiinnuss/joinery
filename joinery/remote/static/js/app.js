@@ -135,14 +135,18 @@ async function projectsScreen() {
   if (answer.status === 401) return pairScreen();
   const projects = answer.data.projects || [];
   const rows = projects.map((project, index) => h("li", { style: `--i:${index}` },
-    h("button", { type: "button", class: "row", onclick: () => openProject(project) },
+    h("button", {
+      type: "button", class: `row ${project.open ? "" : "closed"}`,
+      onclick: () => (project.open ? openProject(project) : wakeProject(project)),
+      disabled: !project.open && !project.can_open,
+    },
       h("span", { class: `dot ${project.waiting ? "waiting" : project.working ? "working" : "idle"}`, "aria-hidden": "true" }),
       h("span", { class: "row-main" },
         h("span", { class: "row-title", text: project.name }),
         h("span", { class: "row-sub", text: projectLine(project) })),
       h("span", { class: "chevron", "aria-hidden": "true", text: "›" }))));
   screen(h("main", { class: "page" },
-    h("h1", { text: "Projects" }),
+    h("div", { class: "title-row" }, h("h1", { text: "Projects" }), button("Settings", settingsSheet, "quiet", { "aria-haspopup": "dialog" })),
     projects.length
       ? h("ul", { class: "list" }, rows)
       : h("div", { class: "empty" },
@@ -152,12 +156,99 @@ async function projectsScreen() {
 }
 
 function projectLine(project) {
+  if (!project.open) return project.can_open ? "Closed · tap to open it without the editor" : "Closed · open it in Joinery on your Mac";
   const parts = [];
   if (project.waiting) parts.push(project.waiting === 1 ? "A change waits" : `${project.waiting} changes wait`);
   else if (project.working) parts.push("Working");
   if (project.todo) parts.push("To-do waits for Go");
   if (!parts.length) parts.push(project.editor ? "Open in the editor" : "Running without the editor");
   return parts.join(" · ");
+}
+
+// A project no editor has open: the always-on helper starts its chat.
+async function wakeProject(project) {
+  toast(`Opening ${project.name}…`);
+  let answer;
+  try {
+    answer = await post(`/api/projects/${project.id}/open`, {});
+  } catch (error) {
+    return asleepScreen();
+  }
+  if (!answer.ok || !answer.data.ok) {
+    toast(answer.data.text || answer.data.error || "It couldn't be opened.", "warn");
+    return;
+  }
+  openProject({ ...project, ...answer.data.project, open: true });
+}
+
+// --- Settings: notifications ------------------------------------------------------------
+
+function keyBytes(text) {
+  const padded = (text + "===".slice((text.length + 3) % 4)).replace(/-/g, "+").replace(/_/g, "/");
+  return Uint8Array.from(atob(padded), (ch) => ch.charCodeAt(0));
+}
+
+async function settingsSheet() {
+  const sheet = h("dialog", { class: "sheet", "aria-label": "Settings" });
+  const close = () => { sheet.close(); sheet.remove(); };
+  sheet.addEventListener("close", () => sheet.remove());
+  const status = h("p", { class: "muted small", role: "status" });
+  const toggle = h("input", { type: "checkbox", role: "switch", id: "push", class: "switch" });
+  const can = "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+  const standalone = matchMedia("(display-mode: standalone)").matches || navigator.standalone;
+  sheet.append(
+    h("div", { class: "sheet-head" }, h("h2", { text: "Settings" }), button("Done", close, "quiet")),
+    h("div", { class: "card stack" },
+      h("label", { class: "switch-row", for: "push" },
+        h("span", { class: "row-main" }, h("span", { class: "row-title", text: "Notifications" }),
+          h("span", { class: "row-sub", text: "When a change waits, Journeyman needs you, or something goes wrong" })),
+        toggle),
+      status),
+    h("div", { class: "card stack" },
+      h("p", { class: "row-title", text: (ui.me && ui.me.name) || "This phone" }),
+      h("p", { class: "muted small", text: "To unpair it, use Revoke in Settings → Remote on your Mac." })));
+  document.body.append(sheet);
+  sheet.showModal();
+  if (!can) {
+    toggle.disabled = true;
+    status.textContent = /iPhone|iPad/.test(navigator.userAgent) && !standalone
+      ? "Add Joinery to your Home Screen first (Share → Add to Home Screen), then open it from there."
+      : "This browser can't show notifications.";
+    return;
+  }
+  const info = await get("/api/push").catch(() => null);
+  toggle.checked = !!(info && info.data.subscribed && Notification.permission === "granted");
+  toggle.addEventListener("change", async () => {
+    toggle.disabled = true;
+    try {
+      if (toggle.checked) await pushOn(info.data.public_key, status);
+      else await pushOff(status);
+    } catch (error) {
+      status.textContent = String(error.message || error);
+      toggle.checked = !toggle.checked;
+    }
+    toggle.disabled = false;
+  });
+}
+
+async function pushOn(key, status) {
+  if ((await Notification.requestPermission()) !== "granted") throw new Error("Notifications are off for Joinery in this phone's settings.");
+  const registration = await navigator.serviceWorker.ready;
+  const subscription = (await registration.pushManager.getSubscription())
+    || (await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(key) }));
+  const answer = await post("/api/push/subscribe", { subscription: subscription.toJSON() });
+  if (!answer.ok) throw new Error(answer.data.text || "Your Mac didn't take the subscription.");
+  status.textContent = "On. Nothing comes while you're at the editor.";
+}
+
+async function pushOff(status) {
+  const registration = await navigator.serviceWorker.ready;
+  const subscription = await registration.pushManager.getSubscription();
+  if (subscription) {
+    await post("/api/push/unsubscribe", { endpoint: subscription.endpoint });
+    await subscription.unsubscribe();
+  }
+  status.textContent = "Off.";
 }
 
 function asleepScreen() {

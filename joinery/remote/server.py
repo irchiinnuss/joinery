@@ -44,8 +44,17 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from joinery import chats
 from joinery.remote import audit
 from joinery.remote.actions import REFUSED, Refused, admit, needs_opening
+from joinery.remote.awake import KeepAwake
 from joinery.remote.hosts import Host, HostGone, discover, request, subscribe
 from joinery.remote.media import MEDIA_TYPES, checked_media, scrub
+from joinery.remote.paths import known
+from joinery.remote.push import (
+    ALL_KINDS,
+    DEFAULT_KINDS,
+    Vapid,
+    WebPushSink,
+    checked_subscription,
+)
 from joinery.remote.seams import (
     HostLauncher,
     NoLauncher,
@@ -174,6 +183,9 @@ class RemoteServer:
         self._watchers: dict[str, asyncio.Task[None]] = {}
         self._listeners: set[asyncio.Queue[Notice]] = set()
         self._discovery: asyncio.Task[None] | None = None
+        #: Open event streams per host: a host a phone watches is never idle.
+        self.watching: dict[str, int] = {}
+        self.awake = KeepAwake()
 
     # --- Checks -------------------------------------------------------------------------
 
@@ -234,12 +246,42 @@ class RemoteServer:
                 self._watchers.pop(host_id).cancel()
                 self.previews.pop(host_id, None)
                 self.states.pop(host_id, None)
+            tick = getattr(self.launcher, "tick", None)
+            if tick is not None:
+                await tick(self.idle_for)
+            self.awake.follow(bool(self.store.config().get("keep_awake")))
             await asyncio.sleep(DISCOVER_SECONDS)
+
+    def idle_for(self, host_id: str) -> float:
+        """Seconds a host has had nothing running, nothing waiting and no phone
+        watching (0 while any of them holds)."""
+        state = self.states.get(host_id)
+        if state is None:
+            return 0.0
+        if state.get("working") or state.get("waiting") or state.get("todo"):
+            return 0.0
+        if self.watching.get(host_id):
+            return 0.0
+        return time.time() - float(
+            state.get("last") or state.get("since") or time.time()
+        )
+
+    def quiet(self, host_id: str) -> bool:
+        """The user is at the open editor of this project: pushes wait."""
+        return bool(self.states.get(host_id, {}).get("focused"))
 
     async def _watch(self, host: Host) -> None:
         previews = self.previews.setdefault(host.id, {})
         state = self.states.setdefault(
-            host.id, {"working": False, "waiting": [], "todo": False, "last": 0.0}
+            host.id,
+            {
+                "working": False,
+                "waiting": [],
+                "todo": False,
+                "last": 0.0,
+                "since": time.time(),
+                "focused": False,
+            },
         )
         replayed = 0
         try:
@@ -266,6 +308,9 @@ class RemoteServer:
     ) -> None:
         kind = str(event.get("kind", ""))
         tx = str(event.get("transaction_id", ""))
+        if kind == "presence":
+            state["focused"] = bool(event.get("focused"))
+            return
         state["last"] = time.time()
         if kind == "file_preview" and tx:
             previews[tx] = event
@@ -377,9 +422,101 @@ class RemoteServer:
                     "waiting": len(state.get("waiting", [])),
                     "todo": bool(state.get("todo")),
                     "last": float(state.get("last", 0)),
+                    "open": True,
+                }
+            )
+        # Projects a host served here before: the helper can open them again.
+        running = {project["id"] for project in shown}
+        can_open = not isinstance(self.launcher, NoLauncher)
+        for identifier, entry in known(self.home).items():
+            if identifier in running or (allowed and identifier not in allowed):
+                continue
+            shown.append(
+                {
+                    "id": identifier,
+                    "name": str(entry.get("name", "")),
+                    "agent": str(entry.get("agent", "")),
+                    "editor": False,
+                    "open": False,
+                    "can_open": can_open,
+                    "last": float(entry.get("seen", 0)),
                 }
             )
         return JSONResponse({"projects": shown})
+
+    async def open_project(self, request: Request) -> Response:
+        """Start a project's headless host (the always-on helper), for a phone."""
+        device = self.device(request, "chat")
+        identifier = request.path_params["project"]
+        allowed = device.get("projects") or []
+        entry = known(self.home).get(identifier)
+        if entry is None or (allowed and identifier not in allowed):
+            raise NotFound("No such project.")
+        if isinstance(self.launcher, NoLauncher):
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "text": "Open it in Joinery on your Mac, or turn on Keep Remote "
+                    "available in Settings → Remote.",
+                },
+                409,
+            )
+        try:
+            host = await self.launcher.ensure_host(Path(str(entry["project"])))
+        except (OSError, ValueError) as exc:
+            audit.record(
+                "open", "error", device=device, home=self.home, reason=str(exc)
+            )
+            return JSONResponse({"ok": False, "text": str(exc)}, 409)
+        audit.record(
+            "open",
+            "ok",
+            device=device,
+            project=Path(str(entry["project"])),
+            home=self.home,
+        )
+        return JSONResponse(
+            {"ok": host is not None, "project": host.public() if host else None}
+        )
+
+    # --- Push -------------------------------------------------------------------------
+
+    async def push_info(self, request: Request) -> Response:
+        device = self.device(request)
+        mine = [s for d, s in self.store.push_targets() if d["id"] == device["id"]]
+        return JSONResponse(
+            {
+                "public_key": Vapid(self.home).public_key(),
+                "subscribed": bool(mine),
+                "kinds": mine[0].get("kinds", list(DEFAULT_KINDS))
+                if mine
+                else list(DEFAULT_KINDS),
+            }
+        )
+
+    async def push_subscribe(self, request: Request) -> Response:
+        device = self.device(request)
+        body = await _body(request)
+        try:
+            subscription = checked_subscription(body.get("subscription"))
+        except (TypeError, ValueError) as exc:
+            audit.record(
+                "push", "refused", device=device, home=self.home, reason=str(exc)
+            )
+            return JSONResponse({"ok": False, "text": str(exc)}, 400)
+        kinds = [k for k in body.get("kinds", DEFAULT_KINDS) if k in ALL_KINDS] or list(
+            DEFAULT_KINDS
+        )
+        self.store.add_push(str(device["id"]), subscription, kinds)
+        audit.record("push", "ok", device=device, home=self.home, step="on")
+        return JSONResponse({"ok": True, "kinds": kinds})
+
+    async def push_unsubscribe(self, request: Request) -> Response:
+        device = self.device(request)
+        body = await _body(request)
+        self.store.remove_push(str(body.get("endpoint", "")), str(device["id"]))
+        audit.record("push", "ok", device=device, home=self.home, step="off")
+        return JSONResponse({"ok": True})
 
     async def chat_list(self, request: Request) -> Response:
         device = self.device(request)
@@ -448,6 +585,7 @@ class RemoteServer:
             since = 0  # Another host since: the device catches up from the start.
         listener: asyncio.Queue[Notice] = asyncio.Queue(maxsize=100)
         self._listeners.add(listener)
+        self.watching[host.id] = self.watching.get(host.id, 0) + 1
 
         async def stream() -> AsyncIterator[dict[str, str]]:
             events = subscribe(host, since)
@@ -498,6 +636,7 @@ class RemoteServer:
                     if task is not None:
                         task.cancel()
                 self._listeners.discard(listener)
+                self.watching[host.id] = max(0, self.watching.get(host.id, 1) - 1)
                 with contextlib.suppress(Exception):
                     await events.aclose()
 
@@ -619,6 +758,20 @@ class RemoteServer:
             Route("/api/pair/status", guarded(self.pair_status), methods=["POST"]),
             Route("/api/me", guarded(self.me)),
             Route("/api/projects", guarded(self.projects)),
+            Route("/api/push", guarded(self.push_info)),
+            Route(
+                "/api/push/subscribe", guarded(self.push_subscribe), methods=["POST"]
+            ),
+            Route(
+                "/api/push/unsubscribe",
+                guarded(self.push_unsubscribe),
+                methods=["POST"],
+            ),
+            Route(
+                "/api/projects/{project}/open",
+                guarded(self.open_project),
+                methods=["POST"],
+            ),
             Route("/api/projects/{project}/chats", guarded(self.chat_list)),
             Route("/api/projects/{project}/chats/{chat}", guarded(self.chat_history)),
             Route("/api/projects/{project}/events", guarded(self.events)),
@@ -646,6 +799,10 @@ class RemoteServer:
                 await asyncio.gather(
                     self._discovery, *self._watchers.values(), return_exceptions=True
                 )
+                self.awake.stop()
+                closing = getattr(self.launcher, "close", None)
+                if closing is not None:
+                    await closing()
 
         return Guard(Starlette(routes=routes, lifespan=lifespan), self)
 
@@ -707,11 +864,18 @@ def _static(path: str) -> Callable[[Request], Awaitable[Response]]:
     return serve
 
 
-def run(store: Store, port: int, home: Path | None = None) -> int:
-    """Serve on 127.0.0.1:``port`` until stopped."""
+def run(
+    store: Store, port: int, home: Path | None = None, *, helper: bool = False
+) -> int:
+    """Serve on 127.0.0.1:``port`` until stopped. ``helper``: the always-on helper,
+    which starts a headless host for a project no editor has open."""
     import uvicorn
 
-    server = RemoteServer(store, port=port, home=home)
+    from joinery.remote.helper import HeadlessLauncher
+
+    launcher: HostLauncher = HeadlessLauncher(home) if helper else NoLauncher()
+    server = RemoteServer(store, port=port, home=home, launcher=launcher)
+    server.sinks.append(WebPushSink(store, home, quiet=server.quiet))
     config = uvicorn.Config(
         server.app(),
         host="127.0.0.1",

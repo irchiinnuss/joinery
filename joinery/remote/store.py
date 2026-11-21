@@ -20,7 +20,7 @@ from typing import Any
 
 from joinery.platform_support import lock_file, private_file, unlock_file
 from joinery.remote.actions import SCOPES
-from joinery.remote.paths import read_json, remote_home, write_private_json
+from joinery.remote.paths import home_path, read_json, remote_home, write_private_json
 
 VERSION = 1
 #: Crockford-like: no I, L, O, U, 0 or 1, so a code read aloud is typed right.
@@ -66,8 +66,10 @@ def device_name(name: str) -> str:
 def public(device: dict[str, Any], now: float | None = None) -> dict[str, Any]:
     """A device as the CLI and the Settings page show it: never its token hash."""
     now = time.time() if now is None else now
-    hidden = {"token_sha256"}
+    hidden = {"token_sha256", "push"}
     shown = {k: v for k, v in device.items() if k not in hidden}
+    # Whether it hears pushes; never its endpoint or keys.
+    shown["push"] = len(device.get("push", []))
     shown["state"] = state_of(device, now)
     return shown
 
@@ -86,11 +88,7 @@ def state_of(device: dict[str, Any], now: float) -> str:
 def enabled(home: Path | None = None) -> bool:
     """Whether Remote is on (Settings → Remote, ``joinery remote start``): only then do
     chat hosts open their channel. Never creates anything."""
-    try:
-        base = home or remote_home()
-    except OSError:
-        return False
-    data = read_json(base / "devices.json")
+    data = read_json((home or home_path()) / "devices.json")
     config = data.get("config") if isinstance(data, dict) else None
     return bool(isinstance(config, dict) and config.get("enabled"))
 
@@ -403,3 +401,44 @@ class Store:
             device["scopes"] = [s for s in SCOPES if s in scopes]
             shown = public(device)
         return shown
+
+    # --- Push subscriptions -------------------------------------------------------------
+
+    def add_push(
+        self, device_id: str, subscription: dict[str, str], kinds: list[str]
+    ) -> None:
+        """Keep a phone's Web Push subscription (joinery.remote.push), newest three."""
+        with self.edit() as data:
+            device = next(
+                (d for d in data["devices"] if d.get("id") == device_id), None
+            )
+            if device is None:
+                raise ValueError(f"No paired device {device_id}.")
+            kept = [
+                s
+                for s in device.get("push", [])
+                if s.get("endpoint") != subscription["endpoint"]
+            ]
+            kept.append({**subscription, "kinds": kinds, "created": time.time()})
+            device["push"] = kept[-3:]
+
+    def remove_push(self, endpoint: str, device_id: str = "") -> None:
+        with self.edit() as data:
+            for device in data["devices"]:
+                if device_id and device.get("id") != device_id:
+                    continue
+                device["push"] = [
+                    s for s in device.get("push", []) if s.get("endpoint") != endpoint
+                ]
+
+    def push_targets(
+        self, now: float | None = None
+    ) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+        """(device, subscription) for every active device that may watch."""
+        now = time.time() if now is None else now
+        return [
+            (public(device, now), subscription)
+            for device in self.read()["devices"]
+            if state_of(device, now) == "active" and "watch" in device.get("scopes", [])
+            for subscription in device.get("push", [])
+        ]

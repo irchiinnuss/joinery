@@ -20,6 +20,10 @@ var cli_prefix := PackedStringArray()
 var cli_enabled := true
 var switch_row: UI.SwitchRow
 var where: Label
+## Keep Remote available when Joinery is closed (`joinery remote install-helper`).
+var helper_row: UI.SwitchRow
+## Keep this machine awake on power while Remote is on (`joinery remote keep-awake`).
+var awake_row: UI.SwitchRow
 var pair_button: Button
 var pair_box: VBoxContainer
 var qr: TextureRect
@@ -48,6 +52,23 @@ func _init() -> void:
 	where.name = "Where"
 	where.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
 	add_child(_inset(where))
+	helper_row = UI.switch_row("When Joinery is closed", "Your phone can still open your projects")
+	helper_row.name = "HelperSwitch"
+	helper_row.switch_button.accessibility_name = "Keep Remote available when Joinery is closed"
+	helper_row.toggled.connect(
+		func(on: bool) -> void:
+			helper_row.set_checking()
+			_run("toggle", ["remote", "install-helper" if on else "uninstall-helper", "--json"])
+	)
+	add_child(helper_row)
+	awake_row = UI.switch_row("Keep this Mac awake", "While it's plugged in and Remote is on")
+	awake_row.name = "AwakeSwitch"
+	awake_row.toggled.connect(
+		func(on: bool) -> void:
+			awake_row.set_checking()
+			_run("toggle", ["remote", "keep-awake", "on" if on else "off", "--json"])
+	)
+	add_child(awake_row)
 	pair_button = UI.secondary("Pair a device")
 	pair_button.name = "Pair"
 	pair_button.pressed.connect(_pair)
@@ -115,6 +136,12 @@ func apply_status(data: Dictionary) -> void:
 		where.text = "Put it on your tailnet: " + str(data.get("serve_command", ""))
 	else:
 		where.text = "On your phone: " + str(data.get("url", ""))
+	helper_row.visible = on
+	awake_row.visible = on
+	helper_row.set_on(bool(data.get("helper", false)))
+	helper_row.set_disabled_reason("")
+	awake_row.set_on(bool(data.get("keep_awake", false)))
+	awake_row.set_disabled_reason("")
 	pair_button.disabled = not on
 	pair_button.tooltip_text = "" if on else "Turn Remote on first"
 	_show_devices(data.get("devices", []))
@@ -244,8 +271,13 @@ func _finished(result: Dictionary) -> void:
 		data = {"error": "Remote didn't answer. Details are in Output."}
 		print("[Joinery] remote\n", result.get("output", ""), "\n", result.get("error", ""))
 	match kind:
-		"status", "toggle":
+		"status":
 			apply_status(data)
+		"toggle":
+			# Each switch answers with only its own part: read the whole state again.
+			if data.has("error"):
+				where.text = str(data["error"])
+			refresh()
 		"pair":
 			apply_pairing(data)
 		"requests":

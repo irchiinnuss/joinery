@@ -88,6 +88,10 @@ async function main() {
   check(await until(`document.querySelectorAll(".row").length === 1`), "The open project is listed");
   check(await evaluate(`document.querySelector(".row-sub").textContent.includes("change waits")`), "It says a change waits");
   await shot("projects");
+  await evaluate(`[...document.querySelectorAll("button")].find((b) => b.textContent === "Settings").click()`);
+  check(await until(`!!document.querySelector("dialog[open] #push")`), "Settings offers notifications");
+  await shot("settings");
+  await evaluate(`document.querySelector("dialog[open]").close()`);
 
   await evaluate(`document.querySelector(".row").click()`);
   check(await until(`!!document.querySelector(".change")`), "The change card shows");

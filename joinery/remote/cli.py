@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from joinery.platform_support import ProcessWatch, private_file
-from joinery.remote import audit, qr, tailscale
+from joinery.remote import audit, login_item, qr, tailscale
 from joinery.remote.actions import SCOPES
 from joinery.remote.hosts import discover
 from joinery.remote.paths import read_json, remote_home, write_private_json
@@ -38,10 +38,28 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     start = actions.add_parser("start", help="turn Remote on and start its server")
     start.add_argument("--port", type=int, default=0)
     start.add_argument("--json", action="store_true")
-    stop = actions.add_parser("stop", help="turn Remote off; paired devices stay paired")
+    stop = actions.add_parser(
+        "stop", help="turn Remote off; paired devices stay paired"
+    )
     stop.add_argument("--json", action="store_true")
     serve = actions.add_parser("serve", help="run the server in the foreground")
     serve.add_argument("--port", type=int, default=0)
+    serve.add_argument(
+        "--helper",
+        action="store_true",
+        help="also start a project's chat for a phone when no editor has it open",
+    )
+    for name, says in (
+        ("install-helper", "keep Remote available when Joinery is closed (login item)"),
+        ("uninstall-helper", "remove the login item"),
+    ):
+        helper = actions.add_parser(name, help=says)
+        helper.add_argument("--json", action="store_true")
+    awake = actions.add_parser(
+        "keep-awake", help="keep this machine awake on power while Remote is on"
+    )
+    awake.add_argument("state", choices=["on", "off"])
+    awake.add_argument("--json", action="store_true")
     status = actions.add_parser("status", help="whether Remote is on, and where")
     status.add_argument("--json", action="store_true")
     pair = actions.add_parser("pair", help="pair a phone: a QR code and a code")
@@ -75,7 +93,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     log.add_argument("--limit", type=int, default=50)
     log.add_argument("--json", action="store_true")
     ts = actions.add_parser(
-        "tailscale", help="the `tailscale serve` command that puts Remote on your tailnet"
+        "tailscale",
+        help="the `tailscale serve` command that puts Remote on your tailnet",
     )
     ts.add_argument("--run", action="store_true", help="run it (asks first)")
     ts.add_argument("--yes", action="store_true", help="with --run: don't ask")
@@ -97,6 +116,9 @@ def run(args: argparse.Namespace) -> int:
         "forget-all": _forget,
         "log": _log,
         "tailscale": _tailscale,
+        "install-helper": _install_helper,
+        "uninstall-helper": _uninstall_helper,
+        "keep-awake": _keep_awake,
     }
     try:
         return handlers[args.action](store, args)
@@ -151,7 +173,15 @@ def _start(store: Store, args: argparse.Namespace) -> int:
             private_file(log)
             flags = 0x00000008 | 0x00000200 if os.name == "nt" else 0
             subprocess.Popen(
-                [sys.executable, "-m", "joinery.remote.cli", "serve", "--port", str(port)],
+                [
+                    sys.executable,
+                    "-m",
+                    "joinery.remote.cli",
+                    "serve",
+                    "--port",
+                    str(port),
+                    *(["--helper"] if login_item.status()["installed"] else []),
+                ],
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=stream,
@@ -173,7 +203,11 @@ def _stop(store: Store, args: argparse.Namespace) -> int:
         # Only the server this user started, by the pid it wrote itself.
         os.kill(int(info["pid"]), signal.SIGTERM)
     audit.record("remote_off", "ok")
-    _out(args, {"enabled": False, "running": False}, "Remote is off. Devices stay paired.")
+    _out(
+        args,
+        {"enabled": False, "running": False},
+        "Remote is off. Devices stay paired.",
+    )
     return 0
 
 
@@ -184,7 +218,7 @@ def _serve(store: Store, args: argparse.Namespace) -> int:
     path = store.home / SERVER_FILE
     write_private_json(path, {"pid": os.getpid(), "port": port, "started": time.time()})
     try:
-        return serve(store, port)
+        return serve(store, port, helper=bool(getattr(args, "helper", False)))
     finally:
         current = read_json(path)
         if isinstance(current, dict) and current.get("pid") == os.getpid():
@@ -207,6 +241,8 @@ def status(store: Store) -> dict[str, Any]:
             tailscale.serve_command(port, tailscale.executable() or "tailscale")
         ),
         "devices": [d for d in devices if d["state"] == "active"],
+        "helper": login_item.status()["installed"],
+        "keep_awake": bool(config.get("keep_awake")),
         "projects": [h.public() for h in discover(store.home)],
     }
 
@@ -280,7 +316,10 @@ def _wait_and_ask(store: Store, made: dict[str, Any], args: argparse.Namespace) 
             allow = said in {"y", "yes"}
             answered = store.answer(request["id"], allow)
             audit.record(
-                "pair", "ok" if allow else "refused", name=request["name"], step="answer"
+                "pair",
+                "ok" if allow else "refused",
+                name=request["name"],
+                step="answer",
             )
             _out(
                 args,
@@ -375,10 +414,46 @@ def _tailscale(store: Store, args: argparse.Namespace) -> int:
             return 1
     done = tailscale.serve(port, program)
     if done.returncode != 0:
-        raise ValueError((done.stderr or done.stdout).strip() or "tailscale serve failed.")
+        raise ValueError(
+            (done.stderr or done.stdout).strip() or "tailscale serve failed."
+        )
     store.set_config(origin=ts["origin"])
     audit.record("tailscale_serve", "ok", origin=ts["origin"])
     _out(args, {**data, "ran": True}, f"Remote is on your tailnet: {ts['origin']}")
+    return 0
+
+
+def _install_helper(store: Store, args: argparse.Namespace) -> int:
+    done = login_item.install(store.home / LOG_FILE)
+    audit.record("helper_on", "ok")
+    _out(
+        args,
+        done,
+        "Remote stays available when Joinery is closed. Your phone can open any "
+        "project you used here; it runs without the editor and keeps every change "
+        "for review.",
+    )
+    return 0
+
+
+def _uninstall_helper(store: Store, args: argparse.Namespace) -> int:
+    done = login_item.uninstall()
+    audit.record("helper_off", "ok")
+    _out(args, done, "Remote now needs Joinery open.")
+    return 0
+
+
+def _keep_awake(store: Store, args: argparse.Namespace) -> int:
+    on = args.state == "on"
+    store.set_config(keep_awake=on)
+    audit.record("keep_awake", "ok", state=args.state)
+    _out(
+        args,
+        {"keep_awake": on},
+        "This machine stays awake on power while Remote is on."
+        if on
+        else "This machine sleeps as usual.",
+    )
     return 0
 
 
