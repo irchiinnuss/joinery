@@ -31,7 +31,7 @@ import tempfile
 import threading
 import time
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -39,7 +39,7 @@ from typing import Any
 from joinery.platform_support import private_directory
 from joinery.remote.actions import Refused, admit, route
 from joinery.remote.media import checked_media, scrub
-from joinery.remote.paths import hosts_dir, project_id, write_private_json
+from joinery.remote.paths import hosts_dir, project_id, remember, write_private_json
 
 #: Events kept for a device that reconnects; older ones come from the saved chats.
 RING = 2000
@@ -54,6 +54,8 @@ HIDDEN = frozenset({"editor_action", "editor_view", "remote_action", "quiet"})
 SIDES = ("before", "after")
 FILE_KEYS = ("before", "after", "before_model", "after_model")
 NO_EDITOR_ANSWER = "The editor didn't answer. Look at the machine."
+#: Set for the hosts the always-on helper starts.
+HELPER_ENV = "JOINERY_REMOTE_HELPER"
 
 
 @dataclass
@@ -65,6 +67,8 @@ class Origin:
     scopes: tuple[str, ...]
     ref: str = ""
     answer: asyncio.Future[dict[str, Any]] | None = field(default=None, repr=False)
+    #: The host's own line (the editor taking the project over), never a device's.
+    internal: bool = False
 
     def done(self, ok: bool, text: str = "", **extra: Any) -> None:
         if self.answer is not None and not self.answer.done():
@@ -82,9 +86,14 @@ class RemoteChannel:
         replies: dict[str, Callable[[], dict[str, Any]]] | None = None,
         home: Path | None = None,
         transport: str | None = None,
+        release: Callable[[], Awaitable[bool]] | None = None,
     ) -> None:
         self.project = project
         self.agent_id = agent_id
+        #: Started by the always-on helper (joinery.remote.helper), not by an editor.
+        self.helper = os.environ.get(HELPER_ENV) == "1"
+        #: Let the project go to an editor that opens it, once quiet; True while busy.
+        self.release = release
         #: An editor is attached: the sidebar carries out what it owns.
         self.editor = editor
         self.to_editor = to_editor
@@ -137,6 +146,7 @@ class RemoteChannel:
                 os.chmod(path, 0o600)
                 endpoint = {"transport": "unix", "path": str(path)}
             self.advert = hosts_dir(self.home) / (project_id(self.project) + ".json")
+            remember(self.project, self.agent_id, self.home)
             write_private_json(
                 self.advert,
                 {
@@ -148,6 +158,7 @@ class RemoteChannel:
                     "editor": self.editor,
                     "token": self._token,
                     "started": self.started,
+                    "helper": self.helper,
                     **endpoint,
                 },
             )
@@ -351,6 +362,11 @@ class RemoteChannel:
             return {"ok": True, "path": str(path)}
         if op == "state":
             return {"ok": True, **self.hello()}
+        if op == "release":
+            # Only a host with no editor gives the project up (to the editor opening it).
+            if self.editor or self.release is None:
+                return {"ok": False, "text": "This chat belongs to an open editor."}
+            return {"ok": True, "busy": await self.release()}
         if op != "action":
             raise ValueError("Unknown request.")
         device = request.get("device")

@@ -38,6 +38,8 @@ class Host:
     endpoint: dict[str, Any]
     token: str
     started: float
+    #: Started by the always-on helper, with no editor (joinery.remote.helper).
+    helper: bool = False
 
     def public(self) -> dict[str, Any]:
         """The host as a device sees it: never its path or token."""
@@ -84,6 +86,7 @@ def discover(home: Path | None = None) -> list[Host]:
                 endpoint=endpoint,
                 token=str(data.get("token", "")),
                 started=float(data.get("started", 0) or 0),
+                helper=bool(data.get("helper", False)),
             )
         )
     return found

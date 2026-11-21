@@ -851,6 +851,10 @@ func _close_if_gone() -> void:
 
 
 func _notification(what: int) -> void:
+	if what in [NOTIFICATION_APPLICATION_FOCUS_IN, NOTIFICATION_APPLICATION_FOCUS_OUT]:
+		# Joinery Remote holds a phone's push notifications while the user is here (ADR 0093).
+		_send_line({"kind": "editor_focus", "focused": what == NOTIFICATION_APPLICATION_FOCUS_IN})
+		return
 	if what == NOTIFICATION_PREDELETE and _job != null:
 		# No signals here: the sidebar listening to them may be going too.
 		_job.send_line(JSON.stringify({"kind": "shutdown", "keep_reviews": true}))

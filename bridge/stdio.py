@@ -39,7 +39,7 @@ from bridge.models import Selection
 from bridge.playtester import Playtester, gameplay_change
 from bridge.protocol import Done, EditorAction, Message, Prompt, Usage
 from bridge.provider_switch import ProviderSwitch
-from bridge.remote_channel import Inputs, RemoteChannel
+from bridge.remote_channel import Inputs, Origin, RemoteChannel
 from bridge.reviewer import Debugger, ReviewAgent
 from bridge.sound_pass import SoundPassRun
 from bridge.specialists import Specialists
@@ -73,6 +73,7 @@ from joinery.gateway import ProjectGateway, waiting_note
 from joinery.gateway_rpc import GatewayRPC
 from joinery.platform_support import ProcessWatch
 from joinery.remote.actions import route as remote_route
+from joinery.remote.handoff import take_over
 from joinery.remote.store import enabled as remote_enabled
 from joinery.routing import routing_settings
 from joinery.timing import TurnTiming
@@ -91,6 +92,7 @@ QUIET_KINDS = frozenset(
         "models_request",
         "when_quiet",
         "remote_ack",
+        "editor_focus",
     }
 )
 #: How often the host looks whether Remote was turned on or off (seconds).
@@ -353,6 +355,10 @@ async def _serve(
     remote: RemoteChannel | None = None
     remote_watch: asyncio.Task[None] | None = None
     inputs: Inputs | None = None
+    if editor_pid > 0:
+        # A host the always-on helper started for a phone holds the project: it hands
+        # over to this editor once quiet (joinery.remote.handoff).
+        await take_over(project, emit)
     try:
         gateway = ProjectGateway(project)
     except (OSError, ValueError) as exc:
@@ -1143,6 +1149,30 @@ async def _serve(
             emit({"kind": "quiet"})
 
         inputs = Inputs(early, None)
+        handing_over: set[asyncio.Task[None]] = set()
+
+        async def release_to_editor() -> bool:
+            """An editor opens this project: let it go once nothing is at work, keeping
+            the changes waiting for review (ADR 0093). True while still busy."""
+            busy = idle_busy()
+
+            async def when_quiet() -> None:
+                while idle_busy():
+                    await asyncio.sleep(1.0)
+                gateway.keep_reviews = True
+                gateway.held_by = "the editor"
+                if remote is not None:
+                    await remote.inbox.put(
+                        (
+                            {"kind": "shutdown", "keep_reviews": True},
+                            Origin("", "", (), internal=True),
+                        )
+                    )
+
+            task = asyncio.create_task(when_quiet())
+            handing_over.add(task)
+            task.add_done_callback(handing_over.discard)
+            return busy
 
         async def follow_remote() -> None:
             """Open the Remote channel while Remote is on; close it when turned off (every
@@ -1158,6 +1188,7 @@ async def _serve(
                         editor=editor_pid > 0,
                         to_editor=to_editor,
                         replies={"art_review": lambda: art_review_event(project)},
+                        release=release_to_editor,
                     )
                     try:
                         await channel.start()
@@ -1184,7 +1215,7 @@ async def _serve(
                 data = json.loads(line)
                 if not isinstance(data, dict):
                     raise TypeError("Invalid chat message.")
-                if origin is not None:
+                if origin is not None and not origin.internal:
                     if data.get("kind") == "decision":
                         data["decided_from"] = origin.device_name
                     relay = (
@@ -1269,6 +1300,12 @@ async def _serve(
                     )
                 elif data.get("kind") == "rollback_decision":
                     emit(gateway.rollback_decision(str(data.get("transaction_id", ""))))
+                elif data.get("kind") == "editor_focus":
+                    # Push notifications wait while the user is at the editor.
+                    if remote is not None:
+                        remote.publish(
+                            {"kind": "presence", "focused": bool(data.get("focused"))}
+                        )
                 elif data.get("kind") == "remote_ack":
                     # The sidebar did (or couldn't do) what a device asked.
                     if remote is not None:

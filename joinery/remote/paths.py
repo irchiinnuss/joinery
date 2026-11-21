@@ -16,20 +16,24 @@ from joinery.platform_support import private_directory, private_file
 HOME_ENV = "JOINERY_REMOTE_HOME"
 
 
+def home_path() -> Path:
+    """Where the per-user directory is, without making it."""
+    override = os.environ.get(HOME_ENV, "").strip()
+    if override:
+        return Path(override)
+    if sys.platform == "darwin":
+        return Path.home() / "Library/Application Support/Joinery/remote"
+    if os.name == "nt":
+        local = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData/Local")
+        return Path(local) / "Joinery/remote"
+    state = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local/state")
+    return Path(state) / "joinery/remote"
+
+
 def remote_home() -> Path:
     """The per-user directory: device token hashes, pairing codes, the host list and
     the machine's audit log. Created private (0700) on first use."""
-    override = os.environ.get(HOME_ENV, "").strip()
-    if override:
-        base = Path(override)
-    elif sys.platform == "darwin":
-        base = Path.home() / "Library/Application Support/Joinery/remote"
-    elif os.name == "nt":
-        local = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData/Local")
-        base = Path(local) / "Joinery/remote"
-    else:
-        state = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local/state")
-        base = Path(state) / "joinery/remote"
+    base = home_path()
     if not base.is_dir():
         base.mkdir(parents=True, mode=0o700)
         private_directory(base)
@@ -73,3 +77,43 @@ def read_json(path: Path) -> Any:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
+
+
+def known_path(home: Path | None = None) -> Path:
+    return (home or remote_home()) / "known.json"
+
+
+def remember(project: Path, agent: str, home: Path | None = None) -> None:
+    """Note a project a host served, so a phone can open it again with no editor open
+    (the always-on helper). Never raises."""
+    import time
+
+    path = known_path(home)
+    try:
+        known = read_json(path)
+        known = known if isinstance(known, dict) else {}
+        known[project_id(project)] = {
+            "project": str(project),
+            "name": project.name,
+            "agent": agent,
+            "seen": time.time(),
+        }
+        # The newest 50.
+        kept = dict(
+            sorted(known.items(), key=lambda kv: -float(kv[1].get("seen", 0)))[:50]
+        )
+        write_private_json(path, kept)
+    except (OSError, ValueError, TypeError):
+        pass
+
+
+def known(home: Path | None = None) -> dict[str, dict[str, Any]]:
+    """{project id: {project, name, agent, seen}} for projects hosts served here."""
+    data = read_json(known_path(home))
+    if not isinstance(data, dict):
+        return {}
+    return {
+        k: v
+        for k, v in data.items()
+        if isinstance(v, dict) and Path(str(v.get("project", ""))).is_dir()
+    }
