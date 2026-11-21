@@ -74,6 +74,7 @@ from joinery.gateway_rpc import GatewayRPC
 from joinery.platform_support import ProcessWatch
 from joinery.remote.actions import route as remote_route
 from joinery.remote.handoff import take_over
+from joinery.remote.service import host_wants_server
 from joinery.remote.store import enabled as remote_enabled
 from joinery.routing import routing_settings
 from joinery.timing import TurnTiming
@@ -1198,6 +1199,10 @@ async def _serve(
                         remote = _remote = channel
                         assert inputs is not None
                         inputs.channel = channel
+                        if editor_pid > 0:
+                            # Remote stays on across restarts: an editor opening a
+                            # project starts the server again, at this version.
+                            await asyncio.to_thread(host_wants_server)
                 elif not on and remote is not None:
                     closing, remote, _remote = remote, None, None
                     assert inputs is not None

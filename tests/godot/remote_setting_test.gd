@@ -39,6 +39,8 @@ func _run() -> void:
 	else:
 		_home = OS.get_temp_dir().path_join("joinery-remote-test-%d" % OS.get_process_id())
 		OS.set_environment("JOINERY_REMOTE_HOME", _home)
+		# The real CLI, but no real server process.
+		OS.set_environment("JOINERY_REMOTE_NO_SERVER", "1")
 		await _check_real_cli()
 		OS.move_to_trash(_home)
 	print("remote setting: ", "FAILED" if _failed else "ok")

@@ -9,22 +9,24 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import signal
-import subprocess
-import sys
 import time
 from pathlib import Path
 from typing import Any
 
-from joinery.platform_support import ProcessWatch, private_file
+from joinery import __version__
 from joinery.remote import audit, login_item, qr, tailscale
 from joinery.remote.actions import SCOPES
 from joinery.remote.hosts import discover
-from joinery.remote.paths import read_json, remote_home, write_private_json
+from joinery.remote.paths import read_json, write_private_json
+from joinery.remote.service import (
+    LOG_FILE,
+    SERVER_FILE,
+    ensure_server,
+    server_info,
+    stop_server,
+)
 from joinery.remote.store import Store
 
-SERVER_FILE = "server.json"
-LOG_FILE = "server.log"
 #: What a pairing confirmation says the device will be able to do.
 CAN_DO = {
     "watch": "follow your chats and changes",
@@ -139,19 +141,6 @@ def _out(args: argparse.Namespace, data: Any, text: str) -> None:
 # --- Server -------------------------------------------------------------------------------
 
 
-def server_info(home: Path | None = None) -> dict[str, Any]:
-    """``{running, pid, port}`` of the server this user started."""
-    data = read_json((home or remote_home()) / SERVER_FILE)
-    if not isinstance(data, dict) or not isinstance(data.get("pid"), int):
-        return {"running": False, "pid": 0, "port": 0}
-    watch = ProcessWatch(int(data["pid"]))
-    try:
-        running = watch.alive()
-    finally:
-        watch.close()
-    return {"running": running, "pid": data["pid"], "port": int(data.get("port", 0))}
-
-
 def origin(store: Store, port: int, ts: dict[str, Any] | None = None) -> str:
     """Where a phone opens Remote: the tailnet name, else (on this machine only) loopback."""
     configured = str(store.config().get("origin", "") or "")
@@ -171,42 +160,14 @@ def _port(store: Store, wanted: int) -> int:
 def _start(store: Store, args: argparse.Namespace) -> int:
     port = _port(store, args.port)
     store.set_config(enabled=True, port=port)
-    info = server_info()
-    if not info["running"]:
-        log = store.home / LOG_FILE
-        with log.open("ab") as stream:
-            private_file(log)
-            flags = 0x00000008 | 0x00000200 if os.name == "nt" else 0
-            subprocess.Popen(
-                [
-                    sys.executable,
-                    "-m",
-                    "joinery.remote.cli",
-                    "serve",
-                    "--port",
-                    str(port),
-                    *(["--helper"] if login_item.status()["installed"] else []),
-                ],
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=stream,
-                creationflags=flags,
-                start_new_session=os.name != "nt",
-            )
-        for _ in range(50):
-            if server_info()["running"]:
-                break
-            time.sleep(0.1)
+    ensure_server(store, port)
     audit.record("remote_on", "ok")
     return _status(store, args)
 
 
 def _stop(store: Store, args: argparse.Namespace) -> int:
     store.set_config(enabled=False)
-    info = server_info()
-    if info["running"]:
-        # Only the server this user started, by the pid it wrote itself.
-        os.kill(int(info["pid"]), signal.SIGTERM)
+    stop_server(store.home)
     audit.record("remote_off", "ok")
     _out(
         args,
@@ -221,7 +182,15 @@ def _serve(store: Store, args: argparse.Namespace) -> int:
 
     port = _port(store, args.port)
     path = store.home / SERVER_FILE
-    write_private_json(path, {"pid": os.getpid(), "port": port, "started": time.time()})
+    write_private_json(
+        path,
+        {
+            "pid": os.getpid(),
+            "port": port,
+            "started": time.time(),
+            "version": __version__,
+        },
+    )
     try:
         return serve(store, port, helper=bool(getattr(args, "helper", False)))
     finally:
@@ -232,6 +201,10 @@ def _serve(store: Store, args: argparse.Namespace) -> int:
 
 def status(store: Store) -> dict[str, Any]:
     config = store.config()
+    if config.get("enabled"):
+        # Settings → Remote reads this when shown: after a restart or an update, the
+        # server is started again at this version.
+        ensure_server(store, wait=True)
     info = server_info(store.home)
     port = int(info["port"] or config["port"])
     ts = tailscale.status()
@@ -424,11 +397,9 @@ def _tailscale(store: Store, args: argparse.Namespace) -> int:
         if answer not in {"y", "yes"}:
             _out(args, {**data, "ran": False}, "Nothing changed.")
             return 1
-    done = tailscale.serve(port, program)
-    if done.returncode != 0:
-        raise ValueError(
-            (done.stderr or done.stdout).strip() or "tailscale serve failed."
-        )
+    ok, said = tailscale.serve(port, program)
+    if not ok:
+        raise ValueError(said)
     store.set_config(origin=ts["origin"])
     audit.record("tailscale_serve", "ok", origin=ts["origin"])
     _out(args, {**data, "ran": True}, f"Remote is on your tailnet: {ts['origin']}")

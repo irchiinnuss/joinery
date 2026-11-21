@@ -8,6 +8,12 @@ from joinery.agents import AGENTS, JOINERY_AGENT_ENV
 
 
 @pytest.fixture(autouse=True)
+def _no_remote_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Chat hosts under test never start a Joinery Remote server of their own."""
+    monkeypatch.setenv("JOINERY_REMOTE_NO_SERVER", "1")
+
+
+@pytest.fixture(autouse=True)
 def _as_the_user(monkeypatch: pytest.MonkeyPatch) -> None:
     """Tests run as the user, even inside an agent's shell: a test that wants an
     agent sets its variables itself (joinery.agents.running_agent)."""

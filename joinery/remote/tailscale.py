@@ -9,6 +9,7 @@ so, runs) that one command; it never changes Tailscale's settings otherwise.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -71,11 +72,32 @@ def serve_command(port: int, program: str = "tailscale") -> list[str]:
     return [program, "serve", "--bg", "--https=443", f"http://127.0.0.1:{port}"]
 
 
-def serve(port: int, program: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        serve_command(port, program),
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
+#: Where Tailscale says to turn on Serve or HTTPS for the tailnet, in its output.
+ENABLE_LINK = re.compile(r"https://login\.tailscale\.com/\S+")
+
+
+def serve(port: int, program: str) -> tuple[bool, str]:
+    """Run :func:`serve_command`. (ok, what to tell the user). A tailnet without Serve or
+    HTTPS turned on makes Tailscale print a link and wait: that link is returned."""
+    try:
+        done = subprocess.run(
+            serve_command(port, program),
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        said, ok = (done.stdout or "") + (done.stderr or ""), done.returncode == 0
+    except subprocess.TimeoutExpired as exc:
+        out = exc.stdout or b""
+        said = out.decode(errors="replace") if isinstance(out, bytes) else str(out)
+        ok = False
+    except OSError as exc:
+        return False, f"Tailscale couldn't be run: {exc}"
+    link = ENABLE_LINK.search(said)
+    if link:
+        return False, (
+            "Turn on HTTPS for your tailnet first (one click in Tailscale), then try "
+            f"again: {link.group(0)}"
+        )
+    return ok, said.strip() or ("" if ok else "tailscale serve failed.")

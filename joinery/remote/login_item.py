@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import plistlib
 import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -26,11 +27,35 @@ NO_LOAD_ENV = "JOINERY_REMOTE_NO_LOAD"
 
 
 def command() -> list[str]:
+    """What the login item runs. In an installed Joinery (the app sets ``JOINERY_HOME``)
+    it goes through ``uv`` against the app's own folder, as the app's launcher does, so
+    an update in place is picked up; a checkout runs its own Python."""
+    home = os.environ.get("JOINERY_HOME", "")
+    uv = shutil.which("uv")
+    if home and uv:
+        return [
+            uv,
+            "run",
+            "--frozen",
+            "--quiet",
+            "--project",
+            home,
+            "joinery",
+            "remote",
+            "serve",
+            "--helper",
+        ]
     return [sys.executable, "-m", "joinery.remote.cli", "serve", "--helper"]
 
 
 def _env() -> dict[str, str]:
-    keep = {k: os.environ[k] for k in (HOME_ENV, "JOINERY_HOME") if os.environ.get(k)}
+    keep = {
+        k: os.environ[k]
+        for k in (HOME_ENV, "JOINERY_HOME", "UV_PROJECT_ENVIRONMENT", "UV_NO_DEV")
+        if os.environ.get(k)
+    }
+    # A login item starts with a bare PATH: uv, git and the tools need the user's.
+    keep["PATH"] = os.environ.get("PATH", "/usr/bin:/bin")
     return keep
 
 
@@ -118,6 +143,16 @@ def uninstall() -> dict[str, Any]:
     if sys.platform != "darwin" and os.name != "nt":
         _load(["systemctl", "--user", "daemon-reload"])
     return status()
+
+
+def refresh(log: Path) -> bool:
+    """Rewrite an installed login item when this install would write it differently
+    (Joinery moved or was updated). True when it changed."""
+    target = path()
+    if not target.is_file() or target.read_bytes() == contents(log):
+        return False
+    install(log)
+    return True
 
 
 def status() -> dict[str, Any]:
