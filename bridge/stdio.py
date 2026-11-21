@@ -39,6 +39,7 @@ from bridge.models import Selection
 from bridge.playtester import Playtester, gameplay_change
 from bridge.protocol import Done, EditorAction, Message, Prompt, Usage
 from bridge.provider_switch import ProviderSwitch
+from bridge.remote_channel import Inputs, RemoteChannel
 from bridge.reviewer import Debugger, ReviewAgent
 from bridge.sound_pass import SoundPassRun
 from bridge.specialists import Specialists
@@ -71,6 +72,8 @@ from joinery.editor_ops import validate_edit
 from joinery.gateway import ProjectGateway, waiting_note
 from joinery.gateway_rpc import GatewayRPC
 from joinery.platform_support import ProcessWatch
+from joinery.remote.actions import route as remote_route
+from joinery.remote.store import enabled as remote_enabled
 from joinery.routing import routing_settings
 from joinery.timing import TurnTiming
 from joinery.turn import TurnController
@@ -78,10 +81,20 @@ from joinery.wiring import refresh_gate
 
 #: The open chat's recorder while a host serves; it sees every event the sidebar does.
 _recorder: ChatRecorder | None = None
+#: Joinery Remote's channel while Remote is on (ADR 0093); devices see every event too.
+_remote: RemoteChannel | None = None
 #: Messages the editor sends by itself: they don't mean the user is at the keyboard.
 QUIET_KINDS = frozenset(
-    {"editor_result", "editor_view_result", "models_request", "when_quiet"}
+    {
+        "editor_result",
+        "editor_view_result",
+        "models_request",
+        "when_quiet",
+        "remote_ack",
+    }
 )
+#: How often the host looks whether Remote was turned on or off (seconds).
+REMOTE_POLL_SECONDS = 3.0
 #: Fixes and checks that may wait until the user is away (ADR 0072).
 UNHURRIED = frozenset({"match_fix", "check_fix", "design_start"})
 
@@ -90,6 +103,25 @@ def emit(event: dict[str, Any]) -> None:
     print(json.dumps(event), flush=True)
     if _recorder is not None:
         _recorder.observe(event)
+    if _remote is not None:
+        _remote.publish(event)
+
+
+def to_editor(event: dict[str, Any]) -> None:
+    """An event for the sidebar alone: no device and no chat record sees it."""
+    print(json.dumps(event), flush=True)
+
+
+def decided_from(data: dict[str, Any]) -> str:
+    """The paired device a decision line names ("" from the editor's own click)."""
+    return " ".join(str(data.get("decided_from", "") or "").split())[:60]
+
+
+def mark_decided_from(lane: ProjectGateway, data: dict[str, Any]) -> None:
+    """Name the device on the change being decided, for its Timeline entry."""
+    tx = lane.transaction
+    if tx is not None and tx.id == str(data.get("transaction_id", "")):
+        tx.decided_from = decided_from(data)
 
 
 _FEATURE_OFFER = re.compile(r"\s*Add (?:it|them) with (/feature add [a-z0-9-]+)\?")
@@ -316,6 +348,11 @@ async def _serve(
     switch: ProviderSwitch | None = None
     #: The last request's model choice, which the tasks it starts use too.
     selection: dict[str, Any] = {}
+    global _remote
+    #: Joinery Remote's channel while Remote is on, and the input loop it feeds.
+    remote: RemoteChannel | None = None
+    remote_watch: asyncio.Task[None] | None = None
+    inputs: Inputs | None = None
     try:
         gateway = ProjectGateway(project)
     except (OSError, ValueError) as exc:
@@ -1096,11 +1133,60 @@ async def _serve(
                 calm = 0 if idle_busy() else calm + 1
             emit({"kind": "quiet"})
 
-        while line := await early.readline():
+        inputs = Inputs(early, None)
+
+        async def follow_remote() -> None:
+            """Open the Remote channel while Remote is on; close it when turned off (every
+            device's stream ends). A headless host (``joinery run``) has no editor."""
+            nonlocal remote
+            global _remote
+            while True:
+                on = await asyncio.to_thread(remote_enabled)
+                if on and remote is None:
+                    channel = RemoteChannel(
+                        project,
+                        agent_id,
+                        editor=editor_pid > 0,
+                        to_editor=to_editor,
+                        replies={"art_review": lambda: art_review_event(project)},
+                    )
+                    try:
+                        await channel.start()
+                    except (OSError, ValueError):
+                        pass  # Tried again on the next look.
+                    else:
+                        remote = _remote = channel
+                        assert inputs is not None
+                        inputs.channel = channel
+                elif not on and remote is not None:
+                    closing, remote, _remote = remote, None, None
+                    assert inputs is not None
+                    await inputs.drop_channel()
+                    await closing.close()
+                await asyncio.sleep(REMOTE_POLL_SECONDS)
+
+        remote_watch = asyncio.create_task(follow_remote())
+        while True:
+            line, origin = await inputs.readline()
+            if not line:
+                break
+            failed = ""
             try:
                 data = json.loads(line)
                 if not isinstance(data, dict):
                     raise TypeError("Invalid chat message.")
+                if origin is not None:
+                    if data.get("kind") == "decision":
+                        data["decided_from"] = origin.device_name
+                    if (
+                        remote is not None
+                        and remote.editor
+                        and remote_route(data) == "relay"
+                    ):
+                        # The sidebar does it as if clicked, and answers remote_ack.
+                        remote.relay(data, origin)
+                        origin = None
+                        continue
                 if data.get("kind") == "shutdown":
                     # The editor restarts its chat (another agent, Reconnect): changes
                     # waiting for review stay for the user, as after `joinery run`.
@@ -1115,6 +1201,7 @@ async def _serve(
                 assert variants is not None
                 if data.get("kind") == "decision" and owned is not None:
                     try:
+                        mark_decided_from(owned.gateway, data)
                         if owned.group and bool(data.get("accept", False)):
                             # Accepting one way is picking it: the rest go.
                             emit_decisions(await variants.pick(owned.group, owned.id))
@@ -1148,6 +1235,7 @@ async def _serve(
                         # The editor's own Accept of a change Joinery said may be kept
                         # without asking (its live scene edits): recorded as such.
                         pending.auto_accepted = True
+                    mark_decided_from(gateway, data)
                     decision = await controller.decide(
                         str(data.get("transaction_id", "")),
                         bool(data.get("accept", False)),
@@ -1165,6 +1253,14 @@ async def _serve(
                     )
                 elif data.get("kind") == "rollback_decision":
                     emit(gateway.rollback_decision(str(data.get("transaction_id", ""))))
+                elif data.get("kind") == "remote_ack":
+                    # The sidebar did (or couldn't do) what a device asked.
+                    if remote is not None:
+                        remote.acked(
+                            str(data.get("ref", "")),
+                            bool(data.get("ok", False)),
+                            str(data.get("text", "") or ""),
+                        )
                 elif data.get("kind") == "art_review":
                     emit(art_review_event(project))
                 elif data.get("kind") == "models_request":
@@ -1439,7 +1535,13 @@ async def _serve(
                 else:
                     raise ValueError("Unknown chat message.")
             except (TypeError, ValueError, OSError, RuntimeError, TimeoutError) as exc:
-                emit(Message(text=str(exc), level="warn").model_dump())
+                failed = str(exc) or "That didn't work."
+                if origin is None:
+                    emit(Message(text=str(exc), level="warn").model_dump())
+            finally:
+                # A device's action is answered to that device, not in the sidebar.
+                if origin is not None:
+                    origin.done(not failed, failed)
         return 0
     except (
         OSError,
@@ -1481,6 +1583,14 @@ async def _serve(
         if editor_watch is not None:
             editor_watch.cancel()
             await asyncio.gather(editor_watch, return_exceptions=True)
+        if remote_watch is not None:
+            remote_watch.cancel()
+            await asyncio.gather(remote_watch, return_exceptions=True)
+        if inputs is not None:
+            await inputs.close()
+        if remote is not None:
+            _remote = None
+            await remote.close()
 
 
 def run(

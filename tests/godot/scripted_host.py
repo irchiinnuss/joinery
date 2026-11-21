@@ -397,6 +397,8 @@ def main() -> int:
     parser.add_argument("--project", type=Path, required=True)
     parser.add_argument("--script", type=Path, required=True)
     parser.add_argument("--agent", default="codex")
+    # The editor that started it (Joinery Remote hands that sidebar what it owns).
+    parser.add_argument("--editor-pid", type=int, default=0)
     args = parser.parse_args()
     # A host that won't end can be asked where it is: SIGUSR1 writes every stack here.
     # Windows has neither the signal nor faulthandler.register; there the test just ends it.
@@ -416,7 +418,9 @@ def main() -> int:
         setattr(stdio, name, value)
     # Stand-in workers: the real disk and Docker are never asked before a turn.
     os.environ.setdefault("JOINERY_MACHINE_CHECK", "off")
-    return asyncio.run(stdio.serve(args.project.resolve(), args.agent))
+    return asyncio.run(
+        stdio.serve(args.project.resolve(), args.agent, editor_pid=args.editor_pid)
+    )
 
 
 if __name__ == "__main__":
