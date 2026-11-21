@@ -38,6 +38,9 @@ from joinery.stage_access import NO_STAGE, STAGE_ENV
 from joinery.tool_names import for_agent
 from joinery.wiring import _command_str
 
+#: Codex's app-server stays out of its remote control (the daemon sets the same).
+NO_VENDOR_REMOTE_ENV = {"CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED": "1"}
+
 
 def require_gate(project: Path) -> None:
     """Refuse to launch without the shared project hook; never overwrite user config."""
@@ -201,6 +204,9 @@ class CodexSession:
         if self.role:
             env[ROLE_ENV] = self.role
         env[STAGE_ENV] = self.stage or NO_STAGE
+        # Never reachable through Codex's own remote control: the phone would steer
+        # the agent around the sidebar's review (ADR 0093).
+        env.update(NO_VENDOR_REMOTE_ENV)
         if profile_id:
             driver, args, extra = runtime(profile_id)
             if driver != "codex":
@@ -211,6 +217,8 @@ class CodexSession:
             )
         if self.inspection_only:
             args += ["-c", "agents.enabled=false"]
+        # Older Codex had remote control as a feature flag; newer ones read the env.
+        args += ["-c", "features.remote_control=false"]
         # Session configuration loads even when the project's config layer is
         # untrusted. Supply only our verified gate, without trusting other hooks.
         command = _command_str(str(ROOT), "codex")

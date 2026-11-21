@@ -80,6 +80,13 @@ CLAUDE_SESSION_TOOLS: tuple[str, ...] = (
 #: notes outside the project, unreviewed, and adds its instructions to every call;
 #: the project's memory is JOURNEYMAN.md, already in the prompt (ADR 0077).
 SESSION_ENV: dict[str, str] = {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
+#: A Joinery session is never reachable through Claude's own Remote Control, even
+#: with the user's "Enable Remote Control for all sessions": the phone would steer
+#: the agent around the sidebar's review. Joinery Remote is the way in (ADR 0093).
+NO_VENDOR_REMOTE: dict[str, bool] = {
+    "disableRemoteControl": True,
+    "remoteControlAtStartup": False,
+}
 
 
 def cache_flags(role: str, stable_system_prompt: bool, tools_flag: bool) -> list[str]:
@@ -482,6 +489,7 @@ class ClaudeSession:
         hook = _command_str(str(ROOT), "claude")
         settings: dict[str, Any] = {
             **(user_settings_kept() if self.setting_sources else {}),
+            **NO_VENDOR_REMOTE,
             "hooks": {
                 "PreToolUse": [
                     {

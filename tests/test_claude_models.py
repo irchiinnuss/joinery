@@ -123,3 +123,19 @@ def test_a_session_skips_the_users_own_settings_but_signs_in_as_before(
     old = launch_args(monkeypatch, prompt)
     assert "--setting-sources" not in old
     assert "env" not in json.loads(old[old.index("--settings") + 1])
+
+
+def test_a_session_is_never_reachable_through_claudes_own_remote_control(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Joinery Remote is the way in (ADR 0093): a user's "Enable Remote Control for
+    all sessions" must not open a Joinery session around the sidebar's review."""
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path))
+    (tmp_path / "settings.json").write_text(
+        json.dumps({"remoteControlAtStartup": True, "disableRemoteControl": False})
+    )
+    for sources in (True, False):
+        args = launch_args(monkeypatch, Prompt(text="hi", project_dir="/p"), sources)
+        settings = json.loads(args[args.index("--settings") + 1])
+        assert settings["disableRemoteControl"] is True
+        assert settings["remoteControlAtStartup"] is False

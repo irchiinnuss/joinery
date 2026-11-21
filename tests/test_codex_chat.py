@@ -44,6 +44,7 @@ import re
 command = json.loads(re.search(r'command=("(?:[^"\\\\]|\\\\.)*")',command)[1])
 trusted = Path('hook_trusted').exists()
 Path('argv.json').write_text(json.dumps(sys.argv))
+Path('remote_env.txt').write_text(os.environ.get('CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED', ''))
 turn = 0
 for line in sys.stdin:
  r=json.loads(line)
@@ -502,3 +503,20 @@ def test_a_saved_thread_resumes_and_a_new_chat_starts_a_thread(game: Path) -> No
             await session.close()
 
     asyncio.run(run())
+
+
+def test_a_session_stays_out_of_codexs_own_remote_control(game: Path) -> None:
+    """Joinery Remote is the way in (ADR 0093): Codex's remote control never attaches
+    to the app-server Joinery starts, old Codex (a feature) or new (its env)."""
+
+    async def run() -> None:
+        session = CodexSession()
+        try:
+            await session.connect(game)
+        finally:
+            await session.close()
+
+    asyncio.run(run())
+    argv = json.loads((game / "argv.json").read_text())
+    assert "features.remote_control=false" in argv
+    assert (game / "remote_env.txt").read_text() == "1"
