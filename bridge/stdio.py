@@ -1178,11 +1178,18 @@ async def _serve(
                 if origin is not None:
                     if data.get("kind") == "decision":
                         data["decided_from"] = origin.device_name
-                    if (
+                    relay = (
                         remote is not None
                         and remote.editor
                         and remote_route(data) == "relay"
-                    ):
+                    )
+                    if relay and data.get("kind") == "decision":
+                        # Only the change in the sidebar's review is decided there (its
+                        # live scene edits); a task's, or none, is the host's to answer.
+                        relay = controller.review_open and controller.review_id == str(
+                            data.get("transaction_id", "")
+                        )
+                    if relay and remote is not None:
                         # The sidebar does it as if clicked, and answers remote_ack.
                         remote.relay(data, origin)
                         origin = None

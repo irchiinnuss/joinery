@@ -245,13 +245,6 @@ def test_with_an_editor_the_sidebar_does_it(tmp_path: Path, agent: str) -> None:
                     assert relayed["device"]["name"] == "Ana's iPhone"
                     if action["kind"] == "prompt":
                         await host.send({"kind": "prompt", "text": action["text"]})
-                    elif action["kind"] == "decision":
-                        await host.send(
-                            {
-                                **action,
-                                "decided_from": relayed["device"]["name"],
-                            }
-                        )
                     await host.send(
                         {
                             "kind": "remote_ack",
@@ -267,13 +260,15 @@ def test_with_an_editor_the_sidebar_does_it(tmp_path: Path, agent: str) -> None:
             )
             assert sent == {"ok": True, "text": "Done."}
             await feed.wait_for(lambda e: e.get("kind") == "file_preview")
+            # A change the sidebar isn't reviewing is the host's to answer, not relayed.
             decided = await hosts.request(
                 channel,
                 act({"kind": "decision", "transaction_id": "tx1", "accept": True}),
             )
-            assert decided["ok"]
-            decision = await feed.wait_for(lambda e: e.get("kind") == "file_decision")
-            assert decision["accepted"] is True
+            assert decided == {
+                "ok": False,
+                "text": "No change is waiting for your decision.",
+            }
             # The relay itself is the editor's alone: no device sees it.
             assert not any(
                 (i.get("event") or {}).get("kind") == "remote_action"
