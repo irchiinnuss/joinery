@@ -443,6 +443,24 @@ after 30 days unused or 90 days in all. Revoke it in Settings → Remote or with
 lists what devices did. Turning Remote off ends every connection and keeps
 pairings.
 
+**When Joinery is closed** (`joinery remote install-helper`) keeps Remote
+available after you quit: your phone lists the projects you used here, and opening
+one starts its chat without the editor, with the agent of its last chat. Changes
+wait for review as usual. It stops after 15 quiet minutes. If you then open the
+project in Joinery, the editor takes it over, after the phone's request finishes
+if one is running. `joinery remote uninstall-helper` removes it.
+
+**Notifications**: on the phone, open Settings on the Projects screen and turn
+on Notifications. On an iPhone, first add the page to the Home Screen (Share →
+Add to Home Screen) and open it from there. Your Mac sends a short, encrypted
+note through your phone's own push service when a change waits, Journeyman needs
+you, or something goes wrong, never what the change or the chat says, and
+nothing while you're at the editor.
+
+**Keep this Mac awake** (`joinery remote keep-awake on`, off by default) stops
+the Mac sleeping while it's plugged in and Remote is on. A closed laptop still
+sleeps unless it's on power with an external display.
+
 A paired device's token can do what you could do in the sidebar, within its
 scopes, until you revoke it. Treat a lost phone like a lost key.
 

@@ -131,8 +131,14 @@ All routes are on the server:
   `expired` or `allowed`. `allowed` sets the cookie and returns `token` once.
 - `GET /api/me` returns the device (scopes, expiry, last seen).
 - `GET /api/projects` returns `[{id, name, agent, editor, started, working, waiting, todo,
-  last}]`.
-- `GET /api/projects/{id}/chats` returns the saved chats (id, title, provider, dates).
+  last, open}]`. Projects a host served here before follow with `open: false` and
+  `can_open`, which is true only under the always-on helper.
+- `POST /api/projects/{id}/open` starts a closed project's headless host (chat scope). It
+  returns 409 without the helper.
+- `GET /api/projects/{id}/chats` returns the saved chats (id, title, provider, dates), and
+  `GET /api/projects/{id}/chats/{chat}` returns a chat's last 100 turns.
+- `GET /api/push` returns `{public_key, subscribed, kinds}`. `POST /api/push/subscribe`
+  takes `{subscription, kinds?}` and `POST /api/push/unsubscribe` takes `{endpoint}`.
 - `GET /api/projects/{id}/events?since=N&started=T` is a Server-Sent Events stream:
   - `hello` gives `{seq, oldest, gap, editor, started}`;
   - `event` has `id` = seq and data = one host event (`message_delta`, `message`,
@@ -148,26 +154,79 @@ All routes are on the server:
   opened.
 - `GET /api/projects/{id}/media/{tx}/{index}/{before|after}` returns the picture or sound.
 
-## Seams for what comes next
+## The phone page
 
-- `joinery.remote.seams.HostLauncher.ensure_host(project)` is for the always-on helper. It
-  starts the headless host (`joinery chat --keep-reviews`, as `joinery run` does) for a
-  project with no host advertised, taking the project's lease like any host. The server's
-  default `NoLauncher` reaches only projects open somewhere. The helper's server is
-  constructed with its launcher (`RemoteServer(launcher=…)`). An editor that later opens the
-  project asks the headless host to release it, once quiet.
-- `joinery.remote.seams.NotificationSink.notify(Notice)` is for Web Push. The server follows
-  every advertised host, whether or not a phone is connected, and turns its events into
-  notices with `notice_for`:
-  - `finished` from `done` ok;
-  - `change_ready` from `file_preview`;
-  - `needs_you` from a to-do waiting for Go, a provider switch, an art gate, or a Rule Zero
-    stop;
-  - `error` from a warning or a lost connection.
+`joinery/remote/static` is plain HTML, CSS and ES modules. It loads nothing from elsewhere,
+and its CSP has no `unsafe-inline`.
+- It installs as a web app: a manifest, icons, and a service worker that keeps only the
+  page's own files and never `/api`.
+- It uses the sidebar's palette and is laid out for phones (360–430 px), in dark and light.
+- Screens: pairing, projects (open, and closed ones the helper can open), the live chat and
+  saved chats, and settings (notifications).
+- The chat shows:
+  - the steps and replies;
+  - the change card with facts, the checks line, reviewer notes worst first, a before and
+    after compare (dragged, or with a slider), sounds A/B and the changed lines;
+  - Accept only once a change with notes has been opened;
+  - the to-do with Go and Cancel;
+  - task Stops and the provider offer;
+  - the Rule Zero banner, read and dismissed with no retry, and the art-gate notice.
+- The message box is never redrawn, so an event arriving while the user types costs
+  nothing.
+- After a drop the page reconnects from its last event and says when the Mac was last seen.
+  A message that couldn't go stays in the box.
+- Events replayed on connect are shown but never announced.
+- The page's state model is tested in node (`tests/remote_page/state.test.mjs`). The page is
+  tested in headless Chrome over its DevTools protocol, with no extra package
+  (`tests/remote_page/browse.py`, 30 checks in dark and light, with screenshots).
 
-  A notice's text carries no content ("A change waits in Harbour."). Sinks are passed to
-  `RemoteServer(sinks=…)`. The same notices already reach open pages as `notice` events.
-- Keep-awake while plugged in is an option for a later stage, default off.
+## The always-on helper
+
+`joinery remote serve --helper` is the same server given a `HeadlessLauncher`
+(`joinery/remote/helper.py`, implementing the `HostLauncher` seam). It is installed as a
+login item by `joinery remote install-helper` and removed by `uninstall-helper`: a
+LaunchAgent on macOS, a `systemd --user` unit on Linux, a logon task on Windows. Settings →
+Remote offers it as "When Joinery is closed".
+
+- When a phone opens a closed project, the helper starts the host `joinery run` uses
+  (`joinery chat --keep-reviews`) with the agent of the project's last chat. That host takes
+  the project's lease like any other, answers editor-only calls with "No editor is open",
+  and keeps changes for review.
+- The helper stops that host after 15 minutes with nothing running, nothing waiting, no
+  to-do and no phone watching. It holds no lease of itself.
+- **Handover** (`joinery/remote/handoff.py`): an editor opening such a project first asks
+  that host to let go (channel `op: release`, which only hosts with no editor accept). The
+  host lets go at once when quiet, else when its request finishes, never by stopping it.
+  The editor says "A request from your phone is still running…" and waits up to 5 minutes.
+  The editor's own lease wait covers the close. Changes waiting for review appear in its
+  Review tab.
+
+## Web Push
+
+`joinery/remote/push.py` implements the `NotificationSink` seam. It is the only thing Remote
+sends off the machine, and only to phones that turned notifications on.
+
+- The browser's subscription is accepted only for HTTPS endpoints on the known push
+  services (Apple, Google, Mozilla, Microsoft), with a valid P-256 key and a 16-byte secret.
+  A device can't make the machine post anywhere else.
+- Each push is encrypted for that phone (RFC 8291 `aes128gcm`; the test checks the RFC's
+  worked example byte for byte) and signed with this machine's VAPID key (RFC 8292, ES256,
+  kept in the per-user directory at 0600).
+- The payload is `{kind, project, project_id, text}` with no content, for example "A change
+  waits in Harbour.".
+- By default only `needs_you`, `change_ready` and `error` are sent. A push service that says
+  a subscription is gone (404/410) drops it.
+- Nothing is pushed while the user is at that project's editor: the sidebar reports focus,
+  and the host passes it on as `presence`. Nothing is shown while the page itself is in
+  front.
+
+## Keep-awake
+
+`joinery remote keep-awake on|off` (Settings → Remote → "Keep this Mac awake") is off by
+default. While on, the server holds the machine awake:
+- macOS: `caffeinate -s`, which holds only on AC power;
+- Linux: `systemd-inhibit`;
+- Windows: `SetThreadExecutionState`.
 
 ## Consequences
 
@@ -179,7 +238,9 @@ All routes are on the server:
   Scopes, expiry, revocation, the audit log and the Accept-after-opening rule limit it.
   Step-up with Face ID or Touch ID (WebAuthn) for Accept is later work.
 - New direct dependencies are starlette, uvicorn and sse-starlette (already resolved through
-  mcp) and segno (pure-Python QR), all pinned in `uv.lock` with hashes.
+  mcp) and segno (pure-Python QR), all pinned in `uv.lock` with hashes. Web Push uses
+  `cryptography`, already resolved through mcp and sigstore.
+- On iOS, notifications need the page added to the Home Screen (Safari's rule).
 
 ## Not verified
 
@@ -187,3 +248,6 @@ All routes are on the server:
   configured) and loopback are accepted. `Tailscale-User-Login` is only logged as the peer,
   and only when the request came from loopback.
 - Claude Code Remote Control against a `-p` stream-json session. It is turned off either way.
+- A real push through Apple's, Google's or Mozilla's service, a real `tailscale serve`, and
+  loading the login item: none was run on the development machine. The encryption, the
+  signature, the subscription checks and the login item files are tested.
