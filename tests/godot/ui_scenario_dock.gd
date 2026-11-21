@@ -64,6 +64,15 @@ func _run() -> void:
 	quit(0 if ok else 1)
 
 
+## What remote_relay.gd reads of plugin.gd: the sidebar, the file review on screen and whether
+## a decision on it is on its way.
+class RelayPlugin:
+	extends RefCounted
+	var _dock: Control
+	var _file_review: Dictionary = {}
+	var _deciding := false
+
+
 ## A fresh sidebar on the editor's ground, with a chat bridge wired as the plugin wires it.
 func _build() -> Array:
 	_host = Control.new()
@@ -106,6 +115,11 @@ func _wire(dock: Control, chat: Node) -> void:
 	dock.connect("prompt_submitted", Callable(chat, "submit"))
 	dock.connect("cancel_requested", Callable(chat, "cancel_turn"))
 	var review := {}
+	# A paired phone's send, Stop, Go and decisions, through the sidebar (review_flow.gd).
+	var plugin := RelayPlugin.new()
+	plugin._dock = dock
+	plugin._file_review = review
+	load("res://addons/joinery/remote_relay.gd").call("attach", dock, plugin, chat)
 	chat.connect(
 		"file_preview",
 		func(event: Dictionary) -> void:
@@ -124,12 +138,16 @@ func _wire(dock: Control, chat: Node) -> void:
 		if not bool(chat.call("is_ready")):
 			dock.call("show_review_error", "Journeyman isn't connected. Reconnect, then decide.")
 			return
+		plugin._deciding = true
 		chat.call("decide_files", str(review.get("transaction_id", "")), accept)
 	dock.connect("accept_edit_requested", decide.bind(true))
 	dock.connect("reject_edit_requested", decide.bind(false))
 	chat.connect(
 		"file_decision",
 		func(event: Dictionary) -> void:
+			plugin._deciding = false
+			# As plugin.gd: the decided change is no longer the one in review.
+			review.clear()
 			var accepted := bool(event.get("accepted", false))
 			dock.call(
 				"hide_edit_review",

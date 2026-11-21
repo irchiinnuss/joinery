@@ -726,3 +726,84 @@ func _kept_id(sessions: Node, view: Control) -> String:
 		if kept[id] == view:
 			return id
 	return ""
+
+
+## What the chat host hands the sidebar when a paired phone asks (Joinery Remote, ADR 0093).
+func _from_phone(action: Dictionary, ref: String) -> void:
+	(
+		s
+		. chat
+		. call(
+			"_handle",
+			{
+				"kind": "remote_action",
+				"ref": ref,
+				"action": action,
+				"device": {"id": "d_1", "name": "Ana's iPhone"},
+			}
+		)
+	)
+
+
+## A phone accepts the change waiting at the editor: the sidebar does it as its own Accept, the
+## card settles as after a click, the transcript names the phone and nothing takes the focus.
+func _remote_decision() -> void:
+	if not await s.connect_host():
+		return
+	s.send(WIDEN)
+	var ready := await s.wait_until(
+		func() -> bool: return bool(s.dock.get("_review_pending")), 8000
+	)
+	s.check(ready, "The change waits for review")
+	await s.frames(2)
+	var focused: Control = s.dock.get_viewport().gui_get_focus_owner()
+	_from_phone({"kind": "decision", "transaction_id": "tx-widen", "accept": true}, "r1")
+	await s.frames(1)
+	s.check(s.card().call("awaiting_decision") == false, "The phone's Accept took the decision")
+	s.check(s.visible_text().contains("Accepted from Ana's iPhone"), "The transcript names it")
+	var settled := await s.wait_until(
+		func() -> bool: return not bool(s.dock.get("_review_pending")), 8000
+	)
+	s.check(settled, "The host's decision closes the review")
+	s.check(str(s.card().get("state")) == "accepted", "The card reads accepted")
+	s.check(
+		s.dock.get_viewport().gui_get_focus_owner() == focused, "A phone's decision takes no focus"
+	)
+	await s.shot("decided")
+	# A second Accept from the phone finds nothing waiting at the editor.
+	_from_phone({"kind": "decision", "transaction_id": "tx-widen", "accept": true}, "r2")
+	await s.frames(2)
+	s.check(
+		s.visible_text().count("Accepted from Ana's iPhone") == 1,
+		"A decision the editor no longer has is not shown twice"
+	)
+
+
+## A phone sends a message while the user types one: it goes as a request of its own, said to be
+## from the phone, and the user's draft stays. One sent while Journeyman works waits in the queue;
+## the phone's Stop is the Stop button.
+func _remote_prompt() -> void:
+	if not await s.connect_host():
+		return
+	s.prompt().text = "my own draft"
+	_from_phone({"kind": "prompt", "text": SAY_HELLO}, "p1")
+	var replied := await s.wait_until(func() -> bool: return s.visible_text().contains("Hello!"))
+	s.check(replied, "The phone's message ran as a request")
+	s.check(s.visible_text().contains("Sent from Ana's iPhone"), "The transcript names the phone")
+	s.check(s.prompt().text == "my own draft", "The user's draft is untouched")
+	await s.wait_until(func() -> bool: return not bool(s.dock.get("_busy")), 8000)
+	_from_phone({"kind": "prompt", "text": KEEP_GOING}, "p2")
+	var working := await s.wait_until(func() -> bool: return bool(s.dock.get("_busy")), 8000)
+	s.check(working, "The sidebar shows Journeyman at work on the phone's request")
+	var queue: Object = s.transcript().get("queue")
+	_from_phone({"kind": "prompt", "text": SAY_HELLO}, "p3")
+	await s.frames(2)
+	s.check(int(queue.call("size_queued")) == 1, "A message sent meanwhile waits in the queue")
+	s.check(
+		not s.visible_text().contains("Queued from"), "No extra line cuts into the running reply"
+	)
+	await s.shot("queued")
+	_from_phone({"kind": "cancel"}, "p4")
+	var stopped := await s.wait_until(func() -> bool: return not bool(s.dock.get("_busy")), 8000)
+	s.check(stopped, "The phone's Stop stopped the request")
+	s.check(s.visible_text().contains("Stopped from Ana's iPhone"), "The stop names the phone")

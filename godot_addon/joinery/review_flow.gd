@@ -25,6 +25,7 @@ extends Node
 const DROPPED := ["failed", "cancelled", "stopped", "needs_user"]
 const AUTO_ACCEPTED := "Accepted automatically"
 const PLAYED_WATCH := preload("played_watch.gd")
+const REMOTE_RELAY := preload("remote_relay.gd")
 
 ## The undo history of a scene (UndoRedo for [param root]), for tests; empty asks the editor.
 var history_for := Callable()
@@ -63,6 +64,8 @@ func setup(plugin: Object, chat: Node) -> void:
 	var panel := _panel()
 	if panel != null and panel.has_signal("revise_requested"):
 		panel.connect("revise_requested", _on_revise)
+	# A paired phone's send, Stop, Go, Accept and Discard, done here as if clicked (ADR 0093).
+	REMOTE_RELAY.attach(self, plugin, chat)
 
 
 ## A live edit is on screen in the viewport ([param summary] names it; [param owner] is the

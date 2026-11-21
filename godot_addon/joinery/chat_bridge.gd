@@ -88,6 +88,9 @@ signal provider_switch(event: Dictionary)
 ## Why the connection failed, before the "error" status: {reason, agent, name, url, details}
 ## (bridge/connect_errors.py); {} once connected.
 signal connection_problem(problem: Dictionary)
+## A paired device asked for something the sidebar does itself (send, Stop, Go, Accept, Discard;
+## remote_relay.gd, ADR 0093): {ref, action, device: {id, name}}. Answer with [method remote_ack].
+signal remote_action(event: Dictionary)
 
 const COMMAND_SCRIPT := preload("command_job.gd")
 const ATTACHMENTS := preload("chat_attachments.gd")
@@ -110,6 +113,8 @@ var parallel := 1
 ## True while the host's lines of one read are handled: a line can still follow the one being
 ## handled (a turn's timing follows its done).
 var dispatching := false
+## The paired device the next decision comes from (remote_relay.gd); its Timeline entry says so.
+var decided_from := ""
 var _job: RefCounted
 var _connected := false
 var _pending: Dictionary = {}
@@ -665,6 +670,8 @@ func _handle(event: Dictionary) -> void:
 			provider_switch.emit(event)
 		"file_decision":
 			file_decision.emit(event)
+		"remote_action":
+			remote_action.emit(event)
 		"editor_action":
 			editor_action.emit(event)
 		"editor_view":
@@ -777,7 +784,15 @@ func decide_files(identifier: String, accept: bool, auto := false) -> void:
 		var line := {"kind": "decision", "transaction_id": identifier, "accept": accept}
 		if auto:
 			line["auto"] = true
+		if not decided_from.is_empty():
+			line["decided_from"] = decided_from
+			decided_from = ""
 		_job.send_line(JSON.stringify(line))
+
+
+## Tell the host what came of a device's [signal remote_action] [param ref].
+func remote_ack(ref: String, ok: bool, text := "") -> void:
+	_send_line({"kind": "remote_ack", "ref": ref, "ok": ok, "text": text})
 
 
 func rollback_files(identifier: String) -> void:

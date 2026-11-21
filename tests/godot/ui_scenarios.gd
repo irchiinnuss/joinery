@@ -74,6 +74,8 @@ const ALL := [
 	"busy-status",
 	"editor-life",
 	"reopen",
+	"remote-decision",
+	"remote-prompt",
 ]
 
 ## Builds a fresh sidebar for each scenario: returns [dock, chat bridge], wired and in the tree.
