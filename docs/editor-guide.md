@@ -418,9 +418,10 @@ your Mac serves it, and your own Tailscale carries it to the phone (ADR 0093).
    tailnet.
 2. Settings → Remote → turn **Remote** on (`joinery remote start`). Joinery's
    server listens on this Mac only (127.0.0.1).
-3. Put it on your tailnet: `joinery remote tailscale` prints the
-   `tailscale serve` command; `joinery remote tailscale --run` runs it after
-   asking. Your phone then opens `https://<mac>.<tailnet>.ts.net`.
+3. Put it on your tailnet: press **Put it on my tailnet** under the address
+   (it asks first), or run `joinery remote tailscale --run`. Your phone then
+   opens `https://<mac>.<tailnet>.ts.net`; **Copy address** copies it. Without
+   Tailscale the button reads **Get Tailscale**.
 4. **Pair a device** shows a QR code and a 10-character code for 5 minutes.
    Scan it on the phone, then answer "Pair …?" on the Mac. Without that answer
    nothing is paired. `joinery remote pair` does the same in a terminal.
@@ -437,7 +438,10 @@ auto-accept, set up tools, or pair another device. It has no file browser and
 no shell. Every agent call still passes the project's policy gate, and a Rule
 Zero stop shows on the phone as it does in the sidebar.
 
-Each device can only watch, also chat, or also decide (`--scopes`). It expires
+Each device can **Follow only**, **Follow and chat**, or do **Everything**
+(which adds Accept and Discard): choose it beside the device in Settings →
+Remote, or `joinery remote scopes <id> watch,chat`. **Activity** there lists what
+devices did and what was refused; **Unpair all** asks first. It expires
 after 30 days unused or 90 days in all. Revoke it in Settings → Remote or with
 `joinery remote revoke <id>`, which takes effect at once. `joinery remote log`
 lists what devices did. Turning Remote off ends every connection and keeps

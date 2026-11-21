@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import stat
+import time
 from pathlib import Path
 
 import pytest
@@ -170,3 +171,20 @@ def test_audit(tmp_path: Path) -> None:
     assert "reason" not in mine[0]
     assert [e["action"] for e in audit.entries(project=project)] == ["decision"]
     assert stat.S_IMODE(os.stat(home / audit.FILE).st_mode) == 0o600
+
+
+def test_cli_changes_what_a_device_may_do(
+    store: Store, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Settings → Remote's picker runs `joinery remote scopes`."""
+    from joinery.cli import main
+
+    monkeypatch.setenv("JOINERY_REMOTE_HOME", str(store.home))
+    token = paired(store, now=time.time())
+    device = store.authenticate(token)
+    assert device is not None
+    assert main(["remote", "scopes", device["id"], "watch,chat", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["scopes"] == ["watch", "chat"]
+    assert main(["remote", "scopes", device["id"], "root", "--json"]) == 1
+    assert "watch, chat and decide" in capsys.readouterr().out
+    assert [e["action"] for e in audit.entries(home=store.home)][-1] == "scopes"

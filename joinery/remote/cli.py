@@ -85,6 +85,10 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     revoke = actions.add_parser("revoke", help="revoke a device at once")
     revoke.add_argument("device_id")
     revoke.add_argument("--json", action="store_true")
+    scopes = actions.add_parser("scopes", help="change what a paired device may do")
+    scopes.add_argument("device_id")
+    scopes.add_argument("scopes", help="comma-separated: watch, chat, decide")
+    scopes.add_argument("--json", action="store_true")
     forget = actions.add_parser("forget-all", help="unpair every device")
     forget.add_argument("--yes", action="store_true")
     forget.add_argument("--json", action="store_true")
@@ -114,6 +118,7 @@ def run(args: argparse.Namespace) -> int:
         "devices": _devices,
         "revoke": _revoke,
         "forget-all": _forget,
+        "scopes": _set_scopes,
         "log": _log,
         "tailscale": _tailscale,
         "install-helper": _install_helper,
@@ -370,6 +375,13 @@ def _revoke(store: Store, args: argparse.Namespace) -> int:
     device = store.revoke(args.device_id)
     audit.record("revoke", "ok", device=device)
     _out(args, device, f"Revoked {device['name']}.")
+    return 0
+
+
+def _set_scopes(store: Store, args: argparse.Namespace) -> int:
+    device = store.set_scopes(args.device_id, list(_scopes(args.scopes)))
+    audit.record("scopes", "ok", device=device, scopes=",".join(device["scopes"]))
+    _out(args, device, f"{device['name']} may now: {', '.join(device['scopes'])}.")
     return 0
 
 

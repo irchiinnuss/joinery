@@ -54,16 +54,31 @@ func _check_states() -> void:
 	_check(setting.pair_button.disabled, "Pairing waits for Remote to be on")
 	_check(not setting.helper_row.visible, "Off, the helper switch waits too")
 	setting.apply_status(
-		{"enabled": true, "tailscale": {"running": false, "message": "Tailscale isn't installed."}}
+		{
+			"enabled": true,
+			"tailscale":
+			{"installed": true, "running": false, "message": "Tailscale isn't installed."}
+		}
 	)
 	_check(setting.where.text == "Tailscale isn't installed.", "Says what Tailscale needs")
+	_check(not setting.tailnet_button.visible, "Installed but off: nothing to press here")
+	setting.apply_status({"enabled": true, "tailscale": {"installed": false}})
+	_check(setting.tailnet_button.text == "Get Tailscale", "Not installed: Get Tailscale")
+	setting.apply_status(
+		{
+			"enabled": true,
+			"url": "http://127.0.0.1:47615",
+			"tailscale": {"running": true, "installed": true}
+		}
+	)
+	_check(setting.tailnet_button.text == "Put it on my tailnet", "Not served yet: one button")
 	(
 		setting
 		. apply_status(
 			{
 				"enabled": true,
 				"url": "https://mac.tail1.ts.net",
-				"tailscale": {"running": true},
+				"tailscale": {"installed": true, "running": true},
 				"devices": [{"id": "d_1", "name": "Ana's iPhone", "scopes": ["watch"]}],
 				"helper": true,
 			}
@@ -72,8 +87,34 @@ func _check_states() -> void:
 	_check(setting.where.text.ends_with("https://mac.tail1.ts.net"), "Says where a phone opens it")
 	_check(not setting.pair_button.disabled, "Pair a device, once on")
 	_check(setting.helper_row.visible and setting.awake_row.visible, "On: the helper and awake")
-	_check(setting.devices.get_child_count() == 1, "The paired device is listed")
+	_check(setting.devices.list.get_child_count() == 1, "The paired device is listed")
 	_check(setting.helper_row.is_on() and not setting.awake_row.is_on(), "Each switch as told")
+	_check(setting.tailnet_button.text == "Copy address", "Served: copy the address")
+	var picker: OptionButton = setting.devices.find_child("Scopes", true, false)
+	_check(picker != null and picker.selected == 0, "A watch-only device reads Follow only")
+	var seen: Array = []
+	setting.devices.command.connect(func(kind: String, args: Array) -> void: seen.append(args))
+	if picker != null:
+		picker.select(2)
+		picker.item_selected.emit(2)
+	_check(
+		seen.size() == 1 and seen[0] == ["remote", "scopes", "d_1", "watch,chat,decide", "--json"],
+		"Everything gives it Accept and Discard: %s" % [seen]
+	)
+	var line: String = setting.devices.activity_line(
+		{
+			"ts": 0,
+			"action": "decision",
+			"accept": true,
+			"device_name": "Ana's iPhone",
+			"result": "ok"
+		}
+	)
+	_check(line.ends_with("Accepted a change · Ana's iPhone"), "Activity in words: " + line)
+	line = setting.devices.activity_line(
+		{"ts": 0, "action": "art_approval", "result": "refused", "reason": "Use the editor."}
+	)
+	_check(line.ends_with("refused: Use the editor."), "A refusal says why: " + line)
 	setting.free()
 
 
@@ -117,14 +158,14 @@ func _check_real_cli() -> void:
 		_check(ask.get("cancel").has_focus(), "Cancel has the focus")
 		(ask.get("action") as Button).pressed.emit()
 	_check(
-		await _until(func() -> bool: return setting.devices.get_child_count() == 1),
+		await _until(func() -> bool: return setting.devices.list.get_child_count() == 1),
 		"The paired device is listed"
 	)
 	var revoke: Button = setting.devices.find_child("Revoke", true, false)
 	if revoke != null:
 		revoke.pressed.emit()
 	_check(
-		await _until(func() -> bool: return setting.devices.get_child_count() == 0),
+		await _until(func() -> bool: return setting.devices.list.get_child_count() == 0),
 		"Revoke unpairs it"
 	)
 	host.queue_free()
