@@ -407,6 +407,45 @@ does instead (ADR 0072):
   waits for the testbed's off-peak hours and runs on its light model unless
   `--model` pins one.
 
+### From your phone (Joinery Remote)
+
+Follow and direct Journeyman from your phone while the editor is open: send a
+request, Stop, press Go on a to-do, see a change's before and after, and
+Accept or Discard it. Nothing goes through a server of ours or anyone else's:
+your Mac serves it, and your own Tailscale carries it to the phone (ADR 0093).
+
+1. Install Tailscale on the Mac and the phone and sign both in to the same
+   tailnet.
+2. Settings → Remote → turn **Remote** on (`joinery remote start`). Joinery's
+   server listens on this Mac only (127.0.0.1).
+3. Put it on your tailnet: `joinery remote tailscale` prints the
+   `tailscale serve` command; `joinery remote tailscale --run` runs it after
+   asking. Your phone then opens `https://<mac>.<tailnet>.ts.net`.
+4. **Pair a device** shows a QR code and a 10-character code for 5 minutes.
+   Scan it on the phone, then answer "Pair …?" on the Mac. Without that answer
+   nothing is paired. `joinery remote pair` does the same in a terminal.
+
+What a phone does is done exactly as your own click in the sidebar: a message
+queues while Journeyman works, Accept runs the same checks, and the transcript
+says "Sent from Ana's iPhone" or "Accepted from Ana's iPhone". An accepted
+change's Timeline entry ends with `Decided-From: Ana's iPhone`. A change with
+reviewer notes, a failed check or an unmet "done when" must be opened on the
+phone before it can be accepted there.
+
+A phone can never approve the art direction or the brief, change settings or
+auto-accept, set up tools, or pair another device. It has no file browser and
+no shell. Every agent call still passes the project's policy gate, and a Rule
+Zero stop shows on the phone as it does in the sidebar.
+
+Each device can only watch, also chat, or also decide (`--scopes`). It expires
+after 30 days unused or 90 days in all. Revoke it in Settings → Remote or with
+`joinery remote revoke <id>`, which takes effect at once. `joinery remote log`
+lists what devices did. Turning Remote off ends every connection and keeps
+pairings.
+
+A paired device's token can do what you could do in the sidebar, within its
+scopes, until you revoke it. Treat a lost phone like a lost key.
+
 ### Trying a few ways
 
 When you aren't sure how something should look, sound or play, let Journeyman
