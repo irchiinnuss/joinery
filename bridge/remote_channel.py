@@ -38,7 +38,7 @@ from typing import Any
 
 from joinery.platform_support import private_directory
 from joinery.remote.actions import Refused, admit, route
-from joinery.remote.media import checked_media
+from joinery.remote.media import checked_media, scrub
 from joinery.remote.paths import hosts_dir, project_id, write_private_json
 
 #: Events kept for a device that reconnects; older ones come from the saved chats.
@@ -213,7 +213,7 @@ class RemoteChannel:
         kind = str(event.get("kind", ""))
         if kind in HIDDEN:
             return None
-        shown = _scrub(event, str(self.project))
+        shown = scrub(event, str(self.project))
         assert isinstance(shown, dict)
         media = event.get("media")
         identifier = str(event.get("transaction_id", ""))
@@ -466,33 +466,8 @@ class Inputs:
 def _media_item(
     item: dict[str, Any], transaction_id: str, index: int
 ) -> dict[str, Any]:
-    shown = {k: v for k, v in _scrub(item, "").items() if k not in FILE_KEYS}
+    shown = {k: v for k, v in scrub(item, "").items() if k not in FILE_KEYS}
     for side in SIDES:
         if isinstance(item.get(side), str) and item[side]:
             shown[side] = f"media/{transaction_id}/{index}/{side}"
     return shown
-
-
-def _scrub(value: Any, project: str) -> Any:
-    """``value`` with no file path left as a whole string: one in the project becomes
-    project-relative, any other absolute one is dropped. Words that merely start with
-    a slash ("/variants 3 …") stay as they are."""
-    if isinstance(value, dict):
-        return {k: _scrub(v, project) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_scrub(v, project) for v in value]
-    if isinstance(value, str):
-        prefix = project.rstrip("/\\") + os.sep if project else ""
-        if prefix and value.startswith(prefix) and "\n" not in value:
-            return value[len(prefix) :].replace(os.sep, "/")
-        if _absolute(value):
-            return ""
-    return value
-
-
-def _absolute(text: str) -> bool:
-    if not text or any(ch.isspace() for ch in text):
-        return False
-    if len(text) > 2 and text[1] == ":" and text[2] in "/\\":
-        return True
-    return text.startswith(("/", "\\")) and len(text) > 1 and text[1:].count("/") >= 1

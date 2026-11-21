@@ -45,7 +45,7 @@ from joinery import chats
 from joinery.remote import audit
 from joinery.remote.actions import REFUSED, Refused, admit, needs_opening
 from joinery.remote.hosts import Host, HostGone, discover, request, subscribe
-from joinery.remote.media import MEDIA_TYPES, checked_media
+from joinery.remote.media import MEDIA_TYPES, checked_media, scrub
 from joinery.remote.seams import (
     HostLauncher,
     NoLauncher,
@@ -70,11 +70,36 @@ PAIR_PER_MINUTE = 10
 DISCOVER_SECONDS = 2.0
 RECHECK_SECONDS = 5.0
 BODY_LIMIT = 64_000
+#: A saved chat's newest turns a phone is sent.
+HISTORY_TURNS = 100
+#: The page's own files, by URL: nothing else is ever served from disk.
+PAGE_FILES = (
+    "index.html",
+    "app.css",
+    "sw.js",
+    "manifest.webmanifest",
+    "icon.svg",
+    "icon-192.png",
+    "apple-touch-icon.png",
+    "js/app.js",
+    "js/api.js",
+    "js/state.js",
+    "js/view.js",
+)
+TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".webmanifest": "application/manifest+json",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+}
 STATIC = {
-    "/": ("index.html", "text/html; charset=utf-8"),
-    "/app.js": ("app.js", "text/javascript; charset=utf-8"),
-    "/app.css": ("app.css", "text/css; charset=utf-8"),
-    "/manifest.webmanifest": ("manifest.webmanifest", "application/manifest+json"),
+    ("/" if name == "index.html" else "/" + name): (
+        name,
+        TYPES[name[name.rindex(".") :]],
+    )
+    for name in PAGE_FILES
 }
 SECURITY_HEADERS = [
     (
@@ -365,6 +390,19 @@ class RemoteServer:
             {"chats": [{k: c[k] for k in keep if k in c} for c in listing]}
         )
 
+    async def chat_history(self, request: Request) -> Response:
+        """A saved chat's turns ({request, reply, changes, tasks, outcome})."""
+        device = self.device(request)
+        host = self.host_for(device, request.path_params["project"])
+        try:
+            _, entries = await asyncio.to_thread(
+                chats.read, host.project, request.path_params["chat"]
+            )
+        except (OSError, ValueError) as exc:
+            raise NotFound(str(exc) or "No such chat.") from exc
+        turns = chats.turns(entries)[-HISTORY_TURNS:]
+        return JSONResponse({"turns": scrub(turns, str(host.project))})
+
     async def change(self, request: Request) -> Response:
         device = self.device(request)
         host = self.host_for(device, request.path_params["project"])
@@ -582,6 +620,7 @@ class RemoteServer:
             Route("/api/me", guarded(self.me)),
             Route("/api/projects", guarded(self.projects)),
             Route("/api/projects/{project}/chats", guarded(self.chat_list)),
+            Route("/api/projects/{project}/chats/{chat}", guarded(self.chat_history)),
             Route("/api/projects/{project}/events", guarded(self.events)),
             Route(
                 "/api/projects/{project}/actions",
@@ -658,7 +697,11 @@ def _static(path: str) -> Callable[[Request], Awaitable[Response]]:
     name, media_type = STATIC[path]
 
     async def serve(_request: Request) -> Response:
-        data = resources.files("joinery.remote").joinpath("static", name).read_bytes()
+        data = (
+            resources.files("joinery.remote")
+            .joinpath("static", *name.split("/"))
+            .read_bytes()
+        )
         return Response(data, media_type=media_type)
 
     return serve

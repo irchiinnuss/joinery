@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+from typing import Any
 
 #: What a device may be shown from a change's folder.
 MEDIA_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".wav", ".ogg"})
@@ -43,3 +45,28 @@ def checked_media(project: Path, transaction_id: str, named: Path) -> Path:
     if not step.is_file():
         raise ValueError("That picture isn't ready.")
     return step
+
+
+def scrub(value: Any, project: str) -> Any:
+    """``value`` with no file path left as a whole string: one in the project becomes
+    project-relative, any other absolute one is dropped. Words that merely start with
+    a slash ("/variants 3 …") stay as they are."""
+    if isinstance(value, dict):
+        return {k: scrub(v, project) for k, v in value.items()}
+    if isinstance(value, list):
+        return [scrub(v, project) for v in value]
+    if isinstance(value, str):
+        prefix = project.rstrip("/\\") + os.sep if project else ""
+        if prefix and value.startswith(prefix) and "\n" not in value:
+            return value[len(prefix) :].replace(os.sep, "/")
+        if _absolute(value):
+            return ""
+    return value
+
+
+def _absolute(text: str) -> bool:
+    if not text or any(ch.isspace() for ch in text):
+        return False
+    if len(text) > 2 and text[1] == ":" and text[2] in "/\\":
+        return True
+    return text.startswith(("/", "\\")) and len(text) > 1 and text[1:].count("/") >= 1

@@ -561,6 +561,15 @@ async def _serve(
             text, started = recorder.begin(data, attachments)
             if started is not None:
                 emit(started)
+            if _remote is not None:
+                # The sidebar draws its own bubble; a phone hears the request (ADR 0093).
+                _remote.publish(
+                    {
+                        "kind": "request",
+                        "chat_id": recorder.chat_id,
+                        "text": str(data.get("text", "")),
+                    }
+                )
             # A run in a chat whose own change still waits for review (it stopped,
             # or its checks held it) carries on in that change: one change for the
             # request, never a second one rebuilt from scratch.
