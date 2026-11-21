@@ -1640,6 +1640,12 @@ def _parser() -> argparse.ArgumentParser:
     connect.add_argument(
         "--project", type=Path, help="project to send the test message from (verify)"
     )
+    remote_cmd = commands.add_parser(
+        "remote", help="follow and direct Journeyman from your phone (Joinery Remote)"
+    )
+    from joinery.remote import cli as remote_cli
+
+    remote_cli.add_arguments(remote_cmd)
     chat = commands.add_parser("chat", help="connect the editor to an agent over stdio")
     chat.add_argument("--project", type=Path, required=True)
     chat.add_argument("--agent", choices=[a.id for a in all_agents()], required=True)
@@ -1744,6 +1750,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "run":
         return headless.run(args)
+
+    if args.command == "remote":
+        from joinery.remote import cli as remote_cli
+
+        return remote_cli.run(args)
 
     if args.command == "map":
         return project_map.run(args)

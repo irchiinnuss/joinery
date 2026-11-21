@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Joinery Remote</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="stylesheet" href="/app.css">
+<script src="/app.js" defer></script>
+</head>
+<body>
+<main id="app" aria-live="polite">
+  <section id="pair" hidden>
+    <h1>Pair this phone</h1>
+    <p class="quiet">Type the code shown on your Mac in Settings → Remote, then confirm on the Mac.</p>
+    <form id="pair-form">
+      <label for="pair-code">Code</label>
+      <input id="pair-code" name="code" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" required>
+      <label for="pair-name">This device</label>
+      <input id="pair-name" name="name" maxlength="60" required>
+      <button type="submit">Pair</button>
+    </form>
+    <p id="pair-status" role="status"></p>
+  </section>
+  <section id="projects" hidden>
+    <h1>Projects</h1>
+    <ul id="project-list"></ul>
+    <p id="projects-empty" class="quiet" hidden>No Joinery project is open on the machine.</p>
+  </section>
+  <section id="chat" hidden>
+    <header>
+      <button id="back" type="button" aria-label="Back to projects">‹</button>
+      <h1 id="chat-title"></h1>
+      <span id="link-state" class="quiet" role="status"></span>
+    </header>
+    <ol id="log"></ol>
+    <div id="change" hidden>
+      <h2 id="change-summary"></h2>
+      <div id="change-media"></div>
+      <button id="change-open" type="button">Open the change</button>
+      <button id="change-accept" type="button">Accept</button>
+      <button id="change-discard" type="button">Discard</button>
+    </div>
+    <div id="todo" hidden>
+      <p id="todo-text"></p>
+      <button id="todo-go" type="button">Go</button>
+      <button id="todo-cancel" type="button">Cancel</button>
+    </div>
+    <form id="composer">
+      <label for="message" class="hidden">Message</label>
+      <textarea id="message" rows="2" placeholder="Ask Journeyman"></textarea>
+      <button type="submit">Send</button>
+      <button id="stop" type="button">Stop</button>
+    </form>
+    <p id="chat-status" role="status"></p>
+  </section>
+</main>
+</body>
+</html>
