@@ -80,6 +80,7 @@ CASES = {
     "playtester_setting_test.gd": "playtester setting: ok",
     "import_hold_test.gd": "import hold: ok",
     "auto_accept_setting_test.gd": "auto accept setting: ok",
+    "remote_setting_test.gd": "remote setting: ok",
     "todo_go_setting_test.gd": "todo go setting: ok",
     "desktop_notify_test.gd": "desktop notify: ok",
     "mix_command_test.gd": "mix command: ok",

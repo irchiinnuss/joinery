@@ -31,6 +31,7 @@ const AGENT_SETTING := preload("agent_setting.gd")
 const AUTO_ACCEPT_SETTING := preload("auto_accept_setting.gd")
 const TODO_GO_SETTING := preload("todo_go_setting.gd")
 const NOTIFY_SETTING := preload("notify_setting.gd")
+const REMOTE_SETTING := preload("remote_setting.gd")
 const GROUP := preload("settings_group.gd")
 const BLOCKS := preload("ui_blocks.gd")
 const PATH := "Joinery/journeyman.cfg"
@@ -194,6 +195,8 @@ func _ready() -> void:
 	_build_agent()
 	_build_appearance()
 	NOTIFY_SETTING.add_to(_section("Notifications").body)
+	# Joinery Remote: a phone over the user's own Tailscale (`joinery remote`, ADR 0093).
+	_section("Remote").body.add_child(REMOTE_SETTING.new())
 	_build_project()
 	_build_advanced()
 	_on_theme_rebuilt()
