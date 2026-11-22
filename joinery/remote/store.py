@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import os
 import secrets
 import time
 from collections.abc import Iterator
@@ -371,6 +372,23 @@ class Store:
                 return public(device, now)
         return None
 
+    def stamp(self) -> tuple[int, int]:
+        """Changes whenever the file is written (a revoke, new scopes or projects), so
+        an open stream can look again at once without reading the file every time."""
+        try:
+            found = os.stat(self.path)
+        except OSError:
+            return (0, 0)
+        return (found.st_mtime_ns, found.st_size)
+
+    def device(self, device_id: str, now: float | None = None) -> dict[str, Any] | None:
+        """The active device ``device_id`` as it is now, else None."""
+        now = time.time() if now is None else now
+        for device in self.read()["devices"]:
+            if device.get("id") == device_id and state_of(device, now) == "active":
+                return public(device, now)
+        return None
+
     def active(self, device_id: str, now: float | None = None) -> bool:
         now = time.time() if now is None else now
         return any(
@@ -418,6 +436,22 @@ class Store:
             if device is None:
                 raise ValueError(f"No paired device {device_id}.")
             device["scopes"] = [s for s in SCOPES if s in scopes]
+            shown = public(device)
+        return shown
+
+    def set_projects(self, device_id: str, projects: list[str]) -> dict[str, Any]:
+        """The projects (by id) a device may reach; an empty list means every one."""
+        if any(not p or not p.isalnum() or len(p) > 64 for p in projects):
+            raise ValueError(
+                "Projects are given by their ids (joinery remote projects)."
+            )
+        with self.edit() as data:
+            device = next(
+                (d for d in data["devices"] if d.get("id") == device_id), None
+            )
+            if device is None:
+                raise ValueError(f"No paired device {device_id}.")
+            device["projects"] = sorted(set(projects))
             shown = public(device)
         return shown
 

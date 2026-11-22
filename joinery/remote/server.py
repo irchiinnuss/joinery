@@ -79,6 +79,9 @@ PAIR_PER_MINUTE = 10
 STATUS_PER_MINUTE = 60
 #: How often the server looks for hosts, and a stream checks its device is still allowed.
 DISCOVER_SECONDS = 2.0
+#: An open stream looks at the device file this often, and asks again at once whenever
+#: it changed: a revoke, or a device's scopes or projects changing, ends it.
+STREAM_TICK = 0.5
 RECHECK_SECONDS = 5.0
 BODY_LIMIT = 64_000
 #: A saved chat's newest turns a phone is sent.
@@ -258,6 +261,20 @@ class RemoteServer:
         if scope not in device.get("scopes", []):
             raise Forbidden(f"This device may not do that ({scope} is not allowed).")
         return device
+
+    def still_allowed(self, device_id: str, project_id: str) -> str:
+        """Why a device's open stream on ``project_id`` must end now ("" if it may
+        go on): revoked or expired, no longer allowed to watch, or no longer allowed
+        this project."""
+        device = self.store.device(device_id)
+        if device is None:
+            return "revoked"
+        if "watch" not in device.get("scopes", []):
+            return "scope"
+        allowed = device.get("projects") or []
+        if allowed and project_id not in allowed:
+            return "project"
+        return ""
 
     def host_for(self, device: dict[str, Any], project_id: str) -> Host:
         allowed = device.get("projects") or []
@@ -640,6 +657,7 @@ class RemoteServer:
             pending: asyncio.Task[dict[str, Any]] | None = None
             noticed: asyncio.Task[Notice] | None = None
             checked = time.monotonic()
+            stamp = self.store.stamp()
             try:
                 while True:
                     if pending is None:
@@ -648,13 +666,23 @@ class RemoteServer:
                         noticed = asyncio.ensure_future(listener.get())
                     done, _ = await asyncio.wait(
                         {pending, noticed},
-                        timeout=RECHECK_SECONDS,
+                        timeout=STREAM_TICK,
                         return_when=asyncio.FIRST_COMPLETED,
                     )
-                    if time.monotonic() - checked >= RECHECK_SECONDS:
-                        checked = time.monotonic()
-                        if not self.store.active(str(device["id"])):
-                            yield {"event": "gone", "data": '{"reason":"revoked"}'}
+                    now_stamp = self.store.stamp()
+                    if (
+                        now_stamp != stamp
+                        or time.monotonic() - checked >= RECHECK_SECONDS
+                    ):
+                        # The device file changed (or a while passed, for expiry):
+                        # ask again before anything more is sent.
+                        stamp, checked = now_stamp, time.monotonic()
+                        reason = self.still_allowed(str(device["id"]), host.id)
+                        if reason:
+                            yield {
+                                "event": "gone",
+                                "data": json.dumps({"reason": reason}),
+                            }
                             return
                     if noticed in done:
                         notice = noticed.result()

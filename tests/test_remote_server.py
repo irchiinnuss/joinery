@@ -527,3 +527,41 @@ def test_pairing_status_polls_are_limited(tmp_path: Path) -> None:
         assert answers[:60] == [200] * 60 and answers[60] == 429
 
     run(tmp_path, test)
+
+
+@pytest.mark.parametrize(
+    ("change", "reason"),
+    [
+        (lambda store, device: store.revoke(device), "revoked"),
+        (lambda store, device: store.set_scopes(device, ["chat"]), "scope"),
+        (lambda store, device: store.set_projects(device, ["other"]), "project"),
+    ],
+)
+def test_an_open_stream_ends_at_once_when_the_device_may_no_longer_watch(
+    tmp_path: Path, change: Callable[[Store, str], Any], reason: str
+) -> None:
+    async def test(f: Fixture) -> None:
+        token = f.device()
+        device = f.store.authenticate(token)
+        assert device is not None
+
+        async def later() -> None:
+            await asyncio.sleep(0.3)
+            change(f.store, device["id"])
+
+        changing = asyncio.create_task(later())
+        started = asyncio.get_running_loop().time()
+        stream = await call(
+            f.app,
+            "GET",
+            f"/api/projects/{f.pid}/events?since=0",
+            token=token,
+            until=lambda body: b"event: gone" in body,
+        )
+        took = asyncio.get_running_loop().time() - started
+        await changing
+        assert "event: gone" in stream.body.decode()
+        assert f'"reason": "{reason}"' in stream.body.decode()
+        assert took < 2.5
+
+    run(tmp_path, test)

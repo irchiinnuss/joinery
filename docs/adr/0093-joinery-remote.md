@@ -71,7 +71,10 @@ cover two of the four agents.
      SameSite=Strict` cookie. Only its SHA-256 is stored, in the per-user directory and never
      in a project.
    - Scopes are watch, chat and decide. A device expires after 30 days unused and 90 in all,
-     and revoking takes effect on its next request. An open stream checks every 5 s.
+     and revoking takes effect on its next request. An open stream looks at the device
+     file every half second and asks again as soon as it changed: a revoke, losing
+     watch, or a project restriction that leaves this project out ends it at once
+     (`gone` with the reason).
 6. **Requests.** The server checks the `Host` header against loopback and the tailnet
    origin, which stops DNS rebinding. Changing requests need a matching `Origin` and an
    `X-Joinery-Remote: 1` header (CSRF).
