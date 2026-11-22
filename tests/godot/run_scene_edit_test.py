@@ -18,6 +18,11 @@ from run_startup_test import (
 from joinery.distribution import engine_binary
 
 ROOT = Path(__file__).resolve().parents[2]
+#: The editor test a mode runs and the line it prints once it passes.
+SCRIPTS = {
+    "import": ("accept_import_editor_test.gd", "editor accept import: ok"),
+    "disk": ("disk_reload_editor_test.gd", "editor disk reload: ok"),
+}
 
 
 def main() -> int:
@@ -29,19 +34,18 @@ def main() -> int:
     )
     parser.add_argument(
         "--mode",
-        choices=["existing", "empty", "import"],
+        choices=["existing", "empty", "import", "disk"],
         action="append",
         help="Run only these modes (all by default)",
     )
     args = parser.parse_args()
-    # The level open, no scene open, and a fresh editor for the accepted-import order and a
-    # Revert that replaces a model open scenes use.
-    for mode in args.mode or ("existing", "empty", "import"):
+    # The level open, no scene open, a fresh editor for the accepted-import order and a
+    # Revert that replaces a model open scenes use, and one where files a change wrote come
+    # back without Godot's "modified outside Godot" dialog.
+    for mode in args.mode or ("existing", "empty", "import", "disk"):
         empty = mode == "empty"
-        script, passed = (
-            ("accept_import_editor_test.gd", "editor accept import: ok")
-            if mode == "import"
-            else ("scene_edit_editor_test.gd", "editor scene edits: ok")
+        script, passed = SCRIPTS.get(
+            mode, ("scene_edit_editor_test.gd", "editor scene edits: ok")
         )
         with scratch_folder("joinery-scene-edit-") as directory:
             temporary = Path(directory)
