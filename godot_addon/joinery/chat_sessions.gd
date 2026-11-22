@@ -63,7 +63,7 @@ const STATES := {
 ## The decision line of a change Joinery kept without asking (`[agents] auto_accept`).
 const AUTO := ["auto", "Accepted automatically"]
 ## Requests a reopened chat builds at once; older ones wait until the user scrolls up to them.
-const NEWEST := 10
+const NEWEST := 6
 
 var dock: Control
 var page: PAGE
