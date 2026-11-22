@@ -110,6 +110,14 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     log.add_argument("--project", type=Path)
     log.add_argument("--limit", type=int, default=50)
     log.add_argument("--json", action="store_true")
+    owner = actions.add_parser(
+        "owner",
+        help="only your own tailnet login's devices may reach Remote through the "
+        "tailnet",
+    )
+    owner.add_argument("login", nargs="?", default="", help="e.g. ana@example.com")
+    owner.add_argument("--clear", action="store_true", help="any tailnet device again")
+    owner.add_argument("--json", action="store_true")
     ts = actions.add_parser(
         "tailscale",
         help="the `tailscale serve` command that puts Remote on your tailnet",
@@ -135,6 +143,7 @@ def run(args: argparse.Namespace) -> int:
         "scopes": _set_scopes,
         "log": _log,
         "tailscale": _tailscale,
+        "owner": _owner,
         "install-helper": _install_helper,
         "uninstall-helper": _uninstall_helper,
         "keep-awake": _keep_awake,
@@ -273,6 +282,7 @@ def status(store: Store) -> dict[str, Any]:
         "devices": [d for d in devices if d["state"] == "active"],
         "helper": login_item.status()["installed"],
         "keep_awake": bool(config.get("keep_awake")),
+        "owner": str(config.get("owner", "") or ""),
         "projects": [h.public() for h in discover(store.home)],
     }
 
@@ -506,6 +516,30 @@ def _tailscale(store: Store, args: argparse.Namespace) -> int:
         args,
         {**data, "ran": True, "origin": on_tailnet["origin"]},
         f"Remote is on your tailnet: {on_tailnet['origin']}",
+    )
+    return 0
+
+
+def _owner(store: Store, args: argparse.Namespace) -> int:
+    """Set, clear or show the tailnet login whose devices alone may reach Remote
+    through ``tailscale serve`` (its ``Tailscale-User-Login``). Requests to 127.0.0.1
+    on this machine aren't affected."""
+    if args.clear:
+        store.set_config(owner="")
+        audit.record("owner", "ok", owner="-")
+    elif args.login:
+        login = args.login.strip().lower()
+        if "@" not in login or len(login) > 100 or any(c.isspace() for c in login):
+            raise ValueError("Give a tailnet login, like ana@example.com.")
+        store.set_config(owner=login)
+        audit.record("owner", "ok", owner=login)
+    owner = str(store.config().get("owner", "") or "")
+    _out(
+        args,
+        {"owner": owner},
+        f"Only devices signed in to Tailscale as {owner} can reach Remote."
+        if owner
+        else "Any device on your tailnet can reach Remote's page (pairing still asks).",
     )
     return 0
 

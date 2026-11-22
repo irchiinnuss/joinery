@@ -215,3 +215,43 @@ def test_the_address_shown_is_one_the_server_answers(
 
     run(tmp_path, test)
     assert calls(folder)
+
+
+def test_a_request_through_funnel_is_refused(tmp_path: Path) -> None:
+    """`tailscale serve` marks a public (Funnel) request; Remote answers none."""
+
+    async def test(f: Fixture) -> None:
+        f.store.set_config(origin=f"https://{NAME}")
+        public = {"host": NAME, "tailscale-funnel-request": "?1"}
+        assert (await call(f.app, "GET", "/", headers=public)).status == 403
+        token = f.device()
+        listed = await call(f.app, "GET", "/api/projects", token=token, headers=public)
+        assert listed.status == 403
+
+    run(tmp_path, test)
+
+
+def test_only_the_owners_devices_through_the_tailnet(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    async def test(f: Fixture) -> None:
+        monkeypatch.setenv("JOINERY_REMOTE_HOME", str(f.home))
+        f.store.set_config(origin=f"https://{NAME}")
+        mine = {"host": NAME, "tailscale-user-login": "ana@example.com"}
+        theirs = {"host": NAME, "tailscale-user-login": "bob@example.com"}
+        # No owner set: any tailnet device reaches the page (pairing still asks).
+        assert (await call(f.app, "GET", "/", headers=theirs)).status == 200
+        code, data = cli(capsys, "owner", "Ana@Example.com")
+        assert code == 0 and data["owner"] == "ana@example.com"
+        assert (await call(f.app, "GET", "/", headers=mine)).status == 200
+        assert (await call(f.app, "GET", "/", headers=theirs)).status == 403
+        # A tagged device or one outside the tailnet gets no login from serve.
+        assert (await call(f.app, "GET", "/", headers={"host": NAME})).status == 403
+        # This machine's own loopback is not the tailnet.
+        assert (await call(f.app, "GET", "/")).status == 200
+        code, data = cli(capsys, "owner", "--clear")
+        assert data["owner"] == ""
+        assert (await call(f.app, "GET", "/", headers=theirs)).status == 200
+        assert cli(capsys, "owner", "not a login")[0] == 1
+
+    run(tmp_path, test)

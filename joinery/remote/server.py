@@ -74,6 +74,10 @@ from joinery.remote.store import (
 
 COOKIE = "joinery_remote"
 CSRF_HEADER = "x-joinery-remote"
+#: Set by `tailscale serve` (see the decision record): Funnel's mark on a public request,
+#: and the signed-in tailnet user a request came from.
+FUNNEL_HEADER = "tailscale-funnel-request"
+LOGIN_HEADER = "tailscale-user-login"
 #: Pairing posts one peer may make a minute (wrong codes also stop waiting codes).
 PAIR_PER_MINUTE = 10
 #: Pairing status polls one peer may make a minute (the page polls every 2 s).
@@ -238,11 +242,25 @@ class RemoteServer:
     ) -> tuple[int, str] | None:
         hosts = {urlsplit(origin).netloc for origin in self.origins()}
         hosts |= {urlsplit(origin).hostname or "" for origin in self.origins()}
-        if headers.get("host", "") not in hosts:
+        host = headers.get("host", "")
+        if host not in hosts:
             return (421, "This server doesn't answer for that name.")
-        if not self.store.config().get("enabled"):
+        config = self.store.config()
+        if not config.get("enabled"):
             # Turned off (or a login item started it while off): nothing is served.
             return (503, "Remote is off on the machine.")
+        if FUNNEL_HEADER in headers:
+            # `tailscale serve` adds this to (only) a request that came through Funnel,
+            # from the public internet: Remote is for the tailnet alone.
+            return (403, "Remote isn't served on the public internet.")
+        owner = str(config.get("owner", "") or "").strip().lower()
+        loopback = {f"127.0.0.1:{self.port}", f"localhost:{self.port}"}
+        if owner and host not in loopback | {"127.0.0.1", "localhost"}:
+            # Through the tailnet: only the owner's own devices (the login `tailscale
+            # serve` sets for a signed-in user's device, after removing any sent).
+            login = headers.get(LOGIN_HEADER, "").strip().lower()
+            if login != owner:
+                return (403, "Only the owner's devices on the tailnet can open this.")
         if method in {"GET", "HEAD"}:
             return None
         if headers.get("origin", "") not in self.origins():
@@ -932,7 +950,7 @@ async def _body(request: Request) -> dict[str, Any]:
 def _peer(request: Request) -> str:
     """Who asked: the tailnet login ``tailscale serve`` adds, else the socket's address."""
     client = request.client.host if request.client else ""
-    login = request.headers.get("tailscale-user-login", "")
+    login = request.headers.get(LOGIN_HEADER, "")
     # Only the local serve proxy may say who it is.
     if login and client in {"127.0.0.1", "::1"}:
         return login[:100]

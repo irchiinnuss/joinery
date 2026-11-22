@@ -89,6 +89,15 @@ cover two of the four agents.
    - `tailscale serve` passes the browser's `Host` on unchanged and leaves `Origin` alone
      (see "How `tailscale serve` forwards a request" below), so the server accepts exactly
      `Host: <name>` (or `<name>:<port>` off 443) and `Origin: https://<name>[:<port>]`.
+   - A request carrying `Tailscale-Funnel-Request` (serve's mark on a public one) is
+     refused, as is a serve config with Funnel on for Remote's address.
+   - `joinery remote owner <login>` (optional) lets only devices signed in to Tailscale as
+     that login through the tailnet name (serve's `Tailscale-User-Login`; tagged devices
+     get none, so they're refused). Loopback on the machine itself isn't affected.
+   - Cookies aren't kept apart by port: another site served under the same tailnet name
+     (another `tailscale serve` port) or on 127.0.0.1 would receive the device cookie.
+     Don't serve untrusted sites beside Remote on the same name. Moving the token out of a
+     cookie would leave the event stream and pictures without credentials.
    - Every answer carries a CSP of `default-src 'self'`, `frame-ancestors 'none'`,
      `no-referrer`, `nosniff` and `no-store`.
    - Accept is refused (409) for a change with something to read until the device has opened
