@@ -46,6 +46,8 @@ DEFAULT_SCOPES: tuple[str, ...] = SCOPES
 SEEN_EVERY = 60
 NAME_LIMIT = 60
 DAY = 86_400
+#: The longest a device may last (`joinery remote expiry`).
+MAX_DAYS = 365
 
 
 class PairRefused(ValueError):
@@ -446,6 +448,35 @@ class Store:
             device["scopes"] = [s for s in SCOPES if s in scopes]
             shown = public(device)
         return shown
+
+    def set_expiry(
+        self, unused_days: float | None = None, absolute_days: float | None = None
+    ) -> dict[str, Any]:
+        """How long devices last: unused, and in all since pairing. Applies to new
+        devices and to the paired ones (an absolute limit counts from each device's
+        pairing)."""
+        with self.edit() as data:
+            config = data["config"]
+            unused = float(
+                config.get("unused_days", UNUSED_DAYS)
+                if unused_days is None
+                else unused_days
+            )
+            absolute = float(
+                config.get("absolute_days", ABSOLUTE_DAYS)
+                if absolute_days is None
+                else absolute_days
+            )
+            if not 1 <= unused <= MAX_DAYS or not 1 <= absolute <= MAX_DAYS:
+                raise ValueError(f"Choose from 1 to {MAX_DAYS} days.")
+            if unused > absolute:
+                raise ValueError("Unused can't be longer than in all.")
+            config["unused_days"] = unused
+            config["absolute_days"] = absolute
+            for device in data["devices"]:
+                device["unused_days"] = unused
+                device["expires_at"] = float(device.get("created", 0)) + absolute * DAY
+        return self.config()
 
     def set_projects(self, device_id: str, projects: list[str]) -> dict[str, Any]:
         """The projects (by id) a device may reach; an empty list means every one."""

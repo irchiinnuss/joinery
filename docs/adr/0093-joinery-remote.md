@@ -70,6 +70,11 @@ cover two of the four agents.
    - The device token is 256 random bits, delivered once and set as an `HttpOnly; Secure;
      SameSite=Strict` cookie. Only its SHA-256 is stored, in the per-user directory and never
      in a project.
+   - `joinery remote projects <device> --allow <project>…` limits a device to some
+     projects (`--all` lifts it; `joinery remote projects` lists them), and `joinery
+     remote expiry --unused-days N --absolute-days N` sets how long devices last, paired
+     ones included (at most 365 days). Both stay at the machine; Settings has no control
+     for them yet.
    - Scopes are watch, chat and decide. A device expires after 30 days unused and 90 in all,
      and revoking takes effect on its next request. An open stream looks at the device
      file every half second and asks again as soon as it changed: a revoke, losing

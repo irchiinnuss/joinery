@@ -7,6 +7,7 @@ import os
 import stat
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -235,3 +236,70 @@ def test_the_private_folders_are_put_right_on_every_use(
     home.chmod(0o750)
     Store(home)
     assert stat.S_IMODE(home.stat().st_mode) == 0o700
+
+
+def test_cli_limits_a_device_to_some_projects(
+    store: Store,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from joinery.cli import main
+    from joinery.remote.paths import project_id, remember
+
+    monkeypatch.setenv("JOINERY_REMOTE_HOME", str(store.home))
+    harbour, forest = tmp_path / "Harbour", tmp_path / "Forest"
+    harbour.mkdir()
+    forest.mkdir()
+    remember(harbour, "claude", store.home)
+    remember(forest, "codex", store.home)
+    device = store.authenticate(paired(store, now=time.time()))
+    assert device is not None
+
+    def said(*args: str) -> tuple[int, dict[str, Any]]:
+        code = main(["remote", "projects", *args, "--json"])
+        return code, json.loads(capsys.readouterr().out)
+
+    code, listed = said()
+    assert code == 0
+    assert {p["name"] for p in listed["projects"]} == {"Harbour", "Forest"}
+    code, shown = said(device["id"], "--allow", str(harbour))
+    assert code == 0 and shown["projects"] == [project_id(harbour)]
+    assert store.devices()[0]["projects"] == [project_id(harbour)]
+    code, shown = said(device["id"], "--allow", project_id(forest), str(harbour))
+    assert sorted(shown["projects"]) == sorted(
+        [project_id(harbour), project_id(forest)]
+    )
+    code, shown = said(device["id"], "--allow", "nope")
+    assert code == 1 and "isn't a project used here" in shown["error"]
+    code, shown = said(device["id"], "--all")
+    assert code == 0 and shown["projects"] == []
+    assert [e["action"] for e in audit.entries(home=store.home)][-1] == "projects"
+
+
+def test_cli_sets_how_long_devices_last(
+    store: Store, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from joinery.cli import main
+
+    monkeypatch.setenv("JOINERY_REMOTE_HOME", str(store.home))
+    paired(store, now=NOW)
+
+    def said(*args: str) -> tuple[int, dict[str, Any]]:
+        code = main(["remote", "expiry", *args, "--json"])
+        return code, json.loads(capsys.readouterr().out)
+
+    assert said() == (0, {"unused_days": 30.0, "absolute_days": 90.0})
+    code, shown = said("--unused-days", "7", "--absolute-days", "30")
+    assert code == 0 and shown == {"unused_days": 7.0, "absolute_days": 30.0}
+    # Paired devices follow: 30 days from their pairing in all, 7 unused.
+    [device] = store.read()["devices"]
+    assert device["expires_at"] == NOW + 30 * DAY and device["unused_days"] == 7.0
+    assert store.authenticate("x") is None
+    # New ones too.
+    later = paired(store, now=NOW + DAY)
+    assert store.read()["devices"][-1]["expires_at"] == NOW + DAY + 30 * DAY
+    assert later
+    assert said("--unused-days", "40")[0] == 1  # Longer than in all.
+    assert said("--absolute-days", "0")[0] == 1
+    assert said("--absolute-days", "9999")[0] == 1

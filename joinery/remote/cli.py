@@ -103,6 +103,27 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     scopes.add_argument("device_id")
     scopes.add_argument("scopes", help="comma-separated: watch, chat, decide")
     scopes.add_argument("--json", action="store_true")
+    projects = actions.add_parser(
+        "projects",
+        help="the projects a phone may reach: list them, or limit a device to some",
+    )
+    projects.add_argument("device_id", nargs="?", default="")
+    chosen = projects.add_mutually_exclusive_group()
+    chosen.add_argument(
+        "--allow",
+        nargs="+",
+        default=None,
+        metavar="PROJECT",
+        help="project ids (from `joinery remote projects`) or folders",
+    )
+    chosen.add_argument("--all", action="store_true", help="every project again")
+    projects.add_argument("--json", action="store_true")
+    expiry = actions.add_parser(
+        "expiry", help="how long a paired device lasts (unused, and in all)"
+    )
+    expiry.add_argument("--unused-days", type=float, default=None)
+    expiry.add_argument("--absolute-days", type=float, default=None)
+    expiry.add_argument("--json", action="store_true")
     forget = actions.add_parser("forget-all", help="unpair every device")
     forget.add_argument("--yes", action="store_true")
     forget.add_argument("--json", action="store_true")
@@ -141,6 +162,8 @@ def run(args: argparse.Namespace) -> int:
         "revoke": _revoke,
         "forget-all": _forget,
         "scopes": _set_scopes,
+        "projects": _projects,
+        "expiry": _expiry,
         "log": _log,
         "tailscale": _tailscale,
         "owner": _owner,
@@ -449,6 +472,88 @@ def _set_scopes(store: Store, args: argparse.Namespace) -> int:
     device = store.set_scopes(args.device_id, list(_scopes(args.scopes)))
     audit.record("scopes", "ok", device=device, scopes=",".join(device["scopes"]))
     _out(args, device, f"{device['name']} may now: {', '.join(device['scopes'])}.")
+    return 0
+
+
+def _project_ids(store: Store, named: list[str]) -> list[str]:
+    """Project ids from ids or folders, each one a project used here before."""
+    from joinery.remote.paths import known, project_id
+
+    projects = known(store.home)
+    ids = []
+    for name in named:
+        folder = Path(name).expanduser()
+        identifier = project_id(folder) if folder.is_dir() else name
+        if identifier not in projects:
+            raise ValueError(
+                f"{name} isn't a project used here. See `joinery remote projects`."
+            )
+        ids.append(identifier)
+    return ids
+
+
+def _projects(store: Store, args: argparse.Namespace) -> int:
+    """No device: the projects a phone could reach. A device: what it may reach, or
+    (``--allow`` / ``--all``) change that; an open stream on a project it loses ends
+    at once."""
+    from joinery.remote.paths import known
+
+    listed = [
+        {"id": identifier, "name": str(entry.get("name", ""))}
+        for identifier, entry in known(store.home).items()
+    ]
+    if not args.device_id:
+        if args.allow is not None or args.all:
+            raise ValueError("Name the device: joinery remote projects <device> ...")
+        lines = [f"{p['id']}  {p['name']}" for p in listed]
+        _out(args, {"projects": listed}, "\n".join(lines) or "No projects yet.")
+        return 0
+    if args.all:
+        device = store.set_projects(args.device_id, [])
+        audit.record("projects", "ok", device=device, projects="all")
+    elif args.allow is not None:
+        device = store.set_projects(args.device_id, _project_ids(store, args.allow))
+        audit.record(
+            "projects", "ok", device=device, projects=",".join(device["projects"])
+        )
+    else:
+        found = [d for d in store.devices() if d["id"] == args.device_id]
+        if not found:
+            raise ValueError(f"No paired device {args.device_id}.")
+        device = found[0]
+    names = {p["id"]: p["name"] for p in listed}
+    allowed = device.get("projects") or []
+    text = (
+        f"{device['name']} may reach: "
+        + ", ".join(names.get(p, p) for p in allowed)
+        + "."
+        if allowed
+        else f"{device['name']} may reach every project."
+    )
+    _out(args, device, text)
+    return 0
+
+
+def _expiry(store: Store, args: argparse.Namespace) -> int:
+    if args.unused_days is not None or args.absolute_days is not None:
+        config = store.set_expiry(args.unused_days, args.absolute_days)
+        audit.record(
+            "expiry",
+            "ok",
+            unused_days=config["unused_days"],
+            absolute_days=config["absolute_days"],
+        )
+    config = store.config()
+    shown = {
+        "unused_days": float(config["unused_days"]),
+        "absolute_days": float(config["absolute_days"]),
+    }
+    _out(
+        args,
+        shown,
+        f"A device is unpaired after {shown['unused_days']:g} days unused, and "
+        f"{shown['absolute_days']:g} days after pairing in all.",
+    )
     return 0
 
 
