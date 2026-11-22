@@ -39,6 +39,13 @@ cache is the first thing to suspect when a build behaves strangely. Point the
 SCons cache elsewhere with `JOINERY_SCONS_CACHE`, size it with
 `JOINERY_SCONS_CACHE_GIB`, and see hit rates with `fork.sh cachestats`.
 
+On macOS, `joinery launch` starts a bare build such as
+`bin/godot.macos.editor.arm64` from a small wrapper,
+`~/Library/Caches/Joinery/dev-app/Joinery.app` (identifier
+`org.joinery.editor.dev`), so the Dock and app switcher show Joinery and its
+icon instead of the file name. The wrapper holds a hard link to the build (a
+copy across volumes) and follows each rebuild; delete it to start fresh.
+
 Intended series: 3D editor context-menu slot and viewport pick hook, meant for
 upstream, plus Joinery-only patches that restructure the editor (ADR 0005) and
 route project creation through Joinery's questionnaire (ADR 0004): starting
