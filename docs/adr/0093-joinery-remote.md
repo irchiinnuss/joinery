@@ -57,7 +57,12 @@ cover two of the four agents.
    `<origin>/#pair=<code>`. The code sits in the URL fragment, so it never reaches a log.
    - The phone posts the code with its name. The device exists only after the machine
      answers: Settings → Remote asks "Pair “Ana's iPhone” (iOS)? It can …" in place with
-     Cancel focused, or `joinery remote pair` asks in the terminal.
+     Cancel focused, or `joinery remote pair` asks in the terminal. The question also says
+     the tailnet login the request came with ("Signed in to Tailscale as …"), or that it
+     had none, since anyone can type a phone's name.
+   - Settings' QR picture is written in the per-user directory (`qr/`, 0700, the file
+     0600, renamed into place) and deleted as soon as it is shown; never a shared temp
+     folder.
    - Five wrong codes lock pairing for 10 minutes. Pairing posts are also limited per
      peer.
    - The device token is 256 random bits, delivered once and set as an `HttpOnly; Secure;

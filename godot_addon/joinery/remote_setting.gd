@@ -233,10 +233,10 @@ func _on_toggled(on: bool) -> void:
 
 func _pair() -> void:
 	_end_pairing()
-	var png := OS.get_temp_dir().path_join("joinery-remote-qr-%d.png" % OS.get_process_id())
 	pair_note.text = "Making a code…"
 	pair_box.show()
-	_run("pair", ["remote", "pair", "--json", "--no-wait", "--qr-png", png])
+	# The PNG goes in Remote's private folder, never a shared temp one: it holds the code.
+	_run("pair", ["remote", "pair", "--json", "--no-wait", "--qr"])
 
 
 ## Show a `joinery remote pair --json --no-wait` answer: the QR code, the code, how long.
@@ -246,8 +246,12 @@ func apply_pairing(data: Dictionary) -> void:
 		return
 	_pairing_id = str(data.get("pairing_id", ""))
 	_pairing_until = Time.get_unix_time_from_system() + 300.0
-	var image := Image.load_from_file(str(data.get("qr", ""))) if data.get("qr") else null
+	var picture := str(data.get("qr", ""))
+	var image := Image.load_from_file(picture) if not picture.is_empty() else null
 	qr.texture = ImageTexture.create_from_image(image) if image != null else null
+	if not picture.is_empty():
+		# Shown from memory from now on: the file with the code goes at once.
+		DirAccess.remove_absolute(picture)
 	code.text = str(data.get("code", ""))
 	pair_note.text = (
 		"Scan it with your phone's camera, or open the address and type the code. "

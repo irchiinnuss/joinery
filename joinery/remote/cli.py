@@ -69,6 +69,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     pair.add_argument("--json", action="store_true")
     pair.add_argument("--qr-png", type=Path, help="also write the QR code as a PNG")
     pair.add_argument(
+        "--qr",
+        action="store_true",
+        help="also write the QR code as a PNG in Remote's private folder (its path "
+        "is in the answer; delete it once shown)",
+    )
+    pair.add_argument(
         "--local",
         action="store_true",
         help="pair a browser on this machine (127.0.0.1) when Remote isn't on the "
@@ -301,10 +307,18 @@ def _scopes(text: str) -> tuple[str, ...]:
 
 
 def confirm_text(request: dict[str, Any]) -> str:
-    """The question the machine answers before a device is paired."""
+    """The question the machine answers before a device is paired. It says who asked
+    as well as the name the phone gave, which anyone could type: the tailnet login
+    ``tailscale serve`` added, or that there was none."""
     platform = f" ({request['platform']})" if request.get("platform") else ""
     can = ", ".join(CAN_DO[s] for s in SCOPES if s in request.get("scopes", []))
-    return f'Pair "{request["name"]}"{platform}? It can {can} in your projects.'
+    peer = str(request.get("peer", "") or "")
+    who = (
+        f" Signed in to Tailscale as {peer}."
+        if "@" in peer
+        else " It gave no Tailscale login (this machine, or a tagged device)."
+    )
+    return f'Pair "{request["name"]}"{platform}? It can {can} in your projects.{who}'
 
 
 def _pair(store: Store, args: argparse.Namespace) -> int:
@@ -317,9 +331,12 @@ def _pair(store: Store, args: argparse.Namespace) -> int:
         raise ValueError(FUNNEL if on_tailnet["funnel"] else NOT_SERVED)
     made = store.new_code(_scopes(args.scopes))
     url = qr.pair_url(origin(port, on_tailnet), made["code"])
+    picture: Path | None = None
     if args.qr_png:
-        qr.png(url, args.qr_png)
-    shown = {**made, "url": url, "qr": str(args.qr_png or "")}
+        picture = qr.png(url, args.qr_png)
+    elif args.qr:
+        picture = qr.private_png(url, store.home, made["pairing_id"])
+    shown = {**made, "url": url, "qr": str(picture or "")}
     audit.record("pair_code", "ok", pairing_id=made["pairing_id"])
     if args.json and args.no_wait:
         print(json.dumps(shown))

@@ -177,6 +177,14 @@ func _check_real_cli() -> void:
 	_check(setting.where.text.ends_with("https://mac.tail1234.ts.net"), "The served address")
 	setting.pair_button.pressed.emit()
 	_check(await _until(func() -> bool: return setting.qr.texture != null), "The QR code shows")
+	var pictures := DirAccess.get_files_at(_home.path_join("qr"))
+	_check(pictures.is_empty(), "The QR picture with the code is gone once shown: %s" % [pictures])
+	_check(
+		not FileAccess.file_exists(
+			OS.get_temp_dir().path_join("joinery-remote-qr-%d.png" % OS.get_process_id())
+		),
+		"Nothing in the shared temp folder"
+	)
 	var code := setting.code.text
 	_check(code.length() == 11 and code[5] == "-", "The code shows, grouped (%s)" % code)
 	# A phone uses the code (as the server does on POST /api/pair).
