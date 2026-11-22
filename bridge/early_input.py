@@ -24,6 +24,11 @@ class EarlyInput:
         self.shutdown: dict[str, object] | None = None
         self._kept: deque[bytes] = deque()
 
+    @property
+    def ended(self) -> bool:
+        """The input's EOF is among the kept lines."""
+        return b"" in self._kept
+
     async def until_ended(self) -> None:
         """Read and keep lines until the input ends (EOF or a ``shutdown`` line)."""
         while line := await self.reader.readline():
@@ -34,6 +39,14 @@ class EarlyInput:
                     self.shutdown = data
                     return
         self._kept.append(b"")
+
+    def keep(self, line: bytes) -> None:
+        """Keep ``line``, read elsewhere (joinery.remote.handoff), for the main loop."""
+        self._kept.append(line)
+        with contextlib.suppress(ValueError):
+            data = json.loads(line)
+            if isinstance(data, dict) and data.get("kind") == "shutdown":
+                self.shutdown = data
 
     async def readline(self) -> bytes:
         """The next line: one kept while connecting first; b"" once the input ended."""

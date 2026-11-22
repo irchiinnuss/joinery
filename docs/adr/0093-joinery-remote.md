@@ -217,10 +217,19 @@ Remote offers it as "When Joinery is closed".
   to-do and no phone watching. It holds no lease of itself.
 - **Handover** (`joinery/remote/handoff.py`): an editor opening such a project first asks
   that host to let go (channel `op: release`, which only hosts with no editor accept). The
-  host lets go at once when quiet, else when its request finishes, never by stopping it.
-  The editor says "A request from your phone is still running…" and waits up to 5 minutes.
-  The editor's own lease wait covers the close. Changes waiting for review appear in its
-  Review tab.
+  host lets go at once when quiet, else when its request finishes.
+  - The editor's host reads the editor's input from the start, so it is never deaf while
+    it waits for the lease: lines that come meanwhile are kept for its loop in order, and
+    the editor closing ends the wait.
+  - The sidebar shows "A request from your phone is still running…" with "Stop it now" and
+    "Wait" (`handover` event, `remote_relay.gd`). Stop sends `handover_stop`; the helper's
+    host stops the request as the phone's Stop would (`op: release, stop: true`) and lets
+    go. Wait waits as long as the request runs; there is no time limit that would end in a
+    lease error.
+  - Once asked to let go, the helper's host refuses new work from a phone (send, a chat
+    task, Go, another agent), so a phone can't hold the project; Stop, Accept and Discard
+    still work.
+  - Changes waiting for review appear in the editor's Review tab.
 
 ## Web Push
 

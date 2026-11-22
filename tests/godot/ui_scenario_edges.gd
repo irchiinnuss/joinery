@@ -807,3 +807,27 @@ func _remote_prompt() -> void:
 	var stopped := await s.wait_until(func() -> bool: return not bool(s.dock.get("_busy")), 8000)
 	s.check(stopped, "The phone's Stop stopped the request")
 	s.check(s.visible_text().contains("Stopped from Ana's iPhone"), "The stop names the phone")
+
+
+## A phone's request still holds the project the editor opens: the sidebar says so and offers
+## "Stop it now" or "Wait" (joinery.remote.handoff); Stop sends the host its line, and the
+## offer goes once the editor has the project.
+func _remote_handover() -> void:
+	var waiting := "A request from your phone is still running in this project."
+	s.chat.call("_handle", {"kind": "handover", "state": "waiting", "text": waiting})
+	await s.frames(2)
+	s.check(s.visible_text().contains(waiting), "The sidebar says the phone has it")
+	s.check(s.visible_text().contains("Stop it now"), "It offers to stop the phone's request")
+	await s.shot("handover")
+	var stop: Button = null
+	for button: Node in s.dock.find_children("*", "Button", true, false):
+		if button is Button and (button as Button).text == "Stop it now":
+			stop = button
+	s.check(stop != null, "Stop it now is a button")
+	if stop != null:
+		stop.pressed.emit()
+	await s.frames(2)
+	s.check(not s.visible_text().contains("Stop it now"), "The offer goes once answered")
+	s.chat.call("_handle", {"kind": "handover", "state": "done", "text": "The editor has it."})
+	await s.frames(2)
+	s.check(s.visible_text().contains("The editor has it."), "And the sidebar says when done")

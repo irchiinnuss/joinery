@@ -356,14 +356,40 @@ async def _serve(
     remote: RemoteChannel | None = None
     remote_watch: asyncio.Task[None] | None = None
     inputs: Inputs | None = None
+    #: The editor's input, read from the start: lines that come while a helper's host
+    #: still has the project are kept for the loop (joinery.remote.handoff).
+    reader: asyncio.StreamReader | None = None
+    transport: InputTransport | None = None
+    early: EarlyInput | None = None
+    editor_watch: asyncio.Task[None] | None = None
     if editor_pid > 0:
+        try:
+            reader, transport = await input_reader(sys.stdin.buffer)
+        except (OSError, ValueError) as exc:
+            emit(connect_errors.event(agent_id, agent_name, exc))
+            return 1
+        early = EarlyInput(reader)
+        editor_watch = asyncio.create_task(
+            end_with_editor(editor_pid, reader, transport)
+        )
         # A host the always-on helper started for a phone holds the project: it hands
-        # over to this editor once quiet (joinery.remote.handoff).
-        await take_over(project, emit)
+        # over to this editor once quiet, or at once if the user stops the phone's
+        # request from the sidebar. The editor's lines meanwhile wait in `early`.
+        await take_over(project, emit, editor=early)
+        if early.shutdown is not None or early.ended:
+            transport.close()
+            editor_watch.cancel()
+            await asyncio.gather(editor_watch, return_exceptions=True)
+            return 0
     try:
         gateway = ProjectGateway(project)
     except (OSError, ValueError) as exc:
         emit(connect_errors.event(agent_id, agent_name, exc))
+        if transport is not None:
+            transport.close()
+        if editor_watch is not None:
+            editor_watch.cancel()
+            await asyncio.gather(editor_watch, return_exceptions=True)
         return 1
     gateway.keep_reviews = keep_reviews
     # A headless run never loses applied work: a change it stopped in waits too.
@@ -511,7 +537,8 @@ async def _serve(
     rpc_server: GatewayRPC | None = None
     try:
         rpc_server = GatewayRPC(gateway, policy_stop)
-        reader, transport = await input_reader(sys.stdin.buffer)
+        if reader is None or transport is None:
+            reader, transport = await input_reader(sys.stdin.buffer)
     except (OSError, ValueError) as exc:
         if rpc_server is not None:
             await rpc_server.close()
@@ -520,11 +547,10 @@ async def _serve(
         emit(connect_errors.event(agent_id, agent_name, exc))
         return 1
     assert rpc_server is not None
-    editor_watch = (
-        asyncio.create_task(end_with_editor(editor_pid, reader, transport))
-        if editor_pid > 0
-        else None
-    )
+    if editor_watch is None and editor_pid > 0:
+        editor_watch = asyncio.create_task(
+            end_with_editor(editor_pid, reader, transport)
+        )
 
     async def turn(data: dict[str, Any]) -> None:
         assert bridge is not None
@@ -703,7 +729,7 @@ async def _serve(
         await rpc_server.start()
         bridge.bind_gateway(rpc_server.path)
         connection_timing = TurnTiming()
-        early = EarlyInput(reader)
+        early = early or EarlyInput(reader)
         if not await connect_or_end(bridge.connect(project, profile_id), early):
             # The editor went (or restarted its chat) before the agent answered.
             if early.shutdown is not None and early.shutdown.get("keep_reviews"):
@@ -1152,10 +1178,21 @@ async def _serve(
         inputs = Inputs(early, None)
         handing_over: set[asyncio.Task[None]] = set()
 
-        async def release_to_editor() -> bool:
+        async def release_to_editor(stop: bool = False) -> bool:
             """An editor opens this project: let it go once nothing is at work, keeping
-            the changes waiting for review (ADR 0093). True while still busy."""
+            the changes waiting for review (ADR 0093). True while still busy. ``stop``:
+            the user chose "Stop it now" at the editor; the request stops as it would
+            for the phone's Stop."""
             busy = idle_busy()
+            if stop and remote is not None:
+                await remote.inbox.put(
+                    (
+                        {"kind": "cancel", "all": True},
+                        Origin("", "", (), internal=True),
+                    )
+                )
+            if handing_over:
+                return busy  # Already letting go.
 
             async def when_quiet() -> None:
                 while idle_busy():

@@ -91,6 +91,9 @@ signal connection_problem(problem: Dictionary)
 ## A paired device asked for something the sidebar does itself (send, Stop, Go, Accept, Discard;
 ## remote_relay.gd, ADR 0093): {ref, action, device: {id, name}}. Answer with [method remote_ack].
 signal remote_action(event: Dictionary)
+## A phone's request still holds the project this sidebar opens (ADR 0093): {state: waiting|
+## stopping|done, text}. While waiting, [method stop_phone_request] stops it.
+signal handover(event: Dictionary)
 
 const COMMAND_SCRIPT := preload("command_job.gd")
 const ATTACHMENTS := preload("chat_attachments.gd")
@@ -672,6 +675,8 @@ func _handle(event: Dictionary) -> void:
 			file_decision.emit(event)
 		"remote_action":
 			remote_action.emit(event)
+		"handover":
+			handover.emit(event)
 		"editor_action":
 			editor_action.emit(event)
 		"editor_view":
@@ -788,6 +793,13 @@ func decide_files(identifier: String, accept: bool, auto := false) -> void:
 			line["decided_from"] = decided_from
 			decided_from = ""
 		_job.send_line(JSON.stringify(line))
+
+
+## "Stop it now" on the [signal handover] offer: the phone's request stops, as its own Stop.
+## Sent before the chat is connected: the host reads it while it waits for the project.
+func stop_phone_request() -> void:
+	if _job != null:
+		_job.send_line(JSON.stringify({"kind": "handover_stop"}))
 
 
 ## Tell the host what came of a device's [signal remote_action] [param ref].

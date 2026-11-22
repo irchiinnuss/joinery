@@ -76,6 +76,7 @@ const ALL := [
 	"reopen",
 	"remote-decision",
 	"remote-prompt",
+	"remote-handover",
 ]
 
 ## Builds a fresh sidebar for each scenario: returns [dock, chat bridge], wired and in the tree.

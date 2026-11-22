@@ -7,13 +7,16 @@ extends Node
 ## Discard on the change in review is the review's own button, with its checks (unsaved scenes,
 ## live scene edits on screen). So the cards, the queue and the live preview stay right, and the
 ## Timeline entry names the device. Each action is answered ("remote_ack") with what came of it,
-## and the transcript says which device did it.
+## and the transcript says which device did it. When a phone's request still holds the project
+## the editor opens ("handover"), the transcript offers "Stop it now" or "Wait".
 
 const SLASH := preload("slash_commands.gd")
 const NOT_HERE := "That isn't waiting at the editor any more."
 
 var _plugin: Object
 var _chat: Node
+## The "Stop it now / Wait" line while a phone's request holds the project.
+var _handover_row: Control
 
 
 ## Follow [param chat] (chat_bridge.gd) for [param plugin] (plugin.gd); placed under [param parent].
@@ -25,7 +28,39 @@ static func attach(parent: Node, plugin: Object, chat: Node) -> Node:
 	parent.add_child(relay)
 	if chat.has_signal("remote_action"):
 		chat.connect("remote_action", Callable(relay, "on_action"))
+	if chat.has_signal("handover"):
+		chat.connect("handover", Callable(relay, "on_handover"))
 	return relay
+
+
+## The project is still a phone's: {state: waiting|stopping|done, text}.
+func on_handover(event: Dictionary) -> void:
+	var dock := _dock()
+	if dock == null:
+		return
+	var turn: Object = dock.call("_turn")
+	var text := str(event.get("text", ""))
+	if is_instance_valid(_handover_row):
+		turn.call("remove_offer", _handover_row)
+	_handover_row = null
+	if str(event.get("state", "")) != "waiting":
+		turn.call("add_notice", text, "info")
+		return
+	_handover_row = turn.call(
+		"add_offer", text, [["Stop it now", _stop_phone_request], ["Wait", _wait_for_phone]]
+	)
+
+
+func _stop_phone_request() -> void:
+	_chat.call("stop_phone_request")
+	_wait_for_phone()
+
+
+func _wait_for_phone() -> void:
+	var dock := _dock()
+	if dock != null and is_instance_valid(_handover_row):
+		(dock.call("_turn") as Object).call("remove_offer", _handover_row)
+	_handover_row = null
 
 
 ## One action: {ref, action: {kind, ...}, device: {id, name}}.

@@ -54,6 +54,12 @@ HIDDEN = frozenset({"editor_action", "editor_view", "remote_action", "quiet"})
 SIDES = ("before", "after")
 FILE_KEYS = ("before", "after", "before_model", "after_model")
 NO_EDITOR_ANSWER = "The editor didn't answer. Look at the machine."
+#: What starts work, refused once an editor takes the project over.
+STARTS = frozenset({"prompt", "chat_task", "todo_go", "provider_switch"})
+TAKING_OVER = (
+    "The editor on your Mac is taking this project over. Carry on there, or stop "
+    "the running request."
+)
 #: Set for the hosts the always-on helper starts.
 HELPER_ENV = "JOINERY_REMOTE_HELPER"
 
@@ -86,7 +92,7 @@ class RemoteChannel:
         replies: dict[str, Callable[[], dict[str, Any]]] | None = None,
         home: Path | None = None,
         transport: str | None = None,
-        release: Callable[[], Awaitable[bool]] | None = None,
+        release: Callable[[bool], Awaitable[bool]] | None = None,
     ) -> None:
         self.project = project
         self.agent_id = agent_id
@@ -94,6 +100,8 @@ class RemoteChannel:
         self.helper = os.environ.get(HELPER_ENV) == "1"
         #: Let the project go to an editor that opens it, once quiet; True while busy.
         self.release = release
+        #: An editor asked this host to let go: a phone starts nothing new here.
+        self.releasing = False
         #: An editor is attached: the sidebar carries out what it owns.
         self.editor = editor
         self.to_editor = to_editor
@@ -366,7 +374,11 @@ class RemoteChannel:
             # Only a host with no editor gives the project up (to the editor opening it).
             if self.editor or self.release is None:
                 return {"ok": False, "text": "This chat belongs to an open editor."}
-            return {"ok": True, "busy": await self.release()}
+            self.releasing = True
+            return {
+                "ok": True,
+                "busy": await self.release(bool(request.get("stop"))),
+            }
         if op != "action":
             raise ValueError("Unknown request.")
         device = request.get("device")
@@ -383,6 +395,10 @@ class RemoteChannel:
             action = admit(request.get("action"), origin.scopes)
         except Refused as exc:
             return {"ok": False, "refused": True, "text": str(exc)}
+        if self.releasing and action["kind"] in STARTS:
+            # The editor is taking this project over: Stop, Accept and Discard still
+            # work here, but nothing new starts that would keep it waiting.
+            return {"ok": False, "refused": True, "text": TAKING_OVER}
         reply = self.replies.get(action["kind"])
         if reply is not None:
             event = await asyncio.to_thread(reply)

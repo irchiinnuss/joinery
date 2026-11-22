@@ -11,6 +11,7 @@ import json
 import os
 import plistlib
 import sys
+from collections import deque
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -117,11 +118,83 @@ def test_an_editor_takes_the_project_over(tmp_path: Path) -> None:
         await asyncio.sleep(0.5)
         taking = asyncio.create_task(take_over(project, said.append, home, wait=30))
         await asyncio.sleep(1.5)
-        assert said == [{"kind": "notice", "level": "info", "text": BUSY}]
+        assert said == [{"kind": "handover", "state": "waiting", "text": BUSY}]
         assert hosts.find(host.id, home) is not None
         await hosts.request(host, act({"kind": "cancel"}))
         assert await taking
         assert hosts.find(host.id, home) is None
+        assert said[-1]["state"] == "done"
+        await launcher.close()
+
+    run(body)
+
+
+def editor_input() -> tuple[asyncio.StreamReader, Any]:
+    from bridge.early_input import EarlyInput
+
+    reader = asyncio.StreamReader()
+    return reader, EarlyInput(reader)
+
+
+def line(data: dict[str, Any]) -> bytes:
+    return (json.dumps(data) + "\n").encode()
+
+
+def test_the_editor_can_stop_the_phones_request_and_stays_heard(
+    tmp_path: Path,
+) -> None:
+    """The editor's host reads the editor while it waits: "Stop it now" stops the phone's
+    request, every other line waits for the loop in order, and a phone starts nothing
+    new once the editor is taking over."""
+    home, project, launcher = setup(tmp_path)
+    remember(project, "claude", home)
+    said: list[dict[str, Any]] = []
+
+    async def body() -> None:
+        host = await launcher.ensure_host(project)
+        assert host is not None
+        await hosts.request(host, act({"kind": "prompt", "text": "Keep going"}))
+        await asyncio.sleep(0.5)
+        reader, early = editor_input()
+        taking = asyncio.create_task(
+            take_over(project, said.append, home, editor=early)
+        )
+        await asyncio.sleep(1.5)
+        assert said[0]["state"] == "waiting"
+        refused = await hosts.request(host, act({"kind": "prompt", "text": "More"}))
+        assert refused["ok"] is False and "taking this project over" in refused["text"]
+        reader.feed_data(line({"kind": "editor_focus", "focused": True}))
+        reader.feed_data(line({"kind": "handover_stop"}))
+        assert await asyncio.wait_for(taking, 30)
+        assert hosts.find(host.id, home) is None
+        assert [e["state"] for e in said] == ["waiting", "stopping", "done"]
+        # The editor's own line is kept for its loop; the stop is not.
+        assert json.loads(await early.readline())["kind"] == "editor_focus"
+        assert early._kept == deque()
+        await launcher.close()
+
+    run(body)
+
+
+def test_the_editor_closing_ends_the_wait(tmp_path: Path) -> None:
+    home, project, launcher = setup(tmp_path)
+    remember(project, "claude", home)
+
+    async def body() -> None:
+        host = await launcher.ensure_host(project)
+        assert host is not None
+        await hosts.request(host, act({"kind": "prompt", "text": "Keep going"}))
+        await asyncio.sleep(0.5)
+        reader, early = editor_input()
+        taking = asyncio.create_task(
+            take_over(project, lambda e: None, home, editor=early)
+        )
+        await asyncio.sleep(1.0)
+        reader.feed_eof()
+        assert await asyncio.wait_for(taking, 10)
+        assert early.ended
+        # The phone's request was never stopped by it.
+        assert hosts.find(host.id, home) is not None
         await launcher.close()
 
     run(body)
