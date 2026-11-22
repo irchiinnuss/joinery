@@ -137,7 +137,12 @@ cover two of the four agents.
       removed and ignores the flag.
     - Gemini CLI and opencode: no remote control of their own is known for the ACP sessions
       Joinery runs, so nothing is set.
-11. **Policy unchanged.** A device reaches no tool, every agent call still passes `joinery
+11. **Kept out of git.** `joinery check remote` (part of `check all`) fails when a
+    project's `.joinery/remote/` or a per-user Remote file is staged or committed, when a
+    project with its own repository doesn't ignore `.joinery/*`, or when the per-user
+    folder sits inside the project or the checkout. A test also holds that only
+    `push.py` imports anything that reaches the network and every socket is loopback.
+12. **Policy unchanged.** A device reaches no tool, every agent call still passes `joinery
     hook`, and a Rule Zero stop reaches every device as the sidebar shows it. Remote adds no
     MCP server, tool or provider flag.
 

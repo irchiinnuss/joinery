@@ -145,6 +145,10 @@ def _check(target: str, project: Path) -> int:
         errors += check_mcp_config(ROOT)
     if target in ("assets", "all"):
         errors += check_assets(project, catalog)
+    if target in ("remote", "all"):
+        from joinery.remote.privacy import check_private
+
+        errors += check_private(project, ROOT)
     for error in errors:
         print(error, file=sys.stderr)
     print(f"check {target}: {'FAILED' if errors else 'ok'}")
@@ -1676,7 +1680,16 @@ def _parser() -> argparse.ArgumentParser:
     check = commands.add_parser("check", help="run policy checks")
     check.add_argument(
         "target",
-        choices=["all", "catalog", "deps", "mcp", "assets", "bible", "catalogue"],
+        choices=[
+            "all",
+            "catalog",
+            "deps",
+            "mcp",
+            "assets",
+            "bible",
+            "catalogue",
+            "remote",
+        ],
     )
     check.add_argument("--project", type=Path, default=ROOT / "testbed")
     history.register(commands)
