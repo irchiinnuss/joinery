@@ -9,8 +9,10 @@ import json
 import os
 import plistlib
 import re
+import shutil
 import struct
 import subprocess
+import sys
 import tarfile
 import zipfile
 from dataclasses import dataclass
@@ -217,6 +219,23 @@ def bundle_version(version: str = __version__) -> str:
     return match.group(0) if match else "0"
 
 
+def bundle_info(executable: str, identifier: str) -> dict[str, Any]:
+    """Joinery.app's Info.plist: the release bundle and the dev wrapper share it."""
+    return {
+        "CFBundleName": "Joinery",
+        "CFBundleDisplayName": "Joinery",
+        "CFBundleIdentifier": identifier,
+        "CFBundleExecutable": executable,
+        "CFBundleIconFile": "Joinery",
+        "CFBundlePackageType": "APPL",
+        "CFBundleShortVersionString": bundle_version(),
+        "CFBundleVersion": "1",
+        "NSHighResolutionCapable": True,
+        "LSMinimumSystemVersion": "13.0",
+        "NSPrincipalClass": "NSApplication",
+    }
+
+
 ICON_SIZES = (16, 32, 48, 64, 128, 256, 512)
 
 
@@ -320,21 +339,7 @@ def package(
             for name, path in bundle_files(notifier).items():
                 entries[name] = _Entry(path, os.access(path, os.X_OK))
         entries["Joinery.app/Contents/Info.plist"] = _Entry(
-            plistlib.dumps(
-                {
-                    "CFBundleName": "Joinery",
-                    "CFBundleDisplayName": "Joinery",
-                    "CFBundleIdentifier": "org.joinery.editor",
-                    "CFBundleExecutable": "Joinery",
-                    "CFBundleIconFile": "Joinery",
-                    "CFBundlePackageType": "APPL",
-                    "CFBundleShortVersionString": bundle_version(),
-                    "CFBundleVersion": "1",
-                    "NSHighResolutionCapable": True,
-                    "LSMinimumSystemVersion": "13.0",
-                    "NSPrincipalClass": "NSApplication",
-                }
-            )
+            plistlib.dumps(bundle_info("Joinery", "org.joinery.editor"))
         )
     elif desktop and actual_target.startswith("windows-"):
         launcher = (
@@ -388,6 +393,82 @@ def package(
     }
 
 
+DEV_APP = Path.home() / "Library/Caches/Joinery/dev-app/Joinery.app"
+DEV_IDENTIFIER = "org.joinery.editor.dev"
+
+
+def _write_if_changed(path: Path, data: bytes) -> bool:
+    if path.is_file() and path.read_bytes() == data:
+        return False
+    staged = path.with_name(path.name + ".new")
+    staged.write_bytes(data)
+    os.replace(staged, path)
+    return True
+
+
+def dev_app(binary: Path, app: Path | None = None) -> Path:
+    """Wrap a bare macOS editor build in Joinery.app; return the wrapped executable.
+
+    macOS names a process in the Dock and app switcher after the bundle its
+    executable sits in, so a locally built ``godot.macos.editor.arm64`` shows its
+    file name and no icon. The wrapper holds the binary as ``Contents/MacOS/Joinery``
+    (a hard link, or a copy across volumes: a symlink would resolve back out of
+    the bundle), the release Info.plist with a dev identifier, and the Joinery
+    icon. It is refreshed only when the binary changes. The process listing still
+    shows the real binary's path, since ``launch`` keeps it as ``argv[0]``.
+    """
+    app = app or DEV_APP
+    contents = app / "Contents"
+    folder = contents / "MacOS"
+    folder.mkdir(parents=True, exist_ok=True)
+    (contents / "Resources").mkdir(exist_ok=True)
+    changed = _write_if_changed(
+        contents / "Info.plist",
+        plistlib.dumps(bundle_info("Joinery", DEV_IDENTIFIER)),
+    )
+    try:
+        changed |= _write_if_changed(
+            contents / "Resources/Joinery.icns", _icon("joinery.icns").read_bytes()
+        )
+    except ValueError:
+        pass  # Still name the process Joinery without the icon.
+    for stale in folder.iterdir():
+        if stale.name != "Joinery":
+            stale.unlink()
+    wrapped = folder / "Joinery"
+    source = binary.stat()
+    current = wrapped.stat() if wrapped.is_file() else None
+    if current is None or not (
+        os.path.samestat(source, current)
+        or (current.st_size, current.st_mtime_ns)
+        == (source.st_size, source.st_mtime_ns)
+    ):
+        staged = wrapped.with_name(wrapped.name + ".new")
+        staged.unlink(missing_ok=True)
+        try:
+            os.link(binary, staged)
+        except OSError:
+            shutil.copy2(binary, staged)
+        os.replace(staged, wrapped)
+        changed = True
+    if changed:
+        os.utime(app)  # LaunchServices rereads a bundle whose date moved.
+    return wrapped
+
+
+def wrapped_editor(binary: Path) -> Path:
+    """The executable to start for ``binary``: on macOS a bare build runs from
+    the dev Joinery.app; anything else (and any failure to wrap) runs as is."""
+    if sys.platform != "darwin" or any(
+        parent.suffix == ".app" for parent in binary.parents
+    ):
+        return binary
+    try:
+        return dev_app(binary)
+    except OSError:
+        return binary
+
+
 def launch(project: Path | None) -> dict[str, Any]:
     binary = engine_binary()
     env = dict(os.environ, JOINERY_HOME=str(ROOT))
@@ -398,8 +479,11 @@ def launch(project: Path | None) -> dict[str, Any]:
         args = [str(binary), "--editor", "--path", str(project.resolve())]
     else:
         args = [str(binary), "--project-manager"]
+    # argv[0] stays the real binary, so process listings that look for this
+    # editor by its path see the same command line; only the image differs.
     child = subprocess.Popen(
         args,
+        executable=str(wrapped_editor(binary)),
         env=env,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,

@@ -261,3 +261,98 @@ def test_release_refuses_files_linking_outside_source(
         distribution.package(
             tmp_path / "bad.zip", binary=executable(source / "engine", "linux-x86_64")
         )
+
+
+def test_dev_app_wraps_a_bare_build_with_the_release_identity(
+    source: Path, tmp_path: Path
+) -> None:
+    binary = executable(tmp_path / "godot.macos.editor.arm64", "macos-arm64")
+    app = tmp_path / "cache/Joinery.app"
+    wrapped = distribution.dev_app(binary, app)
+    assert wrapped == app / "Contents/MacOS/Joinery"
+    assert wrapped.read_bytes() == binary.read_bytes()
+    assert os.access(wrapped, os.X_OK)
+    info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
+    release = distribution.bundle_info("Joinery", "org.joinery.editor")
+    assert info == {**release, "CFBundleIdentifier": distribution.DEV_IDENTIFIER}
+    assert info["CFBundleName"] == info["CFBundleDisplayName"] == "Joinery"
+    assert info["CFBundleIdentifier"] != "org.joinery.editor"
+    assert (app / "Contents/Resources/Joinery.icns").read_bytes() == (
+        source / "release/icon/dist/joinery.icns"
+    ).read_bytes()
+
+
+@pytest.mark.parametrize("linked", [True, False])
+def test_dev_app_refreshes_only_when_the_binary_changes(
+    source: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    linked: bool,
+) -> None:
+    if not linked:
+
+        def no_link(*args: object) -> None:
+            raise OSError("cross-device link")
+
+        monkeypatch.setattr(distribution.os, "link", no_link)
+    binary = executable(tmp_path / "godot.macos.editor.arm64", "macos-arm64")
+    app = tmp_path / "Joinery.app"
+    wrapped = distribution.dev_app(binary, app)
+    assert os.path.samefile(wrapped, binary) is linked
+    first = wrapped.stat()
+    (wrapped.parent / "godot.old.editor").write_text("stale")
+    assert distribution.dev_app(binary, app) == wrapped
+    assert wrapped.stat().st_ino == first.st_ino
+    assert [path.name for path in wrapped.parent.iterdir()] == ["Joinery"]
+    # A rebuild writes a new file; the wrapper follows it.
+    binary.unlink()
+    executable(binary, "macos-x86_64")
+    distribution.dev_app(binary, app)
+    assert wrapped.read_bytes() == binary.read_bytes()
+    assert os.path.samefile(wrapped, binary) is linked
+
+
+def test_wrapping_is_mac_only_and_skips_bundled_editors(
+    source: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    app = tmp_path / "cache/Joinery.app"
+    monkeypatch.setattr(distribution, "DEV_APP", app)
+    binary = executable(tmp_path / "godot.linuxbsd.editor.x86_64", "linux-x86_64")
+    monkeypatch.setattr(distribution.sys, "platform", "linux")
+    assert distribution.wrapped_editor(binary) == binary
+    assert not app.exists()
+    monkeypatch.setattr(distribution.sys, "platform", "darwin")
+    bundled = tmp_path / "Joinery.app/Contents/MacOS/Godot"
+    bundled.parent.mkdir(parents=True)
+    executable(bundled, "macos-arm64")
+    assert distribution.wrapped_editor(bundled) == bundled
+    assert not app.exists()
+    assert distribution.wrapped_editor(binary) == app / "Contents/MacOS/Joinery"
+
+
+def test_launch_runs_the_wrapper_but_keeps_the_real_binary_as_argv0(
+    source: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    binary = executable(tmp_path / "godot.macos.editor.arm64", "macos-arm64")
+    wrapper = tmp_path / "Joinery.app/Contents/MacOS/Joinery"
+    monkeypatch.setattr(distribution, "engine_binary", lambda: binary)
+    monkeypatch.setattr(distribution, "wrapped_editor", lambda path: wrapper)
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    class Child:
+        pid = 4321
+
+    def popen(args: list[str], **kwargs: object) -> Child:
+        calls.append((args, kwargs))
+        return Child()
+
+    monkeypatch.setattr(distribution.subprocess, "Popen", popen)
+    assert distribution.launch(None) == {
+        "started": True,
+        "pid": 4321,
+        "mode": "project-manager",
+    }
+    args, kwargs = calls[0]
+    assert args == [str(binary), "--project-manager"]
+    assert kwargs["executable"] == str(wrapper)
+    assert kwargs["start_new_session"] is True
