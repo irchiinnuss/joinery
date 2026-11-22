@@ -420,11 +420,16 @@ your Mac serves it, and your own Tailscale carries it to the phone (ADR 0093).
    server listens on this Mac only (127.0.0.1).
 3. Put it on your tailnet: press **Put it on my tailnet** under the address
    (it asks first), or run `joinery remote tailscale --run`. Your phone then
-   opens `https://<mac>.<tailnet>.ts.net`; **Copy address** copies it. Without
-   Tailscale the button reads **Get Tailscale**.
-4. **Pair a device** shows a QR code and a 10-character code for 5 minutes.
-   Scan it on the phone, then answer "Pair …?" on the Mac. Without that answer
-   nothing is paired. `joinery remote pair` does the same in a terminal.
+   opens `https://<mac>.<tailnet>.ts.net`; **Copy address** copies it. Settings
+   reads what `tailscale serve` actually serves, so a serve you set up yourself
+   counts too. Without Tailscale the button reads **Get Tailscale**. Tailscale
+   Funnel (the public internet) is refused.
+4. **Pair a device** (once Remote is on your tailnet) shows a QR code and a
+   10-character code for 5 minutes. Scan it on the phone, then answer "Pair …?"
+   on the Mac, which also says the Tailscale login it came from. Without that
+   answer nothing is paired. `joinery remote pair` does the same in a terminal.
+   If wrong codes are tried too often, the code stops working and Settings says
+   so; pair again for a new one.
 
 What a phone does is done exactly as your own click in the sidebar: a message
 queues while Journeyman works, Accept runs the same checks, and the transcript
@@ -442,17 +447,23 @@ Each device can **Follow only**, **Follow and chat**, or do **Everything**
 (which adds Accept and Discard): choose it beside the device in Settings →
 Remote, or `joinery remote scopes <id> watch,chat`. **Activity** there lists what
 devices did and what was refused; **Unpair all** asks first. It expires
-after 30 days unused or 90 days in all. Revoke it in Settings → Remote or with
-`joinery remote revoke <id>`, which takes effect at once. `joinery remote log`
+after 30 days unused or 90 days in all (`joinery remote expiry --unused-days 7
+--absolute-days 30` changes that). `joinery remote projects <id> --allow
+<project>` limits a device to some projects. `joinery remote owner
+ana@example.com` lets only your own Tailscale login's devices reach Remote.
+Revoke a device in Settings → Remote or with `joinery remote revoke <id>`,
+which takes effect at once, open connections included. `joinery remote log`
 lists what devices did. Turning Remote off ends every connection and keeps
-pairings.
+pairings; nothing listens until you turn it on again.
 
 **When Joinery is closed** (`joinery remote install-helper`) keeps Remote
 available after you quit: your phone lists the projects you used here, and opening
 one starts its chat without the editor, with the agent of its last chat. Changes
 wait for review as usual. It stops after 15 quiet minutes. If you then open the
 project in Joinery, the editor takes it over, after the phone's request finishes
-if one is running. `joinery remote uninstall-helper` removes it.
+if one is running: the sidebar offers **Stop it now** or **Wait**, and a phone
+can't start anything new there meanwhile. `joinery remote uninstall-helper`
+removes it.
 
 **Notifications**: on the phone, open Settings on the Projects screen and turn
 on Notifications. On an iPhone, first add the page to the Home Screen (Share →
