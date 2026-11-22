@@ -12,7 +12,7 @@ import sys
 import threading
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any, BinaryIO, Protocol
 
@@ -120,11 +120,20 @@ def decided_from(data: dict[str, Any]) -> str:
     return " ".join(str(data.get("decided_from", "") or "").split())[:60]
 
 
-def mark_decided_from(lane: ProjectGateway, data: dict[str, Any]) -> None:
-    """Name the device on the change being decided, for its Timeline entry."""
+@contextlib.contextmanager
+def deciding_from(lane: ProjectGateway, data: dict[str, Any]) -> Iterator[None]:
+    """Name the device on the change being decided, for its history and Timeline
+    entry, for this one decision only: a decision that fails leaves no name behind
+    for a later one (an editor's own, a variant's pick) to be credited with."""
     tx = lane.transaction
-    if tx is not None and tx.id == str(data.get("transaction_id", "")):
-        tx.decided_from = decided_from(data)
+    if tx is None or tx.id != str(data.get("transaction_id", "")):
+        yield
+        return
+    tx.decided_from = decided_from(data)
+    try:
+        yield
+    finally:
+        tx.decided_from = ""
 
 
 _FEATURE_OFFER = re.compile(r"\s*Add (?:it|them) with (/feature add [a-z0-9-]+)\?")
@@ -1290,14 +1299,16 @@ async def _serve(
                 assert variants is not None
                 if data.get("kind") == "decision" and owned is not None:
                     try:
-                        mark_decided_from(owned.gateway, data)
-                        if owned.group and bool(data.get("accept", False)):
-                            # Accepting one way is picking it: the rest go.
-                            emit_decisions(await variants.pick(owned.group, owned.id))
-                            continue
-                        decided = await crew.decide(
-                            owned.transaction_id, bool(data.get("accept", False))
-                        )
+                        with deciding_from(owned.gateway, data):
+                            if owned.group and bool(data.get("accept", False)):
+                                # Accepting one way is picking it: the rest go.
+                                emit_decisions(
+                                    await variants.pick(owned.group, owned.id)
+                                )
+                                continue
+                            decided = await crew.decide(
+                                owned.transaction_id, bool(data.get("accept", False))
+                            )
                     except (OSError, ValueError) as exc:
                         # The task's row in the Review tab says why, in place.
                         decided = {
@@ -1324,11 +1335,11 @@ async def _serve(
                         # The editor's own Accept of a change Joinery said may be kept
                         # without asking (its live scene edits): recorded as such.
                         pending.auto_accepted = True
-                    mark_decided_from(gateway, data)
-                    decision = await controller.decide(
-                        str(data.get("transaction_id", "")),
-                        bool(data.get("accept", False)),
-                    )
+                    with deciding_from(gateway, data):
+                        decision = await controller.decide(
+                            str(data.get("transaction_id", "")),
+                            bool(data.get("accept", False)),
+                        )
                     emit(decision)
                     if "art_review" in decision:
                         emit(art_review_event(project))
