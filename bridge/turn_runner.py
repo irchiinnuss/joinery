@@ -176,7 +176,8 @@ def left_notice(result: SubmitResult) -> dict[str, Any] | None:
 
 def limit_notice(words: str, next_step: str = "") -> dict[str, Any]:
     """Joinery's own line when a usage or rate limit ended the turn: which limit,
-    when it lifts if the provider said, the provider's words and ``next_step``
+    when it lifts if the provider said, whatever else the provider's words add and
+    ``next_step``
     (what the user can do). It is the one place the limit is said: the provider's
     own quota message is not shown besides it. ``joinery run`` takes it as the
     run's error (``about`` = PROVIDER_ERROR)."""

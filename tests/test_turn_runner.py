@@ -835,8 +835,10 @@ def test_without_another_signed_in_agent_the_user_is_told(
     limit = next(e for e in told if e.get("about") == "provider_error")
     assert limit["level"] == "warn" and limit["error_kind"] == "usage_limit"
     assert limit["resets"] == "4:12 PM"
-    assert limit["text"].startswith("Usage limit reached (resets 4:12 PM): " + QUOTA_WORDS)
-    assert "No other agent is signed in" in limit["text"]
-    said = [e for e in host.events if QUOTA_WORDS in str(e.get("text", ""))]
+    assert limit["text"] == (
+        "Usage limit reached. It resets at 4:12 PM. To carry on now, sign in "
+        "another agent under Settings and ask again."
+    )
+    said = [e for e in host.events if "limit" in str(e.get("text", "")).lower()]
     assert said == [limit]
     assert "provider_switch" not in host.kinds()

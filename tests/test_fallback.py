@@ -75,10 +75,25 @@ def test_provider_errors_say_which_limit_and_when_it_lifts(
         "rate_limit": "Rate limit reached",
         "provider": "Provider error",
     }[kind]
-    assert line.startswith(lead) and line.endswith(text)
+    assert line.startswith(lead)
+    if kind == "provider":
+        assert line.endswith(text)
+    else:
+        # The limit is said once: the provider's restating words are left out.
+        assert text not in line and line.lower().count("limit") == 1
     if reset:
-        # Before the provider's words: "Usage limit reached (resets 4:12 PM): …".
-        assert line.index(reset + ")") < line.index(text)
+        # Right after which limit: "Usage limit reached. It resets at 4:12 PM."
+        assert line.index(reset) < len(lead) + 20
+
+
+def test_a_limits_line_keeps_what_the_provider_adds() -> None:
+    _, _, line = provider_error(
+        "Your credit balance is too low to access the API. "
+        "Please go to Plans & Billing to purchase credits."
+    )
+    assert line == (
+        "Usage limit reached. Please go to Plans & Billing to purchase credits."
+    )
 
 
 def test_the_setting_names_a_known_agent_only(tmp_path: Path) -> None:

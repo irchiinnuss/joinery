@@ -87,8 +87,8 @@ class ProviderSwitch:
             self.emit(
                 limit_notice(
                     reason,
-                    "No other agent is signed in to carry it on. Sign one in under "
-                    "Settings, then ask again.",
+                    "To carry on now, sign in another agent under Settings and "
+                    "ask again.",
                 )
             )
             return None

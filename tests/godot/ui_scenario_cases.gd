@@ -521,15 +521,16 @@ func _rate_limit() -> void:
 	var offered := await s.wait_until(
 		func() -> bool:
 			var text := s.visible_text()
-			return text.contains("Continue with") or text.contains("Sign one in"),
+			return text.contains("Continue with") or text.contains("sign in another agent"),
 		6000
 	)
 	s.check(
 		offered, "A quota stop offers another agent, or says how: " + s.visible_text().right(200)
 	)
-	s.check(s.visible_text().contains("usage limit"), "It says it was the usage limit")
-	var said := s.visible_text().count("You've hit your usage limit")
+	s.check(s.visible_text().contains("Usage limit reached"), "It says it was the usage limit")
+	var said := s.visible_text().to_lower().count("usage limit")
 	s.check(said == 1, "The usage limit is said once (%d times)" % said)
+	s.check(s.visible_text().count("4:00 PM") == 1, "…and when it resets, once")
 	s.check(s.reply_shown().is_empty(), "The limit isn't shown as a reply")
 	await s.shot("offer")
 

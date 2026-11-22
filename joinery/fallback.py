@@ -84,22 +84,37 @@ def provider_error(text: str) -> tuple[str, str, str]:
     """(kind, reset time, one plain line) for a provider's error words.
 
     kind is "usage_limit" (a plan's usage window, quota or credits used up),
-    "rate_limit" (too many requests for now) or "provider" (any other error). The
-    line leads with the kind and the reset time when the provider gave one, then
-    the provider's own words: "Usage limit reached (resets 3pm): You've hit…".
+    "rate_limit" (too many requests for now) or "provider" (any other error). For
+    a limit the line says which, then when it lifts if the provider said, then
+    only those of the provider's words that add something: "Usage limit reached.
+    It resets at 3pm." A sentence that restates the limit or its reset is not
+    said a second time.
     """
     words = " ".join((text or "").split())[:400]
     if _USAGE.search(words):
-        kind, label = "usage_limit", "Usage limit reached"
+        kind, label = "usage_limit", "Usage limit reached."
     elif _RATE.search(words):
-        kind, label = "rate_limit", "Rate limit reached"
+        kind, label = "rate_limit", "Rate limit reached."
     else:
         return "provider", "", f"Provider error: {words}" if words else "Provider error"
+    parts = [label]
     reset = reset_time(text)
     if reset:
-        verb = "try again" if reset.startswith("in ") else "resets"
-        label += f" ({verb} {reset})"
-    return kind, reset, f"{label}: {words}"
+        parts.append(
+            f"Try again {reset}."
+            if reset.startswith("in ")
+            else f"It resets at {reset}."
+        )
+    parts.extend(
+        sentence
+        for sentence in _SENTENCE.split(words)
+        if sentence and not any(p.search(sentence) for p in (_USAGE, _RATE, _RESET))
+    )
+    return kind, reset, " ".join(parts)
+
+
+#: Where a provider's sentence ends.
+_SENTENCE = re.compile(r"(?<=[.!?])\s+")
 
 
 def setting(project: Path) -> str:

@@ -369,12 +369,12 @@ def test_a_usage_limit_is_the_runs_error_with_its_reset_time(tmp_path: Path) -> 
                 "about": "provider_error",
                 "error_kind": "usage_limit",
                 "resets": "4:12 PM",
-                "text": "Usage limit reached (resets 4:12 PM): " + words,
+                "text": "Usage limit reached. It resets at 4:12 PM.",
             },
         ),
     )
     assert outcome.state == "failed"
-    assert outcome.error == "Usage limit reached (resets 4:12 PM): " + words
+    assert outcome.error == "Usage limit reached. It resets at 4:12 PM."
     assert (outcome.error_kind, outcome.resets) == ("usage_limit", "4:12 PM")
     assert outcome.as_dict()["error"] == outcome.error
 
@@ -385,7 +385,7 @@ def test_any_agents_error_words_become_the_runs_error(tmp_path: Path) -> None:
     outcome = run_host(
         tmp_path, limited_host({"kind": "message", "level": "warn", "text": words})
     )
-    assert outcome.error == "Rate limit reached (try again in 41.3s): " + words
+    assert outcome.error == "Rate limit reached. Try again in 41.3s."
     assert outcome.error_kind == "rate_limit"
     other = run_host(
         tmp_path,
