@@ -4,6 +4,7 @@ the server accepts all follow what ``tailscale serve`` actually serves. A fake
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -215,6 +216,30 @@ def test_the_address_shown_is_one_the_server_answers(
 
     run(tmp_path, test)
     assert calls(folder)
+
+
+def test_the_server_notices_a_serve_set_up_by_hand(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nobody opened Settings: the server reads `tailscale serve status` itself."""
+    fake(tmp_path / "ts", monkeypatch, serve=serve_config(PORT))
+
+    async def test(f: Fixture) -> None:
+        monkeypatch.setenv("JOINERY_REMOTE_HOME", str(f.home))
+        assert (await call(f.app, "GET", "/", headers={"host": NAME})).status == 421
+        following = asyncio.create_task(f.server.follow())
+        try:
+            for _ in range(100):
+                if f.store.config()["origin"]:
+                    break
+                await asyncio.sleep(0.1)
+        finally:
+            following.cancel()
+            await asyncio.gather(following, return_exceptions=True)
+        assert f.store.config()["origin"] == f"https://{NAME}"
+        assert (await call(f.app, "GET", "/", headers={"host": NAME})).status == 200
+
+    run(tmp_path, test)
 
 
 def test_a_request_through_funnel_is_refused(tmp_path: Path) -> None:

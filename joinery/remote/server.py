@@ -88,6 +88,8 @@ DISCOVER_SECONDS = 2.0
 #: it changed: a revoke, or a device's scopes or projects changing, ends it.
 STREAM_TICK = 0.5
 RECHECK_SECONDS = 5.0
+#: How often the server reads `tailscale serve status` itself.
+TAILNET_SECONDS = 30.0
 BODY_LIMIT = 64_000
 #: A saved chat's newest turns a phone is sent.
 HISTORY_TURNS = 100
@@ -227,6 +229,8 @@ class RemoteServer:
         self.awake = KeepAwake()
         #: Ends the server (uvicorn's should_exit), set by :func:`run`.
         self.on_disabled: Callable[[], None] | None = None
+        #: When the server next reads what `tailscale serve` serves (monotonic).
+        self._tailnet_due = 0.0
 
     # --- Checks -------------------------------------------------------------------------
 
@@ -328,7 +332,19 @@ class RemoteServer:
             if tick is not None:
                 await tick(self.idle_for)
             self.awake.follow(bool(self.store.config().get("keep_awake")))
+            if time.monotonic() >= self._tailnet_due:
+                # A `tailscale serve` set up (or undone) by hand is noticed here
+                # too, not only when Settings or the CLI looks.
+                self._tailnet_due = time.monotonic() + TAILNET_SECONDS
+                await asyncio.to_thread(self.follow_tailnet)
             await asyncio.sleep(DISCOVER_SECONDS)
+
+    def follow_tailnet(self) -> None:
+        """Store the address `tailscale serve` serves this port at (cli.tailnet)."""
+        from joinery.remote.cli import tailnet
+
+        with contextlib.suppress(OSError, ValueError):
+            tailnet(self.store, self.port)
 
     def idle_for(self, host_id: str) -> float:
         """Seconds a host has had nothing running, nothing waiting and no phone

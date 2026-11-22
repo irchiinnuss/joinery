@@ -86,7 +86,8 @@ cover two of the four agents.
    - The tailnet origin is what `tailscale serve status --json` says serves
      `127.0.0.1:<port>` at `/`: a `Web` key `"<name>:<https port>"` whose `/` handler proxies
      to the port, and not in `AllowFunnel`. It is read by `joinery remote status` (which
-     Settings → Remote runs when shown), `pair` and `tailscale`, stored in `devices.json`
+     Settings → Remote runs when shown), `pair`, `tailscale` and the server itself every
+     30 s, stored in `devices.json`
      when seen and cleared when no longer served, however serve was set up.
    - Settings offers "Put it on my tailnet" until then, and "Copy address" after. Pairing
      waits for it too: a QR code carries only a served address (`joinery remote pair
