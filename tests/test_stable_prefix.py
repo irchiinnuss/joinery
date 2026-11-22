@@ -145,7 +145,16 @@ def test_every_agent_is_told_to_work_in_few_calls() -> None:
     assert ECONOMY_GUIDE in prompt_text(turn("hello", 1))
     source = Path("bridge/codex_session.py").read_text(encoding="utf-8")
     assert "+ ECONOMY_GUIDE" in source
-    for rule in ("in one message", "never read a file you already read", "tool_schema"):
+    for rule in (
+        "in one message",
+        "never read a file you already read",
+        "tool_schema",
+        # Claude Code refuses substitutions and paths outside the project with no
+        # one to approve them; every agent gets the same plain-command rule.
+        "one plain command per call",
+        "never read or search Joinery's own install",
+        "how_checked",
+    ):
         assert rule in ECONOMY_GUIDE
     # One spelling of each rule: the live-scene rule lives in OBJECT_GUIDE only.
     assert INSTRUCTIONS.count("unsaved edits change live with edit_scene") == 0
