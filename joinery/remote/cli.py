@@ -213,6 +213,12 @@ def _stop(store: Store, args: argparse.Namespace) -> int:
 def _serve(store: Store, args: argparse.Namespace) -> int:
     from joinery.remote.server import run as serve
 
+    if not store.config().get("enabled"):
+        # A login item (the always-on helper) starts this at every login, even after
+        # `joinery remote stop`: while Remote is off nothing listens. Exit 0, so the
+        # login item doesn't start it again.
+        _out(args, {"enabled": False}, "Remote is off: nothing to serve.")
+        return 0
     port = _port(store, args.port)
     path = store.home / SERVER_FILE
     write_private_json(

@@ -404,3 +404,42 @@ def test_nothing_else_is_served(tmp_path: Path, path: str) -> None:
         assert (await call(f.app, "GET", path, token=token)).status == 404
 
     run(tmp_path, test)
+
+
+def test_nothing_is_served_while_remote_is_off(tmp_path: Path) -> None:
+    """After `joinery remote stop`, a server still running (or one a login item started)
+    answers no device and ends itself."""
+
+    async def test(f: Fixture) -> None:
+        token = f.device()
+        f.store.set_config(enabled=False)
+        assert (await call(f.app, "GET", "/api/projects", token=token)).status == 503
+        opened = await call(
+            f.app, "POST", f"/api/projects/{f.pid}/open", body={}, token=token
+        )
+        assert opened.status == 503
+        ended: list[bool] = []
+        f.server.on_disabled = lambda: ended.append(True)
+        await asyncio.wait_for(f.server.follow(), 5)
+        assert ended == [True]
+
+    run(tmp_path, test)
+
+
+def test_serve_exits_at_once_while_remote_is_off(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The login item runs `joinery remote serve --helper` at every login."""
+    from joinery.cli import main
+    from joinery.remote import server
+
+    home = tmp_path / "home"
+    home.mkdir(mode=0o700)
+    monkeypatch.setenv("JOINERY_REMOTE_HOME", str(home))
+    Store(home).set_config(enabled=False)
+
+    def listens(*_a: Any, **_kw: Any) -> int:
+        raise AssertionError("nothing may listen while Remote is off")
+
+    monkeypatch.setattr(server, "run", listens)
+    assert main(["remote", "serve", "--helper"]) == 0

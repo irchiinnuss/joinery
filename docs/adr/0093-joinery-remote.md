@@ -199,6 +199,9 @@ login item by `joinery remote install-helper` and removed by `uninstall-helper`:
 LaunchAgent on macOS, a `systemd --user` unit on Linux, a logon task on Windows. Settings →
 Remote offers it as "When Joinery is closed".
 
+- While Remote is off nothing listens: `serve` exits at once (status 0, so the login item
+  doesn't start it again), a running server answers 503 and ends itself on its next look.
+
 - When a phone opens a closed project, the helper starts the host `joinery run` uses
   (`joinery chat --keep-reviews`) with the agent of the project's last chat. That host takes
   the project's lease like any other, answers editor-only calls with "No editor is open",

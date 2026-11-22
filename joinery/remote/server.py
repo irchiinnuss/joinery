@@ -186,6 +186,8 @@ class RemoteServer:
         #: Open event streams per host: a host a phone watches is never idle.
         self.watching: dict[str, int] = {}
         self.awake = KeepAwake()
+        #: Ends the server (uvicorn's should_exit), set by :func:`run`.
+        self.on_disabled: Callable[[], None] | None = None
 
     # --- Checks -------------------------------------------------------------------------
 
@@ -203,6 +205,9 @@ class RemoteServer:
         hosts |= {urlsplit(origin).hostname or "" for origin in self.origins()}
         if headers.get("host", "") not in hosts:
             return (421, "This server doesn't answer for that name.")
+        if not self.store.config().get("enabled"):
+            # Turned off (or a login item started it while off): nothing is served.
+            return (503, "Remote is off on the machine.")
         if method in {"GET", "HEAD"}:
             return None
         if headers.get("origin", "") not in self.origins():
@@ -237,6 +242,12 @@ class RemoteServer:
     async def follow(self) -> None:
         """Watch every advertised host: its reviews, its state and its notices."""
         while True:
+            if not self.store.config().get("enabled"):
+                # Remote was turned off: the server ends, and a login item that
+                # starts it again finds it off and exits at once.
+                if self.on_disabled is not None:
+                    self.on_disabled()
+                return
             hosts = {host.id: host for host in discover(self.home)}
             for host_id, host in hosts.items():
                 task = self._watchers.get(host_id)
@@ -886,5 +897,7 @@ def run(
         server_header=False,
         lifespan="on",
     )
-    uvicorn.Server(config).run()
+    serving = uvicorn.Server(config)
+    server.on_disabled = lambda: setattr(serving, "should_exit", True)
+    serving.run()
     return 0
