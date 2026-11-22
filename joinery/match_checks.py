@@ -214,8 +214,8 @@ async def images(audit: _Audit, paths: list[str]) -> None:
             f"{share:.0%} off-palette",
             f"≤ {allowed:.0%}",
             f"{share:.0%} of its colours are more than ΔE {rules.palette.max_delta_e:g} "
-            f"from the palette and not a blend of two of its colours "
-            f"(allowed {allowed:.0%})",
+            "(max_delta_e) from the palette and not a blend of two of its colours; "
+            f"allowed {allowed:.0%} (max_off_palette)",
             fix=fix,
             needs_you=why,
             swatches=_worst_colour(

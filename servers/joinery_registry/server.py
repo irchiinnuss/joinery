@@ -274,7 +274,7 @@ def make_server(project: Path) -> MCPServer[Any]:
     @server.tool(annotations=ToolAnnotations(read_only_hint=True))
     @tool_errors
     async def art_direction() -> CallToolResult:
-        """Read the project's actual art bible, its user approval status, and a lint of the bible (problems, open sections, reference board, suggestions). The JSON comes first; the user's reference images from art/reference follow as pictures (listed in reference_images), so you can look at them. They are references, never assets: don't copy or trace them. The model has no approval operation."""
+        """Read the project's actual art bible, its user approval status, and a lint of the bible (problems, open sections, reference board, suggestions, and how_checked: how the checks measure assets against it, such as the palette's ΔE limit and the share of off-palette pixels an image may have). The JSON comes first; the user's reference images from art/reference follow as pictures (listed in reference_images), so you can look at them. They are references, never assets: don't copy or trace them. The model has no approval operation."""
         path = project / "art/bible.md"
         lint: dict[str, Any] | None = None
         bible_lint = _optional("joinery.bible_lint")

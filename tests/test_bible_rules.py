@@ -25,6 +25,7 @@ from joinery.bible_rules import (
     cvd_delta_e,
     delta_e_2000,
     glb_triangles,
+    how_checked,
     image_size,
     is_data_map,
     linear_rgb,
@@ -249,10 +250,20 @@ def test_palette_counts_opaque_pixels_far_from_every_colour(tmp_path: Path) -> N
         check_rules(root, ["art/textures/wall.png"], measured(beyond))
     ) == [
         (
-            "art/textures/wall.png: 50% of its colours are more than ΔE 12 from the "
-            "palette and not a blend of two of its colours (allowed 25%)"
+            "art/textures/wall.png: 50% of its colours are more than ΔE 12 "
+            "(max_delta_e) from the palette and not a blend of two of its colours; "
+            "allowed 25% (max_off_palette)"
         )
     ]
+
+
+def test_how_checked_says_the_palette_limits(tmp_path: Path) -> None:
+    rules = load_rules(palette_stage(tmp_path, '["#ff0000"]'))
+    text = how_checked(rules)["palette"]
+    assert "ΔE 12 (max_delta_e)" in text
+    assert "more than 25% (max_off_palette)" in text
+    assert "blend of two" in text and "_normal" in text
+    assert "not checked" in how_checked(BibleRules())["palette"]
 
 
 def test_anti_aliased_edges_between_palette_colours_are_on_the_palette(
@@ -273,8 +284,9 @@ def test_anti_aliased_edges_between_palette_colours_are_on_the_palette(
         check_rules(root, ["art/textures/wall.png"], measured(foreign))
     ) == [
         (
-            "art/textures/wall.png: 33% of its colours are more than ΔE 12 from the "
-            "palette and not a blend of two of its colours (allowed 25%)"
+            "art/textures/wall.png: 33% of its colours are more than ΔE 12 "
+            "(max_delta_e) from the palette and not a blend of two of its colours; "
+            "allowed 25% (max_off_palette)"
         )
     ]
 

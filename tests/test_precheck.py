@@ -326,6 +326,17 @@ def test_an_agent_that_prechecks_and_fixes_submits_once(
             "Rig",
         ),
         (
+            (
+                "art/t/wall.png: 50% of its colours are more than ΔE 12 "
+                "(max_delta_e) from the palette and not a blend of two of its "
+                "colours; allowed 5% (max_off_palette)"
+            ),
+            "art_bible.palette",
+            "50%",
+            "5%",
+            "",
+        ),
+        (
             "art/m/a.glb: something new the look checks",
             "art_bible.rule",
             "something new the look checks",

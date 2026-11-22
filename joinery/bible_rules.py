@@ -587,6 +587,39 @@ def off_palette_share(
     return far / len(pixels)
 
 
+def how_checked(rules: BibleRules) -> dict[str, str]:
+    """How the checks measure images against the bible, in plain words, so an agent
+    knows the limits before it paints instead of searching Joinery's code for them."""
+    palette = rules.palette
+    folders = ", ".join(f"{f}/" for f in palette.folders) or "no folders"
+    out: dict[str, str] = {}
+    if palette.all_colours():
+        out["palette"] = (
+            f"Each changed image ({', '.join(sorted(_IMAGES))}) under {folders} is "
+            f"sampled on a {SAMPLE}x{SAMPLE} grid (nearest pixel). A pixel is on the "
+            f"palette when it is within CIEDE2000 ΔE {palette.max_delta_e:g} "
+            "(max_delta_e) of a palette colour or a role colour, or an anti-aliased "
+            "blend of two of them; a part-transparent pixel may also be such a colour "
+            "faded by its alpha. The image fails when more than "
+            f"{palette.max_off_palette:.0%} (max_off_palette) of its samples are off "
+            "the palette. Data maps (stems ending "
+            f"{', '.join(DATA_MAP_SUFFIXES)}) are not checked, nor folders listed in "
+            "exclude."
+        )
+    else:
+        out["palette"] = "No palette colours are set, so image colours are not checked."
+    materials = rules.materials
+    if materials.albedo_luminance is not None:
+        low, high = materials.albedo_luminance
+        out["albedo"] = (
+            f"Albedo textures (stems ending {', '.join(materials.albedo_suffixes)}) "
+            f"fail when more than {materials.albedo_max_outside:.0%} "
+            f"(albedo_max_outside) of their samples have linear luminance outside "
+            f"{low:g}-{high:g} (albedo_luminance)."
+        )
+    return out
+
+
 #: Machado, Oliveira and Fernandes (2009), severity 1.0, applied to linear RGB.
 CVD_MATRICES: dict[str, tuple[tuple[float, float, float], ...]] = {
     "protanopia": (
@@ -2098,9 +2131,9 @@ async def _image_problems(
             if share > palette_rules.max_off_palette:
                 problems.append(
                     f"{path}: {share:.0%} of its colours are more than ΔE "
-                    f"{palette_rules.max_delta_e:g} from the palette and not a blend "
-                    f"of two of its colours (allowed "
-                    f"{palette_rules.max_off_palette:.0%})"
+                    f"{palette_rules.max_delta_e:g} (max_delta_e) from the palette "
+                    "and not a blend of two of its colours; allowed "
+                    f"{palette_rules.max_off_palette:.0%} (max_off_palette)"
                 )
         if path in albedo_images and rules.materials.albedo_luminance is not None:
             low, high = rules.materials.albedo_luminance

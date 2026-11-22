@@ -18,7 +18,13 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict
 
 from joinery import bible_schema, bible_writing
-from joinery.bible_rules import BibleRules, palette_problems, parse_rules, rules_text
+from joinery.bible_rules import (
+    BibleRules,
+    how_checked,
+    palette_problems,
+    parse_rules,
+    rules_text,
+)
 from joinery.catalog import ROOT
 from joinery.lockfile import LOCK_NAME
 
@@ -472,6 +478,8 @@ def summary(project: Path) -> dict[str, Any]:
         "rules": None
         if report.rules is None
         else report.rules.model_dump(mode="json", by_alias=True),
+        # How the checks apply those rules (the palette's ΔE and off-palette share).
+        "how_checked": None if report.rules is None else how_checked(report.rules),
         "problems": list(report.problems),
         "gaps": [gap.model_dump(mode="json") for gap in report.gaps],
         "references": [row.model_dump(mode="json") for row in report.references],

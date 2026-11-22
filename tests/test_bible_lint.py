@@ -234,8 +234,12 @@ def test_summary_is_json_safe(tmp_path: Path) -> None:
         "gaps",
         "references",
         "suggestions",
+        "how_checked",
     }
     assert json.loads(json.dumps(summary)) == summary
+    # The palette check's limits are in the report, so no agent digs for them.
+    palette = summary["how_checked"]["palette"]
+    assert "max_off_palette" in palette or "not checked" in palette
     assert summary["rules"]["schema"] == 2
     assert summary["references"][0]["id"] == "R1"
     assert summary["gaps"][0]["section"] == "vision"

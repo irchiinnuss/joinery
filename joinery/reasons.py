@@ -85,8 +85,8 @@ _BIBLE: tuple[tuple[str, re.Pattern[str], str], ...] = tuple(
         (
             "art_bible.palette",
             (
-                r"(?P<m>\d+%) of its colours are more than ΔE \S+ from the palette "
-                r"\(allowed (?P<e>\d+%)\)"
+                r"(?P<m>\d+%) of its colours are more than ΔE \S+ \(max_delta_e\) "
+                r"from the palette .*allowed (?P<e>\d+%) \(max_off_palette\)"
             ),
             "Repaint or recolour with the look's palette.",
         ),
