@@ -247,18 +247,32 @@ def test_pairing_end_to_end(tmp_path: Path) -> None:
 
 def test_wrong_codes_and_rate_limit(tmp_path: Path) -> None:
     async def test(f: Fixture) -> None:
-        for _ in range(5):
-            wrong = await call(f.app, "POST", "/api/pair", body={"code": "AAAAAAAAAA"})
+        waiting = f.store.new_code()
+        # Wrong codes from anyone (here with made-up tailnet logins, which any local
+        # process can send) stop the waiting code but lock nobody out.
+        for i in range(5):
+            wrong = await call(
+                f.app,
+                "POST",
+                "/api/pair",
+                body={"code": "AAAAAAAAAA"},
+                headers={"tailscale-user-login": f"spoof{i}@x"},
+            )
             assert wrong.status == 403
+        stopped = await call(f.app, "POST", "/api/pair", body={"code": waiting["code"]})
+        assert stopped.status == 403 and "stopped" in stopped.json()["error"]
+        assert f.store.pairing_state(waiting["pairing_id"]) == "stopped"
         made = f.store.new_code()
-        locked = await call(f.app, "POST", "/api/pair", body={"code": made["code"]})
-        assert locked.status == 403 and "locked" in locked.json()["error"]
-        for _ in range(5):
+        fresh = await call(f.app, "POST", "/api/pair", body={"code": made["code"]})
+        assert fresh.status == 200
+        # Ten posts a minute from one peer (two so far).
+        for _ in range(8):
             await call(f.app, "POST", "/api/pair", body={"code": "x"})
         limited = await call(f.app, "POST", "/api/pair", body={"code": "x"})
         assert limited.status == 429
         refused = [e for e in audit.entries(home=f.home) if e["action"] == "pair"]
-        assert refused and all(e["result"] == "refused" for e in refused)
+        assert [e["result"] for e in refused].count("ok") == 1  # The fresh code.
+        assert refused[-1].get("reason") == "rate"
 
     run(tmp_path, test)
 

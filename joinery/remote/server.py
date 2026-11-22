@@ -73,7 +73,7 @@ from joinery.remote.store import (
 
 COOKIE = "joinery_remote"
 CSRF_HEADER = "x-joinery-remote"
-#: Pairing posts one peer may make a minute (wrong codes also count to the lock).
+#: Pairing posts one peer may make a minute (wrong codes also stop waiting codes).
 PAIR_PER_MINUTE = 10
 #: Pairing status polls one peer may make a minute (the page polls every 2 s).
 STATUS_PER_MINUTE = 60

@@ -3,7 +3,8 @@
 Only SHA-256 hashes of device tokens and pairing codes are stored. A device token is
 256 random bits, handed to the phone once; a pairing code is 10 characters (about 49
 bits), single use, valid for 5 minutes, and useless without the confirmation on the
-machine. Five wrong codes lock pairing for 10 minutes. Every process (the server, the
+machine. Five wrong codes within 10 minutes stop every code waiting to be used (a new
+one is made at the machine, which says why); nobody is locked out. Every process (the server, the
 CLI, the editor's Settings page through the CLI) reads and writes the same file under a
 lock, so a revoke takes effect on the server's next request.
 """
@@ -28,7 +29,8 @@ CODE_ALPHABET = "ABCDEFGHJKMNPQRSTVWXYZ23456789"
 CODE_LENGTH = 10
 PAIR_SECONDS = 5 * 60
 MAX_FAILURES = 5
-LOCK_SECONDS = 10 * 60
+#: The window wrong codes are counted in.
+FAILURE_SECONDS = 10 * 60
 UNUSED_DAYS = 30
 ABSOLUTE_DAYS = 90
 DEFAULT_PORT = 47615
@@ -176,10 +178,19 @@ class Store:
             "scopes": list(scopes),
         }
 
-    def locked_until(self, now: float | None = None) -> float:
+    def pairing_state(self, pairing_id: str, now: float | None = None) -> str:
+        """``waiting`` (the code may be used), ``used``, ``expired``, ``stopped`` (too
+        many wrong codes were tried while it waited) or ``unknown``."""
         now = time.time() if now is None else now
-        until = float(self.read()["lockout"].get("until", 0))
-        return until if until > now else 0.0
+        for pairing in self.read()["pairings"]:
+            if pairing.get("id") != pairing_id:
+                continue
+            if pairing.get("stopped"):
+                return "stopped"
+            if pairing.get("used"):
+                return "used"
+            return "expired" if float(pairing.get("expires", 0)) <= now else "waiting"
+        return "unknown"
 
     def redeem(
         self,
@@ -193,16 +204,13 @@ class Store:
     ) -> dict[str, Any]:
         """A phone posted ``code``: a request that waits for the machine's confirmation.
 
-        Raises :class:`PairRefused` for a wrong, used or expired code, or while pairing
-        is locked; a wrong code counts towards the lock."""
+        Raises :class:`PairRefused` for a wrong, used, stopped or expired code. Every
+        refusal counts: at MAX_FAILURES within FAILURE_SECONDS, every code still waiting
+        is stopped, so guessing gains nothing, and nobody is locked out of a new one."""
         now = time.time() if now is None else now
         wanted = digest(normal_code(code))
         with self.edit() as data:
             lockout = data["lockout"]
-            if float(lockout.get("until", 0)) > now:
-                raise PairRefused(
-                    "Pairing is locked for a while after too many wrong codes."
-                )
             match = next(
                 (
                     p
@@ -211,19 +219,30 @@ class Store:
                 ),
                 None,
             )
-            if match is None or match.get("used") or float(match["expires"]) <= now:
+            if (
+                match is None
+                or match.get("used")
+                or match.get("stopped")
+                or float(match["expires"]) <= now
+            ):
                 failures = [
                     float(t)
                     for t in lockout.get("failures", [])
-                    if float(t) > now - LOCK_SECONDS
+                    if float(t) > now - FAILURE_SECONDS
                 ]
                 failures.append(now)
                 lockout["failures"] = failures
                 if len(failures) >= MAX_FAILURES:
-                    lockout["until"] = now + LOCK_SECONDS
+                    for pairing in data["pairings"]:
+                        if not pairing.get("used") and float(pairing["expires"]) > now:
+                            pairing["stopped"] = now
                     lockout["failures"] = []
+                    lockout["stopped_at"] = now
                 reason = (
-                    "That code was already used."
+                    "That code was stopped after too many wrong codes. Make a new one "
+                    "at the machine."
+                    if match is not None and match.get("stopped")
+                    else "That code was already used."
                     if match is not None and match.get("used")
                     else "That code has expired. Make a new one at the machine."
                     if match is not None

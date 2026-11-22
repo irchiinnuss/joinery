@@ -115,6 +115,13 @@ func _check_states() -> void:
 	_check(setting.devices.list.get_child_count() == 1, "The paired device is listed")
 	_check(setting.helper_row.is_on() and not setting.awake_row.is_on(), "Each switch as told")
 	_check(setting.tailnet_button.text == "Copy address", "Served: copy the address")
+	# Wrong codes were tried too often: the code stops, and Settings says so.
+	setting.apply_pairing({"pairing_id": "p_1", "code": "ABCDE-FGHJK"})
+	setting.apply_requests(
+		{"requests": [], "pairing": "stopped", "text": "This code stopped working."}
+	)
+	_check(not setting.pair_box.visible, "A stopped code is put away")
+	_check(setting.where.text == "This code stopped working.", "And Settings says why")
 	var picker: OptionButton = setting.devices.find_child("Scopes", true, false)
 	_check(picker != null and picker.selected == 0, "A watch-only device reads Follow only")
 	var seen: Array = []

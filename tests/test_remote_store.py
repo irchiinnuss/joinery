@@ -13,7 +13,7 @@ import pytest
 from joinery.remote import audit
 from joinery.remote.store import (
     DAY,
-    LOCK_SECONDS,
+    FAILURE_SECONDS,
     MAX_FAILURES,
     PAIR_SECONDS,
     PairRefused,
@@ -85,18 +85,43 @@ def test_code_expires_after_five_minutes(store: Store) -> None:
         store.answer(request["id"], True, now=NOW + PAIR_SECONDS + 1)
 
 
-def test_wrong_codes_lock_pairing(store: Store) -> None:
+def test_wrong_codes_stop_the_waiting_code_but_lock_nobody_out(store: Store) -> None:
+    """Guessing gains nothing (the code it aims at stops), and the wrong guesses of
+    anyone at all never keep the owner from pairing with a new code."""
     made = store.new_code(now=NOW)
+    assert store.pairing_state(made["pairing_id"], now=NOW) == "waiting"
     for _ in range(MAX_FAILURES):
         with pytest.raises(PairRefused):
             store.redeem("WRONGCODE1", "P", "", digest("t"), digest("s"), now=NOW)
-    # Locked now, even for the right code.
-    with pytest.raises(PairRefused, match="locked"):
+    # The code that waited is stopped, and the machine can tell.
+    assert store.pairing_state(made["pairing_id"], now=NOW + 1) == "stopped"
+    with pytest.raises(PairRefused, match="stopped"):
         store.redeem(made["code"], "P", "", digest("t"), digest("s"), now=NOW + 1)
-    assert store.locked_until(now=NOW + 1) == NOW + LOCK_SECONDS
-    later = NOW + LOCK_SECONDS + 1
-    fresh = store.new_code(now=later)
-    assert store.redeem(fresh["code"], "P", "", digest("t"), digest("s"), now=later)
+    # A new code works at once: nothing is locked.
+    fresh = store.new_code(now=NOW + 2)
+    assert store.redeem(fresh["code"], "P", "", digest("t"), digest("s"), now=NOW + 2)
+    # Wrong codes spread out over more than the window stop nothing.
+    other = store.new_code(now=NOW + 3)
+    for step in range(MAX_FAILURES):
+        when = NOW + 3 + step * (FAILURE_SECONDS / 2)
+        with pytest.raises(PairRefused):
+            store.redeem("WRONGCODE1", "P", "", digest("t"), digest("s"), now=when)
+    assert store.pairing_state(other["pairing_id"], now=NOW + 4) != "stopped"
+
+
+def test_settings_hears_a_code_was_stopped(
+    store: Store, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from joinery.cli import main
+
+    monkeypatch.setenv("JOINERY_REMOTE_HOME", str(store.home))
+    made = store.new_code()
+    for _ in range(MAX_FAILURES):
+        with pytest.raises(PairRefused):
+            store.redeem("WRONGCODE1", "P", "", digest("t"), digest("s"))
+    assert main(["remote", "requests", "--pairing", made["pairing_id"], "--json"]) == 0
+    said = json.loads(capsys.readouterr().out)
+    assert said["pairing"] == "stopped" and "stopped working" in said["text"]
 
 
 def test_only_hashes_are_stored(store: Store) -> None:

@@ -350,8 +350,17 @@ def _pair(store: Store, args: argparse.Namespace) -> int:
     return _wait_and_ask(store, made, args)
 
 
+STOPPED = (
+    "Wrong codes were tried too often, so this code stopped working. Pair again "
+    "for a new one."
+)
+
+
 def _wait_and_ask(store: Store, made: dict[str, Any], args: argparse.Namespace) -> int:
     while time.time() < float(made["expires"]):
+        if store.pairing_state(made["pairing_id"]) == "stopped":
+            _out(args, {"error": "stopped"}, STOPPED)
+            return 1
         waiting = store.requests(made["pairing_id"])
         if waiting:
             request = waiting[0]
@@ -381,7 +390,14 @@ def _wait_and_ask(store: Store, made: dict[str, Any], args: argparse.Namespace) 
 def _requests(store: Store, args: argparse.Namespace) -> int:
     waiting = [{**r, "question": confirm_text(r)} for r in store.requests(args.pairing)]
     text = "\n".join(f"{r['id']}  {r['question']}" for r in waiting) or "Nothing waits."
-    _out(args, {"requests": waiting}, text)
+    data: dict[str, Any] = {"requests": waiting}
+    if args.pairing:
+        # Settings polls this: a code stopped by wrong guesses is said, not hidden.
+        data["pairing"] = store.pairing_state(args.pairing)
+        if data["pairing"] == "stopped":
+            data["text"] = STOPPED
+            text = STOPPED
+    _out(args, data, text)
     return 0
 
 

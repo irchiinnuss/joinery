@@ -63,7 +63,9 @@ cover two of the four agents.
    - Settings' QR picture is written in the per-user directory (`qr/`, 0700, the file
      0600, renamed into place) and deleted as soon as it is shown; never a shared temp
      folder.
-   - Five wrong codes lock pairing for 10 minutes. Pairing posts are also limited per
+   - Five wrong codes within 10 minutes stop every code still waiting, and Settings (or
+     the terminal) says so; a new code works at once. No one is locked out, so wrong
+     guesses can't keep the owner from pairing. Pairing posts are also limited per
      peer.
    - The device token is 256 random bits, delivered once and set as an `HttpOnly; Secure;
      SameSite=Strict` cookie. Only its SHA-256 is stored, in the per-user directory and never

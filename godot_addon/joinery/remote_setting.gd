@@ -263,6 +263,11 @@ func apply_pairing(data: Dictionary) -> void:
 
 ## Show the pairing requests (`joinery remote requests --json`): ask about the first one.
 func apply_requests(data: Dictionary) -> void:
+	if str(data.get("pairing", "")) == "stopped":
+		# Someone typed wrong codes too often: the code stopped working, and Settings says so.
+		_end_pairing()
+		where.text = str(data.get("text", "This code stopped working. Pair again for a new one."))
+		return
 	var waiting: Array = data.get("requests", []) if data.get("requests") is Array else []
 	if waiting.is_empty() or is_instance_valid(_ask):
 		return
