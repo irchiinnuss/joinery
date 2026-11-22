@@ -158,7 +158,8 @@ All routes are on the server:
 
 - `POST /api/pair` with `{code, name, platform?}` returns `{request_id, secret}`. Poll
   `POST /api/pair/status` with `{request_id, secret}`, which returns `waiting`, `denied`,
-  `expired` or `allowed`. `allowed` sets the cookie and returns `token` once.
+  `expired` or `allowed`. `allowed` sets the HttpOnly cookie once; the token is never
+  in a body.
 - `GET /api/me` returns the device (scopes, expiry, last seen).
 - `GET /api/projects` returns `[{id, name, agent, editor, started, working, waiting, todo,
   last, open}]`. Projects a host served here before follow with `open: false` and

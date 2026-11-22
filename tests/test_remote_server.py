@@ -227,8 +227,11 @@ def test_pairing_end_to_end(tmp_path: Path) -> None:
         [pending] = f.store.requests()
         f.store.answer(pending["id"], True)
         allowed = await call(f.app, "POST", "/api/pair/status", body=status)
-        token = allowed.json()["token"]
+        # The token is only in the HttpOnly cookie, never in the body.
+        assert "token" not in allowed.json()
         cookie = allowed.headers["set-cookie"]
+        token = cookie.split(";", 1)[0].split("=", 1)[1]
+        assert token and token not in allowed.body.decode()
         assert (
             "HttpOnly" in cookie and "SameSite=strict" in cookie and "Secure" in cookie
         )

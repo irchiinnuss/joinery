@@ -11,7 +11,7 @@ API (all JSON; mutating requests need ``X-Joinery-Remote: 1`` and a matching Ori
 
 * ``POST /api/pair`` ``{code, name, platform?}`` → ``{request_id, secret}``; then
   ``POST /api/pair/status`` ``{request_id, secret}`` → ``{state}`` until the machine
-  answers; ``allowed`` sets the device cookie and returns the token once.
+  answers; ``allowed`` sets the device cookie (HttpOnly) once, the token in no body.
 * ``GET /api/me``; ``GET /api/projects``; ``GET /api/projects/{id}/chats``.
 * ``GET /api/projects/{id}/events?since=N&started=T`` (SSE): ``hello``, then ``event``
   with ``id`` = seq, ``notice`` for :mod:`joinery.remote.seams` notices, ``gone``.
@@ -472,9 +472,9 @@ class RemoteServer:
             # Delivered once already, or the server restarted meanwhile.
             return JSONResponse({"state": "allowed", "device_id": known["device_id"]})
         token = held[0]
-        answer = JSONResponse(
-            {"state": "allowed", "device_id": known["device_id"], "token": token}
-        )
+        # Only in the HttpOnly cookie: never in the body, where the page's script (or
+        # anything injected into it) could read it.
+        answer = JSONResponse({"state": "allowed", "device_id": known["device_id"]})
         answer.set_cookie(
             COOKIE,
             token,
