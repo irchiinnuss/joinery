@@ -64,9 +64,44 @@ def scrub(value: Any, project: str) -> Any:
     return value
 
 
+#: The first folder of an absolute path on the systems Joinery runs on: a string that
+#: starts with one is a path even with spaces in it ("/Users/ana/My Games/…").
+ROOTS = frozenset(
+    {
+        "Users",
+        "Volumes",
+        "Applications",
+        "Library",
+        "System",
+        "private",
+        "home",
+        "root",
+        "tmp",
+        "var",
+        "opt",
+        "mnt",
+        "media",
+        "srv",
+        "etc",
+        "usr",
+        "run",
+        "snap",
+    }
+)
+
+
 def _absolute(text: str) -> bool:
-    if not text or any(ch.isspace() for ch in text):
+    if not text or "\n" in text:
         return False
-    if len(text) > 2 and text[1] == ":" and text[2] in "/\\":
+    if len(text) > 2 and text[0].isalpha() and text[1] == ":" and text[2] in "/\\":
+        return True  # C:\Users\Ana\My Games\…
+    if text.startswith("\\\\") and len(text) > 2:
+        return True  # A network share.
+    if not text.startswith(("/", "\\")) or len(text) < 2:
+        return False
+    first = text[1:].replace("\\", "/").split("/", 1)[0]
+    if first in ROOTS and "/" in text[1:].replace("\\", "/"):
         return True
-    return text.startswith(("/", "\\")) and len(text) > 1 and text[1:].count("/") >= 1
+    # Anything else must look like a path, not words that start with a slash
+    # ("/variants 3 …").
+    return not any(ch.isspace() for ch in text) and text[1:].count("/") >= 1
