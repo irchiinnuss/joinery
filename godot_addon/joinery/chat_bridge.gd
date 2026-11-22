@@ -118,6 +118,8 @@ var parallel := 1
 var dispatching := false
 ## The paired device the next decision comes from (remote_relay.gd); its Timeline entry says so.
 var decided_from := ""
+## How that decision came: "remote:<device id>", kept in the change's history.
+var decided_via := ""
 var _job: RefCounted
 var _connected := false
 var _pending: Dictionary = {}
@@ -792,6 +794,9 @@ func decide_files(identifier: String, accept: bool, auto := false) -> void:
 		if not decided_from.is_empty():
 			line["decided_from"] = decided_from
 			decided_from = ""
+		if not decided_via.is_empty():
+			line["decided_via"] = decided_via
+			decided_via = ""
 		_job.send_line(JSON.stringify(line))
 
 

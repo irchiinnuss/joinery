@@ -115,6 +115,15 @@ def to_editor(event: dict[str, Any]) -> None:
     print(json.dumps(event), flush=True)
 
 
+_VIA = re.compile(r"remote:[A-Za-z0-9_]{1,40}")
+
+
+def decided_via(data: dict[str, Any]) -> str:
+    """How a decision line came: ``remote:<device id>`` from a paired device, else ""."""
+    via = str(data.get("decided_via", "") or "")
+    return via if _VIA.fullmatch(via) else ""
+
+
 def decided_from(data: dict[str, Any]) -> str:
     """The paired device a decision line names ("" from the editor's own click)."""
     return " ".join(str(data.get("decided_from", "") or "").split())[:60]
@@ -130,10 +139,12 @@ def deciding_from(lane: ProjectGateway, data: dict[str, Any]) -> Iterator[None]:
         yield
         return
     tx.decided_from = decided_from(data)
+    tx.decided_via = decided_via(data)
     try:
         yield
     finally:
         tx.decided_from = ""
+        tx.decided_via = ""
 
 
 _FEATURE_OFFER = re.compile(r"\s*Add (?:it|them) with (/feature add [a-z0-9-]+)\?")
@@ -1269,6 +1280,7 @@ async def _serve(
                 if origin is not None and not origin.internal:
                     if data.get("kind") == "decision":
                         data["decided_from"] = origin.device_name
+                        data["decided_via"] = f"remote:{origin.device_id}"
                     relay = (
                         remote is not None
                         and remote.editor

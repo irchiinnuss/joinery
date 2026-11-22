@@ -69,7 +69,7 @@ func on_action(event: Dictionary) -> void:
 	var action: Dictionary = event.get("action", {}) if event.get("action") is Dictionary else {}
 	var device: Dictionary = event.get("device", {}) if event.get("device") is Dictionary else {}
 	var name := str(device.get("name", "A paired device"))
-	var answer: Array = _do(action, name)
+	var answer: Array = _do(action, name, str(device.get("id", "")))
 	_chat.call("remote_ack", ref, bool(answer[0]), str(answer[1]))
 	if bool(answer[0]) and not str(answer[2]).is_empty():
 		var dock := _dock()
@@ -78,7 +78,7 @@ func on_action(event: Dictionary) -> void:
 
 
 ## [ok, text for the device, line for the transcript].
-func _do(action: Dictionary, name: String) -> Array:
+func _do(action: Dictionary, name: String, device_id := "") -> Array:
 	var dock := _dock()
 	var answer: Array = [false, "Not available remotely. Use the editor.", ""]
 	if dock == null:
@@ -95,7 +95,7 @@ func _do(action: Dictionary, name: String) -> Array:
 				answer = _todo(dock, todo, kind == "todo_go", name)
 			"decision":
 				var tx := str(action.get("transaction_id", ""))
-				answer = _decide(dock, tx, bool(action.get("accept")), name)
+				answer = _decide(dock, tx, bool(action.get("accept")), name, device_id)
 	return answer
 
 
@@ -144,16 +144,21 @@ func _todo(dock: Control, todo_id: String, go: bool, name: String) -> Array:
 	return [true, "Going.", "Go from %s" % name]
 
 
-func _decide(dock: Control, transaction_id: String, accept: bool, name: String) -> Array:
+func _decide(
+	dock: Control, transaction_id: String, accept: bool, name: String, device_id := ""
+) -> Array:
 	var review: Dictionary = _plugin.get("_file_review")
 	if str(review.get("transaction_id", "")) != transaction_id or transaction_id.is_empty():
 		return [false, NOT_HERE, ""]
 	_chat.set("decided_from", name)
+	if not device_id.is_empty():
+		_chat.set("decided_via", "remote:" + device_id)
 	dock.call("_on_accept" if accept else "_on_reject")
 	if not bool(_plugin.get("_deciding")):
 		# The review's own checks refused (an unsaved scene, a stale live preview): the
 		# Review panel says why at the editor.
 		_chat.set("decided_from", "")
+		_chat.set("decided_via", "")
 		return [false, "The editor couldn't do it. Look at the machine.", ""]
 	return [true, "Done.", "Accepted from %s" % name if accept else "Discarded from %s" % name]
 

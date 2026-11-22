@@ -121,8 +121,10 @@ cover two of the four agents.
    `cut_write`, `tidy_remove`, `shutdown`).
 9. **Record.** Every action, refusal, pairing and revoke goes to `<remote home>/audit.jsonl`,
    and project actions also to `.joinery/remote/audit.jsonl`. Message bodies are not logged.
-   - A decision made from a device carries the device name. It lands in the transaction's
-     history (`from`) and in a `Decided-From:` git trailer on the Timeline entry.
+   - A decision made from a device carries the device name and id. The transaction's
+     history keeps both (`from` for the name, `decided_via: remote:<device id>`, which a
+     reused or changed name can't blur), and the Timeline entry gets a `Decided-From:`
+     git trailer with the name. Both are set for that one decision only.
    - The sidebar's transcript says "Sent from …", "Accepted from …" or "Stopped from …".
 10. **Vendor remotes stay off** for the sessions Joinery starts. Otherwise a phone on the
     vendor's app could steer the agent around the sidebar's review.

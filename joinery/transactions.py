@@ -381,12 +381,15 @@ class FileTransaction:
         self.chat_id = ""
         #: Kept for review before Joinery's checks ran on it (a run that stopped).
         self.unchecked = False
-        #: Each decision in order: [{state, at, by?, from?, commit?}], so a change
-        #: reverted and put back again says so.
+        #: Each decision in order: [{state, at, by?, from?, decided_via?, commit?}],
+        #: so a change reverted and put back again says so.
         self.history: list[dict[str, Any]] = []
         #: The paired device the next decision comes from ("Ana's iPhone"), "" for the
         #: editor or the CLI (joinery.remote). Its Timeline entry says so.
         self.decided_from = ""
+        #: How the next decision came ("remote:<device id>" from a paired device), ""
+        #: for the editor or the CLI. Kept in the history, never shown as a name.
+        self.decided_via = ""
 
     @property
     def original(self) -> Path:
@@ -677,8 +680,15 @@ class FileTransaction:
         )
 
     def _from(self) -> dict[str, str]:
-        """The decision's device, for its history entry ({} from the editor)."""
-        return {"from": self.decided_from} if self.decided_from else {}
+        """The decision's device, for its history entry ({} from the editor): its name
+        as shown, and ``decided_via: remote:<device id>``, which names the device for
+        good (a name can be reused or changed)."""
+        found: dict[str, str] = {}
+        if self.decided_from:
+            found["from"] = self.decided_from
+        if self.decided_via:
+            found["decided_via"] = self.decided_via
+        return found
 
     def _note_commit(self) -> None:
         """Keep the timeline entry the last decision made with that decision, so the
@@ -853,7 +863,7 @@ class FileTransaction:
             raise ValueError("This transaction is not pending.")
         self.state = "rejected"
         self.decided = time.time()
-        if self.decided_from:
+        if self.decided_from or self.decided_via:
             self.history.append(
                 {"state": "rejected", "at": self.decided, **self._from()}
             )
