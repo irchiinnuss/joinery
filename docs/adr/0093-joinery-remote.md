@@ -251,7 +251,8 @@ sends off the machine, and only to phones that turned notifications on.
 
 - The browser's subscription is accepted only for HTTPS endpoints on the known push
   services (Apple, Google, Mozilla, Microsoft), with a valid P-256 key and a 16-byte secret.
-  A device can't make the machine post anywhere else.
+  A device can't make the machine post anywhere else. A push follows no redirect and
+  uses no proxy from the environment (`HTTPS_PROXY` and the like).
 - Each push is encrypted for that phone (RFC 8291 `aes128gcm`; the test checks the RFC's
   worked example byte for byte) and signed with this machine's VAPID key (RFC 8292, ES256,
   kept in the per-user directory at 0600).

@@ -14,9 +14,11 @@ anywhere else.
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 import os
 import struct
+import tempfile
 import threading
 import time
 import urllib.error
@@ -103,22 +105,49 @@ class Vapid:
 
     def __init__(self, home: Path | None = None) -> None:
         path = (home or remote_home()) / KEY_FILE
-        if path.is_file():
-            loaded = serialization.load_pem_private_key(path.read_bytes(), None)
-            assert isinstance(loaded, ec.EllipticCurvePrivateKey)
-            self.key = loaded
-        else:
-            self.key = ec.generate_private_key(ec.SECP256R1())
-            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        if not path.is_file():
+            self._create(path)
+        self.key = self._load(path)
+
+    @staticmethod
+    def _create(path: Path) -> None:
+        """A new key, written whole under a temporary name and then linked into place:
+        two servers starting at once both end up with the one that got there first,
+        and neither ever reads a half-written file."""
+        key = ec.generate_private_key(ec.SECP256R1())
+        descriptor, temp = tempfile.mkstemp(prefix=".vapid-", dir=path.parent)
+        try:
+            private_file(Path(temp))
             with os.fdopen(descriptor, "wb") as stream:
                 stream.write(
-                    self.key.private_bytes(
+                    key.private_bytes(
                         serialization.Encoding.PEM,
                         serialization.PrivateFormat.PKCS8,
                         serialization.NoEncryption(),
                     )
                 )
-            private_file(path)
+            try:
+                os.link(temp, path)
+            except FileExistsError:
+                pass  # Another server made it first: its key is the one.
+            except OSError:
+                # No hard links here (some file systems): never replace one there.
+                with contextlib.suppress(FileExistsError):
+                    descriptor = os.open(
+                        path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600
+                    )
+                    with os.fdopen(descriptor, "wb") as stream:
+                        stream.write(Path(temp).read_bytes())
+                    private_file(path)
+        finally:
+            Path(temp).unlink(missing_ok=True)
+
+    @staticmethod
+    def _load(path: Path) -> ec.EllipticCurvePrivateKey:
+        loaded = serialization.load_pem_private_key(path.read_bytes(), None)
+        if not isinstance(loaded, ec.EllipticCurvePrivateKey):
+            raise TypeError("The push key isn't an EC key.")
+        return loaded
 
     def public_key(self) -> str:
         """The application server key a browser subscribes with."""
@@ -173,9 +202,23 @@ def checked_subscription(data: Any) -> dict[str, str]:
 Opener = Callable[[urllib.request.Request], int]
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """A push service never redirects: a redirect is answered as it came, not followed
+    to wherever it points."""
+
+    def redirect_request(self, *_args: Any, **_kwargs: Any) -> None:
+        return None
+
+
+#: Straight to the push service: no redirects, and no proxy from the environment
+#: (``HTTPS_PROXY`` and the like), so the one thing Remote sends off the machine goes
+#: only where the checked subscription says.
+_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
+
+
 def _open(request: urllib.request.Request) -> int:
     try:
-        with urllib.request.urlopen(request, timeout=15) as answer:
+        with _OPENER.open(request, timeout=15) as answer:
             return int(answer.status)
     except urllib.error.HTTPError as exc:
         return int(exc.code)
