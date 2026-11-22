@@ -210,6 +210,16 @@ def test_headless_host_takes_device_actions(tmp_path: Path, agent: str) -> None:
             # Stop on a turn that hangs.
             await hosts.request(channel, act({"kind": "prompt", "text": "Keep going"}))
             await asyncio.sleep(0.3)
+            # A second message while it runs didn't go, and the phone hears that; no
+            # warning reaches anyone else (or a "something went wrong" push).
+            busy = await hosts.request(
+                channel, act({"kind": "prompt", "text": "And another"})
+            )
+            assert busy["ok"] is False and "still responding" in busy["text"]
+            assert not any(
+                e.get("level") == "warn" and "still responding" in str(e.get("text"))
+                for e in [*host.events, *(i.get("event", {}) for i in feed.items)]
+            )
             stopped = await hosts.request(channel, act({"kind": "cancel"}))
             assert stopped["ok"]
             await feed.wait_for(lambda e: e.get("kind") == "done" and not e.get("ok"))

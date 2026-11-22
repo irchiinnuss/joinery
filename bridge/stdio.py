@@ -1615,6 +1615,14 @@ async def _serve(
                         str(data.get("mode", "")), str(data.get("group_id", ""))
                     )
                 elif data.get("kind") == "prompt":
+                    if active is not None and not active.done() and origin is not None:
+                        # A phone's message while a request runs: the phone hears it
+                        # didn't go (and keeps it in its box). No warning reaches the
+                        # transcript, or a push that says something went wrong.
+                        raise ValueError(
+                            f"{agent_name} is still responding. Send it when this "
+                            "one finishes."
+                        )
                     if active is not None and not active.done():
                         emit(
                             Message(
