@@ -30,27 +30,36 @@ def home_path() -> Path:
     return Path(state) / "joinery/remote"
 
 
+#: Windows folders already given their private ACL by this process.
+_PROTECTED: set[Path] = set()
+
+
+def kept_private(folder: Path, *, parents: bool = False) -> Path:
+    """``folder``, made if missing, and private (0700) every time it is used: a folder
+    someone loosened since (or made before Joinery did) is put right, not trusted."""
+    if not folder.is_dir():
+        folder.mkdir(parents=parents, mode=0o700)
+        private_directory(folder)
+        _PROTECTED.add(folder)
+    elif os.name != "nt":
+        if folder.stat().st_mode & 0o077:
+            private_directory(folder)
+    elif folder not in _PROTECTED:
+        private_directory(folder)
+        _PROTECTED.add(folder)
+    return folder
+
+
 def remote_home() -> Path:
     """The per-user directory: device token hashes, pairing codes, the host list and
-    the machine's audit log. Created private (0700) on first use."""
-    base = home_path()
-    if not base.is_dir():
-        base.mkdir(parents=True, mode=0o700)
-        private_directory(base)
-    return base
+    the machine's audit log. Private (0700), checked on every use."""
+    return kept_private(home_path(), parents=True)
 
 
 def hosts_dir(home: Path | None = None) -> Path:
     """Where each running chat host advertises its remote channel."""
-    base = home or remote_home()
-    if not base.is_dir():
-        base.mkdir(parents=True, mode=0o700)
-        private_directory(base)
-    folder = base / "hosts"
-    if not folder.is_dir():
-        folder.mkdir(mode=0o700)
-        private_directory(folder)
-    return folder
+    base = kept_private(home, parents=True) if home else remote_home()
+    return kept_private(base / "hosts")
 
 
 def project_id(project: Path) -> str:

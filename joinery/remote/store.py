@@ -22,7 +22,13 @@ from typing import Any
 
 from joinery.platform_support import lock_file, private_file, unlock_file
 from joinery.remote.actions import SCOPES
-from joinery.remote.paths import home_path, read_json, remote_home, write_private_json
+from joinery.remote.paths import (
+    home_path,
+    kept_private,
+    read_json,
+    remote_home,
+    write_private_json,
+)
 
 VERSION = 1
 #: Crockford-like: no I, L, O, U, 0 or 1, so a code read aloud is typed right.
@@ -100,7 +106,9 @@ class Store:
     """The per-user remote state file (``devices.json``)."""
 
     def __init__(self, home: Path | None = None) -> None:
-        self.home = home or remote_home()
+        self.home = (
+            kept_private(home) if home and home.is_dir() else (home or remote_home())
+        )
         self.path = self.home / "devices.json"
         self.lock_path = self.home / "devices.lock"
 

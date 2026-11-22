@@ -213,3 +213,25 @@ def test_cli_changes_what_a_device_may_do(
     assert main(["remote", "scopes", device["id"], "root", "--json"]) == 1
     assert "watch, chat and decide" in capsys.readouterr().out
     assert [e["action"] for e in audit.entries(home=store.home)][-1] == "scopes"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX modes")
+def test_the_private_folders_are_put_right_on_every_use(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A folder loosened after it was made (or made by someone else first) is made
+    private again, not trusted because it exists."""
+    from joinery.remote.paths import hosts_dir, remote_home
+
+    home = tmp_path / "remote"
+    monkeypatch.setenv("JOINERY_REMOTE_HOME", str(home))
+    home.mkdir(mode=0o755)
+    home.chmod(0o755)
+    assert stat.S_IMODE(remote_home().stat().st_mode) == 0o700
+    folder = hosts_dir(home)
+    folder.chmod(0o777)
+    hosts_dir(home)
+    assert stat.S_IMODE(folder.stat().st_mode) == 0o700
+    home.chmod(0o750)
+    Store(home)
+    assert stat.S_IMODE(home.stat().st_mode) == 0o700
