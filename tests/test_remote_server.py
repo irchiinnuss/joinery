@@ -443,3 +443,73 @@ def test_serve_exits_at_once_while_remote_is_off(
 
     monkeypatch.setattr(server, "run", listens)
     assert main(["remote", "serve", "--helper"]) == 0
+
+
+async def post_chunks(app: Any, chunks: int, length: str | None) -> tuple[int, int]:
+    """POST /api/pair with ``chunks`` 16 kB pieces; (status, pieces read)."""
+    headers = [
+        (b"host", LOCAL.encode()),
+        (b"origin", ORIGIN.encode()),
+        (b"x-joinery-remote", b"1"),
+    ]
+    if length is not None:
+        headers.append((b"content-length", length.encode()))
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/api/pair",
+        "raw_path": b"/api/pair",
+        "query_string": b"",
+        "headers": headers,
+        "client": ("127.0.0.1", 50000),
+        "server": ("127.0.0.1", PORT),
+        "scheme": "http",
+        "http_version": "1.1",
+        "root_path": "",
+    }
+    read = 0
+    status = 0
+
+    async def receive() -> dict[str, Any]:
+        nonlocal read
+        read += 1
+        if read > chunks:
+            return {"type": "http.disconnect"}
+        return {
+            "type": "http.request",
+            "body": b"x" * 16_000,
+            "more_body": read < chunks,
+        }
+
+    async def send(message: dict[str, Any]) -> None:
+        nonlocal status
+        if message["type"] == "http.response.start":
+            status = int(message["status"])
+
+    await asyncio.wait_for(app(scope, receive, send), 10)
+    return status, read
+
+
+def test_long_bodies_are_refused_before_they_are_held(tmp_path: Path) -> None:
+    """Before any device is known: a Content-Length over the limit is refused unread,
+    and a chunked body is cut off at the limit, not read whole first."""
+
+    async def test(f: Fixture) -> None:
+        status, read = await post_chunks(f.app, 10_000, str(160_000_000))
+        assert status == 413 and read == 0
+        status, read = await post_chunks(f.app, 10_000, None)
+        assert status == 413 and read <= 5
+
+    run(tmp_path, test)
+
+
+def test_pairing_status_polls_are_limited(tmp_path: Path) -> None:
+    async def test(f: Fixture) -> None:
+        status = {"request_id": "r_x", "secret": "s"}
+        answers = [
+            (await call(f.app, "POST", "/api/pair/status", body=status)).status
+            for _ in range(61)
+        ]
+        assert answers[:60] == [200] * 60 and answers[60] == 429
+
+    run(tmp_path, test)

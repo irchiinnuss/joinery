@@ -75,6 +75,8 @@ COOKIE = "joinery_remote"
 CSRF_HEADER = "x-joinery-remote"
 #: Pairing posts one peer may make a minute (wrong codes also count to the lock).
 PAIR_PER_MINUTE = 10
+#: Pairing status polls one peer may make a minute (the page polls every 2 s).
+STATUS_PER_MINUTE = 60
 #: How often the server looks for hosts, and a stream checks its device is still allowed.
 DISCOVER_SECONDS = 2.0
 RECHECK_SECONDS = 5.0
@@ -149,12 +151,40 @@ class Guard:
                 message["headers"] = [*message["headers"], *SECURITY_HEADERS]
             await send(message)
 
+        if refusal is None:
+            refusal = _too_long(headers)
         if refusal is not None:
             await JSONResponse({"error": refusal[1]}, status_code=refusal[0])(
                 scope, receive, secured
             )
             return
-        await self.app(scope, receive, secured)
+        received = 0
+
+        async def capped() -> Message:
+            # A body is never held whole past BODY_LIMIT, chunked or not, before any
+            # check of who sent it.
+            nonlocal received
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > BODY_LIMIT:
+                    raise TooLong(TOO_LONG)
+            return message
+
+        await self.app(scope, capped, secured)
+
+
+TOO_LONG = "That's too long."
+
+
+def _too_long(headers: dict[str, str]) -> tuple[int, str] | None:
+    """A request that says it is longer than BODY_LIMIT is refused before it is read."""
+    length = headers.get("content-length")
+    if length is None:
+        return None
+    if not length.strip().isdigit() or int(length) > BODY_LIMIT:
+        return (413, TOO_LONG)
+    return None
 
 
 class RemoteServer:
@@ -175,6 +205,7 @@ class RemoteServer:
         #: Tokens of pairing requests the machine may yet allow; never on disk.
         self._pair_tokens: dict[str, tuple[str, float]] = {}
         self._pair_posts: dict[str, deque[float]] = {}
+        self._status_posts: dict[str, deque[float]] = {}
         #: What the server follows of each host: its pending reviews and its state.
         self.previews: dict[str, dict[str, dict[str, Any]]] = {}
         self.states: dict[str, dict[str, Any]] = {}
@@ -347,12 +378,16 @@ class RemoteServer:
 
     # --- Pairing ------------------------------------------------------------------------
 
-    def _limited(self, peer: str) -> bool:
+    def _limited(
+        self, peer: str, book: dict[str, deque[float]] | None = None, limit: int = 0
+    ) -> bool:
+        book = self._pair_posts if book is None else book
+        limit = limit or PAIR_PER_MINUTE
         now = time.time()
-        posts = self._pair_posts.setdefault(peer, deque(maxlen=PAIR_PER_MINUTE))
+        posts = book.setdefault(peer, deque(maxlen=limit))
         while posts and posts[0] < now - 60:
             posts.popleft()
-        if len(posts) >= PAIR_PER_MINUTE:
+        if len(posts) >= limit:
             return True
         posts.append(now)
         return False
@@ -387,6 +422,8 @@ class RemoteServer:
         )
 
     async def pair_status(self, request: Request) -> Response:
+        if self._limited(_peer(request), self._status_posts, STATUS_PER_MINUTE):
+            return JSONResponse({"error": "Too many tries. Wait a minute."}, 429)
         body = await _body(request)
         request_id = str(body.get("request_id", ""))
         known = self.store.request_state(request_id, str(body.get("secret", "")))
@@ -838,10 +875,14 @@ class NotFound(Problem):
     status = 404
 
 
+class TooLong(Problem):
+    status = 413
+
+
 async def _body(request: Request) -> dict[str, Any]:
     raw = await request.body()
     if len(raw) > BODY_LIMIT:
-        raise Problem("That's too long.")
+        raise TooLong(TOO_LONG)
     try:
         data = json.loads(raw or b"{}")
     except ValueError:
