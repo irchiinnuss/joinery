@@ -289,7 +289,18 @@ class ChatRecorder:
         elif kind in {"progress", "trail", "tests"}:
             # Each step on the work trail as it starts, so a reopened chat shows it;
             # a test run by its summary once it is done.
-            if kind == "trail" and event.get("state", "running") != "running":
+            state = event.get("state", "running")
+            if kind == "trail" and state == "skipped":
+                # A call the agent's own permission layer skipped: a quiet step
+                # when the chat reopens, as it was shown (never a refusal).
+                skipped: dict[str, Any] = {
+                    "type": "step",
+                    "text": str(event.get("text", "")),
+                    "skipped": True,
+                }
+                self._save(lambda: chats.append(self.project, self.chat_id, skipped))
+                return
+            if kind == "trail" and state != "running":
                 return
             if kind == "tests" and not event.get("done"):
                 return

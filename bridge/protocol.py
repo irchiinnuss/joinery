@@ -103,7 +103,9 @@ class Trail(_Msg):
     ends, or a short thought between the steps.
 
     A call is reported running, then done or failed under the same ``id``; the
-    later events repeat its ``text`` and may add a ``picture`` that landed. An
+    later events repeat its ``text`` and may add a ``picture`` that landed. A call
+    the agent's own permission layer refused for want of someone to approve it
+    ends ``skipped``, its line saying so (``bridge.trail.SKIPPED``). An
     edit says its ``file`` and the lines ``added`` and ``removed``; a line about a
     project file carries its ``path`` too.
     """
@@ -111,7 +113,7 @@ class Trail(_Msg):
     kind: Literal["trail"] = "trail"
     id: str = ""
     text: str
-    state: Literal["running", "done", "failed"] = "running"
+    state: Literal["running", "done", "failed", "skipped"] = "running"
     note: Literal["tool", "thought"] = "tool"
     file: str = ""
     added: int = 0

@@ -392,3 +392,96 @@ def test_windows_paths_read_like_any_other() -> None:
     assert trail.project_path("C:\\Users\\me\\a.gd") == ""
     assert trail.project_path("..\\secret.gd") == ""
     assert trail.project_path("game\\level.gd") == "res://game/level.gd"
+
+
+#: Claude Code refusing calls on its own: a substitution and a search outside the
+#: project need approval nobody can give; the policy hook's refusal is Joinery's.
+FAKE_CLAUDE_SKIPS = """#!/usr/bin/env python3
+import json, sys
+sys.stdin.read()
+def say(e):
+    print(json.dumps(e), flush=True)
+def use(i, name, args):
+    say({"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "id": i, "name": name, "input": args}]}})
+def result(i, text):
+    say({"type": "user", "message": {"content": [
+        {"type": "tool_result", "tool_use_id": i, "is_error": True, "content": text}]}})
+DENIED = ("Permission for this tool use was denied. It requires approval, and this "
+    "session has no approval surface - nobody can answer a permission prompt here")
+use("a", "Bash", {"command": "grep -h note $(grep -l bag recipes/*.toml)"})
+result("a", DENIED)
+use("b", "Grep", {"pattern": "max_off_palette", "path": "/opt/joinery"})
+result("b", DENIED)
+use("c", "mcp__joinery-registry__read_tool", {"server": "godot"})
+result("c", "PreToolUse hook error: Blocked by Joinery policy: godot. is not read-only")
+say({"type": "result", "subtype": "success", "is_error": False})
+"""
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the stub is a shell script")
+def test_calls_claude_code_could_not_ask_about_are_quiet_skipped_steps(
+    tmp_path: Path,
+) -> None:
+    import bridge.claude_session as cs
+    from bridge.claude_session import ClaudeSession
+    from bridge.protocol import ToolActivity
+
+    script = tmp_path / "claude"
+    script.write_text(FAKE_CLAUDE_SKIPS)
+    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+    session = ClaudeSession()
+    session.executable = str(script)
+    session.gateway_socket = tmp_path / "gw.sock"
+    session.project = tmp_path
+
+    async def go() -> list[Any]:
+        return [
+            event
+            async for event in session.send(
+                Prompt(text="hi", project_dir=str(tmp_path))
+            )
+            if isinstance(event, (Trail, ToolActivity))
+        ]
+
+    real = cs.readonly_command
+    cs.readonly_command = lambda argv, _p: argv  # type: ignore[assignment]
+    try:
+        events = asyncio.run(go())
+    finally:
+        cs.readonly_command = real
+    ended = [
+        (e.id, e.state, e.text)
+        for e in events
+        if isinstance(e, Trail) and e.state != "running"
+    ]
+    assert ended[:2] == [
+        ("a", "skipped", "Skipped a command that needed approval"),
+        ("b", "skipped", "Skipped a search that needed approval"),
+    ]
+    # Only Joinery's own policy judgment stays a refusal.
+    refused = [e for e in events if isinstance(e, ToolActivity) and not e.allowed]
+    assert [(e.call_id, "Blocked by Joinery" in e.reason) for e in refused] == [
+        ("c", True)
+    ]
+
+
+def test_only_the_agents_own_approval_refusals_are_skips() -> None:
+    assert trail.needs_approval("... this session has no approval surface ...")
+    assert trail.needs_approval(
+        "Edit needs a permission prompt, which this session can't show: use ..."
+    )
+    assert not trail.needs_approval(
+        "hook error: Blocked by Joinery policy: no approval surface either"
+    )
+    assert not trail.needs_approval("Krita isn't enabled for this project.")
+    calls = trail.Calls()
+    calls.start(
+        "e", "Edit", {"file_path": "a.gd", "old_string": "a", "new_string": "b"}
+    )
+    skipped = calls.skip("e", "Edit")
+    assert skipped is not None and skipped.state == "skipped"
+    assert skipped.text == "Skipped a step that needed approval" and not skipped.file
+    assert calls.skip("e") is None
+    line = headless_line(skipped.model_dump())
+    assert line == "  – Skipped a step that needed approval"

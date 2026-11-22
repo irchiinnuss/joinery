@@ -786,6 +786,8 @@ def trail_line(event: dict[str, Any]) -> str:
         return f"  › {text}{size}"
     if state == "failed":
         return f"  ✗ {text}"
+    if state == "skipped":
+        return f"  – {text}"
     if event.get("picture"):
         return f"    picture: {event['picture']}"
     return ""

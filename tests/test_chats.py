@@ -448,6 +448,27 @@ def test_new_chat_starts_a_fresh_provider_session(
     assert chats.read(project, second["chat_id"])[0]["handle"] == "thread-fresh-1"
 
 
+def test_a_skipped_call_is_kept_as_a_quiet_step(tmp_path: Path) -> None:
+    from bridge.chat_record import ChatRecorder
+
+    record = ChatRecorder(tmp_path, "claude")
+    record.begin({"text": "Paint the soil"}, ())
+    skipped = {
+        "kind": "trail",
+        "id": "a",
+        "text": "Skipped a command that needed approval",
+        "state": "skipped",
+    }
+    record.observe(skipped)
+    record.observe({**skipped, "id": "b"})
+    _meta, entries = chats.read(tmp_path, record.chat_id)
+    assert [e["type"] for e in entries].count("refusal") == 0
+    kept = [e for e in entries if e.get("skipped")]
+    assert [(e["type"], e["text"]) for e in kept] == [
+        ("step", "Skipped a command that needed approval")
+    ] * 2
+
+
 def test_a_refused_call_is_kept_so_a_reopened_chat_says_it(tmp_path: Path) -> None:
     from bridge.chat_record import ChatRecorder
 

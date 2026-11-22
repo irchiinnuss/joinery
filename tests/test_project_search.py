@@ -73,9 +73,10 @@ def test_claude_activity_follows_what_each_call_really_did(tmp_path: Path) -> No
     finally:
         cs.readonly_command = real
     # "a" looked refused (an unjudged '&') but ran; "b" looked allowed but was refused;
-    # "c" ran; "d" was refused in words the gate doesn't know: refused. One event
-    # per call, with what really happened.
-    assert seen == [("a", True), ("b", False), ("c", True), ("d", False)]
+    # "c" ran. One event per call, with what really happened. "d" was refused in
+    # words the gate doesn't know, as the prompt it guessed Claude Code would need:
+    # Claude Code's own refusal, a skipped step on the trail, not Joinery's refusal.
+    assert seen == [("a", True), ("b", False), ("c", True)]
 
 
 def project(tmp_path: Path) -> Path:

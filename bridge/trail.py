@@ -144,6 +144,36 @@ _PICTURE = re.compile(
 )
 
 
+#: A call the agent's own permission layer refused because it needed approval and no
+#: one can answer a prompt in a Joinery session: a quiet step, not Joinery's refusal.
+SKIPPED = "Skipped a {} that needed approval"
+#: Words of such a refusal, in the agent's own text or Joinery's guess of it.
+NEEDS_APPROVAL = (
+    "no approval surface",
+    "needs a permission prompt, which this session can't show",
+)
+#: Joinery's own judgment, which always stays a refusal.
+_JOINERY_REFUSAL = "blocked by joinery"
+
+
+def needs_approval(reason: str) -> bool:
+    """Whether ``reason`` is the agent's own "needs approval" refusal rather than
+    Joinery's policy (a Joinery hook refusal never counts, whatever else it says)."""
+    lowered = reason.lower()
+    if _JOINERY_REFUSAL in lowered:
+        return False
+    return any(words in lowered for words in NEEDS_APPROVAL)
+
+
+def skipped_line(tool: str) -> str:
+    """The trail's line for a skipped call of ``tool``: a command, a search or a step."""
+    if tool == "Bash":
+        return SKIPPED.format("command")
+    if tool in {"Grep", "Glob", "LS"}:
+        return SKIPPED.format("search")
+    return SKIPPED.format("step")
+
+
 class Calls:
     """One turn's tool calls on the trail: each reported running when it starts and
     done or failed when it ends, under its id, with the same line."""
@@ -211,6 +241,25 @@ class Calls:
             ok = True
         return started.model_copy(
             update={"state": "done" if ok else "failed", "picture": picture(result)}
+        )
+
+    def skip(self, call_id: str, tool: str = "") -> Trail | None:
+        """The call ``call_id`` was refused by the agent's own permission layer for
+        want of someone to approve it: its line ends quietly, saying it was skipped.
+        None for a call never reported started."""
+        started = self._open.pop(call_id, None)
+        self._searches.discard(call_id)
+        if started is None:
+            return None
+        return started.model_copy(
+            update={
+                "text": skipped_line(tool),
+                "state": "skipped",
+                "file": "",
+                "added": 0,
+                "removed": 0,
+                "path": "",
+            }
         )
 
     def end_all(self) -> list[Trail]:

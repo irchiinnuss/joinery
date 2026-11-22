@@ -640,17 +640,25 @@ class ClaudeSession:
                         if not isinstance(part, dict):
                             continue
                         call_id = str(part.get("tool_use_id", ""))
+                        pending = calls.pop(call_id) if call_id in calls else None
+                        name, guess = pending or ("", "")
+                        reason = refusal(part)
+                        if guess and part.get("is_error") and not reason:
+                            reason = guess
+                        if reason and trail.needs_approval(reason):
+                            # Claude Code's own "needs approval" refusal, with no
+                            # one to ask: a quiet skipped step, never Joinery's
+                            # refusal (the agent reads the reason in the result).
+                            if skipped := trail_calls.skip(call_id, name):
+                                yield skipped
+                            continue
                         ended = trail_calls.end(
                             call_id, not part.get("is_error"), part.get("content")
                         )
                         if ended is not None:
                             yield ended
-                        if call_id not in calls:
+                        if pending is None:
                             continue
-                        name, guess = calls.pop(call_id)
-                        reason = refusal(part)
-                        if guess and part.get("is_error") and not reason:
-                            reason = guess
                         yield ToolActivity(
                             server="claude",
                             tool=name,
