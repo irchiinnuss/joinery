@@ -73,8 +73,9 @@ cover two of the four agents.
    - `joinery remote projects <device> --allow <project>…` limits a device to some
      projects (`--all` lifts it; `joinery remote projects` lists them), and `joinery
      remote expiry --unused-days N --absolute-days N` sets how long devices last, paired
-     ones included (at most 365 days). Both stay at the machine; Settings has no control
-     for them yet.
+     ones included (at most 365 days). Both stay at the machine: Settings → Remote has a
+     projects menu under each device and "Unpair a device after" (7, 30 or 90 days
+     unused, with 30, 90 or 365 in all).
    - Scopes are watch, chat and decide. A device expires after 30 days unused and 90 in all,
      and revoking takes effect on its next request. An open stream looks at the device
      file every half second and asks again as soon as it changed: a revoke, losing

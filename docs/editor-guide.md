@@ -447,9 +447,10 @@ Each device can **Follow only**, **Follow and chat**, or do **Everything**
 (which adds Accept and Discard): choose it beside the device in Settings →
 Remote, or `joinery remote scopes <id> watch,chat`. **Activity** there lists what
 devices did and what was refused; **Unpair all** asks first. It expires
-after 30 days unused or 90 days in all (`joinery remote expiry --unused-days 7
---absolute-days 30` changes that). `joinery remote projects <id> --allow
-<project>` limits a device to some projects. `joinery remote owner
+after 30 days unused or 90 days in all: **Unpair a device after** there changes
+that (or `joinery remote expiry --unused-days 7 --absolute-days 30`). The menu
+under each device (**Every project**, or the projects you tick) limits it to some
+projects, as `joinery remote projects <id> --allow <project>` does. `joinery remote owner
 ana@example.com` lets only your own Tailscale login's devices reach Remote.
 Revoke a device in Settings → Remote or with `joinery remote revoke <id>`,
 which takes effect at once, open connections included. `joinery remote log`

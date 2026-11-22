@@ -307,7 +307,23 @@ def status(store: Store) -> dict[str, Any]:
         "keep_awake": bool(config.get("keep_awake")),
         "owner": str(config.get("owner", "") or ""),
         "projects": [h.public() for h in discover(store.home)],
+        # For Settings → Remote: the projects a device may be limited to, and how
+        # long devices last (`joinery remote projects`, `joinery remote expiry`).
+        "known_projects": _known_projects(store),
+        "expiry": {
+            "unused_days": float(config["unused_days"]),
+            "absolute_days": float(config["absolute_days"]),
+        },
     }
+
+
+def _known_projects(store: Store) -> list[dict[str, str]]:
+    from joinery.remote.paths import known
+
+    return [
+        {"id": identifier, "name": str(entry.get("name", ""))}
+        for identifier, entry in known(store.home).items()
+    ]
 
 
 def _status(store: Store, args: argparse.Namespace) -> int:
@@ -496,12 +512,7 @@ def _projects(store: Store, args: argparse.Namespace) -> int:
     """No device: the projects a phone could reach. A device: what it may reach, or
     (``--allow`` / ``--all``) change that; an open stream on a project it loses ends
     at once."""
-    from joinery.remote.paths import known
-
-    listed = [
-        {"id": identifier, "name": str(entry.get("name", ""))}
-        for identifier, entry in known(store.home).items()
-    ]
+    listed = _known_projects(store)
     if not args.device_id:
         if args.allow is not None or args.all:
             raise ValueError("Name the device: joinery remote projects <device> ...")

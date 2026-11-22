@@ -7,8 +7,9 @@ extends VBoxContainer
 ## here ("Pair “Ana's iPhone”?", Cancel focused). Under the address, one button does the next
 ## step: Get Tailscale, Put it on my tailnet (`tailscale serve`, asked first), or Copy address,
 ## decided by whether `tailscale serve` actually serves Remote (`served` in the status).
-## Paired devices, what each may do, Revoke and the activity are remote_devices.gd's. Pairing,
-## like every other setting, stays at the machine.
+## How long devices last (`joinery remote expiry`) is a picker under Devices. Paired devices, what
+## each may do and which projects it opens, Revoke and the activity are remote_devices.gd's.
+## Pairing, like every other setting, stays at the machine.
 
 const UI := preload("ui_components.gd")
 const UI_MOTION := preload("ui_motion.gd")
@@ -18,6 +19,8 @@ const DEVICES := preload("remote_devices.gd")
 const GET_TAILSCALE := "https://tailscale.com/download"
 const POLL_SECONDS := 2.0
 const QR_SIZE := 192
+## How long a device lasts, as offered: [days unused, days in all since pairing].
+const EXPIRY := [[7.0, 30.0], [30.0, 90.0], [90.0, 365.0]]
 
 ## The CLI program and leading arguments, for tests; empty runs the engine's `uv run joinery`.
 var cli_prefix := PackedStringArray()
@@ -38,6 +41,10 @@ var qr: TextureRect
 var code: Label
 var pair_note: Label
 var devices: DEVICES
+var expiry: OptionButton
+var expiry_note: Label
+## [days unused, days in all] as the picker shows them (a value set elsewhere joins the list).
+var _expiry_items: Array = []
 var _ask: Node
 var _serve_ask: Node
 var _address := ""
@@ -114,6 +121,15 @@ func _init() -> void:
 	pair_box.add_child(pair_note)
 	pair_box.hide()
 	add_child(_inset(pair_box))
+	expiry = UI.picker([], "sm")
+	expiry.name = "Expiry"
+	expiry.tooltip_text = "A paired device is unpaired after this long unused"
+	expiry.item_selected.connect(_on_expiry)
+	add_child(UI.setting_row("Unpair a device after", expiry))
+	expiry_note = UI.label("", "JoineryFaint", true)
+	expiry_note.name = "ExpiryNote"
+	add_child(_inset(expiry_note))
+	show_expiry(30.0, 90.0)
 	devices = DEVICES.new()
 	devices.command.connect(_run)
 	add_child(devices)
@@ -187,7 +203,30 @@ func apply_status(data: Dictionary) -> void:
 	pair_button.tooltip_text = (
 		"Turn Remote on first" if not on else ("" if served else "Put Remote on your tailnet first")
 	)
+	var limits: Dictionary = data.get("expiry", {}) if data.get("expiry") is Dictionary else {}
+	if not limits.is_empty():
+		show_expiry(float(limits.get("unused_days", 30)), float(limits.get("absolute_days", 90)))
+	devices.projects = data.get("known_projects", []) if data.get("known_projects") is Array else []
 	devices.set_devices(data.get("devices", []))
+
+
+## Show how long devices last: [param unused] days unused, [param absolute] in all.
+func show_expiry(unused: float, absolute: float) -> void:
+	_expiry_items = EXPIRY.duplicate()
+	if not _expiry_items.has([unused, absolute]):
+		_expiry_items.append([unused, absolute])
+	expiry.clear()
+	for item: Array in _expiry_items:
+		expiry.add_item("%d days unused" % roundi(item[0]))
+	expiry.select(_expiry_items.find([unused, absolute]))
+	expiry_note.text = "And %d days after pairing, used or not." % roundi(absolute)
+
+
+func _on_expiry(index: int) -> void:
+	var item: Array = _expiry_items[index]
+	expiry_note.text = "And %d days after pairing, used or not." % roundi(item[1])
+	var days := ["--unused-days", str(item[0]), "--absolute-days", str(item[1])]
+	_run("expiry", ["remote", "expiry"] + days + ["--json"])
 
 
 ## The button under the address: get Tailscale, serve on the tailnet (asked first), or copy.
@@ -347,7 +386,7 @@ func _finished(result: Dictionary) -> void:
 			apply_pairing(data)
 		"requests":
 			apply_requests(data)
-		"confirm", "revoke", "scopes", "forget", "tailscale":
+		"confirm", "revoke", "scopes", "projects", "expiry", "forget", "tailscale":
 			tailnet_button.disabled = false
 			if data.has("error"):
 				where.text = str(data["error"])

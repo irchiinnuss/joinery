@@ -147,13 +147,74 @@ func _check_states() -> void:
 		{"ts": 0, "action": "art_approval", "result": "refused", "reason": "Use the editor."}
 	)
 	_check(line.ends_with("refused: Use the editor."), "A refusal says why: " + line)
+	_check_limits(setting)
 	setting.free()
+
+
+## Which projects a device opens, and how long devices last.
+func _check_limits(setting: SETTING) -> void:
+	var harbour := {"id": "aaaa1111", "name": "Harbour"}
+	var forest := {"id": "bbbb2222", "name": "Forest"}
+	var device := {"id": "d_1", "name": "Ana's iPhone", "scopes": ["watch"], "projects": []}
+	var status := {
+		"enabled": true,
+		"tailscale": {"installed": true, "running": true},
+		"devices": [device],
+		"known_projects": [harbour, forest],
+		"expiry": {"unused_days": 7.0, "absolute_days": 30.0},
+	}
+	setting.apply_status(status)
+	var menu: MenuButton = setting.devices.find_child("Projects", true, false)
+	_check(menu != null and menu.text == "Every project", "A device opens every project at first")
+	var seen: Array = []
+	setting.devices.command.connect(func(_kind: String, args: Array) -> void: seen.append(args))
+	if menu != null:
+		menu.get_popup().id_pressed.emit(1)
+	_check(
+		seen == [["remote", "projects", "d_1", "--allow", "aaaa1111", "--json"]],
+		"Ticking one project limits it to that one: %s" % [seen]
+	)
+	device["projects"] = ["aaaa1111", "gone0000"]
+	setting.apply_status(status)
+	# The rows before go at the end of the frame: the new one is last.
+	menu = setting.devices.list.get_child(-1).find_child("Projects", true, false)
+	_check(menu != null and menu.text == "Only Harbour", "It names the projects: %s" % menu.text)
+	seen.clear()
+	if menu != null:
+		menu.get_popup().id_pressed.emit(1)
+		menu.get_popup().id_pressed.emit(2)
+		menu.get_popup().id_pressed.emit(0)
+	_check(
+		(
+			seen
+			== [
+				["remote", "projects", "d_1", "--all", "--json"],
+				["remote", "projects", "d_1", "--allow", "aaaa1111", "bbbb2222", "--json"],
+				["remote", "projects", "d_1", "--all", "--json"],
+			]
+		),
+		"Unticking the last one, or Every project, opens every project again: %s" % [seen]
+	)
+	_check(setting.expiry.text == "7 days unused", "How long devices last: " + setting.expiry.text)
+	_check(setting.expiry_note.text.contains("30 days after pairing"), setting.expiry_note.text)
+	setting.show_expiry(12.0, 40.0)
+	_check(setting.expiry.text == "12 days unused", "A value set elsewhere shows as it is")
+	_check(setting.expiry.item_count == 4, "…beside the usual choices")
 
 
 func _python_line(code: String) -> String:
 	var out: Array = []
 	OS.execute(_python, PackedStringArray(["-c", code]), out, true)
 	return str(out[0]).strip_edges() if not out.is_empty() else ""
+
+
+func _unused_is(days: String) -> bool:
+	return (
+		_python_line(
+			"from joinery.remote.store import Store; print(Store().config()['unused_days'])"
+		)
+		== days
+	)
 
 
 func _check_real_cli() -> void:
@@ -217,6 +278,10 @@ func _check_real_cli() -> void:
 		await _until(func() -> bool: return setting.devices.list.get_child_count() == 1),
 		"The paired device is listed"
 	)
+	# How long devices last, through the real CLI.
+	setting.expiry.select(2)
+	setting.expiry.item_selected.emit(2)
+	_check(await _until(_unused_is.bind("90.0")), "Choosing 90 days sets it")
 	var revoke: Button = setting.devices.find_child("Revoke", true, false)
 	if revoke != null:
 		revoke.pressed.emit()

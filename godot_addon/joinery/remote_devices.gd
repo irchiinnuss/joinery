@@ -2,7 +2,8 @@
 extends VBoxContainer
 ## Settings → Remote's paired devices and what they did (remote_setting.gd, ADR 0093). Each device
 ## has what it may do (Follow only, Follow and chat, or Everything, which adds Accept and Discard;
-## `joinery remote scopes`) and Revoke. Unpair all asks in place first, Cancel focused. Activity
+## `joinery remote scopes`), which projects it opens (every one, or those ticked; `joinery remote
+## projects`) and Revoke. Unpair all asks in place first, Cancel focused. Activity
 ## folds open to the last remote actions and refusals (`joinery remote log`). Every change goes
 ## out as [signal command] for the settings page to run.
 
@@ -12,6 +13,8 @@ signal command(kind: String, args: Array)
 const UI := preload("ui_components.gd")
 const UI_MOTION := preload("ui_motion.gd")
 const ASK := preload("revert_ask.gd")
+const POPUP_FIT := preload("popup_fit.gd")
+const EVERY := "Every project"
 ## What a device may do, as offered: [label, scopes].
 const CHOICES := [
 	["Follow only", "watch"],
@@ -42,6 +45,8 @@ const ACTIONS := {
 	"helper_off": "No longer kept available when closed",
 	"tailscale_serve": "Put on the tailnet",
 	"forget_all": "Unpaired every device",
+	"projects": "Changed which projects it opens",
+	"expiry": "Changed how long devices last",
 }
 const SHOWN := 20
 
@@ -50,6 +55,8 @@ var empty: Label
 var forget: Button
 var activity: UI.Section
 var lines: VBoxContainer
+## The projects a device can be limited to, as [{id, name}] (`joinery remote status`).
+var projects: Array = []
 var _ask: Node
 
 
@@ -144,8 +151,76 @@ func _row(device: Dictionary) -> Control:
 		var caption := UI.label(says, "JoineryFaint", true)
 		caption.name = "Seen"
 		column.add_child(_inset(caption))
+	if not projects.is_empty():
+		var line := HBoxContainer.new()
+		line.add_child(_projects_menu(id, name_text, device.get("projects", [])))
+		column.add_child(_inset(line))
 	UI_MOTION.fade_in(column)
 	return column
+
+
+## Which projects the device opens: "Every project", or one tick per project.
+func _projects_menu(id: String, name_text: String, value: Variant) -> MenuButton:
+	var allowed := allowed_known(value)
+	var menu := MenuButton.new()
+	menu.name = "Projects"
+	menu.theme_type_variation = "JoineryQuietButton"
+	menu.flat = false
+	menu.focus_mode = Control.FOCUS_ALL
+	menu.text = projects_text(allowed)
+	menu.tooltip_text = "Which projects %s can open" % name_text
+	menu.accessibility_name = "Projects %s can open" % name_text
+	UI.bind_icon(menu, "disclosure_open")
+	menu.icon_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	UI.bind_height(menu, "sm")
+	POPUP_FIT.menu(menu)
+	var popup := menu.get_popup()
+	popup.add_radio_check_item(EVERY, 0)
+	popup.set_item_checked(0, allowed.is_empty())
+	popup.add_separator()
+	for index: int in projects.size():
+		var project: Dictionary = projects[index]
+		popup.add_check_item(str(project.get("name", "")), index + 1)
+		popup.set_item_checked(popup.item_count - 1, allowed.has(str(project.get("id", ""))))
+	popup.id_pressed.connect(
+		func(item: int) -> void: command.emit("projects", projects_args(id, allowed, item))
+	)
+	return menu
+
+
+## The ids in [param value] (a device's project list) that are still known projects.
+func allowed_known(value: Variant) -> Array:
+	var ids: Array = []
+	for project: Dictionary in projects:
+		if value is Array and (value as Array).has(str(project.get("id", ""))):
+			ids.append(str(project.get("id", "")))
+	return ids
+
+
+## "Every project", or the names of the [param allowed] project ids.
+func projects_text(allowed: Array) -> String:
+	if allowed.is_empty():
+		return EVERY
+	var names := PackedStringArray()
+	for project: Dictionary in projects:
+		if allowed.has(str(project.get("id", ""))):
+			names.append(str(project.get("name", "")))
+	return "Only " + ", ".join(names)
+
+
+## The CLI call for menu item [param item]: every project again, or [param allowed] with that
+## project ticked or unticked (none left is every project).
+func projects_args(id: String, allowed: Array, item: int) -> Array:
+	var chosen := allowed.duplicate()
+	if item > 0 and item <= projects.size():
+		var project_id := str(projects[item - 1].get("id", ""))
+		if chosen.has(project_id):
+			chosen.erase(project_id)
+		else:
+			chosen.append(project_id)
+	if item == 0 or chosen.is_empty():
+		return ["remote", "projects", id, "--all", "--json"]
+	return ["remote", "projects", id, "--allow"] + chosen + ["--json"]
 
 
 static func _choice(scopes: Variant) -> int:
