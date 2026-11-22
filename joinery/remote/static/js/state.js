@@ -167,7 +167,7 @@ export function apply(state, event) {
       break;
     case "file_decision": {
       if (state.change && state.change.transaction_id === event.transaction_id) state.change = null;
-      const words = event.message || (event.accepted ? "Change accepted" : "Discarded");
+      const words = event.message || (event.accepted ? "Change accepted" : "Change discarded");
       push(state, { type: "decision", accepted: !!event.accepted, text: String(words) });
       break;
     }

@@ -70,7 +70,7 @@ const DRAWER := preload("review_drawer.gd")
 const LAYOUT := preload("review_layout.gd")
 const OWNERS := preload("review_owners.gd")
 const ACCEPTED := "Change accepted"
-const REJECTED := "Discarded"
+const REJECTED := "Change discarded"
 const SCENE_NOTE := "The change is shown in the viewport."
 ## Least width of Discard, in em.
 const BUTTON_EM := 6.0

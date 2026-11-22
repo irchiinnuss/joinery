@@ -151,7 +151,7 @@ func _wire(dock: Control, chat: Node) -> void:
 			var accepted := bool(event.get("accepted", false))
 			dock.call(
 				"hide_edit_review",
-				"Change accepted" if accepted else "Discarded",
+				"Change accepted" if accepted else "Change discarded",
 				"success" if accepted else "rejected"
 			)
 	)

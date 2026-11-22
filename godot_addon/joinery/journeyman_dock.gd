@@ -59,7 +59,7 @@ const REVIEW_WAIT := "Next message…"
 const OTHER_WAIT := "Sends when the other chat finishes"
 const OTHER_HINT := "Waits for the other chat…"
 const PERSONA := "Journeyman"
-const DISCARDED := "Discarded"
+const DISCARDED := "Change discarded"
 const BRIEF := preload("res://addons/joinery/sidebar_brief.gd")
 const FILE_OPEN := preload("res://addons/joinery/sidebar_file_open.gd")
 const NOTIFY := preload("res://addons/joinery/desktop_notify.gd")
@@ -902,7 +902,7 @@ func _arrive() -> void:
 
 ## Close the review. [param kind] is "success", "rejected", "info" or "error"; the message is
 ## shown on the request's card, or as a notice when there is none. A discard always reads
-## "Discarded": nothing in the game changed.
+## "Change discarded": nothing in the game changed.
 func hide_edit_review(message: String = "", kind := "info") -> void:
 	var was_pending := _review_pending
 	_review_pending = false

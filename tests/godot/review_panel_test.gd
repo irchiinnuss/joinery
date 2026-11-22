@@ -8,7 +8,7 @@ const PANEL := preload("res://addons/joinery/review_panel.gd")
 const DETAILS := preload("res://addons/joinery/review_details.gd")
 const UI_MOTION := preload("res://addons/joinery/ui_motion.gd")
 const SETTINGS := preload("res://addons/joinery/journeyman_settings.gd")
-const DISCARDED := "Discarded"
+const DISCARDED := "Change discarded"
 
 var _failed := false
 var _host: Control

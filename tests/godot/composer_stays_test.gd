@@ -179,7 +179,7 @@ func _run() -> void:
 	_finish()
 	root.size = Vector2i(420, 420)
 	await _composer_stays("A short sidebar with a change waiting")
-	_dock.call("hide_edit_review", "Discarded", "rejected")
+	_dock.call("hide_edit_review", "Change discarded", "rejected")
 	await _composer_stays("The change was discarded")
 	print("composer stays: ", "FAILED" if _failed else "ok")
 	quit(1 if _failed else 0)

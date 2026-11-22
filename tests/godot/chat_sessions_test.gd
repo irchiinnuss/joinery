@@ -194,7 +194,7 @@ func _long_chat(chat: Control, sessions: Node) -> void:
 	_check(recall.size() == 30 and recall[0] == "Request 0", "Up recalls every request")
 	var old: Control = view.call("card_for", PRUNED)
 	_check(old != null and str(old.get("request")) == "Request 2", "A link reaches an old change")
-	_check(str(old.get("_outcome_text").text) == "Discarded", "…with its decision line")
+	_check(str(old.get("_outcome_text").text) == "Change discarded", "…with its decision line")
 	cards = view.get("_cards")
 	_check(cards.size() == 30 and int(view.call("older_count")) == 0, "Every request is built")
 	var ordered := true

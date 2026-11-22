@@ -653,7 +653,7 @@ func _review(accept: bool) -> void:
 		s.card().call("awaiting_decision") == false,
 		"The %s took the decision" % ("⌘↩ shortcut" if accept else "Discard button")
 	)
-	var word := "accepted" if accept else "Discarded"
+	var word := "Change accepted" if accept else "Change discarded"
 	await s.frames(1)
 	s.metric("decision_to_line", (Time.get_ticks_usec() - started) / 1000.0, "ms")
 	s.check(s.visible_text().contains(word), "The card says %s at once" % word)

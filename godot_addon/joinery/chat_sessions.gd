@@ -46,7 +46,7 @@ const TURNS := preload("chat_turns.gd")
 const NOTICES := preload("chat_notices.gd")
 const REFUSALS := preload("sidebar_refusals.gd")
 const PERSONA := "Journeyman"
-const DISCARDED := "Discarded"
+const DISCARDED := "Change discarded"
 const QUEUED := "Send or remove this chat's queued message first."
 ## A kept view's change cards ([member _changes]) while it is out of sight.
 const CHANGES_META := "joinery_changes"

@@ -280,7 +280,7 @@ func _run_revert_and_gate() -> void:
 	chat.hide_edit_review("Change rejected. Original restored.", "rejected")
 	_check(
 		creak.state == "rejected" and creak._outcome_text.text == chat.DISCARDED,
-		"A discard reads Discarded"
+		"A discard reads Change discarded"
 	)
 	_check(
 		chat._review._outcome_text.text == chat.DISCARDED,

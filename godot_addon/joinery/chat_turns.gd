@@ -19,7 +19,7 @@ extends RefCounted
 
 const SLASH := preload("slash_commands.gd")
 const PERSONA := "Journeyman"
-const DISCARDED := "Discarded"
+const DISCARDED := "Change discarded"
 const OTHER_WAIT := "Sends when the other chat finishes"
 ## Seconds a ready change waits before its review opens by itself (as a task's does).
 const OPEN_DELAY := 0.8

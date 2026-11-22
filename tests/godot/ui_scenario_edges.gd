@@ -427,7 +427,7 @@ func _switch_in_review() -> void:
 	)
 	s.check(settled, "Discard after switching back decides it")
 	await s.frames(3)
-	s.check(s.visible_text().count("Discarded") == 1, "It says Discarded once")
+	s.check(s.visible_text().count("Change discarded") == 1, "It says Change discarded once")
 
 
 ## Journeyman's own turn and another chat's finish at the same moment: each ends in its view.
