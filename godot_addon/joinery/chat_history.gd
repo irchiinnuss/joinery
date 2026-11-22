@@ -50,6 +50,8 @@ const NOTICES := preload("chat_notices.gd")
 const MARKDOWN := preload("chat_markdown.gd")
 const WORDS := preload("sidebar_turn_words.gd")
 const NO_AGENT := "No agent connected"
+## Time a frame may spend building older turns while the user scrolls up to them.
+const OLDER_BUDGET_MS := 12
 ## Notice kind -> [icon ("" for none), tint role].
 const NOTICE_ICONS := {
 	"success": ["success", "success"],
@@ -82,6 +84,12 @@ var _caption_text: Label
 var _caption_action: Button
 var _caption_callback: Callable
 var _caption_serial := 0
+## A reopened chat's older turns not built yet, as groups of saved entries (one per request,
+## oldest first), and what builds a list of them (chat_sessions.gd). A long chat opens with its
+## newest requests; the older ones are built as the user scrolls up to them.
+var _older: Array = []
+var _build_older := Callable()
+var _prepending := false
 
 
 func _ready() -> void:
@@ -278,7 +286,8 @@ func add_request(text: String, targets: Array = []) -> Control:
 		)
 	)
 	_last_notice = ""
-	_follower.follow()
+	if not _prepending:
+		_follower.follow()
 	_dirty = true
 	return card
 
@@ -390,6 +399,10 @@ func card_for(transaction_id: String) -> Control:
 	for card: Control in _cards:
 		if is_instance_valid(card) and card.transaction_id == transaction_id:
 			return card
+	if _older_has(transaction_id):
+		# A link to a change further up: build the older turns, then it is there.
+		build_all_older()
+		return card_for(transaction_id)
 	return null
 
 
@@ -494,6 +507,8 @@ func clear() -> void:
 	_messages.clear()
 	_cards.clear()
 	_log.clear()
+	_older = []
+	_build_older = Callable()
 	_turn = null
 	_last_notice = ""
 	_empty.show()
@@ -589,6 +604,7 @@ func _semibold(label: RichTextLabel) -> void:
 func _process(_delta: float) -> void:
 	if _caption != null and _caption.visible:
 		_place_caption()
+	_build_older_in_view()
 	if not _dirty or _body == null:
 		return
 	_dirty = false
@@ -598,6 +614,94 @@ func _process(_delta: float) -> void:
 			record["dirty"] = false
 	if _follower.following:
 		_follower.to_end()
+
+
+# --- Older turns of a reopened chat ------------------------------------------------------------
+
+
+## Keep [param groups] (saved entries, one group per request, oldest first) to build above
+## the turns on screen once the user scrolls up to them; [param build] builds a list of groups.
+func set_older(groups: Array, build: Callable) -> void:
+	_older = groups
+	_build_older = build if not groups.is_empty() else Callable()
+
+
+## How many older requests are not built yet.
+func older_count() -> int:
+	return _older.size()
+
+
+## The older requests not built yet, oldest first (Up in the message box recalls them too).
+func older_requests() -> Array[String]:
+	var texts: Array[String] = []
+	for group: Array in _older:
+		for entry: Variant in group:
+			if entry is Dictionary and str(entry.get("type", "")) == "user":
+				texts.append(str(entry.get("text", "")))
+	return texts
+
+
+## Build every older turn now (a link to an old change, a rewind to an old request).
+func build_all_older() -> void:
+	if not _older.is_empty():
+		_prepend(_older.size())
+
+
+## Scrolled up near the oldest turn built: build older ones above it, a frame's worth at a time.
+func _build_older_in_view() -> void:
+	if _older.is_empty() or not is_visible_in_tree() or scroll_vertical > size.y:
+		return
+	var started := Time.get_ticks_msec()
+	while not _older.is_empty() and Time.get_ticks_msec() - started < OLDER_BUDGET_MS:
+		_prepend(1)
+
+
+## Build the newest [param count] older groups and put them above the turns on screen. The
+## view stays on what the user reads: the newest turn stays current and nothing jumps.
+func _prepend(count: int) -> void:
+	var groups := _older.slice(_older.size() - count)
+	_older.resize(_older.size() - count)
+	var kept_turn := _turn
+	var kept_notice := _last_notice
+	var sizes := [_messages.size(), _cards.size(), _log.size()]
+	var before := {}
+	for child: Node in _body.get_children():
+		before[child] = true
+	var bar := get_v_scroll_bar()
+	if not _follower.following:
+		_follower.keep_from_end(bar.max_value - scroll_vertical)
+	_turn = null
+	_last_notice = ""
+	_prepending = true
+	_build_older.call(groups)
+	_prepending = false
+	_turn = kept_turn
+	_last_notice = kept_notice
+	var at := _empty.get_index() + 1
+	for child: Node in _body.get_children():
+		if not before.has(child):
+			_body.move_child(child, at)
+			at += 1
+	var messages: Array[Dictionary] = _messages.slice(sizes[0])
+	messages.append_array(_messages.slice(0, sizes[0]))
+	_messages = messages
+	var cards: Array[Control] = _cards.slice(sizes[1])
+	cards.append_array(_cards.slice(0, sizes[1]))
+	_cards = cards
+	var log := _log.slice(sizes[2])
+	log.append_array(_log.slice(0, sizes[2]))
+	_log = log
+	if _older.is_empty():
+		_build_older = Callable()
+	_dirty = true
+
+
+func _older_has(transaction_id: String) -> bool:
+	for group: Array in _older:
+		for entry: Variant in group:
+			if entry is Dictionary and str(entry.get("transaction_id", "")) == transaction_id:
+				return true
+	return false
 
 
 # --- Transient caption ---------------------------------------------------------------------------

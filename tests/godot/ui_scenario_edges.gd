@@ -210,8 +210,9 @@ func _huge_reply() -> void:
 
 
 ## A 300-message chat (100 requests; 2,000 can outrun a scenario's time limit on a busy
-## machine): it opens in reasonable time, scrolls, and leaves nothing behind when a
-## new chat replaces it.
+## machine): it opens with its newest requests in under a second, builds the older ones as
+## the user scrolls up, keeps them in order, and leaves nothing behind when a new chat
+## replaces it.
 func _long_chat() -> void:
 	if not await s.connect_host():
 		return
@@ -228,21 +229,47 @@ func _long_chat() -> void:
 	await s.frames(2)
 	var took := Time.get_ticks_msec() - started
 	s.metric("long_chat_open", took, "ms")
-	s.expect_bug(
-		took < 1000,
-		"300 messages open in under 1 s (%d ms)" % took,
-		"each request card takes several ms to build, and a reopened chat builds them all at once"
-	)
+	s.check(took < 1000, "300 messages open in under 1 s (%d ms)" % took)
 	var scroll := s.transcript() as ScrollContainer
+	var bar := scroll.get_v_scroll_bar()
+	await s.frames(4)
+	s.check(bar.max_value - bar.page - scroll.scroll_vertical <= 8, "It opens at the newest")
+	var cards: Array = s.transcript().get("_cards")
+	s.check(
+		str(cards[-1].get("request")) == "Request 99: move lamp 99", "The newest request is last"
+	)
+	# Scrolling up builds the older requests above, a frame's worth at a time, and the view
+	# stays where the user reads.
 	var worst := 0.0
+	var steps := 0
+	while int(s.transcript().call("older_count")) > 0 and steps < 600:
+		var last := Time.get_ticks_usec()
+		scroll.scroll_vertical = 0
+		await s.tree.process_frame
+		worst = maxf(worst, (Time.get_ticks_usec() - last) / 1000.0)
+		steps += 1
+	await s.frames(2)
+	s.metric("long_chat_older_frame", worst, "ms")
+	s.check(worst < 250.0, "Building older requests keeps frames short (%.0f ms)" % worst)
+	s.check(
+		bar.max_value - bar.page - scroll.scroll_vertical > bar.page,
+		"Older requests going in above don't pull the view to the end"
+	)
+	cards = s.transcript().get("_cards")
+	s.check(cards.size() == 100, "Every request is there once scrolled up (%d)" % cards.size())
+	var ordered := true
+	for index: int in cards.size():
+		if str(cards[index].get("request")) != "Request %d: move lamp %d" % [index, index]:
+			ordered = false
+	s.check(ordered, "…in the order they were sent")
+	await s.shot("top")
+	worst = 0.0
 	for step: int in 20:
 		var last := Time.get_ticks_usec()
-		scroll.scroll_vertical = int(scroll.get_v_scroll_bar().max_value * step / 19.0)
+		scroll.scroll_vertical = int(bar.max_value * step / 19.0)
 		await s.tree.process_frame
 		worst = maxf(worst, (Time.get_ticks_usec() - last) / 1000.0)
 	s.metric("long_chat_scroll_frame", worst, "ms")
-	var cards: Array = s.transcript().get("_cards")
-	s.check(cards.size() == 100, "Every request is there (%d)" % cards.size())
 	sessions.call("new_chat")
 	for index: int in 10:
 		await s.frames(2)

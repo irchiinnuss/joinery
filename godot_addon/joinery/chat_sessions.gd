@@ -62,6 +62,8 @@ const STATES := {
 }
 ## The decision line of a change Joinery kept without asking (`[agents] auto_accept`).
 const AUTO := ["auto", "Accepted automatically"]
+## Requests a reopened chat builds at once; older ones wait until the user scrolls up to them.
+const NEWEST := 10
 
 var dock: Control
 var page: PAGE
@@ -90,6 +92,8 @@ var _past_text: Label
 var _continue: Button
 ## transaction id -> [card, state shown]
 var _changes: Dictionary = {}
+## What `joinery transactions list` last said, for change cards built after it came.
+var _report: Dictionary = {}
 ## slot -> [job, callback]
 var _jobs: Dictionary = {}
 ## Chats kept running out of sight: chat id ("" until the host names a new one) -> its view.
@@ -296,17 +300,8 @@ func _show(chat_id: String, read_only: bool) -> void:
 	if data.is_empty():
 		dock.call("show_status", "That chat is no longer saved.", 4.0)
 		return
-	# A restored chat appears whole; nothing in it is news. Motion comes back as it was.
-	var key: String = UI_MOTION._ENABLED_META
-	# Unset in the editor; get_meta with a null default would print an error.
-	var motion: Variant = Engine.get_meta(key) if Engine.has_meta(key) else null
-	UI_MOTION.set_enabled(false)
 	_reset()
 	render(data["entries"])
-	if motion == null:
-		Engine.remove_meta(key)
-	else:
-		Engine.set_meta(key, motion)
 	shown_id = chat_id
 	if not read_only:
 		_set_current(chat_id)
@@ -324,17 +319,58 @@ func _show(chat_id: String, read_only: bool) -> void:
 	_check_states()
 
 
-## Put [param entries] (a chat file's lines after the first) back in the transcript.
+## Put [param entries] (a chat file's lines after the first) back in the transcript. Its newest
+## [constant NEWEST] requests are built now; older ones as the user scrolls up to them.
 func render(entries: Array) -> void:
 	_changes.clear()
-	var card: Control = null
+	_report = {}
+	var groups := _groups(entries)
+	var split := maxi(groups.size() - NEWEST, 0)
+	_transcript.call("set_older", groups.slice(0, split), _replay.bind(_transcript))
+	_replay(groups.slice(split), _transcript)
+	_transcript.call("finish_response")
+
+
+## [param entries] in groups, a new one at each request.
+static func _groups(entries: Array) -> Array:
+	var groups: Array = []
 	for entry: Variant in entries:
 		if not entry is Dictionary:
 			continue
+		if groups.is_empty() or str(entry.get("type", "")) == "user":
+			groups.append([])
+		groups[-1].append(entry)
+	return groups
+
+
+## Build [param groups] of saved entries in [param view], each as it was shown. Nothing in them
+## is news, so nothing moves in.
+func _replay(groups: Array, view: Control) -> void:
+	var key: String = UI_MOTION._ENABLED_META
+	# Unset in the editor; get_meta with a null default would print an error.
+	var motion: Variant = Engine.get_meta(key) if Engine.has_meta(key) else null
+	UI_MOTION.set_enabled(false)
+	var added: Array[String] = []
+	for group: Array in groups:
+		_replay_group(group, view, added)
+	for id: String in added:
+		_apply(id, str(_changes[id][1]), true)
+	if not _report.is_empty() and not added.is_empty():
+		show_states(_report)
+	if motion == null:
+		Engine.remove_meta(key)
+	else:
+		Engine.set_meta(key, motion)
+
+
+## One request's saved entries; ids of the changes in it go into [param added].
+func _replay_group(group: Array, view: Control, added: Array[String]) -> void:
+	var card: Control = null
+	for entry: Dictionary in group:
 		var text := str(entry.get("text", ""))
 		match str(entry.get("type", "")):
 			"user":
-				card = _transcript.call("add_request", text, _targets(entry))
+				card = view.call("add_request", text, _targets(entry))
 				card.call("set_sent")
 			"step":
 				if card != null and bool(entry.get("skipped", false)):
@@ -350,7 +386,7 @@ func render(entries: Array) -> void:
 					var refused := {"kind": "tool_activity", "allowed": false}
 					card.call("add_trail", refused.merged(entry))
 			"agent":
-				_transcript.call("add_message", PERSONA, text)
+				view.call("add_message", PERSONA, text)
 			"notice":
 				var level := str(entry.get("level", "info"))
 				var kind := (
@@ -358,7 +394,7 @@ func render(entries: Array) -> void:
 				)
 				if kind == "error" and text.begins_with(NOTICES.POLICY_STOP):
 					kind = "policy"  # A Rule Zero stop keeps its own notice, as it was shown.
-				_transcript.call("add_notice", text, kind)
+				view.call("add_notice", text, kind)
 			"change":
 				var id := str(entry.get("transaction_id", ""))
 				if card != null and not id.is_empty():
@@ -369,6 +405,7 @@ func render(entries: Array) -> void:
 							Array(_notes(entry.get("guessed", []))),
 							Array(_notes(entry.get("not_as_asked", [])))
 						)
+					added.append(id)
 					_changes[id] = [
 						card,
 						str(entry.get("state", "review")),
@@ -378,14 +415,14 @@ func render(entries: Array) -> void:
 			"turn":
 				var outcome := str(entry.get("outcome", "done"))
 				var timing := {"outcome": outcome, "total_ms": int(entry.get("total_ms", 0))}
-				_transcript.call("show_timing", timing)
+				view.call("show_timing", timing)
 				if card != null:
 					card.call("finish", outcome)
 			"variants":
 				# A request tried several ways: what was kept, as the sidebar said it.
 				var said := VARIANTS.saved_line(entry)
 				if not said.is_empty():
-					_transcript.call("add_notice", said, "info")
+					view.call("add_notice", said, "info")
 			"task":
 				# A parallel task's outcome, as the sidebar said it when it finished. A way of a
 				# request tried several ways is told by its group's line instead.
@@ -394,19 +431,14 @@ func render(entries: Array) -> void:
 				var ending := str(TASKS.ENDINGS.get(str(entry.get("state", "")), ""))
 				if not ending.is_empty():
 					var line := "%s: %s" % [str(entry.get("title", "Task")), ending]
-					_transcript.call("add_notice", line, "info")
+					view.call("add_notice", line, "info")
 			"rewind":
-				_transcript.call(
+				view.call(
 					"add_notice", "Rewound to here. Accepted changes stay in the Timeline.", "info"
 				)
 			"session":
 				if str(entry.get("mode", "")) == "summary":
-					_transcript.call(
-						"add_notice", "Continued with a summary; the agent starts fresh."
-					)
-	for id: String in _changes:
-		_apply(id, str(_changes[id][1]), true)
-	_transcript.call("finish_response")
+					view.call("add_notice", "Continued with a summary; the agent starts fresh.")
 
 
 ## A change card's decision line for [param state] (from the chat, then from Joinery).
@@ -429,7 +461,7 @@ func _apply(id: String, state: String, revertible: bool) -> void:
 
 ## Ask Joinery what became of each change on screen.
 func _check_states() -> void:
-	if _changes.is_empty():
+	if _changes.is_empty() and int(_transcript.call("older_count")) == 0:
 		return
 	_start(
 		"states",
@@ -443,6 +475,7 @@ func _check_states() -> void:
 ## Show each change as `joinery transactions list` reports it ([param report] is its JSON). A
 ## change it no longer lists is no longer on record.
 func show_states(report: Dictionary) -> void:
+	_report = report
 	var known := {}
 	for entry: Variant in report.get("transactions", []):
 		if entry is Dictionary:

@@ -172,6 +172,39 @@ func _while_working(chat: Control, backend: Node, sessions: Node) -> void:
 	_check(sessions.call("working_id") == "", "Nothing works now")
 
 
+## A long chat opens with its newest requests; the older ones wait until scrolled to, and a
+## link to an old change, Up in the message box and a rewind still reach them.
+func _long_chat(chat: Control, sessions: Node) -> void:
+	sessions.call("new_chat")
+	var entries: Array = []
+	for index: int in 30:
+		entries.append({"type": "user", "text": "Request %d" % index})
+		entries.append({"type": "agent", "text": "Done %d." % index})
+		if index == 2:
+			entries.append({"type": "change", "transaction_id": PRUNED, "state": "rejected"})
+		entries.append({"type": "turn", "outcome": "done", "total_ms": 1000})
+	sessions.call("render", entries)
+	var view: Control = chat.get("_transcript")
+	var newest: int = sessions.get("NEWEST")
+	var cards: Array = view.get("_cards")
+	_check(cards.size() == newest, "Only the newest requests are built (%d)" % cards.size())
+	_check(int(view.call("older_count")) == 30 - newest, "The rest wait")
+	_check(str(cards[-1].get("request")) == "Request 29", "The newest is last")
+	var recall: Array = load("res://addons/joinery/composer_recall.gd").call("sent_in", view)
+	_check(recall.size() == 30 and recall[0] == "Request 0", "Up recalls every request")
+	var old: Control = view.call("card_for", PRUNED)
+	_check(old != null and str(old.get("request")) == "Request 2", "A link reaches an old change")
+	_check(str(old.get("_outcome_text").text) == "Discarded", "…with its decision line")
+	cards = view.get("_cards")
+	_check(cards.size() == 30 and int(view.call("older_count")) == 0, "Every request is built")
+	var ordered := true
+	for index: int in cards.size():
+		ordered = ordered and str(cards[index].get("request")) == "Request %d" % index
+	_check(ordered, "…in the order they were sent")
+	sessions.call("new_chat")
+	_check(int(chat.get("_transcript").call("older_count")) == 0, "A new chat keeps none")
+
+
 func _run() -> void:
 	load("res://addons/joinery/ui_motion.gd").call("set_enabled", false)
 	var store: GDScript = load("res://addons/joinery/chat_store.gd")
@@ -356,6 +389,7 @@ func _run() -> void:
 	_check(sessions.call("current_id") == "20261111-090000-cccccc", "The host names it")
 	_check(sessions.get("shown_id") == "20261111-090000-cccccc", "And it is the one on screen")
 	await _while_working(chat, backend, sessions)
+	_long_chat(chat, sessions)
 
 	backend.queue_free()
 	chat.queue_free()

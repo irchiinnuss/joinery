@@ -20,6 +20,10 @@ var following := true
 var _scroll: ScrollContainer
 var _jump: Button
 var _leaving := false
+## While older turns are put above the ones on screen: the distance from the end to keep, and
+## the last frame to keep it in (chat_history.gd _prepend).
+var _anchor := 0.0
+var _anchor_until := -1
 
 
 func _init() -> void:
@@ -73,6 +77,13 @@ func to_end() -> void:
 		_end.call_deferred()
 
 
+## Older content is going in above: keep the view [param distance] from the end, so what the
+## user reads stays put and no pill offers "New" for it.
+func keep_from_end(distance: float) -> void:
+	_anchor = distance
+	_anchor_until = Engine.get_process_frames() + 2
+
+
 ## True while the pill offers newer output below.
 func offering() -> bool:
 	return visible and not _leaving
@@ -96,6 +107,9 @@ func _on_grown() -> void:
 		to_end()
 		return
 	var bar := _scroll.get_v_scroll_bar()
+	if Engine.get_process_frames() <= _anchor_until:
+		_scroll.scroll_vertical = int(bar.max_value - _anchor)
+		return
 	if bar.max_value - bar.page - _scroll.scroll_vertical > UI_THEME.space(_scroll, 6):
 		_show_pill()
 

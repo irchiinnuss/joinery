@@ -44,6 +44,9 @@ static func sent_in(transcript: Object) -> Array[String]:
 	var cards: Variant = transcript.get("_cards") if is_instance_valid(transcript) else null
 	if not cards is Array:
 		return sent
+	if transcript.has_method("older_requests"):
+		# A reopened long chat's older requests are not built until scrolled to.
+		sent.append_array(transcript.call("older_requests"))
 	for card: Variant in cards:
 		if card is Object and is_instance_valid(card):
 			sent.append(str((card as Object).get("request")))

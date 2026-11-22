@@ -148,7 +148,10 @@ func turn_of(card: Control) -> int:
 		return -1
 	var text := str(card.get("request"))
 	var before := 0
-	for other: Variant in sessions.get("_transcript").get("_cards"):
+	var view: Object = sessions.get("_transcript")
+	if view.has_method("build_all_older"):
+		view.call("build_all_older")  # Counting starts at the chat's first request.
+	for other: Variant in view.get("_cards"):
 		if other == card:
 			break
 		if (
