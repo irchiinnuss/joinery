@@ -586,3 +586,30 @@ def test_an_open_stream_ends_at_once_when_the_device_may_no_longer_watch(
         assert took < 2.5
 
     run(tmp_path, test)
+
+
+def test_a_pending_action_is_not_called_a_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from joinery.remote import server
+
+    async def slow(_host: Any, _payload: dict[str, Any]) -> dict[str, Any]:
+        return {"ok": False, "pending": True, "text": "Not yet."}
+
+    monkeypatch.setattr(server, "request_host", slow)
+
+    async def test(f: Fixture) -> None:
+        token = f.device()
+        answer = await call(
+            f.app,
+            "POST",
+            f"/api/projects/{f.pid}/actions",
+            body={"kind": "prompt", "text": "hi"},
+            token=token,
+        )
+        assert answer.status == 202
+        assert answer.json() == {"ok": False, "pending": True, "text": "Not yet."}
+        [entry] = audit.entries(project=f.project)
+        assert entry["result"] == "pending"
+
+    run(tmp_path, test)

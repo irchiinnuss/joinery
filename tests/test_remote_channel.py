@@ -221,6 +221,55 @@ def test_relay_waits_for_the_sidebar(tmp_path: Path) -> None:
     run(body)
 
 
+def test_a_late_sidebar_answer_is_told_truthfully(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The sidebar answers after the relay's wait: the device was told "pending", not
+    that it failed, and then hears what the sidebar did."""
+    from bridge import remote_channel
+
+    monkeypatch.setattr(remote_channel, "RELAY_SECONDS", 0.3)
+
+    async def body() -> None:
+        channel, sent = make(tmp_path, editor=True)
+        await channel.start()
+        [host] = hosts.discover(tmp_path / "home")
+        events: list[dict[str, Any]] = []
+
+        async def follow() -> None:
+            async for item in hosts.subscribe(host, 0):
+                if "event" in item:
+                    events.append(item["event"])
+
+        following = asyncio.create_task(follow())
+
+        async def host_loop() -> None:
+            action, origin = await channel.inbox.get()
+            channel.relay(action, origin)
+
+        loop = asyncio.create_task(host_loop())
+        answer = await hosts.request(host, act({"kind": "prompt", "text": "Hi"}))
+        await loop
+        assert answer["ok"] is False and answer["pending"] is True
+        [relayed] = sent
+        channel.acked(relayed["ref"], True, "Sent.")
+        for _ in range(50):
+            if events:
+                break
+            await asyncio.sleep(0.05)
+        assert events == [
+            {
+                "kind": "notice",
+                "level": "info",
+                "text": "At the editor, for Ana's iPhone: Sent.",
+            }
+        ]
+        following.cancel()
+        await channel.close()
+
+    run(body)
+
+
 def test_inputs_merge_editor_first(tmp_path: Path) -> None:
     class Early:
         def __init__(self) -> None:

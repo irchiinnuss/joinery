@@ -811,6 +811,8 @@ class RemoteServer:
         result = (
             "ok"
             if answer.get("ok")
+            else "pending"
+            if answer.get("pending")
             else "refused"
             if answer.get("refused")
             else "error"
@@ -832,6 +834,10 @@ class RemoteServer:
         }
         if isinstance(answer.get("event"), dict):
             shown["event"] = answer["event"]
+        if answer.get("pending") and not shown["ok"]:
+            # Not failed: the editor (or the host) may still do it, and says so later.
+            shown["pending"] = True
+            return JSONResponse(shown, 202)
         return JSONResponse(shown, 200 if shown["ok"] else 409)
 
     # --- App ----------------------------------------------------------------------------

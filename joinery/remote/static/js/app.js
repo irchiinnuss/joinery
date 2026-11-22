@@ -557,7 +557,8 @@ async function sendDraft() {
   render();
   const done = await act(action);
   ui.sending = false;
-  if (done && done.ok) {
+  // Pending: it is the editor's to send now, and the outcome shows in the chat.
+  if (done && (done.ok || done.pending)) {
     ui.draft = "";
     if (ui.other) ui.other.items.push({ type: "you", text });
   }
@@ -580,7 +581,8 @@ async function act(action) {
     return null;
   }
   const text = answer.data.text || answer.data.error || "";
-  if (!answer.ok || !answer.data.ok) toast(text || "That didn't work.", "warn");
+  if (answer.data.pending) toast(text || "Waiting for your Mac.", "info");
+  else if (!answer.ok || !answer.data.ok) toast(text || "That didn't work.", "warn");
   else if (text && text !== "Sent." && text !== "Done.") toast(text, "info");
   return answer.data;
 }

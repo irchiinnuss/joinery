@@ -54,6 +54,9 @@ HIDDEN = frozenset({"editor_action", "editor_view", "remote_action", "quiet"})
 SIDES = ("before", "after")
 FILE_KEYS = ("before", "after", "before_model", "after_model")
 NO_EDITOR_ANSWER = "The editor didn't answer. Look at the machine."
+#: A relayed action the sidebar hasn't answered in time: it may still do it, so the
+#: device hears "pending" and, when the sidebar answers, the outcome as a notice.
+PENDING = "The editor hasn't answered yet. What it does will show here."
 #: What starts work, refused once an editor takes the project over.
 STARTS = frozenset({"prompt", "chat_task", "todo_go", "provider_switch"})
 TAKING_OVER = (
@@ -276,10 +279,22 @@ class RemoteChannel:
         )
 
     def acked(self, ref: str, ok: bool, text: str = "") -> None:
-        """The sidebar's answer to a relayed action."""
+        """The sidebar's answer to a relayed action. One the device already heard
+        "pending" about reaches it as a notice, so what it was told stays true."""
         origin = self._relays.pop(ref, None)
-        if origin is not None:
-            origin.done(ok, text)
+        if origin is None:
+            return
+        if origin.answer is not None and origin.answer.done():
+            said = text or ("Done." if ok else "The editor couldn't do it.")
+            self.publish(
+                {
+                    "kind": "notice",
+                    "level": "info" if ok else "warn",
+                    "text": f"At the editor, for {origin.device_name}: {said}",
+                }
+            )
+            return
+        origin.done(ok, text)
 
     # --- Connections --------------------------------------------------------------------
 
@@ -413,10 +428,15 @@ class RemoteChannel:
                 RELAY_SECONDS if relayed else DIRECT_SECONDS,
             )
         except TimeoutError:
+            if relayed and origin.ref in self._relays:
+                # Still the sidebar's to do: kept, so its late answer is told.
+                origin.done(False, PENDING, pending=True)
+                return {"ok": False, "pending": True, "text": PENDING}
             if origin.ref:
                 self._relays.pop(origin.ref, None)
             return {
                 "ok": False,
+                "pending": not relayed,
                 "text": NO_EDITOR_ANSWER if relayed else "Still working on it.",
             }
 
