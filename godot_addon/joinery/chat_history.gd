@@ -413,6 +413,11 @@ func show_timing(event: Dictionary) -> bool:
 	if _messages.is_empty() or _messages[-1]["who"] == "You":
 		return false
 	var record: Dictionary = _messages[-1]
+	if str(event.get("outcome", "")) == "cancelled":
+		# Stopped mid-reply: it ends on a whole word with "…", live and reopened alike.
+		record["text"] = WORDS.cut_off(str(record["text"]))
+		record["dirty"] = true
+		_dirty = true
 	var seconds := float(event.get("total_ms", 0)) / 1000.0
 	var summary: Button = record["summary"]
 	summary.text = WORDS.timing_line(str(event.get("outcome", "")), seconds)

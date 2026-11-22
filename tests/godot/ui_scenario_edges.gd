@@ -7,6 +7,10 @@ extends RefCounted
 
 const RUNNER := preload("ui_scenarios.gd")
 const KEEP_GOING := "Keep going until I stop you"
+## The words the scripted reply to [constant KEEP_GOING] streams, whole.
+const KEEP_GOING_WORDS := [
+	"Working", "through", "the", "harbour", "scene", "one", "prop", "at", "a"
+]
 const SAY_HELLO := "Say hello"
 const WIDEN := "Make the door a little wider"
 const POLICY := "Make the sign texture with a service"
@@ -518,6 +522,21 @@ func _crash_two_chats() -> void:
 func _revert_elsewhere() -> void:
 	if not await s.connect_host():
 		return
+	# A reply cut off by Stop ends on a whole word with "…", live and reopened.
+	s.send(KEEP_GOING)
+	await s.wait_until(
+		func() -> bool: return s.reply_shown().begins_with("Working through t"), 8000
+	)
+	await s.click(s.composer().get("stop"))
+	await s.wait_until(func() -> bool: return not bool(s.dock.get("_busy")), 8000)
+	await s.frames(3)
+	var cut := s.reply_shown()
+	var whole := cut.trim_suffix("…").split(" ")[-1] in KEEP_GOING_WORDS
+	s.check(
+		cut.ends_with("time.") or (cut.ends_with("…") and whole),
+		"A stopped reply ends on a whole word with … (or its full stop): " + cut
+	)
+	await s.wait_ms(200)
 	s.send(WIDEN)
 	await s.wait_until(func() -> bool: return bool(s.dock.get("_review_pending")), 8000)
 	await s.frames(3)
@@ -629,6 +648,21 @@ func _reopen() -> void:
 		s.send(text)
 		await s.wait_until(func() -> bool: return not bool(s.dock.get("_busy")), 8000)
 		await s.wait_ms(200)
+	# A reply cut off by Stop ends on a whole word with "…", live and reopened.
+	s.send(KEEP_GOING)
+	await s.wait_until(
+		func() -> bool: return s.reply_shown().begins_with("Working through t"), 8000
+	)
+	await s.click(s.composer().get("stop"))
+	await s.wait_until(func() -> bool: return not bool(s.dock.get("_busy")), 8000)
+	await s.frames(3)
+	var cut := s.reply_shown()
+	var whole := cut.trim_suffix("…").split(" ")[-1] in KEEP_GOING_WORDS
+	s.check(
+		cut.ends_with("time.") or (cut.ends_with("…") and whole),
+		"A stopped reply ends on a whole word with … (or its full stop): " + cut
+	)
+	await s.wait_ms(200)
 	s.send(WIDEN)
 	await s.wait_until(func() -> bool: return bool(s.dock.get("_review_pending")), 8000)
 	await s.frames(3)

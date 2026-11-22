@@ -2,7 +2,8 @@
 extends RefCounted
 ## How the sidebar words the end of a turn: the timing line on the request's card ("Completed in
 ## 0:12", chat_history.gd; "Done in 0:12, 1 step not run" when a call was refused,
-## sidebar_change_card.gd) and the kind of a decision message (journeyman_dock.gd).
+## sidebar_change_card.gd), a reply cut off by Stop, and the kind of a decision message
+## (journeyman_dock.gd).
 
 const UI_MOTION := preload("ui_motion.gd")
 
@@ -17,6 +18,23 @@ static func timing_line(outcome: String, seconds: float) -> String:
 	if outcome == "cancelled":
 		return "Stopped within 1 s" if quick else "Stopped after " + clock
 	return "Failed within 1 s" if quick else "Failed after " + clock
+
+
+## A reply [param text] that Stop cut off, ended cleanly: a sentence that ended stays as it is;
+## otherwise the last, perhaps half, word goes and "…" says it stopped there. Inside an open
+## code block nothing is cut.
+static func cut_off(text: String) -> String:
+	var kept := text.strip_edges(false, true)
+	if kept.is_empty() or kept.count("```") % 2 == 1:
+		return kept
+	if kept[-1] in [".", "!", "?", "…", ":", ")", '"', "'", "`", "*", "_"]:
+		return kept
+	var space := maxi(kept.rfind(" "), kept.rfind("\n"))
+	if space > 0:
+		kept = kept.left(space).strip_edges(false, true)
+	while not kept.is_empty() and kept[-1] in [",", ";", "-", "–", "—"]:
+		kept = kept.left(-1).strip_edges(false, true)
+	return kept + "…"
 
 
 ## [param seconds] as a clock ("0:12"), or "under 1 s" for less than a second, never "0:00".
