@@ -494,7 +494,8 @@ function detailsView(change) {
 }
 
 async function openChange(tx) {
-  const answer = await get(`/api/projects/${ui.project.id}/changes/${tx}`).catch(() => null);
+  // A POST: opening is what lets Accept through, so no GET may do it.
+  const answer = await post(`/api/projects/${ui.project.id}/changes/${tx}/open`, {}).catch(() => null);
   if (!answer || !answer.ok) {
     toast((answer && answer.data.error) || "That change isn't waiting any more.", "warn");
     return;

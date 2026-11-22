@@ -347,8 +347,29 @@ def test_accept_needs_the_change_opened(tmp_path: Path) -> None:
         assert (
             await call(f.app, "POST", path, body=discard, token=token)
         ).status == 200
-        opened = await call(
+        # A GET (a prefetch, a link) reads the change but doesn't count as opening it.
+        read = await call(
             f.app, "GET", f"/api/projects/{f.pid}/changes/tx1", token=token
+        )
+        assert read.json()["needs_opening"] is True
+        held = await call(f.app, "POST", path, body=accept, token=token)
+        assert held.status == 409
+        # Opening is a POST with the CSRF checks.
+        forged = await call(
+            f.app,
+            "POST",
+            f"/api/projects/{f.pid}/changes/tx1/open",
+            body={},
+            token=token,
+            headers={"origin": "https://evil"},
+        )
+        assert forged.status == 403
+        opened = await call(
+            f.app,
+            "POST",
+            f"/api/projects/{f.pid}/changes/tx1/open",
+            body={},
+            token=token,
         )
         assert opened.json()["needs_opening"] is True
         assert (await call(f.app, "POST", path, body=accept, token=token)).status == 200

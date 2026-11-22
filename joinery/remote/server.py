@@ -16,7 +16,8 @@ API (all JSON; mutating requests need ``X-Joinery-Remote: 1`` and a matching Ori
 * ``GET /api/projects/{id}/events?since=N&started=T`` (SSE): ``hello``, then ``event``
   with ``id`` = seq, ``notice`` for :mod:`joinery.remote.seams` notices, ``gone``.
 * ``POST /api/projects/{id}/actions`` ``{kind, ...}`` → ``{ok, text}``.
-* ``GET /api/projects/{id}/changes/{tx}``: the change's review (marks it opened).
+* ``GET /api/projects/{id}/changes/{tx}``: the change's review; ``POST`` to
+  ``/api/projects/{id}/changes/{tx}/open`` returns it too and marks it opened.
 * ``GET /api/projects/{id}/media/{tx}/{index}/{before|after}``.
 """
 
@@ -606,13 +607,16 @@ class RemoteServer:
         return JSONResponse({"turns": scrub(turns, str(host.project))})
 
     async def change(self, request: Request) -> Response:
+        """A change's review. Only the POST (``…/open``, with the CSRF checks) marks
+        it opened, so no GET, prefetch or link can clear the "open first" rule."""
         device = self.device(request)
         host = self.host_for(device, request.path_params["project"])
         tx = request.path_params["tx"]
         preview = self.previews.get(host.id, {}).get(tx)
         if preview is None:
             raise NotFound("That change isn't waiting.")
-        self.opened.setdefault(str(device["id"]), set()).add(tx)
+        if request.method == "POST":
+            self.opened.setdefault(str(device["id"]), set()).add(tx)
         return JSONResponse({**preview, "needs_opening": needs_opening(preview)})
 
     async def media(self, request: Request) -> Response:
@@ -857,6 +861,11 @@ class RemoteServer:
                 methods=["POST"],
             ),
             Route("/api/projects/{project}/changes/{tx}", guarded(self.change)),
+            Route(
+                "/api/projects/{project}/changes/{tx}/open",
+                guarded(self.change),
+                methods=["POST"],
+            ),
             Route(
                 "/api/projects/{project}/media/{tx}/{index}/{side}",
                 guarded(self.media),

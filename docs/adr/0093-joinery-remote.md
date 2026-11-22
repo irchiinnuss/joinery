@@ -171,8 +171,9 @@ All routes are on the server:
     replays from its start.
 - `POST /api/projects/{id}/actions` takes `{kind, …}` and returns `{ok, text, event?}`.
   Refusals return 403, Accept before opening 409, and a host that can't be reached 502.
-- `GET /api/projects/{id}/changes/{tx}` returns the review with `needs_opening` and marks it
-  opened.
+- `GET /api/projects/{id}/changes/{tx}` returns the review with `needs_opening`.
+  `POST /api/projects/{id}/changes/{tx}/open` returns it too and marks it opened; only that
+  POST (with the Origin and header checks) lets Accept through.
 - `GET /api/projects/{id}/media/{tx}/{index}/{before|after}` returns the picture or sound.
 
 ## The phone page
