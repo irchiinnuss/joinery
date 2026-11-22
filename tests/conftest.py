@@ -11,6 +11,8 @@ from joinery.agents import AGENTS, JOINERY_AGENT_ENV
 def _no_remote_server(monkeypatch: pytest.MonkeyPatch) -> None:
     """Chat hosts under test never start a Joinery Remote server of their own."""
     monkeypatch.setenv("JOINERY_REMOTE_NO_SERVER", "1")
+    # Nor ask the machine's own Tailscale: a test that wants it installs a fake.
+    monkeypatch.setenv("JOINERY_TAILSCALE", "none")
 
 
 @pytest.fixture(autouse=True)

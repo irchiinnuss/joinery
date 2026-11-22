@@ -5,7 +5,8 @@ extends VBoxContainer
 ## it says where a phone opens it, or what Tailscale still needs. Pair a device shows a QR code and
 ## its code for 5 minutes; a phone that uses it is paired only once the user answers the question
 ## here ("Pair “Ana's iPhone”?", Cancel focused). Under the address, one button does the next
-## step: Get Tailscale, Put it on my tailnet (`tailscale serve`, asked first), or Copy address.
+## step: Get Tailscale, Put it on my tailnet (`tailscale serve`, asked first), or Copy address,
+## decided by whether `tailscale serve` actually serves Remote (`served` in the status).
 ## Paired devices, what each may do, Revoke and the activity are remote_devices.gd's. Pairing,
 ## like every other setting, stays at the machine.
 
@@ -156,7 +157,14 @@ func apply_status(data: Dictionary) -> void:
 		tailnet_mode = "get"
 	elif not bool(ts.get("running", false)):
 		where.text = str(ts.get("message", "Tailscale isn't connected."))
-	elif _address.begins_with("http://127.0.0.1"):
+	elif bool(data.get("funnel", false)):
+		# Tailscale Funnel would make it public: Remote refuses it, so nothing to copy.
+		where.text = (
+			"Tailscale Funnel puts Remote on the public internet, and Remote refuses that. "
+			+ "Turn Funnel off for it in Tailscale."
+		)
+	elif not bool(data.get("served", false)):
+		# Only an address `tailscale serve` actually serves is shown or put in a QR code.
 		where.text = "One step left: put Remote on your tailnet, so your phone can open it."
 		tailnet_mode = "serve"
 	else:
@@ -173,8 +181,12 @@ func apply_status(data: Dictionary) -> void:
 	helper_row.set_disabled_reason("")
 	awake_row.set_on(bool(data.get("keep_awake", false)))
 	awake_row.set_disabled_reason("")
-	pair_button.disabled = not on
-	pair_button.tooltip_text = "" if on else "Turn Remote on first"
+	# A QR code carries only an address Tailscale serves: pairing waits for it.
+	var served := bool(data.get("served", false))
+	pair_button.disabled = not on or not served
+	pair_button.tooltip_text = (
+		"Turn Remote on first" if not on else ("" if served else "Put Remote on your tailnet first")
+	)
 	devices.set_devices(data.get("devices", []))
 
 

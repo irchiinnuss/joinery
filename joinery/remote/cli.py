@@ -69,6 +69,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     pair.add_argument("--json", action="store_true")
     pair.add_argument("--qr-png", type=Path, help="also write the QR code as a PNG")
     pair.add_argument(
+        "--local",
+        action="store_true",
+        help="pair a browser on this machine (127.0.0.1) when Remote isn't on the "
+        "tailnet yet",
+    )
+    pair.add_argument(
         "--no-wait",
         action="store_true",
         help="print the code and return; confirm with `joinery remote confirm`",
@@ -140,14 +146,41 @@ def _out(args: argparse.Namespace, data: Any, text: str) -> None:
 
 # --- Server -------------------------------------------------------------------------------
 
+NOT_SERVED = (
+    "Remote isn't on your tailnet yet, so a phone can't open it. Put it on first: "
+    "joinery remote tailscale --run"
+)
+FUNNEL = (
+    "Tailscale Funnel puts Remote on the public internet, and Remote refuses that. "
+    "Turn Funnel off for it in Tailscale, then serve it on your tailnet only."
+)
 
-def origin(store: Store, port: int, ts: dict[str, Any] | None = None) -> str:
-    """Where a phone opens Remote: the tailnet name, else (on this machine only) loopback."""
-    configured = str(store.config().get("origin", "") or "")
-    if configured:
-        return configured
-    found = str((ts or {}).get("origin", ""))
-    return found or f"http://127.0.0.1:{port}"
+
+def tailnet(store: Store, port: int) -> dict[str, Any]:
+    """Whether ``tailscale serve`` carries Remote now, kept in step with the stored origin.
+
+    The server answers for the stored origin's name only (ADR 0093), so the address
+    ``tailscale serve`` is found to serve is stored whenever it is seen, however it was
+    set up, and a stored one that Tailscale says it no longer serves is cleared.
+    Returns ``{served, origin, funnel}``; ``origin`` is "" unless served."""
+    found = tailscale.served(port)
+    stored = str(store.config().get("origin", "") or "")
+    if found["known"] and found["origin"] != stored:
+        store.set_config(origin=found["origin"])
+        audit.record("tailnet_origin", "ok", origin=found["origin"] or "-")
+        stored = found["origin"]
+    served = bool(found["known"] and found["origin"])
+    return {
+        "served": served,
+        "origin": stored if served else "",
+        "funnel": bool(found["funnel"]),
+    }
+
+
+def origin(port: int, served: dict[str, Any]) -> str:
+    """Where a phone opens Remote: the served tailnet address, else (on this machine
+    only) loopback."""
+    return str(served.get("origin", "")) or f"http://127.0.0.1:{port}"
 
 
 def _port(store: Store, wanted: int) -> int:
@@ -208,12 +241,19 @@ def status(store: Store) -> dict[str, Any]:
     info = server_info(store.home)
     port = int(info["port"] or config["port"])
     ts = tailscale.status()
+    on_tailnet = (
+        tailnet(store, port)
+        if ts["running"]
+        else {"served": False, "origin": "", "funnel": False}
+    )
     devices = store.devices()
     return {
         "enabled": bool(config.get("enabled")),
         "running": bool(info["running"]),
         "port": port,
-        "url": origin(store, port, ts),
+        "url": origin(port, on_tailnet),
+        "served": on_tailnet["served"],
+        "funnel": on_tailnet["funnel"],
         "tailscale": ts,
         "serve_command": " ".join(
             tailscale.serve_command(port, tailscale.executable() or "tailscale")
@@ -236,7 +276,9 @@ def _status(store: Store, args: argparse.Namespace) -> int:
     print(f"Address: {data['url']}")
     if not data["tailscale"]["running"]:
         print(data["tailscale"]["message"])
-    elif not store.config().get("origin"):
+    elif data["funnel"]:
+        print(FUNNEL)
+    elif not data["served"]:
         print(f"Put it on your tailnet: {data['serve_command']}")
     print(f"Paired devices: {len(data['devices'])}")
     return 0
@@ -263,9 +305,12 @@ def _pair(store: Store, args: argparse.Namespace) -> int:
     config = store.config()
     if not config.get("enabled"):
         raise ValueError("Turn Remote on first: joinery remote start")
-    port = int(server_info()["port"] or config["port"])
+    port = int(server_info(store.home)["port"] or config["port"])
+    on_tailnet = tailnet(store, port)
+    if not on_tailnet["served"] and not args.local:
+        raise ValueError(FUNNEL if on_tailnet["funnel"] else NOT_SERVED)
     made = store.new_code(_scopes(args.scopes))
-    url = qr.pair_url(origin(store, port, tailscale.status()), made["code"])
+    url = qr.pair_url(origin(port, on_tailnet), made["code"])
     if args.qr_png:
         qr.png(url, args.qr_png)
     shown = {**made, "url": url, "qr": str(args.qr_png or "")}
@@ -383,11 +428,19 @@ def _log(store: Store, args: argparse.Namespace) -> int:
 def _tailscale(store: Store, args: argparse.Namespace) -> int:
     program = tailscale.executable()
     ts = tailscale.status(program)
-    port = int(server_info()["port"] or store.config()["port"])
+    port = int(server_info(store.home)["port"] or store.config()["port"])
     command = tailscale.serve_command(port, program or "tailscale")
     data: dict[str, Any] = {**ts, "command": command}
     if not args.run:
-        text = " ".join(command) if ts["running"] else ts["message"]
+        if ts["running"]:
+            data |= tailnet(store, port)
+        text = (
+            ts["message"]
+            if not ts["running"]
+            else f"Remote is on your tailnet: {data['origin']}"
+            if data["served"]
+            else " ".join(command)
+        )
         _out(args, data, text)
         return 0 if ts["installed"] else 1
     if not ts["running"]:
@@ -400,9 +453,21 @@ def _tailscale(store: Store, args: argparse.Namespace) -> int:
     ok, said = tailscale.serve(port, program)
     if not ok:
         raise ValueError(said)
-    store.set_config(origin=ts["origin"])
-    audit.record("tailscale_serve", "ok", origin=ts["origin"])
-    _out(args, {**data, "ran": True}, f"Remote is on your tailnet: {ts['origin']}")
+    # What Tailscale now serves, not what it was asked to: that name is stored.
+    on_tailnet = tailnet(store, port)
+    if not on_tailnet["served"]:
+        raise ValueError(
+            FUNNEL
+            if on_tailnet["funnel"]
+            else "tailscale serve ran, but Tailscale doesn't list Remote as served. "
+            "Check `tailscale serve status`."
+        )
+    audit.record("tailscale_serve", "ok", origin=on_tailnet["origin"])
+    _out(
+        args,
+        {**data, "ran": True, "origin": on_tailnet["origin"]},
+        f"Remote is on your tailnet: {on_tailnet['origin']}",
+    )
     return 0
 
 

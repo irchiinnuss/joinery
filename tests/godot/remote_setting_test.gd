@@ -74,12 +74,35 @@ func _check_states() -> void:
 		}
 	)
 	_check(setting.tailnet_button.text == "Put it on my tailnet", "Not served yet: one button")
+	_check(setting.pair_button.disabled, "Not served yet: no QR code for an unserved address")
+	# Tailscale knows the machine's name, but nothing serves it yet: still the serve step.
+	setting.apply_status(
+		{
+			"enabled": true,
+			"url": "http://127.0.0.1:47615",
+			"served": false,
+			"tailscale": {"running": true, "installed": true, "origin": "https://mac.tail1.ts.net"}
+		}
+	)
+	_check(setting.tailnet_button.text == "Put it on my tailnet", "Unserved name: serve first")
+	setting.apply_status(
+		{
+			"enabled": true,
+			"url": "http://127.0.0.1:47615",
+			"served": false,
+			"funnel": true,
+			"tailscale": {"running": true, "installed": true}
+		}
+	)
+	_check(setting.where.text.contains("Funnel"), "Funnel is refused, and says so")
+	_check(not setting.tailnet_button.visible, "Funnel: nothing to copy")
 	(
 		setting
 		. apply_status(
 			{
 				"enabled": true,
 				"url": "https://mac.tail1.ts.net",
+				"served": true,
 				"tailscale": {"installed": true, "running": true},
 				"devices": [{"id": "d_1", "name": "Ana's iPhone", "scopes": ["watch"]}],
 				"helper": true,
@@ -134,8 +157,24 @@ func _check_real_cli() -> void:
 		[_python, "-c", "import sys; from joinery.cli import main; sys.exit(main())"]
 	)
 	_python_line("from joinery.remote.store import Store; Store().set_config(enabled=True)")
+	# A stand-in `tailscale` that serves Remote: never the machine's own Tailscale.
+	var program := _python_line(
+		(
+			"import sys; from pathlib import Path; from joinery.catalog import ROOT; "
+			+ "sys.path.insert(0, str(ROOT / 'tests')); "
+			+ "from remote_tailscale_fake import install, serve_config; "
+			+ "print(install(Path(r'%s'), serve=serve_config(47615)))" % _home.path_join("ts")
+		)
+	)
+	_check(not program.is_empty(), "The stand-in tailscale is made")
+	OS.set_environment("JOINERY_TAILSCALE", program)
 	host.add_child(setting)
 	_check(await _until(func() -> bool: return setting.switch_row.is_on()), "The CLI says it is on")
+	_check(
+		await _until(func() -> bool: return setting.tailnet_button.text == "Copy address"),
+		"Served by tailscale serve: the address to copy (%s)" % setting.where.text
+	)
+	_check(setting.where.text.ends_with("https://mac.tail1234.ts.net"), "The served address")
 	setting.pair_button.pressed.emit()
 	_check(await _until(func() -> bool: return setting.qr.texture != null), "The QR code shows")
 	var code := setting.code.text

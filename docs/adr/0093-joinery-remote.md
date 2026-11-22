@@ -65,9 +65,20 @@ cover two of the four agents.
      in a project.
    - Scopes are watch, chat and decide. A device expires after 30 days unused and 90 in all,
      and revoking takes effect on its next request. An open stream checks every 5 s.
-6. **Requests.** The server checks the `Host` header against loopback and the configured
-   tailnet origin, which stops DNS rebinding. Changing requests need a matching `Origin` and
-   an `X-Joinery-Remote: 1` header (CSRF).
+6. **Requests.** The server checks the `Host` header against loopback and the tailnet
+   origin, which stops DNS rebinding. Changing requests need a matching `Origin` and an
+   `X-Joinery-Remote: 1` header (CSRF).
+   - The tailnet origin is what `tailscale serve status --json` says serves
+     `127.0.0.1:<port>` at `/`: a `Web` key `"<name>:<https port>"` whose `/` handler proxies
+     to the port, and not in `AllowFunnel`. It is read by `joinery remote status` (which
+     Settings → Remote runs when shown), `pair` and `tailscale`, stored in `devices.json`
+     when seen and cleared when no longer served, however serve was set up.
+   - Settings offers "Put it on my tailnet" until then, and "Copy address" after. Pairing
+     waits for it too: a QR code carries only a served address (`joinery remote pair
+     --local` pairs a browser on the machine itself).
+   - `tailscale serve` passes the browser's `Host` on unchanged and leaves `Origin` alone
+     (see "How `tailscale serve` forwards a request" below), so the server accepts exactly
+     `Host: <name>` (or `<name>:<port>` off 443) and `Origin: https://<name>[:<port>]`.
    - Every answer carries a CSP of `default-src 'self'`, `frame-ancestors 'none'`,
      `no-referrer`, `nosniff` and `no-store`.
    - Accept is refused (409) for a change with something to read until the device has opened
@@ -242,11 +253,33 @@ default. While on, the server holds the machine awake:
   `cryptography`, already resolved through mcp and sigstore.
 - On iOS, notifications need the page added to the Home Screen (Safari's rule).
 
+## How `tailscale serve` forwards a request
+
+Checked against Tailscale's source (`ipn/ipnlocal/serve.go`, the `reverseProxy` that
+`tailscale serve` uses for a `Proxy` handler, and `ipn/serve.go` for the config) and the
+Serve guide (https://tailscale.com/kb/1312/serve, "Identity headers"):
+
+- `Host`: the proxy's `Rewrite` sets `r.Out.Host = r.In.Host` for a TCP backend, so the
+  server sees the name the phone opened (`mac.tail1234.ts.net`, with `:<port>` only off
+  443). Only a unix-socket backend gets the backend's own host.
+- `Origin`: not read or changed; the browser's `https://<name>` arrives as sent.
+- Added: `X-Forwarded-Host` (the incoming Host), `X-Forwarded-Proto: https`, and
+  `X-Forwarded-For` (the peer's tailnet address). Remote doesn't rely on them; uvicorn runs
+  with `proxy_headers=False`.
+- Identity: `Tailscale-User-Login`, `-Name`, `-Profile-Pic`, `Tailscale-Headers-Info` and
+  `Tailscale-Funnel-Request` are always deleted from the incoming request first, so a peer
+  can't spoof them through serve. The identity ones are then set for a signed-in user's
+  device, and not for a tagged device or a request from outside the tailnet.
+- Funnel: a request that came through Funnel instead gets `Tailscale-Funnel-Request: ?1`
+  and no identity headers.
+- The connection to the server comes from loopback either way, so a local process can send
+  any of these headers itself; they say who a tailnet request is from, never that it is
+  allowed.
+
 ## Not verified
 
-- Whether `tailscale serve` passes the original `Host` header. Both the tailnet name (once
-  configured) and loopback are accepted. `Tailscale-User-Login` is only logged as the peer,
-  and only when the request came from loopback.
+- A real `tailscale serve` against this server (the forwarding above is from the source and
+  docs; the tests use a stand-in `tailscale` program).
 - Claude Code Remote Control against a `-p` stream-json session. It is turned off either way.
 - A real push through Apple's, Google's or Mozilla's service, a real `tailscale serve`, and
   loading the login item: none was run on the development machine. The encryption, the
