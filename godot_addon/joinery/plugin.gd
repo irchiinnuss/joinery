@@ -415,7 +415,7 @@ func _on_chat_state(state: String, detail: String) -> void:
 ## A change accepted from the Review tab wrote files: rescan them, like any accepted change.
 func _on_review_row_applied(id: String, paths: PackedStringArray, changes: Array) -> void:
 	_accepted_changes[id] = changes
-	_on_files_changed(id, paths)
+	await _on_files_changed(id, paths)
 
 
 # --- Main screen and selection ---------------------------------------------------------------
@@ -682,12 +682,18 @@ func _on_agent_connected(agent: String, method_or_view: Variant, view: Variant =
 	_chat.start(agent, connection, _engine_dir(), ProjectSettings.globalize_path("res://"))
 
 
-## A change the user applied wrote files: show them, and when it edited project.godot offer to
+## A change the user applied wrote files: the open scenes and scripts among them reload, with no
+## "modified outside Godot" question, and when it edited project.godot the sidebar offers to
 ## reload, so the editor's settings in memory never overwrite the new ones.
 func _on_files_changed(_transaction_id: String, paths: PackedStringArray) -> void:
-	EditorInterface.get_resource_filesystem().scan()
 	if paths.has("project.godot"):
 		_offer_reload()
+	var landed: Array[String] = []
+	for path: String in paths:
+		landed.append("res://" + path.trim_prefix("res://"))
+	var kept := await FILE_SETTLE.land(landed)
+	if not kept.is_empty():
+		_status("Not reloaded: " + ", ".join(kept))
 
 
 func _offer_reload() -> void:
@@ -915,19 +921,12 @@ func _on_file_decision(event: Dictionary) -> void:
 	for change: Dictionary in event.get("changes", []):
 		landed.append("res://" + str(change["path"]))
 	await FILE_SETTLE.scan(landed)
-	var waiting: Array[String] = []
-	for change: Dictionary in event.get("changes", []):
-		var path := "res://" + str(change["path"])
-		if path.get_extension() != "tscn" or not FileAccess.file_exists(path):
-			continue
-		if not FILE_SETTLE.loadable(path):
-			waiting.append(path.get_file())
-		elif EditorInterface.get_open_scenes().has(path):
-			EditorInterface.reload_scene_from_path(path)
-		elif EditorInterface.get_edited_scene_root() == null or change.get("change") == "created":
-			EditorInterface.open_scene_from_path(path)
+	var waiting := FILE_SETTLE.open_accepted(event.get("changes", []))
 	if not waiting.is_empty():
 		_status("Not loaded, it uses files that are missing: " + ", ".join(waiting))
+	var kept := FILE_SETTLE.reload_scripts(landed)
+	if not kept.is_empty():
+		_status("Not reloaded: " + ", ".join(kept))
 	# Only a newly created model takes the user to the Assets view, where it is selected and
 	# flashed; an edit to an existing model stays in the view the user is working in.
 	for change: Dictionary in event.get("changes", []):
@@ -969,6 +968,7 @@ func _on_change_reverted(transaction_id: String) -> void:
 		scenes = FILE_SETTLE.reload_untouched(scenes, restored)
 	await FILE_SETTLE.scan(restored)
 	var kept := FILE_SETTLE.reload_open(scenes)
+	kept.append_array(FILE_SETTLE.reload_scripts(restored, not known))
 	if not kept.is_empty():
 		_status("Reverted. Not reloaded: " + ", ".join(kept))
 	_workspace.invalidate()

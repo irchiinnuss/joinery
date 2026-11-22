@@ -19,6 +19,8 @@ const TIMEOUT_MSEC := 60000
 ## Milliseconds after a scan ends that errors naming its files still count as import noise.
 const WINDOW_MSEC := 10000
 const IMPORTED := "res://.godot/imported/"
+## Godot's editor setting: reload open scripts changed on disk without asking.
+const AUTO_RELOAD := "text_editor/behavior/files/auto_reload_scripts_on_external_change"
 ## Files Godot loads as they are, never through an import.
 const NATIVE := [
 	"tscn", "scn", "tres", "res", "gd", "cs", "gdshader", "gdshaderinc", "gdextension", "json"
@@ -201,6 +203,71 @@ static func reload_open(scenes: Array[String]) -> Array[String]:
 			kept.append(path.get_file() + " (uses missing files)")
 		else:
 			EditorInterface.reload_scene_from_path(path)
+	return kept
+
+
+## Brings the editor up to date with the files a change wrote or a revert restored ([param
+## paths], res://): once they are scanned and imported, the open scenes among them are reloaded
+## and so are the open scripts and text files ([method reload_scripts]), so Godot never asks
+## about them ("Files have been modified outside Godot") when the editor gets the focus back.
+## Returns a note for each one left as it is ([method reload_open]); Godot still asks about
+## those, so unsaved edits are never dropped.
+static func land(paths: Array[String]) -> Array[String]:
+	await scan(paths)
+	var scenes: Array[String] = []
+	for path: String in EditorInterface.get_open_scenes():
+		if paths.has(path) and FileAccess.file_exists(path):
+			scenes.append(path)
+	var kept := reload_open(scenes)
+	kept.append_array(reload_scripts(paths))
+	return kept
+
+
+## After Accept, once the files are scanned: each changed scene ([param changes], the
+## decision's) that is open reloads, and a created one, or any when no scene is open, opens.
+## Returns the scenes left unloaded because they use missing files.
+static func open_accepted(changes: Array) -> Array[String]:
+	var waiting: Array[String] = []
+	for change: Dictionary in changes:
+		var path := "res://" + str(change["path"])
+		if path.get_extension() != "tscn" or not FileAccess.file_exists(path):
+			continue
+		if not loadable(path):
+			waiting.append(path.get_file())
+		elif EditorInterface.get_open_scenes().has(path):
+			EditorInterface.reload_scene_from_path(path)
+		elif EditorInterface.get_edited_scene_root() == null or change.get("change") == "created":
+			EditorInterface.open_scene_from_path(path)
+	return waiting
+
+
+## Reloads the scripts and text files open in the script editor that changed on disk, without
+## Godot's "modified outside Godot" question, even when the editor setting asks for it: these
+## are files Joinery itself wrote ([param paths], res://; [param every] for a change whose files
+## are not known, from an earlier session). When one of them has unsaved edits, nothing is
+## reloaded here: Godot asks about it, as it does for any outside edit, and the note returned
+## says so.
+static func reload_scripts(paths: Array[String], every := false) -> Array[String]:
+	if not Engine.is_editor_hint() or (paths.is_empty() and not every):
+		return []
+	var scripts := EditorInterface.get_script_editor()
+	if scripts == null:
+		return []
+	var unsaved := scripts.get_unsaved_files()
+	var kept: Array[String] = []
+	for path: String in unsaved:
+		if paths.has(path):
+			kept.append(path.get_file() + " (unsaved edits)")
+	if not kept.is_empty() or (every and not unsaved.is_empty()):
+		return kept
+	var settings := EditorInterface.get_editor_settings()
+	var ask := settings.has_setting(AUTO_RELOAD) and not bool(settings.get_setting(AUTO_RELOAD))
+	if ask:
+		settings.set_setting(AUTO_RELOAD, true)
+	# Reloads each open file whose time on disk changed; with nothing unsaved it never asks.
+	scripts.reload_open_files()
+	if ask:
+		settings.set_setting(AUTO_RELOAD, false)
 	return kept
 
 
