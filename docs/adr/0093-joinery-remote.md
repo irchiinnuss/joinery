@@ -270,7 +270,7 @@ sends off the machine, and only to phones that turned notifications on.
 `joinery remote keep-awake on|off` (Settings → Remote → "Keep this Mac awake") is off by
 default. While on, the server holds the machine awake:
 - macOS: `caffeinate -s`, which holds only on AC power;
-- Linux: `systemd-inhibit`;
+- Linux: `systemd-inhibit`, held only while on mains power (`/sys/class/power_supply`);
 - Windows: `SetThreadExecutionState`.
 
 ## Consequences

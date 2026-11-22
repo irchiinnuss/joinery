@@ -1,8 +1,9 @@
 """Keep the machine awake while Remote serves, if the user asks (ADR 0093). Off by default.
 
 macOS: ``caffeinate -s``, which holds only while on AC power, for as long as the server
-runs. Linux: ``systemd-inhibit`` blocking sleep. Windows: the server process asks
-``SetThreadExecutionState`` itself. A Mac laptop with its lid closed still sleeps unless
+runs. Linux: ``systemd-inhibit`` blocking sleep, held only while the machine is on mains
+power (``/sys/class/power_supply``), so a laptop on battery sleeps as usual. Windows:
+the server process asks ``SetThreadExecutionState`` itself. A Mac laptop with its lid closed still sleeps unless
 it is on power with an external display.
 """
 
@@ -12,7 +13,31 @@ import os
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any
+
+#: Where Linux lists power supplies (each with ``type`` and ``online``).
+POWER_SUPPLIES = Path("/sys/class/power_supply")
+
+
+def on_mains(root: Path | None = None) -> bool:
+    """Linux: whether the machine runs on mains power. One with no mains supply
+    listed (a desktop, a VM) counts as on mains; one whose mains supplies are all
+    offline runs on battery."""
+    root = POWER_SUPPLIES if root is None else root
+    mains: list[bool] = []
+    try:
+        supplies = list(root.iterdir())
+    except OSError:
+        return True
+    for supply in supplies:
+        try:
+            kind = (supply / "type").read_text().strip()
+            if kind == "Mains":
+                mains.append((supply / "online").read_text().strip() == "1")
+        except OSError:
+            continue
+    return not mains or any(mains)
 
 
 class KeepAwake:
@@ -68,6 +93,8 @@ class KeepAwake:
             self.windows = False
 
     def follow(self, wanted: bool) -> None:
+        if wanted and sys.platform.startswith("linux") and not on_mains():
+            wanted = False  # On battery: sleep as usual (caffeinate -s does the same).
         if wanted and not self.on:
             self.start()
         elif not wanted and self.on:
