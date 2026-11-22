@@ -98,6 +98,7 @@ signal handover(event: Dictionary)
 const COMMAND_SCRIPT := preload("command_job.gd")
 const ATTACHMENTS := preload("chat_attachments.gd")
 const EDITOR_VIEW := preload("editor_view.gd")
+const REFUSALS := preload("sidebar_refusals.gd")
 ## Each agent's name as the user knows it: the same as joinery/agents.py, which the chat host
 ## also sends in its connection event.
 ## Lines of a stopped chat host's error output kept for "Copy details".
@@ -625,7 +626,9 @@ func _handle(event: Dictionary) -> void:
 		"trail":
 			trail_event.emit(event)
 		"tool_activity":  # A call the gate refused joins the trail with its reason.
-			if not bool(event.get("allowed", true)):
+			if REFUSALS.needs_approval(event):  # Claude Code's own: a skipped step.
+				trail_event.emit(REFUSALS.skipped_step(event))
+			elif not bool(event.get("allowed", true)):
 				trail_event.emit(event)
 		"tests":
 			tests_event.emit(event)

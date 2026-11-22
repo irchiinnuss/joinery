@@ -99,8 +99,8 @@ func add_line(text: String, detail := "") -> void:
 	_sync_live()
 
 
-## The host's trail event: {id, text, state: running|done|failed, note: tool|thought, file,
-## added, removed, picture, path}. [code]path[/code] is the res:// file the line names: a
+## The host's trail event: {id, text, state: running|done|failed|skipped, note: tool|thought,
+## file, added, removed, picture, path}. [code]path[/code] is the res:// file the line names: a
 ## link when the file is in the project, or when the call edits it (a change not yet accepted
 ## has it only in review).
 func add_call(event: Dictionary) -> void:
@@ -132,10 +132,27 @@ func add_call(event: Dictionary) -> void:
 		if path.begins_with("res://") and (edits or FileAccess.file_exists(path)):
 			row.set_meta("path", path)
 			LINK.render(_words(row), path, file_opened.emit)
-	if state in ["done", "failed"]:
+	if state == "skipped":
+		_skip(row, text)
+	elif state in ["done", "failed"]:
 		_end(row, "success" if state == "done" else "error")
 		_show_picture(row, str(event.get("picture", "")))
 	_sync_live()
+
+
+## The agent's own permission layer skipped the call on [param row] (it needed approval nobody
+## can give here): its line says so in faint words behind the muted stop mark. Not the project's
+## gate, so the card counts no refusal.
+func _skip(row: Control, text: String) -> void:
+	_set_live(row, true)
+	row.set_meta("said", text)
+	if row.has_meta("path"):
+		row.remove_meta("path")
+	var words := _words(row)
+	words.text = text
+	words.tooltip_text = text
+	words.theme_type_variation = "JoineryFaint"
+	_end(row, "stopped")
 
 
 ## A test run's event ({id, label, now, total, results, done, summary}): its line says the test

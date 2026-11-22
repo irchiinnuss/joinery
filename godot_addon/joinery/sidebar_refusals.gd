@@ -9,6 +9,11 @@ const UI_MOTION := preload("ui_motion.gd")
 const UI := preload("ui_components.gd")
 const STYLE := preload("sidebar_style.gd")
 
+## Words of the agent's own "needs approval" refusal (bridge/trail.py NEEDS_APPROVAL).
+const NEEDS_APPROVAL := [
+	"no approval surface", "needs a permission prompt, which this session can't show"
+]
+
 ## The refused calls, by call id and reason.
 var _calls: Dictionary = {}
 var _lines: Array[String] = []
@@ -46,3 +51,28 @@ func add(event: Dictionary) -> void:
 ## How many calls were refused.
 func count() -> int:
 	return _calls.size()
+
+
+## True for Claude Code's own refusal of a call that needed approval nobody can give in a Joinery
+## session ({server: "claude", reason}), saved as a refusal by an older Joinery or guessed by the
+## host. It is no judgment of the project's gate, so it reads as a skipped step, not a refusal.
+## Joinery's own refusals ("Blocked by Joinery policy", Rule Zero stops) never match.
+static func needs_approval(event: Dictionary) -> bool:
+	var reason := str(event.get("reason", "")).to_lower()
+	if str(event.get("server", "")) != "claude" or reason.contains("blocked by joinery"):
+		return false
+	return NEEDS_APPROVAL.any(func(words: String) -> bool: return reason.contains(words))
+
+
+## The trail event for that skipped call ({tool, call_id}): its line ends quietly, saying so.
+static func skipped_step(event: Dictionary) -> Dictionary:
+	var tool := str(event.get("tool", ""))
+	var what := (
+		"command" if tool == "Bash" else ("search" if tool in ["Grep", "Glob", "LS"] else "step")
+	)
+	return {
+		"kind": "trail",
+		"id": str(event.get("call_id", "")),
+		"text": "Skipped a %s that needed approval" % what,
+		"state": "skipped",
+	}

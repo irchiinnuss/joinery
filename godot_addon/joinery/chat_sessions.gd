@@ -44,6 +44,7 @@ const ATTACHMENTS := preload("chat_attachments.gd")
 const REWIND := preload("chat_rewind.gd")
 const TURNS := preload("chat_turns.gd")
 const NOTICES := preload("chat_notices.gd")
+const REFUSALS := preload("sidebar_refusals.gd")
 const PERSONA := "Journeyman"
 const DISCARDED := "Discarded"
 const QUEUED := "Send or remove this chat's queued message first."
@@ -336,11 +337,16 @@ func render(entries: Array) -> void:
 				card = _transcript.call("add_request", text, _targets(entry))
 				card.call("set_sent")
 			"step":
-				if card != null:
+				if card != null and bool(entry.get("skipped", false)):
+					card.call("add_trail", {"kind": "trail", "text": text, "state": "skipped"})
+				elif card != null:
 					card.call("add_step", text)
 			"refusal":
 				# A call the gate refused: the card says why and never reads "Completed".
-				if card != null:
+				# Claude Code's own "needs approval" refusal is a skipped step instead.
+				if card != null and REFUSALS.needs_approval(entry):
+					card.call("add_trail", REFUSALS.skipped_step(entry))
+				elif card != null:
 					var refused := {"kind": "tool_activity", "allowed": false}
 					card.call("add_trail", refused.merged(entry))
 			"agent":
