@@ -734,10 +734,10 @@ class ProjectGateway:
                 connection = await self.connection(server)
             except ValueError:
                 return arguments
-        definition = connection.tools.get(tool)
-        if definition is None:
+        schema = getattr(connection.tools.get(tool), "input_schema", None)
+        if not isinstance(schema, dict):
             return arguments
-        return filled(server, definition.input_schema, arguments, self.project)
+        return filled(server, schema, arguments, self.project)
 
     def _named(self, arguments: dict[str, Any]) -> set[str]:
         """The project files a call's arguments name (a path into this gateway's
