@@ -185,12 +185,11 @@ def make_server(socket: Path, role: str | None = None) -> MCPServer[Any]:
         glob: Annotated[str, Field(max_length=200)] = "",
         regex: bool = True,
         ignore_case: bool = False,
-        limit: Annotated[int, Field(ge=1, le=project_search.MAX_LIMIT)] = (
-            project_search.DEFAULT_LIMIT
-        ),
+        # A larger limit is cut to the cap rather than refused.
+        limit: Annotated[int, Field(ge=1)] = project_search.DEFAULT_LIMIT,
         query: Annotated[str, Field(max_length=300)] = "",
     ) -> dict[str, Any]:
-        """Search the project's text files (scripts, scenes, resources, docs, settings) for a regex or plain text; returns matching lines grouped by file ('line: text' under each path, with how many more each file has), capped. path: a folder or file; glob: '*.gd'. Your change's own edits included. Use it before reading files."""
+        """Search the project's text files (scripts, scenes, resources, docs, settings) for a regex or plain text; returns matching lines grouped by file ('line: text' under each path, with how many more each file has), at most 60. path: a folder or file; glob: '*.gd'. Your change's own edits included. Use it before reading files."""
         pattern = pattern or query
         if not pattern:
             raise ValueError("Give a pattern to search for.")
