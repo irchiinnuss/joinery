@@ -321,6 +321,29 @@ def step_tier(kind: StepKind, text: str = "", checks: Sequence[str] = ()) -> Tie
     return "main"
 
 
+#: The reasoning effort a routine to-do step runs at, at most (ADR 0094).
+ROUTINE_EFFORT = "medium"
+#: Words that make a to-do step one that keeps the chosen effort: a model, art or
+#: sound made in its tool, and finding out why something is broken.
+_DEEP_STEP = re.compile(
+    r"\b(model\w*|mesh\w*|sculpt\w*|rig|rigg\w*|animat\w*|textur\w*|paint\w*|"
+    r"material\w*|sprite\w*|pixel art|art|artwork|sound\w*|sfx|audio|music|song|"
+    r"riff|melod\w*|instrument|synth\w*|patch|blender|krita|material maker|surge|"
+    r"supercollider|fluidsynth|midi|debug\w*|bug\w*|crash\w*|error\w*|diagnos\w*|"
+    r"investigat\w*|plan\w*)\b",
+    re.IGNORECASE,
+)
+
+
+def step_effort_cap(text: str) -> str:
+    """The highest reasoning effort a to-do step built a step per prompt runs at:
+    ROUTINE_EFFORT for routine work (code, wiring, settings, scenes), "" (the
+    request's own choice) for a step that makes a model, art or sound in its tool,
+    or debugs. The request's plan, a fix after Joinery's checks and a step asked
+    again are never capped; their prompts don't come through here."""
+    return "" if _DEEP_STEP.search(" ".join(text.split())) else ROUTINE_EFFORT
+
+
 def step_model(
     settings: RoutingSettings,
     agent: str,

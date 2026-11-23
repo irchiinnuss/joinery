@@ -32,7 +32,7 @@ from bridge.protocol import (
 from joinery import done_when, machine_health, metrics, request_digest
 from joinery.fallback import is_quota, provider_error, staged_lines
 from joinery.headless import LEFT_CHANGE, PROVIDER_ERROR
-from joinery.routing import routing_settings, step_model
+from joinery.routing import routing_settings, step_effort_cap, step_model
 from joinery.timing import TurnTiming
 from joinery.turn import MAX_CONTINUATIONS, Problem, SubmitResult, TurnController
 
@@ -319,11 +319,12 @@ async def _events(
             controller.quota = event.text
             continue
         if isinstance(event, Execution):
-            timing.model, timing.effort, timing.mode = (
-                event.model,
-                event.effort,
-                event.mode,
-            )
+            timing.model, timing.mode = event.model, event.mode
+            # Each effort the turn's prompts ran at, in order ("high, medium" when
+            # its routine steps ran at medium), so the timing line says so.
+            efforts = [e for e in timing.effort.split(", ") if e]
+            if event.effort and event.effort not in efforts:
+                timing.effort = ", ".join([*efforts, event.effort])
         if isinstance(event, (MessageDelta, Message)):
             timing.response()
         if isinstance(event, Trail) and event.picture:
@@ -653,6 +654,15 @@ def _stepwise(
     return prompt.model_copy(update={"text": prompt.text.replace(whole, first)})
 
 
+def _capped(prompt: Prompt, todo: done_when.Todo, index: int) -> Prompt:
+    """Step ``index``'s prompt with its effort limit (ADR 0094): a routine step runs
+    at medium at most, a step that makes a model, art or sound, or debugs, at the
+    request's own effort."""
+    cap = step_effort_cap(todo.step_line(index))
+    selection = prompt.selection.model_copy(update={"effort_cap": cap})
+    return prompt.model_copy(update={"selection": selection})
+
+
 def _submitted(controller: TurnController) -> bool:
     """The agent handed its change over (or Joinery has a result for it)."""
     return controller.last_result is not None or controller.attempts > 0
@@ -673,7 +683,7 @@ async def _step_by_step(
     reads. The last step submits. Returns the provider's ``Done.ok``."""
     trace = timing.trace
     prompts = fresh = 0
-    ok = await stream(controller, bridge, first, emit, timing)
+    ok = await stream(controller, bridge, _capped(first, todo, 0), emit, timing)
     prompts += 1
     for index in range(1, len(todo.steps)):
         if not ok or controller.quota or _submitted(controller):
@@ -687,7 +697,7 @@ async def _step_by_step(
             fresh += 1
             text = f"{start}\n\n{text}"
         step = first.model_copy(update={"text": text, "attachments": (), "primer": ""})
-        ok = await stream(controller, bridge, step, emit, timing)
+        ok = await stream(controller, bridge, _capped(step, todo, index), emit, timing)
         prompts += 1
     trace.attributes[metrics.STEPS_PROMPTS] = prompts
     trace.attributes[metrics.STEPS_FRESH] = fresh

@@ -22,6 +22,20 @@ class Selection(BaseModel):
     mode: Literal["auto", "fast", "thorough"] = "auto"
     model: str = ""
     effort: str = ""
+    #: The highest effort this prompt runs at ("" = no limit): Joinery sets it on a
+    #: routine to-do step (joinery.routing.step_effort_cap), never the sidebar.
+    effort_cap: str = ""
+
+
+#: Reasoning efforts from least to most, across providers.
+EFFORT_ORDER = ("none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra")
+
+
+def capped(effort: str, cap: str, efforts: tuple[str, ...]) -> str:
+    """``effort``, lowered to ``cap`` when it is above it and the model offers it."""
+    if cap not in efforts or not {effort, cap} <= set(EFFORT_ORDER):
+        return effort
+    return cap if EFFORT_ORDER.index(effort) > EFFORT_ORDER.index(cap) else effort
 
 
 def unavailable(selection: Selection, choices: list[ModelChoice]) -> bool:
@@ -92,8 +106,7 @@ def route(
     if selection.effort and selection.effort not in model.efforts:
         raise ValueError("This model does not support the selected reasoning effort.")
     if not selection.effort and model.efforts:
-        order = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]
-        supported = [e for e in order if e in model.efforts]
+        supported = [e for e in EFFORT_ORDER if e in model.efforts]
         if supported and mode == "fast":
             effort = supported[0]
         elif mode == "thorough":
@@ -104,4 +117,4 @@ def route(
                 if supported
                 else effort
             )
-    return model, effort, mode
+    return model, capped(effort, selection.effort_cap, model.efforts), mode

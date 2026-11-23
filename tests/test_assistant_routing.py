@@ -56,6 +56,20 @@ def test_explicit_model_and_effort_override_automatic_routing():
     assert choice.id == "available-sol" and effort == "high"
 
 
+def test_a_routine_step_runs_at_medium_at_most():
+    routine = Selection(model="available-sol", effort="high", effort_cap="medium")
+    assert route(routine, "wire the door", CHOICES)[1] == "medium"
+    # Thorough picks high for a request; its routine steps are still capped.
+    thorough = Selection(mode="thorough", effort_cap="medium")
+    assert route(thorough, "wire the door", CHOICES)[1] == "medium"
+    assert route(Selection(mode="thorough"), "wire the door", CHOICES)[1] == "high"
+    # A cap only lowers, and only to an effort the model offers.
+    low = Selection(model="available-sol", effort="low", effort_cap="medium")
+    assert route(low, "wire the door", CHOICES)[1] == "low"
+    quick = Selection(model="available-luna", effort="high", effort_cap="medium")
+    assert route(quick, "wire the door", CHOICES)[1] == "high"
+
+
 def test_unsupported_effort_never_silently_switches():
     with pytest.raises(ValueError):
         route(Selection(model="available-luna", effort="ultra"), "hello", CHOICES)

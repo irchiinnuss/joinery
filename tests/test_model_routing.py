@@ -27,6 +27,7 @@ from joinery.routing import (
     review_route,
     routing_settings,
     set_routing,
+    step_effort_cap,
     step_model,
     step_tier,
 )
@@ -535,6 +536,26 @@ def test_a_fix_is_light_only_when_every_failure_is_routine() -> None:
 )
 def test_a_to_do_step_is_light_when_it_is_a_small_edit(step: str, tier: str) -> None:
     assert step_tier("step", step) == tier
+
+
+@pytest.mark.parametrize(
+    ("step", "cap"),
+    [
+        ("Wire the exit switch to the end screen", "medium"),
+        ("Spawn Drudges at the enemy markers", "medium"),
+        ("Add a pause menu scene with Resume and Quit", "medium"),
+        ("Make a low-poly Rivet Driver model in Blender", ""),
+        ("Paint the crate texture in Krita", ""),
+        ("Set up the music for the Casting Hall", ""),
+        ("A hit sound patch in Surge XT", ""),
+        ("Debug why the door never opens", ""),
+        ("Find the error the boss fight throws", ""),
+    ],
+)
+def test_routine_steps_run_at_medium_and_creative_or_debugging_ones_as_chosen(
+    step: str, cap: str
+) -> None:
+    assert step_effort_cap(step) == cap
 
 
 def test_a_routine_to_do_step_task_runs_on_the_light_model(tmp_path: Path) -> None:
