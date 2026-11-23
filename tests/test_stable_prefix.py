@@ -328,7 +328,7 @@ def test_claude_flags_where_the_cli_has_them() -> None:
     assert cache_flags("reviewer", True, True) == [
         DYNAMIC_SECTIONS_FLAG,
         "--tools",
-        "Read,Grep,Glob,Bash",
+        "Read,Grep,Glob,Bash,ToolSearch",
     ]
     # An older CLI without them runs as before.
     assert cache_flags("reviewer", False, False) == []

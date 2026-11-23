@@ -325,8 +325,10 @@ def may_drive(role: str, project: Path | None) -> bool:
 # --- Provider built-in tools offered to read-only roles -------------------------------
 
 #: Claude Code's built-in tools a read-only role is offered (``claude --tools``): its
-#: reads, and Bash, which the hook holds to read-only commands.
-CLAUDE_READ_TOOLS: tuple[str, ...] = ("Read", "Grep", "Glob", "Bash")
+#: reads, Bash, which the hook holds to read-only commands, and ToolSearch: with it
+#: Claude Code defers MCP schemas until the agent loads one, rather than sending
+#: every registry schema on the first call.
+CLAUDE_READ_TOOLS: tuple[str, ...] = ("Read", "Grep", "Glob", "Bash", "ToolSearch")
 
 
 # --- Read-only shell ------------------------------------------------------------------
