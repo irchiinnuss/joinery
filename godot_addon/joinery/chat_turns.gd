@@ -128,11 +128,11 @@ func send_typed(view: Control, entry: String, targets: Array) -> bool:
 
 
 ## The oldest message waiting in [param view]'s queue starts beside the other chat once an
-## agent is free; otherwise it waits on.
+## agent is free; otherwise it waits on. An action (a to-do's Go) waits for Journeyman's own turn.
 func drain(view: Control) -> void:
 	var queue: Object = view.get("queue")
 	var head: Control = queue.call("first")
-	if head == null:
+	if head == null or bool(head.call("is_action")):
 		return
 	var targets: Variant = head.get("targets")
 	if send_now(view, str(head.get("text")), targets if targets is Array else [], true):

@@ -12,6 +12,8 @@ const STYLE := preload("sidebar_style.gd")
 
 var text := ""
 var targets: Array = []
+## For an action rather than a message (a to-do's Go): what runs when its turn comes.
+var run := Callable()
 var text_label: Label
 var edit: Button
 var remove: Button
@@ -70,6 +72,17 @@ func _init(message := "", context: Array = []) -> void:
 	)
 	remove.pressed.connect(func() -> void: remove_pressed.emit())
 	row.add_child(remove)
+
+
+## Make this card an action's: [param action] runs in its turn; there is nothing to edit.
+func set_action(action: Callable) -> void:
+	run = action
+	edit.hide()
+	accessibility_name = "Queued: " + text
+
+
+func is_action() -> bool:
+	return run.is_valid()
 
 
 ## Controls whose text follows the transcript text size, as [control, TYPE step] pairs.

@@ -79,14 +79,34 @@ func push(text: String, targets: Array) -> bool:
 	return true
 
 
-## The oldest message as {text, targets}, taken out of the queue ({} when empty).
+## Queue an action that is not a message (a to-do's Go): [param run] does it when its turn
+## comes. Its card reads [param text] and has no Edit. Returns the card, or null when full.
+func push_action(text: String, run: Callable) -> Control:
+	if not push(text, []):
+		return null
+	var card: Control = _cards[-1]
+	card.call("set_action", run)
+	return card
+
+
+## The oldest message as {text, targets} (with {run} for an action), taken out of the queue
+## ({} when empty).
 func take() -> Dictionary:
 	if _cards.is_empty():
 		return {}
 	var card: Control = _cards[0]
 	var entry := {"text": str(card.get("text")), "targets": card.get("targets")}
+	if bool(card.call("is_action")):
+		entry["run"] = card.get("run")
 	remove(card)
 	return entry
+
+
+## Take every action out (Stop): each says so as its own remove would.
+func drop_actions() -> void:
+	for card: Control in _cards.duplicate():
+		if bool(card.call("is_action")):
+			card.emit_signal("remove_pressed")
 
 
 ## Take [param card] away at once; it fades out after leaving the list.

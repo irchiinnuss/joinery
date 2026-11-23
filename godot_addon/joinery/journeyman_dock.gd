@@ -465,12 +465,15 @@ func _drain() -> void:
 		return
 	var next := queue.take()
 	var entry := str(next["text"])
-	if not entry.begins_with("/") or SLASH_SCRIPT.is_prompt(entry):
+	if next.has("run"):  # An action (a to-do's Go) sends its own request.
+		(next["run"] as Callable).call()
+	elif not entry.begins_with("/") or SLASH_SCRIPT.is_prompt(entry):
 		_start_request(entry, next["targets"])
 		return
-	run_command(entry)
-	# A command that finished at once lets the next one go.
-	if _slash.running().is_empty():
+	else:
+		run_command(entry)
+	# A command that finished at once (or an action that sent nothing) lets the next one go.
+	if _slash.running().is_empty() and not _occupied():
 		_drain.call_deferred()
 
 
@@ -644,6 +647,7 @@ func _waiting_placeholder() -> String:
 
 
 func _request_cancel() -> void:
+	_transcript.queue.drop_actions()  # Stop takes back a Go still waiting; messages stay.
 	_transcript.queue.pause()
 	if _chats.turns.stop_in(_transcript):  # This chat's own turn, beside the other: only it.
 		return
