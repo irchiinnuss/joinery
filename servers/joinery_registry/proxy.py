@@ -642,7 +642,36 @@ def make_server(socket: Path, role: str | None = None) -> MCPServer[Any]:
         for name in roles.REGISTRY_TOOLS:
             if name not in offered:
                 server.remove_tool(name)
+    preload(server)
     return server
+
+
+#: The registry tools nearly every turn calls. Claude Code defers MCP schemas behind
+#: ToolSearch, and in recorded sessions the first call of most turns was a
+#: ToolSearch loading these: they are sent up front instead. Other agents ignore
+#: the mark (it is MCP ``_meta``), and a role not offered one never lists it.
+PRELOADED_TOOLS = (
+    "discover_tools",
+    "read_tool",
+    "call_tool",
+    "search_project",
+    "details",
+    "todo_step",
+    "precheck",
+    "submit_for_review",
+    "report_review",
+    "report_diagnosis",
+)
+#: Claude Code's MCP tool ``_meta`` key: never defer this tool behind ToolSearch.
+ALWAYS_LOAD = "anthropic/alwaysLoad"
+
+
+def preload(server: MCPServer[Any]) -> None:
+    """Mark the PRELOADED_TOOLS the server lists as always loaded."""
+    for name in PRELOADED_TOOLS:
+        tool = server._tool_manager.get_tool(name)
+        if tool is not None:
+            tool.meta = {**(tool.meta or {}), ALWAYS_LOAD: True}
 
 
 def main() -> None:

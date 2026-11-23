@@ -287,6 +287,29 @@ def test_read_only_roles_carry_far_fewer_schema_bytes() -> None:
         assert size(role) < everything / 2, role
 
 
+def test_the_core_registry_tools_are_sent_up_front() -> None:
+    # Claude Code defers MCP schemas behind ToolSearch; the tools nearly every turn
+    # calls carry its always-load mark so no turn starts with a ToolSearch for them.
+    def marked(role: str | None) -> set[str]:
+        tools = asyncio.run(make_server(Path("g.sock"), role).list_tools())
+        return {t.name for t in tools if (t.meta or {}).get("anthropic/alwaysLoad")}
+
+    assert marked("lead") == {
+        "discover_tools",
+        "read_tool",
+        "call_tool",
+        "search_project",
+        "details",
+        "todo_step",
+        "precheck",
+        "submit_for_review",
+    }
+    reviewer = marked("reviewer")
+    assert "report_review" in reviewer and "todo_step" not in reviewer
+    # The big, rarer schemas stay deferred.
+    assert not {"blockout", "edit_scene", "propose_todo"} & marked(None)
+
+
 def test_role_specific_reports_reach_only_their_role() -> None:
     assert "report_review" in offered_tools("reviewer")
     assert "report_review" not in offered_tools("lead")
