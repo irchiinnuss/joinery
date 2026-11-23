@@ -529,7 +529,10 @@ def test_go_starts_the_work_and_a_fail_goes_back_to_the_agent_once(
                 "The bot reached Vault"
             )
             assert preview["done_when_summary"] == "2 of 2 done"
-            states = [e["state"] for e in todo_events(events)]
+            # Built a step per prompt, Joinery checks the steps off itself (step
+            # events carry no to-do state).
+            assert any("step" in e for e in todo_events(events))
+            states = [e["state"] for e in todo_events(events) if "state" in e]
             assert states == [
                 "waiting",
                 "checking",
@@ -538,7 +541,7 @@ def test_go_starts_the_work_and_a_fail_goes_back_to_the_agent_once(
                 "checking",
                 "checked",
             ]
-            checked = [e for e in todo_events(events) if e["state"] == "checked"]
+            checked = [e for e in todo_events(events) if e.get("state") == "checked"]
             assert checked[0]["summary"] == "1 of 2 done"
             assert "Checking the done-when items…" in [
                 e["text"] for e in events if e.get("kind") == "progress"
