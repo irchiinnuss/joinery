@@ -11,7 +11,7 @@ from mcp.server import MCPServer
 from mcp.types import CallToolResult, ImageContent, TextContent, ToolAnnotations
 from pydantic import BaseModel, Field
 
-from joinery import chat_attachments, project_search, roles
+from joinery import chat_attachments, project_search, read_access, roles
 from joinery.blockout.layout import Layout
 from joinery.editor_ops import SceneEdit
 from joinery.gateway_rpc import rpc
@@ -123,6 +123,24 @@ def _project_result(data: dict[str, Any]) -> CallToolResult:
             TextContent(type="text", text="Joinery: " + str(data["joinery"]))
         )
     return result
+
+
+def _target(
+    server: str, tool: str, name: str, arguments: dict[str, Any] | str | None
+) -> dict[str, Any]:
+    """call_tool and read_tool's request, in the spelling the policy hook judged
+    (``read_access.call_target``); a call naming no tool or server is refused with
+    what to pass."""
+    values: dict[str, Any] = {"server": server, "tool": tool, "arguments": arguments}
+    if name:
+        values["name"] = name
+    target = read_access.call_target(values)
+    missing = read_access.missing_target(target)
+    if missing:
+        raise ValueError(missing)
+    if target.get("arguments") is None:
+        target["arguments"] = {}
+    return {k: target[k] for k in ("server", "tool", "arguments")}
 
 
 def make_server(socket: Path, role: str | None = None) -> MCPServer[Any]:
@@ -621,29 +639,27 @@ def make_server(socket: Path, role: str | None = None) -> MCPServer[Any]:
     @server.tool(annotations=ToolAnnotations(read_only_hint=True))
     @tool_errors
     async def read_tool(
-        server: str, tool: str, arguments: dict[str, Any] | str
+        server: str = "",
+        tool: str = "",
+        arguments: dict[str, Any] | str | None = None,
+        name: str = "",
     ) -> CallToolResult:
         """Run a read-only project tool (discover_tools marks them read: validate_script, read_file, inspect_document, ...). Calls run side by side, so send independent reads together. Anything else is refused: use call_tool."""
         return _project_result(
-            await rpc(
-                socket,
-                "read",
-                {"server": server, "tool": tool, "arguments": arguments},
-            )
+            await rpc(socket, "read", _target(server, tool, name, arguments))
         )
 
     @server.tool()
     @tool_errors
     async def call_tool(
-        server: str, tool: str, arguments: dict[str, Any] | str
+        server: str = "",
+        tool: str = "",
+        arguments: dict[str, Any] | str | None = None,
+        name: str = "",
     ) -> CallToolResult:
         """Operate a connected project tool; changes are staged, policy-checked, and require user review. For a read-only tool, read_tool runs beside other calls."""
         return _project_result(
-            await rpc(
-                socket,
-                "call",
-                {"server": server, "tool": tool, "arguments": arguments},
-            )
+            await rpc(socket, "call", _target(server, tool, name, arguments))
         )
 
     if role is not None:

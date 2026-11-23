@@ -52,7 +52,7 @@ from joinery.policy import (
     url_violation,
     user_only_violation,
 )
-from joinery.read_access import not_a_read, read_only
+from joinery.read_access import call_target, not_a_read, read_only
 from joinery.roles import (
     CALL_TOOLS,
     READ_TOOL,
@@ -319,7 +319,26 @@ def read_tool_violation(event: Event) -> Verdict | None:
     return Verdict(Severity.DENY, not_a_read(server, tool))
 
 
+def canonical_call(raw: dict[str, Any]) -> dict[str, Any]:
+    """``raw`` with a registry call_tool or read_tool's arguments in the one
+    spelling the gateway also reads (``read_access.call_target``: ``name`` as
+    ``tool``, tool_schema as the registry's), so both judge the same call."""
+    event = normalise_event(raw)
+    if (
+        event.kind != "mcp"
+        or event.server.replace("_", "-") != "joinery-registry"
+        or event.tool not in CALL_TOOLS
+    ):
+        return raw
+    key = "tool_input" if isinstance(raw.get("tool_input"), dict) else "args"
+    values = raw.get(key)
+    if not isinstance(values, dict):
+        return raw
+    return {**raw, key: call_target(values)}
+
+
 def violation(raw: dict[str, Any]) -> Verdict | None:
+    raw = canonical_call(raw)
     event = normalise_event(raw)
     role = os.environ.get(ROLE_ENV, "")
     stop = rule_zero(event)

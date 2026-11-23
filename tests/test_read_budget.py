@@ -25,7 +25,7 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     (tmp_path / f"recipes/history/{RECIPE}.toml").write_text('tool = "blender"\n')
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
     monkeypatch.setenv("JOINERY_STAGE", "none")
-    monkeypatch.delenv("JOINERY_ROLE", raising=False)
+    monkeypatch.delenv("JOINERY_AGENT_ROLE", raising=False)
     return tmp_path
 
 

@@ -40,6 +40,7 @@ from joinery.read_access import not_a_read, read_only
 from joinery.roles import (
     NO_DRIVING,
     READ_ONLY_ROLES,
+    REGISTRY_TOOLS,
     may_drive,
     refusal,
     registry_allowed,
@@ -335,6 +336,21 @@ class GatewayRPC:
             return not self.inspection_only
         return may_drive(self.role, self.gateway.project)
 
+    async def schema(self, server: str, tool: str) -> dict[str, Any]:
+        """A project tool's full input schema, or what to ask for instead."""
+        connection = await self.gateway.connection(server)
+        definition = connection.tools.get(tool)
+        if definition is None:
+            if tool in REGISTRY_TOOLS:
+                raise ValueError(
+                    f"{tool} is a joinery-registry tool of its own: its arguments are "
+                    "in your tool list."
+                )
+            raise ValueError(
+                f"{server} has no tool {tool}; discover_tools lists its tools."
+            )
+        return definition.model_dump(by_alias=True, exclude_none=True)
+
     async def start(self) -> None:
         if self.transport == "tcp":
             self.server = await asyncio.start_server(
@@ -405,10 +421,18 @@ class GatewayRPC:
                     }
                 data = search_tools(data, str(params.get("query", "")))
             elif method == "schema":
-                connection = await self.gateway.connection(str(params["server"]))
-                data = connection.tools[str(params["tool"])].model_dump(
-                    by_alias=True, exclude_none=True
-                )
+                data = await self.schema(str(params["server"]), str(params["tool"]))
+            elif method in {"call", "read"} and params.get("tool") == "tool_schema":
+                # tool_schema called through call_tool or read_tool: answered here,
+                # for the server and tool its arguments name.
+                inner = call_arguments(params.get("arguments", {}))
+                server, tool = str(inner.get("server", "")), str(inner.get("tool", ""))
+                if not server or not tool:
+                    raise ValueError(
+                        "tool_schema takes the tool's server and name: "
+                        "tool_schema(server='godot', tool='write_file')."
+                    )
+                data = await self.schema(server, tool)
             elif method in {"call", "read"}:
                 if method == "read" and not read_only(
                     str(params["server"]), str(params["tool"])
