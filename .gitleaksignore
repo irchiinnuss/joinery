@@ -1,0 +1,3 @@
+# Published test vectors, not secrets: the RFC 8291 Appendix A auth secret in the
+# Web Push encryption test.
+6b26ea5bbe381d7031d8a0e673605d41bcf581aa:tests/test_remote_push.py:generic-api-key:31
