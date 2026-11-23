@@ -11,7 +11,7 @@ from mcp.server import MCPServer
 from mcp.types import CallToolResult, ImageContent, TextContent, ToolAnnotations
 from pydantic import BaseModel, Field
 
-from joinery import chat_attachments, roles
+from joinery import chat_attachments, project_search, roles
 from joinery.blockout.layout import Layout
 from joinery.editor_ops import SceneEdit
 from joinery.gateway_rpc import rpc
@@ -180,14 +180,20 @@ def make_server(socket: Path, role: str | None = None) -> MCPServer[Any]:
     @server.tool(annotations=ToolAnnotations(read_only_hint=True))
     @tool_errors
     async def search_project(
-        pattern: Annotated[str, Field(min_length=1, max_length=300)],
+        pattern: Annotated[str, Field(max_length=300)] = "",
         path: Annotated[str, Field(max_length=300)] = "",
-        glob: Annotated[str, Field(max_length=100)] = "",
+        glob: Annotated[str, Field(max_length=200)] = "",
         regex: bool = True,
         ignore_case: bool = False,
-        limit: Annotated[int, Field(ge=1, le=100)] = 50,
+        limit: Annotated[int, Field(ge=1, le=project_search.MAX_LIMIT)] = (
+            project_search.DEFAULT_LIMIT
+        ),
+        query: Annotated[str, Field(max_length=300)] = "",
     ) -> dict[str, Any]:
-        """Search the project's text files (scripts, scenes, resources, docs, settings) for a regex or plain text; returns 'path:line: text' per match, capped. path: a folder or file; glob: '*.gd'. Your change's own edits included. Use it before reading files."""
+        """Search the project's text files (scripts, scenes, resources, docs, settings) for a regex or plain text; returns matching lines grouped by file ('line: text' under each path, with how many more each file has), capped. path: a folder or file; glob: '*.gd'. Your change's own edits included. Use it before reading files."""
+        pattern = pattern or query
+        if not pattern:
+            raise ValueError("Give a pattern to search for.")
         return await rpc(
             socket,
             "search",

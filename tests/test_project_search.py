@@ -108,9 +108,10 @@ def test_search_finds_lines_in_the_games_own_sources(
     tmp_path: Path, engine: str
 ) -> None:
     found = project_search.search(project(tmp_path), r"health\b")
-    paths = {m.split(":")[0] for m in found["matches"]}
-    assert paths == {"game/player.gd"}, engine
-    assert found["matches"][0] == "game/player.gd:2: @export var max_health: int = 100"
+    assert set(found["matches"]) == {"game/player.gd"}, engine
+    assert (
+        found["matches"]["game/player.gd"][0] == "2: @export var max_health: int = 100"
+    )
 
 
 def test_search_narrows_by_folder_glob_and_case(tmp_path: Path, engine: str) -> None:
@@ -129,6 +130,33 @@ def test_search_caps_its_results(tmp_path: Path, engine: str) -> None:
     (root / "many.gd").write_text("var x\n" * 500)
     found = project_search.search(root, "var x", limit=10)
     assert found["count"] == 10 and found["truncated"] is True and "next" in found
+    lines = found["matches"]["many.gd"]
+    assert len(lines) == 11 and lines[-1] == "… 490 more in this file"
+    assert found["total"] == 500
+
+
+def test_search_groups_by_file_with_counts(tmp_path: Path, engine: str) -> None:
+    root = project(tmp_path)
+    for n in range(4):
+        (root / f"m{n}.gd").write_text("var hit\n" * (n + 1) + "x" * 400 + " hit\n")
+    found = project_search.search(root, "hit", glob="m*.gd", limit=3)
+    shown = found["matches"]
+    assert sum(1 for p in shown for line in shown[p] if not line.startswith("…")) == 3
+    assert found["files"] == 4 and found["total"] == 14
+    assert len(shown) + len(found.get("other_files", {})) == 4
+    long = project_search.search(root, "x+ hit", path="m0.gd")["matches"]["m0.gd"][0]
+    assert len(long) <= project_search.LINE_CHARS + 6 and long.endswith("…")
+
+
+def test_search_limit_defaults_and_caps(tmp_path: Path) -> None:
+    root = project(tmp_path)
+    (root / "many.gd").write_text("var x\n" * 500)
+    assert project_search.search(root, "var x")["count"] == project_search.DEFAULT_LIMIT
+    assert (
+        project_search.search(root, "var x", limit=1000)["count"]
+        == project_search.MAX_LIMIT
+    )
+    assert project_search.DEFAULT_LIMIT <= 30 and project_search.MAX_LIMIT <= 60
 
 
 def test_search_stays_in_the_project(tmp_path: Path) -> None:

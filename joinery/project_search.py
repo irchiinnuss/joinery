@@ -22,10 +22,14 @@ from typing import Any
 #: Folders never searched: caches, records and the engine-side add-ons.
 SKIP_DIRS = frozenset({".git", ".godot", ".joinery", "addons", "node_modules"})
 #: Matches returned at most, and the most a caller may ask for.
-DEFAULT_LIMIT = 50
-MAX_LIMIT = 100
+DEFAULT_LIMIT = 30
+MAX_LIMIT = 60
+#: Matching lines counted at most (past the ones returned), for per-file counts.
+COUNT_CAP = 2000
+#: Files beyond the returned matches named with their counts.
+OTHER_FILES = 10
 #: Characters of one matching line kept.
-LINE_CHARS = 160
+LINE_CHARS = 120
 #: Files bigger than this are not text sources; skipped.
 MAX_FILE_BYTES = 2_000_000
 #: Text suffixes a search reads (the rest are assets: models, images, sound).
@@ -59,22 +63,51 @@ TEXT = frozenset(
 
 @dataclass
 class Found:
-    """What a search returns: ``matches`` [{path, line, text}], capped; given to
-    the agent as ``path:line: text`` lines, the fewest tokens per match."""
+    """What a search returns: the first ``limit`` matches [{path, line, text}], and
+    how many lines matched in each file (counted on past the cap). Given to the
+    agent grouped by file, ``"line: text"`` under each path, so a path is said once."""
 
     matches: list[dict[str, Any]] = field(default_factory=list)
-    files: int = 0
+    #: Matching lines per file, all of them (up to ``COUNT_CAP`` in all).
+    counts: dict[str, int] = field(default_factory=dict)
     truncated: bool = False
 
+    def add(self, path: str, line: int, text: str, limit: int) -> bool:
+        """Count a match, and keep it while under ``limit``; False once counting
+        should stop."""
+        self.counts[path] = self.counts.get(path, 0) + 1
+        if len(self.matches) < limit:
+            self.matches.append({"path": path, "line": line, "text": text})
+        else:
+            self.truncated = True
+        return sum(self.counts.values()) < COUNT_CAP
+
     def as_dict(self) -> dict[str, Any]:
+        grouped: dict[str, list[str]] = {}
+        for m in self.matches:
+            grouped.setdefault(m["path"], []).append(f"{m['line']}: {m['text']}")
+        for path, lines in grouped.items():
+            more = self.counts.get(path, len(lines)) - len(lines)
+            if more > 0:
+                lines.append(f"… {more} more in this file")
+        total = sum(self.counts.values())
         data: dict[str, Any] = {
-            "matches": [f"{m['path']}:{m['line']}: {m['text']}" for m in self.matches],
+            "matches": grouped,
             "count": len(self.matches),
-            "files": self.files,
+            "files": len(self.counts),
         }
         if self.truncated:
             data["truncated"] = True
-            data["next"] = "More matches: narrow path or glob, or raise limit."
+            data["total"] = f"{total}+" if total >= COUNT_CAP else total
+            unshown = sorted(
+                (p for p in self.counts if p not in grouped),
+                key=lambda p: -self.counts[p],
+            )
+            if unshown:
+                data["other_files"] = {p: self.counts[p] for p in unshown[:OTHER_FILES]}
+                if len(unshown) > OTHER_FILES:
+                    data["other_files"]["…"] = len(unshown) - OTHER_FILES
+            data["next"] = "More: narrow path or glob, or a more exact pattern."
         return data
 
 
@@ -132,7 +165,6 @@ def _python(
     base: Path, root: Path, compiled: re.Pattern[str], glob: str, limit: int
 ) -> Found:
     found = Found()
-    seen: set[str] = set()
     for path in _walk(root, base, glob):
         try:
             if path.stat().st_size > MAX_FILE_BYTES:
@@ -142,14 +174,8 @@ def _python(
             continue
         rel = path.relative_to(base).as_posix()
         for number, text in enumerate(lines, 1):
-            if compiled.search(text):
-                if len(found.matches) >= limit:
-                    found.truncated = True
-                    found.files = len(seen)
-                    return found
-                seen.add(rel)
-                found.matches.append({"path": rel, "line": number, "text": _line(text)})
-    found.files = len(seen)
+            if compiled.search(text) and not found.add(rel, number, _line(text), limit):
+                return found
     return found
 
 
@@ -189,7 +215,6 @@ def _ripgrep(
     if done.returncode not in {0, 1}:
         return None
     found = Found()
-    seen: set[str] = set()
     for raw in done.stdout.splitlines():
         try:
             event = json.loads(raw)
@@ -203,18 +228,13 @@ def _ripgrep(
             rel = (path if path.is_absolute() else base / path).relative_to(base)
         except ValueError:
             continue
-        if len(found.matches) >= limit:
-            found.truncated = True
+        if not found.add(
+            rel.as_posix(),
+            int(data.get("line_number") or 0),
+            _line(str(data.get("lines", {}).get("text", ""))),
+            limit,
+        ):
             break
-        seen.add(rel.as_posix())
-        found.matches.append(
-            {
-                "path": rel.as_posix(),
-                "line": int(data.get("line_number") or 0),
-                "text": _line(str(data.get("lines", {}).get("text", ""))),
-            }
-        )
-    found.files = len(seen)
     return found
 
 
