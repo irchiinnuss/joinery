@@ -74,8 +74,15 @@ def project_map(prompt: Prompt) -> str:
             summary = cached_map(Path(prompt.project_dir))
         except OSError:
             summary = ""  # The map is context only; a turn never waits on it.
+    folder = (
+        f"Project folder: {prompt.project_dir} (name files by their absolute path "
+        "there or a path inside it; no cd).\n"
+        if prompt.project_dir
+        else ""
+    )
     return (
-        (summary + "\n\n" if summary else "")
+        folder
+        + (summary + "\n\n" if summary else "")
         + "Editor context:\n"
         + _json(editor_outline(stable))
         + "\n\n"

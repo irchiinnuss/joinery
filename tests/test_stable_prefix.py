@@ -154,6 +154,10 @@ def test_every_agent_is_told_to_work_in_few_calls() -> None:
         "one plain command per call",
         "never read or search Joinery's own install",
         "how_checked",
+        # Paths, not cd; long files and recipe op logs in parts.
+        "no cd",
+        "refused whole",
+        "find_recipe(recipe=<id>)",
     ):
         assert rule in ECONOMY_GUIDE
     # One spelling of each rule: the live-scene rule lives in OBJECT_GUIDE only.
@@ -166,7 +170,10 @@ def test_claude_turns_leave_the_instructions_to_the_system_prompt() -> None:
     # paid for them again, uncached, each time.
     text = user_input(turn("hello", 1)).decode()
     assert INSTRUCTIONS not in text
-    assert text.startswith("Editor context:")
+    # The stable part opens with the project folder, so no shell call needs a cd.
+    assert text.startswith("Project folder: /tmp/game (")
+    assert "no cd" in text.splitlines()[0]
+    assert text.splitlines()[1] == "Editor context:"
 
 
 def test_role_rules_come_before_the_project_map() -> None:
