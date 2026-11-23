@@ -27,7 +27,7 @@ import os
 import subprocess
 import sys
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -319,11 +319,10 @@ def read_tool_violation(event: Event) -> Verdict | None:
     return Verdict(Severity.DENY, not_a_read(server, tool))
 
 
-def canonical_call(raw: dict[str, Any]) -> dict[str, Any]:
+def canonical_call(raw: dict[str, Any], event: Event) -> dict[str, Any]:
     """``raw`` with a registry call_tool or read_tool's arguments in the one
     spelling the gateway also reads (``read_access.call_target``: ``name`` as
     ``tool``, tool_schema as the registry's), so both judge the same call."""
-    event = normalise_event(raw)
     if (
         event.kind != "mcp"
         or event.server.replace("_", "-") != "joinery-registry"
@@ -338,8 +337,12 @@ def canonical_call(raw: dict[str, Any]) -> dict[str, Any]:
 
 
 def violation(raw: dict[str, Any]) -> Verdict | None:
-    raw = canonical_call(raw)
     event = normalise_event(raw)
+    canonical = canonical_call(raw, event)
+    if canonical is not raw:
+        raw = canonical
+        values = raw.get("tool_input") or raw.get("args") or {}
+        event = replace(event, arguments=values)
     role = os.environ.get(ROLE_ENV, "")
     stop = rule_zero(event)
     if stop is not None and stop.severity == Severity.STOP:
