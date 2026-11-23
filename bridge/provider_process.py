@@ -81,8 +81,8 @@ def project_map(prompt: Prompt) -> str:
         else ""
     )
     return (
-        folder
-        + (summary + "\n\n" if summary else "")
+        (summary + "\n\n" if summary else "")
+        + folder
         + "Editor context:\n"
         + _json(editor_outline(stable))
         + "\n\n"

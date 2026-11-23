@@ -214,7 +214,9 @@ def turn(count: int, text: str = "Make the door red") -> Prompt:
 def test_the_prompt_holds_an_outline_of_the_scene() -> None:
     head = project_map(turn(200))
     assert '"property_' not in head and "rotation_degrees" not in head
-    stable = json.loads(head.removeprefix("Editor context:\n"))
+    folder, _, scene = head.partition("Editor context:\n")
+    assert folder.startswith("Project folder: ") or not folder
+    stable = json.loads(scene)
     assert len(stable["nodes"]) == compact.OUTLINE_NODES
     assert stable["nodes"][1] == "Node1 (MeshInstance3D) at 1.5,0,-0.25"
     assert "120 more nodes" in stable["nodes_note"]
