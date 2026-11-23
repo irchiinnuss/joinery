@@ -131,3 +131,26 @@ def test_details_refuses_too_many_paths_and_unknown_refs(tmp_path: Path) -> None
         compact.details_many(tmp_path, ref, ["a"] * (compact.MAX_PATHS + 1))
     with pytest.raises(ValueError):
         compact.details_many(tmp_path, "nope", ["problems/0"])
+
+
+def test_details_pages_a_read_file_answer_as_its_lines(tmp_path: Path) -> None:
+    script = "\n".join(f"var line_{n} := {n}  # {'x' * 30}" for n in range(900))
+    result = {"content": [{"type": "text", "text": script}], "isError": False}
+    ref = str(compact.compact(tmp_path, "read", result)["details"]["ref"])
+    page = compact.details(tmp_path, ref)
+    assert page["path"] == "content/0/text"
+    assert page["lines"].startswith("var line_0 := 0")
+    assert page["total_lines"] == 900 and page["next_offset"] is not None
+    assert len(page["lines"]) <= compact.PAGE_CHARS
+    rest = compact.details(tmp_path, ref, offset=page["next_offset"])
+    assert rest["lines"].startswith(f"var line_{page['next_offset']} ")
+
+
+def test_details_cuts_a_line_longer_than_a_page_and_says_so(tmp_path: Path) -> None:
+    result = {"a": "z" * 30_000, "b": [{"text": "one"}, {"text": "two"}]}
+    ref = str(compact.compact(tmp_path, "call", result)["details"]["ref"])
+    first = compact.details(tmp_path, ref)
+    assert first["lines"] == "{" and first["next_offset"] == 1
+    page = compact.details(tmp_path, ref, offset=1)
+    assert len(page["lines"]) < compact.PAGE_CHARS + 200
+    assert "more characters" in page["lines"] and "line_cut" in page

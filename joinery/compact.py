@@ -39,9 +39,10 @@ PASSES: tuple[tuple[int, int, int], ...] = (
 )
 #: Characters kept of one long line.
 LINE_KEEP = 400
-#: One page of ``details``: lines, and characters at most.
-PAGE_LINES = 150
-PAGE_CHARS = 12000
+#: One page of ``details``: lines, and characters at most. A page stays in the
+#: agent's context for the rest of its session, so it is about 1.5k tokens.
+PAGE_LINES = 120
+PAGE_CHARS = 6000
 #: Content parts kept whole: their bytes are not text for the agent to read.
 _MEDIA = frozenset({"image", "audio", "resource", "resource_link"})
 _REF = re.compile(r"^r[0-9a-f]{12}$")
@@ -299,6 +300,10 @@ def details(
             "That result is no longer kept; run the tool again for a fresh one."
         )
     kept = json.loads(file.read_text(encoding="utf-8"))
+    if not path:
+        # A tool's answer that is one text (a file read_file returned) pages as
+        # that text, line by line, not as one escaped JSON line.
+        path = _only_text(kept["result"])
     value = _part(kept["result"], path)
     if isinstance(value, str) and value.lstrip()[:1] in {"[", "{"}:
         try:
@@ -314,13 +319,17 @@ def details(
     start = max(offset, 0)
     page: list[str] = []
     used = 0
+    cut = 0
     for line in lines[start : start + max(1, min(limit, 1000))]:
         if page and used + len(line) > PAGE_CHARS:
             break
-        page.append(line[:PAGE_CHARS])
+        if len(line) > PAGE_CHARS:
+            cut = len(line) - PAGE_CHARS
+            line = line[:PAGE_CHARS] + f"… ({cut} more characters)"
+        page.append(line)
         used += len(line) + 1
     end = start + len(page)
-    return {
+    data: dict[str, Any] = {
         "ref": ref,
         "tool": kept.get("tool", ""),
         "path": path,
@@ -329,6 +338,26 @@ def details(
         "total_lines": len(lines),
         "next_offset": end if end < len(lines) else None,
     }
+    if cut and isinstance(value, dict | list):
+        data["line_cut"] = (
+            "A line was too long for one page: ask for a part of it by path "
+            "(keys and indexes joined by '/')."
+        )
+    return data
+
+
+def _only_text(result: Any) -> str:
+    """The path of a tool result's only text part ('content/0/text'), else ""."""
+    if not isinstance(result, dict) or not isinstance(result.get("content"), list):
+        return ""
+    texts = [
+        index
+        for index, part in enumerate(result["content"])
+        if isinstance(part, dict) and isinstance(part.get("text"), str)
+    ]
+    if len(texts) != 1:
+        return ""
+    return f"content/{texts[0]}/text"
 
 
 #: Parts one ``details`` call may read together.
