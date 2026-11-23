@@ -52,6 +52,7 @@ const ALL := [
 	"switch-mid-stream",
 	"rewind",
 	"todo",
+	"todo-go-busy",
 	"playtest",
 	"console-errors",
 	"auto-fix",

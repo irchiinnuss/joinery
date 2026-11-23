@@ -22,6 +22,8 @@ const FAIL_SLOWLY := "Fail after a while"
 const TOGETHER := "Finish at the same time"
 const LIVE := "Stream while the editor changes"
 const OTHER := "Name three harbour sounds"
+## A to-do whose turn goes on talking after the card comes in.
+const PLAN_SLOWLY := "Plan the tool shed and talk me through it"
 const BUSY_STATUS := "Model the sign in Blender, then paint it in Krita"
 ## Emoji, CJK, right-to-left and combining text in one reply.
 const SCRIPTS := "Lanterns 🏮🚢 — 港の灯台 · 등대 · منارة الميناء · מגדלור · é ok"
@@ -82,6 +84,26 @@ const SCRIPT := {
 		{"execution": {}},
 		{"stream": "The harbour lamps flicker as the tide comes in. ", "chunk": 6, "every_ms": 25},
 		{"stream": "Each lamp gets its own light.", "chunk": 6, "every_ms": 25, "new": false},
+	],
+	PLAN_SLOWLY:
+	[
+		{"execution": {}},
+		{
+			"emit":
+			{
+				"kind": "todo",
+				"todo_id": "todo-slow",
+				"state": "waiting",
+				"steps": ["Shed walls and roof", "Shelf for the tools"],
+				"done_when":
+				[{"id": "d1", "text": "The player can reach the shed", "kind": "reach"}]
+			}
+		},
+		{
+			"stream": "Here's the plan: walls and a roof first, then a shelf. Edit it, then Go.",
+			"chunk": 3,
+			"every_ms": 60
+		},
 	],
 }
 
@@ -868,6 +890,61 @@ func _remote_prompt() -> void:
 	var stopped := await s.wait_until(func() -> bool: return not bool(s.dock.get("_busy")), 8000)
 	s.check(stopped, "The phone's Stop stopped the request")
 	s.check(s.visible_text().contains("Stopped from Ana's iPhone"), "The stop names the phone")
+
+
+## Go pressed while the turn that proposed the to-do still runs is not refused: it waits in
+## the queue ("Starting…" on the card) and Stop takes it back. Go from the phone does the same,
+## a message typed after it waits behind it, and the to-do starts once Journeyman is free.
+func _todo_go_busy() -> void:
+	if not await s.connect_host():
+		return
+	var tasks: Node = s.dock.get("_tasks")
+	var queue: Object = s.transcript().get("queue")
+	s.send(PLAN_SLOWLY)
+	var shown := await s.wait_until(
+		func() -> bool:
+			var found: Variant = tasks.get("todo_card")
+			return found is Control and (found as Control).is_visible_in_tree(),
+		8000
+	)
+	s.check(shown, "The to-do card shows")
+	if not shown:
+		return
+	var todo: Control = tasks.get("todo_card")
+	var go: Button = todo.get("go")
+	s.check(bool(s.dock.call("_occupied")), "The turn that proposed it still runs")
+	go.pressed.emit()
+	await s.frames(2)
+	s.check(not s.visible_text().contains("Wait for Journeyman"), "Go is not refused")
+	s.check(int(queue.call("size_queued")) == 1, "Go waits in the queue")
+	s.check(go.disabled, "Go rests while it waits")
+	s.check(s.visible_text(todo).contains("Starting"), "The to-do says it is starting")
+	await s.shot("go-waiting")
+	(s.composer().get("stop") as Button).pressed.emit()
+	await s.frames(2)
+	s.check(int(queue.call("size_queued")) == 0, "Stop takes the waiting Go back")
+	s.check(not go.disabled, "Go is offered again")
+	await s.wait_until(func() -> bool: return not bool(s.dock.get("_busy")), 8000)
+	# Again, from the phone, with a message typed after it: the to-do goes first, by itself.
+	s.send(PLAN_SLOWLY)
+	await s.wait_until(func() -> bool: return s.card_state() == "working", 8000)
+	await s.wait_until(func() -> bool: return _turn_text().contains("plan"), 8000)
+	s.check(bool(s.dock.call("_occupied")), "The turn is still running")
+	_from_phone({"kind": "todo_go", "todo_id": "todo-slow"}, "g1")
+	s.send(SAY_HELLO)
+	await s.frames(2)
+	s.check(int(queue.call("size_queued")) == 2, "Go and the message wait in order")
+	var started := await s.wait_until(
+		func() -> bool: return s.card() != null and str(s.card().get("request")) == "Go", 15000
+	)
+	s.check(started, "The to-do starts once Journeyman is free")
+	s.check(not s.visible_text().contains("Wait for Journeyman"), "Nothing asked to wait")
+	var left: PackedStringArray = queue.call("texts")
+	s.check(left == PackedStringArray([SAY_HELLO]), "The message waits behind it (%s)" % left)
+	# Stop on the to-do's work keeps a typed message (only a waiting Go is taken back).
+	(s.composer().get("stop") as Button).pressed.emit()
+	await s.wait_until(func() -> bool: return not bool(s.dock.get("_busy")), 8000)
+	s.check(int(queue.call("size_queued")) == 1, "Stop keeps the typed message queued")
 
 
 ## A phone's request still holds the project the editor opens: the sidebar says so and offers
