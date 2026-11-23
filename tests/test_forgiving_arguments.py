@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -21,7 +22,7 @@ from mcp.types import TextContent
 from joinery import done_when
 from joinery.gateway import ProjectGateway
 from joinery.gateway_rpc import GatewayRPC, call_arguments, rpc
-from joinery.mcp_runtime import input_problem
+from joinery.mcp_runtime import filled, input_problem, needs_filling
 from joinery.peer_review import NOTE_CHARS, notes_from
 from joinery.tools.blender_model_ops import pivot_name, set_pivot_code
 from joinery.turn import STEP_NOTE_CHARS, TurnController
@@ -365,3 +366,69 @@ def test_a_missing_argument_is_named() -> None:
     assert input_problem(error, schema) == "missing tool (it takes source, tool)."
     error = next(Draft202012Validator(schema).iter_errors({"tool": 1, "source": "a"}))
     assert input_problem(error, schema) == "type constraint failed."
+
+
+# --- a Godot read without projectPath, a file argument under another name ----------
+GODOT_READ = {
+    "type": "object",
+    "properties": {"projectPath": {"type": "string"}, "filePath": {"type": "string"}},
+    "required": ["projectPath", "filePath"],
+}
+
+
+def test_godot_projectpath_and_a_misnamed_file_are_filled(tmp_path: Path) -> None:
+    given = {"path": "res://game/a.gd"}
+    assert needs_filling("godot", given)
+    assert filled("godot", GODOT_READ, given, tmp_path) == {
+        "projectPath": str(tmp_path),
+        "filePath": "res://game/a.gd",
+    }
+    script = {
+        "type": "object",
+        "properties": {"projectPath": {}, "scriptPath": {}},
+        "required": ["projectPath", "scriptPath"],
+    }
+    assert filled(
+        "godot", script, {"projectPath": "/p", "filePath": "a.gd"}, tmp_path
+    ) == {"projectPath": "/p", "scriptPath": "a.gd"}
+    inspect = {
+        "type": "object",
+        "properties": {"source": {}, "tool": {}},
+        "required": ["source"],
+    }
+    assert filled("joinery-blender-ops", inspect, {"path": "a.blend"}, tmp_path) == {
+        "source": "a.blend"
+    }
+    # Another server's projectPath is never filled; a real argument is never moved.
+    assert "projectPath" not in filled("blender", GODOT_READ, {}, tmp_path)
+    both = {
+        "type": "object",
+        "properties": {"path": {}, "source": {}},
+        "required": ["source"],
+    }
+    assert filled("x", both, {"path": "a"}, tmp_path) == {"path": "a"}
+    assert not needs_filling("godot", {"projectPath": "/p", "content": "x"})
+
+
+def test_the_gateway_fills_godot_arguments_from_the_schema(tmp_path: Path) -> None:
+    gateway = ProjectGateway.__new__(ProjectGateway)
+    gateway.project = tmp_path
+    gateway.connections = {}
+    tool = SimpleNamespace(input_schema=GODOT_READ)
+
+    async def connection(_server: str) -> Any:
+        return SimpleNamespace(tools={"read_file": tool})
+
+    gateway.connection = connection  # type: ignore[method-assign]
+    done = run(lambda: gateway._filled("godot", "read_file", {"path": "game/a.gd"}))
+    assert done == {"projectPath": str(tmp_path), "filePath": "game/a.gd"}
+    same = run(lambda: gateway._filled("godot", "nope", {"path": "game/a.gd"}))
+    assert same == {"path": "game/a.gd"}
+
+
+def test_a_missing_argument_names_the_unknown_one_given() -> None:
+    error = next(Draft202012Validator(GODOT_READ).iter_errors({"path": "a.gd"}))
+    assert input_problem(error, GODOT_READ) == (
+        "missing projectPath, filePath (it takes filePath, projectPath); "
+        "path is not one of them."
+    )

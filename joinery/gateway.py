@@ -62,8 +62,10 @@ from joinery.mcp_runtime import (
     CHANGE_FOLDERS,
     MCPConnection,
     PolicyStop,
+    filled,
     godot_relative,
     names_changes,
+    needs_filling,
     rewrite_root,
     validate_arguments,
 )
@@ -718,6 +720,25 @@ class ProjectGateway:
                     attrs[metrics.ERROR_TYPE] = "tool_error"
                 return result
 
+    async def _filled(
+        self, server: str, tool: str, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        """The arguments with the Godot MCP's projectPath and a misnamed file
+        argument filled in from the tool's schema (``mcp_runtime.filled``). Only
+        Godot is started for it; another server's schema is used once it is known."""
+        connection = self.connections.get(server)
+        if connection is None or not connection.tools:
+            if server != "godot":
+                return arguments
+            try:
+                connection = await self.connection(server)
+            except ValueError:
+                return arguments
+        definition = connection.tools.get(tool)
+        if definition is None:
+            return arguments
+        return filled(server, definition.input_schema, arguments, self.project)
+
     def _named(self, arguments: dict[str, Any]) -> set[str]:
         """The project files a call's arguments name (a path into this gateway's
         stage counts as the file it stages)."""
@@ -876,6 +897,8 @@ class ProjectGateway:
             ),
             None,
         )
+        if needs_filling(server, arguments):
+            arguments = await self._filled(server, tool, arguments)
         if custom is None:
             validate_arguments(arguments)
         readonly = read_only(server, tool)

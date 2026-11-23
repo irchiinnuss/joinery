@@ -53,9 +53,11 @@ def input_problem(error: Any, schema: dict[str, Any]) -> str:
     if error.validator == "required" and isinstance(error.instance, dict):
         wanted = [n for n in error.validator_value if n not in error.instance]
         known = sorted((schema.get("properties") or {}).keys())
+        unknown = sorted(n for n in error.instance if known and n not in known)
         return (
             f"missing {', '.join(wanted)}"
             + (f" (it takes {', '.join(known)})" if known else "")
+            + (f"; {', '.join(unknown)} is not one of them" if unknown else "")
             + "."
         )
     return f"{error.validator} constraint failed."
@@ -140,6 +142,42 @@ def godot_relative(arguments: dict[str, Any]) -> dict[str, Any]:
         else value
         for key, value in arguments.items()
     }
+
+
+#: Names agents give a file argument a tool calls something else.
+PATH_ALIASES = ("path", "file", "file_path", "filePath", "scriptPath", "scenePath")
+#: Required arguments an alias may stand for: the Godot MCP's file arguments and a
+#: document operator's ``source``.
+_ALIASED = GODOT_FILE_ARGUMENTS | {"source"}
+
+
+def needs_filling(server: str, arguments: dict[str, Any]) -> bool:
+    """The call may lack an argument :func:`filled` can supply."""
+    return (server == "godot" and not arguments.get("projectPath")) or any(
+        key in arguments for key in PATH_ALIASES
+    )
+
+
+def filled(
+    server: str, schema: dict[str, Any], arguments: dict[str, Any], project: Path
+) -> dict[str, Any]:
+    """``arguments`` with what an agent commonly leaves out filled in from ``schema``:
+    the Godot MCP's ``projectPath`` (this project), and one missing file argument
+    given under another name (``path`` for ``filePath``, ``filePath`` for
+    ``scriptPath``, ``path`` for ``source``)."""
+    properties = schema.get("properties") or {}
+    out = dict(arguments)
+    if server == "godot" and "projectPath" in properties and not out.get("projectPath"):
+        out["projectPath"] = str(project)
+    missing = [
+        name
+        for name in schema.get("required") or []
+        if name not in out and name in _ALIASED
+    ]
+    given = [key for key in PATH_ALIASES if key in out and key not in properties]
+    if len(missing) == 1 and len(given) == 1:
+        out[missing[0]] = out.pop(given[0])
+    return out
 
 
 def worker_root(spec: ServerSpec) -> Path | None:
