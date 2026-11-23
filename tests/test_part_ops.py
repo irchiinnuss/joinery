@@ -318,6 +318,34 @@ def test_paint_map_needs_a_krita_source_and_records_both_steps(
     assert linked.kwargs["inputs"] == ("art/sources/maps/hammer/steel_rough.png",)
 
 
+def test_paint_map_paints_more_than_one_runs_worth_in_batches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    kra = "art/sources/maps/hammer/steel_rough.kra"
+    stage, edit = _project(tmp_path, monkeypatch, kra)
+    _pick(stage, part_kind="texture", material="Steel", image="steel_rough")
+    (stage / kra).parent.mkdir(parents=True)
+    (stage / kra).write_bytes(b"kra")
+    ops = [
+        {"op": "fill", "color": [1, 1, 1], "rect": [n, 0, 1, 1]}
+        for n in range(krita_ops.MAX_OPS * 2 + 5)
+    ]
+    arguments = {"material": "Steel", "image": "steel_rough", "ops": ops}
+    result = _call(stage, "paint_map", arguments)
+    assert not result.is_error, result.content[0].text
+    *painted, linked = edit.await_args_list
+    assert [call.args[1] for call in painted] == ["krita"] * 3
+    assert (
+        painted[0].args[3].count("_joinery_fill(document, 'Fill") == krita_ops.MAX_OPS
+    )
+    assert painted[2].args[3].count("_joinery_fill(document, 'Fill") == 5
+    assert "(batch 3 of 3)" in painted[2].args[5]
+    assert linked.args[1] == "blender"
+    too_many = ops * 2
+    refused = _call(stage, "paint_map", {**arguments, "ops": too_many})
+    assert refused.is_error and "1 to 128 operations" in refused.content[0].text
+
+
 def test_a_failed_link_puts_the_krita_step_back(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

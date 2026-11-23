@@ -62,6 +62,8 @@ FILTERS: dict[str, tuple[str, frozenset[str]]] = {
 #: The bottom layer: the map's pixels as the model had them.
 BASE_LAYER = "Map"
 MAX_OPS = 32
+#: paint_map takes this many batches of MAX_OPS in one call, painted one after another.
+MAX_BATCHES = 4
 MAX_POINTS = 512
 
 
@@ -118,11 +120,11 @@ def _filter(name: Any, params: Any) -> tuple[str, dict[str, float]]:
 
 
 def check_ops(
-    ops: Any, allowed: dict[str, frozenset[str]] = PAINT_OPS
+    ops: Any, allowed: dict[str, frozenset[str]] = PAINT_OPS, most: int = MAX_OPS
 ) -> list[dict[str, Any]]:
     """Refuse unknown operations and bad values before Krita starts."""
-    if not isinstance(ops, list) or not 1 <= len(ops) <= MAX_OPS:
-        raise ValueError(f"ops is a list of 1 to {MAX_OPS} operations.")
+    if not isinstance(ops, list) or not 1 <= len(ops) <= most:
+        raise ValueError(f"ops is a list of 1 to {most} operations.")
     checked: list[dict[str, Any]] = []
     for number, given in enumerate(ops, 1):
         if not isinstance(given, dict) or given.get("op") not in allowed:
@@ -486,6 +488,11 @@ def _blend(value: Any, number: int) -> str:
             f"Operation {number}: the blend mode is one of: {', '.join(BLEND_MODES)}."
         )
     return BLEND_MODES[str(value)]
+
+
+def batches(checked: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    """Checked operations in runs of at most MAX_OPS, painted one Krita run each."""
+    return [checked[i : i + MAX_OPS] for i in range(0, len(checked), MAX_OPS)]
 
 
 def check_layer_ops(ops: Any) -> list[dict[str, Any]]:

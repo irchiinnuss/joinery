@@ -305,7 +305,8 @@ async def paint_map(
     ops: list[dict[str, Any]],
     exports: list[str] | None,
 ) -> dict[str, Any]:
-    checked = krita_ops.check_ops(ops)
+    # More than one Krita run's worth is painted in batches, one after another.
+    checked = krita_ops.check_ops(ops, most=krita_ops.MAX_OPS * krita_ops.MAX_BATCHES)
     part = await _map_part(project, source, material, image)
     document = part.editable
     if not document:
@@ -320,17 +321,24 @@ async def paint_map(
     if not (project / document).is_file():
         raise ValueError(f"{document} is missing. Call make_map_editable again.")
     picture = str(PurePosixPath(document).with_suffix(".png"))
-    summary = ", ".join(row["op"] + " " + row["name"] for row in checked)
+    runs = krita_ops.batches(checked)
 
     async def paint() -> dict[str, Any]:
-        return await edit_document(
-            project,
-            "krita",
-            document,
-            krita_ops.paint_code(checked),
-            [picture],
-            f"Paint {image} of {material}: {summary}",
-        )
+        made: dict[str, Any] = {}
+        for number, run in enumerate(runs, 1):
+            summary = ", ".join(row["op"] + " " + row["name"] for row in run)
+            part_of = f" (batch {number} of {len(runs)})" if len(runs) > 1 else ""
+            made = await edit_document(
+                project,
+                "krita",
+                document,
+                krita_ops.paint_code(run),
+                [picture],
+                f"Paint {image} of {material}{part_of}: {summary}",
+            )
+        if len(runs) > 1:
+            made = {**made, "batches": len(runs), "operations": len(checked)}
+        return made
 
     async def link(made: dict[str, Any]) -> dict[str, Any]:
         linked = await _link(
@@ -615,7 +623,7 @@ def register(server: MCPServer[Any], project: Path) -> None:
         ops: list[dict[str, Any]],
         exports: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Paint a map made editable in Krita with typed layers, then load it into the model. Each op adds a layer on top: {"op": "fill", "color": [r, g, b(, a)], "rect"?: [x, y, w, h], "opacity"?, "name"?}; {"op": "stroke", "points": [[x, y], ...], "color", "width" (pixels), "opacity"?, "name"?}; {"op": "adjust", "filter": "invert" | "levels" {in_low, in_high, gamma, out_low, out_high} | "hue_saturation" {hue -0.5..0.5, saturation -1..1, value -1..1} | "blur" {radius} | "desaturate", "params"?, "opacity"?}. Colours are sRGB 0-1; pixels count from the top left of the map."""
+        """Paint a map made editable in Krita with typed layers, then load it into the model. Each op adds a layer on top: {"op": "fill", "color": [r, g, b(, a)], "rect"?: [x, y, w, h], "opacity"?, "name"?}; {"op": "stroke", "points": [[x, y], ...], "color", "width" (pixels), "opacity"?, "name"?}; {"op": "adjust", "filter": "invert" | "levels" {in_low, in_high, gamma, out_low, out_high} | "hue_saturation" {hue -0.5..0.5, saturation -1..1, value -1..1} | "blur" {radius} | "desaturate", "params"?, "opacity"?}. Colours are sRGB 0-1; pixels count from the top left of the map. Up to 128 ops; past 32 they are painted 32 at a time."""
         return await paint_map(project, source, material, image, ops, exports)
 
     @server.tool(name="replace_map")
