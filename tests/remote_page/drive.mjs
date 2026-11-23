@@ -12,6 +12,9 @@ const profile = mkdtempSync(join(tmpdir(), "joinery-chrome-"));
 const browser = spawn(chrome, [
   "--headless=new", `--remote-debugging-port=${debugPort}`, `--user-data-dir=${profile}`,
   "--no-first-run", "--no-default-browser-check", "--disable-gpu", "--hide-scrollbars",
+  // Ubuntu 24.04 forbids the user namespaces Chrome's sandbox needs; this throwaway
+  // browser only ever opens the local test server.
+  ...(process.platform === "linux" ? ["--no-sandbox"] : []),
   "about:blank",
 ], { stdio: "ignore" });
 
@@ -20,7 +23,7 @@ const seen = { checks: [] };
 const check = (ok, what) => seen.checks.push({ ok: !!ok, what });
 
 async function target() {
-  for (let i = 0; i < 100; i += 1) {
+  for (let i = 0; i < 300; i += 1) {
     try {
       const list = await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json();
       const page = list.find((entry) => entry.type === "page");
