@@ -138,9 +138,16 @@ func _todo(dock: Control, todo_id: String, go: bool, name: String) -> Array:
 	if not go:
 		(card as Control).call("_on_cancel")
 		return [true, "Cancelled.", "To-do cancelled from %s" % name]
-	if bool(dock.call("_occupied")):
-		return [false, "Wait for Journeyman to finish, then press Go.", ""]
+	# The same Go as at the editor: while Journeyman still finishes it waits its turn.
+	var todo: Node = (tasks as Node).get_node_or_null("TodoList")
+	if todo != null:
+		todo.set("last_go", "")
 	(card as Control).call("_on_go")
+	var did := str(todo.get("last_go")) if todo != null else "sent"
+	if did == "queued":
+		return [true, "Queued: Go starts when Journeyman finishes.", "Go from %s" % name]
+	if did != "sent":
+		return [false, did if not did.is_empty() else "Go couldn't start.", ""]
 	return [true, "Going.", "Go from %s" % name]
 
 

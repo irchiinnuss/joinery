@@ -43,8 +43,12 @@ verify, and a moment to check it before the user sees the change.
    `sidebar_todo.gd`) shows the list at once; while it waits every line edits in place and
    has its own remove. Go sends the list as left (`todo_go`, a request of its own whose bubble
    reads "Go", so it has its change card and review like any other); the agent hears it as
-   `done_when.go_prompt` and the controller holds the to-do for the turn. Cancel drops it, and
-   so does any other message (`dropped`). The user can't change an item's kind or target,
+   `done_when.go_prompt` and the controller holds the to-do for the turn. Go pressed while the
+   turn that proposed the to-do is still ending (or anything else keeps Journeyman busy) is not
+   refused: it waits in the sidebar's queue like a typed message, in the order pressed, the card
+   reads "Starting…", and it goes the moment the sidebar is free; Cancel or Stop takes it back.
+   Go from a phone does the same. Only no connection (or a full queue) refuses it. Cancel drops
+   the to-do, and so does any other message sent ahead of Go (`dropped`). The user can't change an item's kind or target,
    only its words or whether it stays.
 3. **Checked after Joinery's checks, before the reviewer.** Once a submitted change passes
    the submit checks, `TurnController._check_done` runs `done_when.verify`: every playing item

@@ -646,6 +646,21 @@ static func _row_text(row: Node) -> String:
 
 
 func _on_go() -> void:
+	var left := line()
+	if left.is_empty():
+		return
+	set_starting()
+	go_pressed.emit(left)
+
+
+## Go pressed: Go rests and the line says the work is starting; Cancel stays.
+func set_starting() -> void:
+	go.disabled = true
+	_step.text = "Starting…"
+
+
+## The to-do as the user left it, {todo_id, steps, done_when} ({} with no step left).
+func line() -> Dictionary:
 	var done: Array = []
 	for row: Dictionary in done_rows():
 		if not str(row["text"]).is_empty():
@@ -664,10 +679,8 @@ func _on_go() -> void:
 			{"title": words, "detail": str(row.call("detail_text")), "from": int(row.get("origin"))}
 		)
 	if kept.is_empty():
-		return
-	go.disabled = true
-	_step.text = "Starting…"
-	go_pressed.emit({"todo_id": todo_id, "steps": kept, "done_when": done})
+		return {}
+	return {"todo_id": todo_id, "steps": kept, "done_when": done}
 
 
 func _on_cancel() -> void:

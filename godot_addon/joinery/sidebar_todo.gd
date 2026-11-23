@@ -25,7 +25,14 @@ var dock: Control
 var tasks: Object
 ## The to-do card, while there is one.
 var card: Control
+## What the last Go did: "sent", "queued", or why it couldn't start.
+var last_go := ""
 var _bridge: Object
+## A Go pressed while Journeyman finished: its card in the sidebar's queue
+## (sidebar_queued_card.gd), that queue, and the to-do it starts.
+var _queued: Control
+var _queue: Object
+var _queued_id := ""
 
 
 static func attach(sidebar: Control, list: Object) -> Node:
@@ -58,11 +65,17 @@ func on_event(event: Dictionary) -> void:
 		if state in ["dropped", "cancelled"] or not event.has("steps"):
 			return
 		_replace(id)
+	var queued := _queued_go()
 	card.call("apply", event)
+	if queued and str(card.get("state")) == "waiting":
+		card.call("set_starting")  # Its Go still waits its turn.
+	elif queued:  # Dropped for a message sent ahead of it, or cancelled: Go has nothing to do.
+		_unqueue()
 	tasks.call("sync_visible")
 
 
 func _replace(id: String) -> void:
+	_unqueue()
 	if is_instance_valid(card):
 		card.queue_free()
 	card = CARD.new(id)
@@ -78,24 +91,96 @@ func _replace(id: String) -> void:
 	UI_MOTION.enter(card)
 
 
-## Go: the to-do as the user left it, sent as a request of its own.
+## Go: the to-do as the user left it, sent as a request of its own. Pressed while Journeyman
+## still finishes (the turn that proposed it is ending, a change waits for review, a message
+## is ahead of it), Go waits in the queue like a typed message and goes, in its order, the
+## moment the sidebar is free. The card says "Starting…" meanwhile; Cancel or Stop takes it
+## back. [member last_go] says what happened.
 func _go(line: Dictionary) -> void:
+	last_go = ""
 	if _bridge == null or not _bridge.has_method("hold_line") or not bool(_bridge.call("is_ready")):
-		dock.call("show_status", "Journeyman isn't connected.", 3.0)
-		card.call("apply", {"state": "waiting"})
+		_refuse("Journeyman isn't connected.")
 		return
-	if bool(dock.call("_occupied")):
-		dock.call("show_status", "Wait for Journeyman to finish, then press Go.", 3.0)
-		card.call("apply", {"state": "waiting"})
+	if _queued_go():  # Pressed again (from the phone, say): it already waits.
+		last_go = "queued"
 		return
+	var view: Object = dock.get("_transcript")
+	var turns: Object = (dock.get("_chats") as Object).get("turns")
+	if not bool(dock.call("_occupied")) and not bool(turns.call("busy_in", view)):
+		_send(line)
+		return
+	var queue: Object = view.get("queue")
+	var queued: Variant = queue.call("push_action", "Go: start the to-do", _send_queued)
+	if not queued is Control:
+		_refuse("The queue is full. Remove a message, then press Go.")
+		return
+	_queued = queued
+	_queue = queue
+	_queued_id = str(card.get("todo_id"))
+	_queued.connect("remove_pressed", _unqueue.bind(true))
+	last_go = "queued"
+
+
+func _send(line: Dictionary) -> void:
 	_bridge.call("hold_line", line)
 	dock.call("_start_request", "Go", [])
+	last_go = "sent"
 	# Go: the list gives way to its one line while the work runs.
 	card.call("set_minimised", true)
 	remember(_chat(), str(card.get("todo_id")), true)
 
 
+## The queued Go's turn: send the to-do as it is now (edits made while it waited count).
+func _send_queued() -> void:
+	var id := _queued_id
+	_forget_queued()
+	if not is_instance_valid(card) or str(card.get("todo_id")) != id:
+		return
+	if str(card.get("state")) != "waiting":
+		return
+	var line: Dictionary = card.call("line")
+	if line.is_empty():
+		card.call("apply", {"state": "waiting"})
+		return
+	_send(line)
+
+
+func _refuse(why: String) -> void:
+	last_go = why
+	dock.call("show_status", why, 3.0)
+	card.call("apply", {"state": "waiting"})
+
+
+## A Go of the to-do on show waits in the queue.
+func _queued_go() -> bool:
+	if not is_instance_valid(_queued) or not is_instance_valid(card):
+		return false
+	return _queued_id == str(card.get("todo_id"))
+
+
+## Take the queued Go back out of the queue; [param reset] offers Go again on its card.
+func _unqueue(reset := false) -> void:
+	var leaving := _queued
+	var queue := _queue
+	var id := _queued_id
+	_forget_queued()
+	if is_instance_valid(leaving) and is_instance_valid(queue):
+		queue.call("remove", leaving)
+	if reset and is_instance_valid(card) and str(card.get("todo_id")) == id:
+		if str(card.get("state")) == "waiting":
+			card.call("apply", {"state": "waiting"})
+
+
+func _forget_queued() -> void:
+	_queued = null
+	_queue = null
+	_queued_id = ""
+
+
 func _cancel() -> void:
+	if _queued_go():  # Cancel first takes back a Go still waiting; the to-do stays.
+		_unqueue(true)
+		return
 	if _bridge != null and _bridge.has_method("cancel_todo"):
 		_bridge.call("cancel_todo", str(card.get("todo_id")))
 
