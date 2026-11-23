@@ -73,6 +73,7 @@ func _run() -> void:
 		await _reverted_open_model(plugin)
 		plugin._workspace._clear_preview()
 		plugin._chat.close()
+	await get_tree().create_timer(3.0).timeout
 	await get_tree().process_frame
 	await get_tree().process_frame
 	RenderingServer.force_draw()
