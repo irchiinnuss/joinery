@@ -19,7 +19,8 @@ from mcp import Client
 from mcp.types import TextContent
 
 from bridge.crew import Crew
-from bridge.protocol import Done, Message, Prompt
+from bridge.models import Selection
+from bridge.protocol import Done, Message, MessageDelta, Prompt
 from bridge.steps import StepRun, title
 from bridge.turn_runner import run_turn
 from joinery import done_when, metrics
@@ -555,3 +556,77 @@ def test_the_tool_passes_the_steps_order_through(
         assert asked[0]["after"] == [[], []]
 
     run(go)
+
+
+def test_one_by_one_checks_steps_off_itself_with_the_replys_last_line(
+    project: Path,
+) -> None:
+    """Built a step per prompt, Joinery marks each step started and, when the agent
+    ends it, done with the reply's last line as its note: no todo_step round trips.
+    A routine step runs at medium effort at most, a modelling step as chosen."""
+    todo = done_when.proposal(
+        {
+            "steps": ["Wire the door to the switch", "Make a lamp model in Blender"],
+            "done_when": [{"text": "The door opens", "kind": "look"}],
+        }
+    )
+    started: list[str] = []
+
+    def says(*lines: str) -> Step:
+        async def step(_lane: ProjectGateway) -> AsyncIterator[Any]:
+            started.append(",".join(todo.state(i) for i in range(2)))
+            yield MessageDelta(text="Reading the scene.", new_message=True)
+            yield MessageDelta(text="\n".join(lines), new_message=True)
+            yield Done(ok=True)
+
+        return step
+
+    test = Steps(project)
+    lead = Lead(
+        test.gateway,
+        [says("Done.", "", "**Wired Door.open to Switch.**"), says("Lamp made")],
+    )
+
+    async def go() -> None:
+        try:
+            await run_turn(
+                test.controller,
+                lead,
+                Prompt(
+                    text=done_when.go_prompt(todo),
+                    project_dir=str(project),
+                    selection=Selection(effort="high"),
+                ),
+                test.events.append,
+                TurnTiming(),
+                todo=todo,
+            )
+        finally:
+            await test.close()
+
+    run(go)
+    assert started == ["started,", "done,started"]
+    assert todo.note(0) == "Wired Door.open to Switch."
+    first, second = lead.prompts
+    assert "Now step 1 of 2" in first.text
+    assert "todo_step(1, 'started')" not in first.text
+    assert "Wired Door.open to Switch." in second.text  # the next step hears it
+    assert first.selection.effort_cap == "medium"
+    assert second.selection.effort_cap == ""
+
+
+def test_a_step_hears_the_tools_its_words_point_to() -> None:
+    found = {
+        "tools": [
+            {"server": "blender", "name": "add_modifier", "args": "object*: string"},
+            {"server": "godot", "name": "read_file", "args": "path*: string"},
+        ]
+    }
+    found["tools"][1]["read"] = True
+    text = done_when.step_tools(found)
+    assert "- blender/add_modifier: object*: string" in text
+    assert "- godot/read_file (read): path*: string" in text
+    assert done_when.step_tools({"tools": []}) == ""
+    todo = done_when.proposal({"steps": ["Bevel the crate", "Paint it"]})
+    prompt = done_when.step_prompt(todo, 0, tools=text)
+    assert prompt.index("Now step 1 of 2") < prompt.index(text)

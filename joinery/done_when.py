@@ -790,20 +790,51 @@ def stepwise(todo: Todo, mode: str) -> bool:
 #: What the agent hears about the step's end, when more steps follow.
 _STEP_END = (
     "Do this step only, on top of the change staged so far; read only what it needs. "
-    "Call todo_step({n}, 'started') as you begin and todo_step({n}, 'done') with a "
-    "note when it is finished (or 'skipped', with why). The note is what the next "
-    "steps hear of this one, so name what you made: files, nodes, functions. Don't "
-    "submit yet and don't start the next step: end your turn with one short line on "
-    "what you did, and Joinery hands you step {next}."
+    "Joinery has marked it started. Don't submit yet and don't start the next step: "
+    "end your turn with one short line naming what you made (files, nodes, "
+    "functions). Joinery checks the step off with that line as its note, which is "
+    "what the next steps hear of this one, and hands you step {next}. If the step "
+    "can't or needn't be done, call todo_step({n}, 'skipped') with why."
 )
 #: ... and when it is the last.
 _LAST_END = (
-    "Do this step on top of the change staged so far; read only what it needs. Call "
-    "todo_step({n}, 'started') as you begin and todo_step({n}, 'done') when it is "
-    "finished. Then submit the whole change (every step) with submit_for_review. "
-    "Joinery checks each done-when item after the change passes its checks; don't "
-    "propose the to-do again."
+    "Do this step on top of the change staged so far; read only what it needs. "
+    "Joinery has marked it started. Then submit the whole change (every step) with "
+    "submit_for_review. Joinery checks each done-when item after the change passes "
+    "its checks; don't propose the to-do again."
 )
+#: The step's own tools, found for it ahead of time (step_tools).
+STEP_TOOLS = (
+    "Project tools this step likely needs (name: arguments, * required; call_tool "
+    "runs them, read_tool the ones marked read; discover_tools finds others):\n{tools}"
+)
+#: Tools listed for one step, and the characters of their lines together.
+STEP_TOOLS_LISTED = 6
+STEP_TOOLS_CHARS = 1500
+
+
+def step_tools(found: dict[str, Any]) -> str:
+    """The tools ``discover_tools`` found for a step's own words (``search_tools``'s
+    answer), as a few lines for its prompt; "" when none matched."""
+    lines: list[str] = []
+    used = 0
+    for tool in found.get("tools", [])[:STEP_TOOLS_LISTED]:
+        mark = " (read)" if tool.get("read") else ""
+        line = f"- {tool['server']}/{tool['name']}{mark}: {tool.get('args', '')}"
+        if used + len(line) > STEP_TOOLS_CHARS:
+            break
+        lines.append(line)
+        used += len(line)
+    return STEP_TOOLS.format(tools="\n".join(lines)) if lines else ""
+
+
+def step_note(reply: str) -> str:
+    """The step's note from the agent's reply: its last line that says something."""
+    for line in reversed(reply.splitlines()):
+        words = " ".join(line.strip().strip("*_`#>-").split())
+        if words:
+            return words
+    return ""
 
 
 def done_lines(todo: Todo, upto: int) -> str:
@@ -821,11 +852,17 @@ def done_lines(todo: Todo, upto: int) -> str:
 
 
 def step_prompt(
-    todo: Todo, index: int, *, first: bool = False, planned: bool = False
+    todo: Todo,
+    index: int,
+    *,
+    first: bool = False,
+    planned: bool = False,
+    tools: str = "",
 ) -> str:
     """What the agent hears for step ``index`` (0-based) of a to-do built a step per
     prompt. ``first``: the user just pressed Go, or (``planned``) the build of a
-    plan made in an earlier session starts."""
+    plan made in an earlier session starts. ``tools``: the step's own tools with
+    their arguments (:func:`step_tools`), so it needs no discover_tools first."""
     number = index + 1
     count = len(todo.steps)
     last = number == count
@@ -844,6 +881,8 @@ def step_prompt(
     if index:
         parts.append(f"Done so far:\n{done_lines(todo, index)}")
     parts.append(f"Now step {number} of {count}: {todo.step_line(index)}")
+    if tools:
+        parts.append(tools)
     parts.append(
         _LAST_END.format(n=number)
         if last

@@ -443,6 +443,9 @@ class TurnController:
         self._last_chance = False
         #: The provider session's token totals as last reported (input, output, cached).
         self.usage_totals: metrics.Totals = (0, 0, 0)
+        #: The agent's last message in the provider prompt streaming now, or the one
+        #: before: Joinery takes a to-do step's note from it (``done_when.step_note``).
+        self.reply = ""
         #: The provider's words when a usage or quota limit stopped it this prompt
         #: (ADR 0080); "" otherwise. The chat host may carry the turn on elsewhere.
         self.quota = ""

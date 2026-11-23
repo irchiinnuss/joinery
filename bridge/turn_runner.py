@@ -31,6 +31,7 @@ from bridge.protocol import (
 )
 from joinery import done_when, machine_health, metrics, request_digest
 from joinery.fallback import is_quota, provider_error, staged_lines
+from joinery.gateway_rpc import search_tools
 from joinery.headless import LEFT_CHANGE, PROVIDER_ERROR
 from joinery.routing import routing_settings, step_effort_cap, step_model
 from joinery.timing import TurnTiming
@@ -309,7 +310,13 @@ async def _events(
     ok = False
     usage: Usage | None = None
     event: AgentEvent
+    controller.reply = ""
     async for event in bridge.send(prompt):
+        if isinstance(event, MessageDelta):
+            # The agent's last message this prompt: a step's note comes from it.
+            controller.reply = (
+                event.text if event.new_message else controller.reply + event.text
+            )
         if (
             isinstance(event, Message)
             and event.level != "info"
@@ -683,25 +690,101 @@ async def _step_by_step(
     reads. The last step submits. Returns the provider's ``Done.ok``."""
     trace = timing.trace
     prompts = fresh = 0
+    tools = await _step_tools(controller, todo, 0)
+    if tools:
+        # Step 1's prompt was written before its tools were looked up.
+        now = f"Now step 1 of {len(todo.steps)}: {todo.step_line(0)}"
+        first = first.model_copy(
+            update={"text": first.text.replace(now, f"{now}\n\n{tools}", 1)}
+        )
+    _begin_step(controller, todo, 0)
     ok = await stream(controller, bridge, _capped(first, todo, 0), emit, timing)
     prompts += 1
+    if ok and not controller.quota and not _submitted(controller):
+        prompts += await _end_step(controller, bridge, first, emit, timing, todo, 0)
     for index in range(1, len(todo.steps)):
         if not ok or controller.quota or _submitted(controller):
             break
         if todo.state(index) in {"done", "skipped"} and index < len(todo.steps) - 1:
             continue  # the agent did it already
         controller.gateway.progress(f"Step {index + 1} of {len(todo.steps)}…")
-        text = done_when.step_prompt(todo, index)
+        tools = await _step_tools(controller, todo, index)
+        text = done_when.step_prompt(todo, index, tools=tools)
         start = await _fresh_start(controller, bridge, emit)
         if start is not None:
             fresh += 1
             text = f"{start}\n\n{text}"
         step = first.model_copy(update={"text": text, "attachments": (), "primer": ""})
+        _begin_step(controller, todo, index)
         ok = await stream(controller, bridge, _capped(step, todo, index), emit, timing)
         prompts += 1
+        if ok and not controller.quota and not _submitted(controller):
+            prompts += await _end_step(
+                controller, bridge, step, emit, timing, todo, index
+            )
     trace.attributes[metrics.STEPS_PROMPTS] = prompts
     trace.attributes[metrics.STEPS_FRESH] = fresh
     return ok
+
+
+async def _step_tools(
+    controller: TurnController, todo: done_when.Todo, index: int
+) -> str:
+    """The project tools step ``index``'s own words point to, with their arguments,
+    for its prompt (``done_when.step_tools``); "" when none match or the project's
+    tools can't be listed now (the agent's discover_tools still can)."""
+    discover = getattr(controller.gateway, "discover", None)
+    if discover is None:
+        return ""
+    try:
+        data = await discover()
+    except (OSError, RuntimeError, ValueError, TimeoutError):
+        return ""
+    return done_when.step_tools(search_tools(data, todo.step_line(index)))
+
+
+def _begin_step(controller: TurnController, todo: done_when.Todo, index: int) -> None:
+    """Joinery checks step ``index`` off as started itself: no todo_step round trip."""
+    if todo.state(index) or controller.todo is not todo:
+        return
+    with contextlib.suppress(ValueError, TypeError):
+        controller.todo_step({"step": index + 1, "state": "started"})
+
+
+async def _end_step(
+    controller: TurnController,
+    bridge: AgentBridge,
+    step: Prompt,
+    emit: Emit,
+    timing: TurnTiming,
+    todo: done_when.Todo,
+    index: int,
+) -> int:
+    """After a step that is not the last: unless the agent checked it off itself,
+    Joinery marks it done with the reply's last line as its note. When the asset gate
+    refuses that (files that don't match joinery.lock), the agent gets one prompt to
+    fix them, at the request's own effort. Returns the prompts that took."""
+    if index == len(todo.steps) - 1 or controller.todo is not todo:
+        return 0
+    asked = 0
+    while todo.state(index) not in {"done", "skipped"}:
+        note = done_when.step_note(controller.reply)
+        try:
+            answer = await controller.todo_step_checked(
+                {"step": index + 1, "state": "done", "note": note}
+            )
+        except (ValueError, TypeError):
+            return asked
+        if answer.get("status") != "not_done" or asked:
+            return asked
+        problems = "\n".join(f"- {p}" for p in answer.get("problems", []))
+        fix = step.model_copy(update={"text": f"{answer['next']}\n{problems}"})
+        asked += 1
+        if not await stream(controller, bridge, fix, emit, timing) or (
+            controller.quota or _submitted(controller)
+        ):
+            return asked
+    return asked
 
 
 async def _build(
