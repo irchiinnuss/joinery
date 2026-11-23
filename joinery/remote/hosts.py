@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import sys
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from pathlib import Path
@@ -105,6 +106,8 @@ async def _open(host: Host) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]
             return await asyncio.open_connection(
                 "127.0.0.1", int(host.endpoint.get("port", 0)), limit=LINE_LIMIT
             )
+        if sys.platform == "win32":
+            raise HostGone("The chat host's channel isn't local.")
         return await asyncio.open_unix_connection(
             str(host.endpoint.get("path", "")), limit=LINE_LIMIT
         )

@@ -55,6 +55,7 @@ class KeepAwake:
         """Hold the machine awake; False when this system has no way to."""
         if self.on:
             return True
+        argv: list[str]
         if sys.platform == "darwin" and shutil.which("caffeinate"):
             argv = ["caffeinate", "-s", "-w", str(os.getpid())]
         elif sys.platform.startswith("linux") and shutil.which("systemd-inhibit"):
