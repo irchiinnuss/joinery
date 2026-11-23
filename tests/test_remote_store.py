@@ -130,7 +130,8 @@ def test_only_hashes_are_stored(store: Store) -> None:
     raw = store.path.read_text()
     assert token not in raw
     assert digest(token) in raw
-    assert stat.S_IMODE(os.stat(store.path).st_mode) == 0o600
+    # Windows keeps it private with an ACL instead; the mode bits say nothing there.
+    assert os.name == "nt" or stat.S_IMODE(os.stat(store.path).st_mode) == 0o600
     assert "token_sha256" not in json.dumps(store.devices())
 
 
@@ -196,7 +197,8 @@ def test_audit(tmp_path: Path) -> None:
     assert mine[0]["device_name"] == "Ana's iPhone"
     assert "reason" not in mine[0]
     assert [e["action"] for e in audit.entries(project=project)] == ["decision"]
-    assert stat.S_IMODE(os.stat(home / audit.FILE).st_mode) == 0o600
+    # Windows keeps it private with an ACL instead; the mode bits say nothing there.
+    assert os.name == "nt" or stat.S_IMODE(os.stat(home / audit.FILE).st_mode) == 0o600
 
 
 def test_cli_changes_what_a_device_may_do(

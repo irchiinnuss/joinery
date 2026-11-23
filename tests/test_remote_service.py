@@ -34,6 +34,9 @@ class Spawns:
         self.killed: list[int] = []
         monkeypatch.setattr(service.subprocess, "Popen", self.popen)
         monkeypatch.setattr(service.os, "kill", self.kill)
+        # Windows makes the server file private with whoami and icacls (subprocess.run),
+        # which the Popen stand-in above would break.
+        monkeypatch.setattr(service, "private_file", lambda _p: None)
 
     def kill(self, pid: int, sig: int) -> None:
         # Signal 0 is the liveness look (ProcessWatch); anything else would stop it.
@@ -109,6 +112,9 @@ def test_the_login_item_runs_the_installed_app_through_uv(
         str(app),
     ]
     assert not login_item.refresh(tmp_path / "log")
+    if os.name == "nt":
+        # The scheduled task runs in the user's own environment; it stores none.
+        return
     # An update: the app's environment moved; the login item follows.
     monkeypatch.setenv("UV_PROJECT_ENVIRONMENT", "/cache/python-2")
     assert login_item.refresh(tmp_path / "log")

@@ -51,7 +51,7 @@ def imported(path: Path) -> set[str]:
 
 def test_nothing_but_web_push_reaches_the_network() -> None:
     reaching = {
-        str(path.relative_to(ROOT)): sorted(imported(path) & NETWORK)
+        path.relative_to(ROOT).as_posix(): sorted(imported(path) & NETWORK)
         for path in remote_sources()
         if imported(path) & NETWORK
     }

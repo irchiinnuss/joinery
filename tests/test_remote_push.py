@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import struct
 import urllib.request
 from pathlib import Path
@@ -83,7 +84,8 @@ def test_encryption_matches_rfc_8291() -> None:
 
 def test_vapid_signs_for_the_push_service(tmp_path: Path) -> None:
     vapid = Vapid(tmp_path)
-    assert (tmp_path / "vapid.pem").stat().st_mode & 0o777 == 0o600
+    # Windows keeps it private with an ACL instead; the mode bits say nothing there.
+    assert os.name == "nt" or (tmp_path / "vapid.pem").stat().st_mode & 0o777 == 0o600
     assert Vapid(tmp_path).public_key() == vapid.public_key()
     header = vapid.header(ENDPOINT, now=1_800_000_000)
     token = header.split("t=", 1)[1].split(",", 1)[0]
