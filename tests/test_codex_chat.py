@@ -520,3 +520,38 @@ def test_a_session_stays_out_of_codexs_own_remote_control(game: Path) -> None:
     argv = json.loads((game / "argv.json").read_text())
     assert "features.remote_control=false" in argv
     assert (game / "remote_env.txt").read_text() == "1"
+
+
+def test_a_session_loads_only_joinerys_own_mcp_server(
+    game: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The user's Codex MCP servers (a pixel-art service, desktop control) and the
+    ChatGPT account's apps, plugins and image generator stay out of a Joinery
+    session: none of them goes through the policy hook's matcher."""
+    home = tmp_path / "codex-home"
+    home.mkdir()
+    (home / "config.toml").write_text(
+        '[mcp_servers.pixellab]\ncommand = "npx"\n'
+        '[mcp_servers.computer-use]\ncommand = "cua"\n'
+        '[mcp_servers."odd.name"]\ncommand = "x"\n'
+    )
+    (game / ".codex/config.toml").write_text(
+        '[mcp_servers.project-extra]\nurl = "https://example.invalid/mcp"\n'
+        '[mcp_servers.joinery-registry]\ncommand = "python"\n'
+    )
+    monkeypatch.setenv("CODEX_HOME", str(home))
+
+    async def run() -> None:
+        session = CodexSession()
+        try:
+            await session.connect(game)
+        finally:
+            await session.close()
+
+    asyncio.run(run())
+    argv = json.loads((game / "argv.json").read_text())
+    for name in ("pixellab", "computer-use", "project-extra"):
+        assert f"mcp_servers.{name}.enabled=false" in argv
+    assert "mcp_servers.joinery-registry.enabled=false" not in argv
+    for feature in ("apps", "plugins", "image_generation", "computer_use"):
+        assert f"features.{feature}=false" in argv

@@ -10,7 +10,8 @@ import re
 import shutil
 import signal
 import sys
-from collections.abc import AsyncIterator
+import tomllib
+from collections.abc import AsyncIterator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -107,6 +108,52 @@ def registry_config(socket: Path, role: str | None) -> list[str]:
                 "-c",
                 f'mcp_servers.joinery-registry.tools.{tool}.approval_mode="approve"',
             ]
+    return args
+
+
+#: Codex features a Joinery session runs without: the ChatGPT account's apps and
+#: plugins (connectors to the user's mail, files and services), the built-in image
+#: generator (Rule Zero), and the browser and desktop control. None of them is a
+#: tool the policy hook's matcher sees, so they are switched off, not judged.
+ACCOUNT_FEATURES_OFF = (
+    "apps",
+    "plugins",
+    "remote_plugin",
+    "image_generation",
+    "browser_use",
+    "browser_use_external",
+    "in_app_browser",
+    "computer_use",
+)
+#: An MCP server name a ``-c mcp_servers.<name>`` override can address.
+_SERVER_KEY = re.compile(r"[A-Za-z0-9_-]+")
+
+
+def _configured_servers(path: Path) -> list[str]:
+    try:
+        config = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    servers = config.get("mcp_servers")
+    return [str(name) for name in servers] if isinstance(servers, dict) else []
+
+
+def own_servers_only(project: Path, env: Mapping[str, str]) -> list[str]:
+    """Codex's ``-c`` overrides that leave a Joinery session only Joinery's own MCP
+    server: every server the user's or the project's Codex config names is turned
+    off (``enabled=false``), and so are the account extras (ACCOUNT_FEATURES_OFF)."""
+    home = Path(env.get("CODEX_HOME") or Path.home() / ".codex")
+    names: list[str] = []
+    for config in (home / "config.toml", project / ".codex" / "config.toml"):
+        for name in _configured_servers(config):
+            if name != "joinery-registry" and name not in names:
+                names.append(name)
+    args: list[str] = []
+    for name in names:
+        if _SERVER_KEY.fullmatch(name):
+            args += ["-c", f"mcp_servers.{name}.enabled=false"]
+    for feature in ACCOUNT_FEATURES_OFF:
+        args += ["-c", f"features.{feature}=false"]
     return args
 
 
@@ -219,6 +266,8 @@ class CodexSession:
             args += ["-c", "agents.enabled=false"]
         # Older Codex had remote control as a feature flag; newer ones read the env.
         args += ["-c", "features.remote_control=false"]
+        # Only Joinery's own MCP server; no account apps, image generator or browser.
+        args += own_servers_only(Path(project), env)
         # Session configuration loads even when the project's config layer is
         # untrusted. Supply only our verified gate, without trusting other hooks.
         command = _command_str(str(ROOT), "codex")
