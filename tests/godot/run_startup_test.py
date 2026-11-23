@@ -151,7 +151,9 @@ def remove_when_released(path: Path, seconds: float = 30.0) -> None:
             return
         except FileNotFoundError:
             return
-        except PermissionError:
+        except OSError:
+            # Still in use (PermissionError), or a host wrote one more file while the
+            # folder was emptied ("The directory is not empty", WinError 145): try again.
             if time.monotonic() > deadline:
                 raise
             time.sleep(0.5)
