@@ -15,15 +15,17 @@ from bridge.claude_session import ClaudeSession, claude_transcript_exists
 from bridge.protocol import Done, MessageDelta, Prompt
 
 CLAUDE = """#!/usr/bin/env python3
-import json, sys
+import json, os, sys
 from pathlib import Path
 if '--help' in sys.argv:
     print('--effort --output-format --verbose --include-partial-messages')
     print('--permission-prompts --allowedTools --append-system-prompt --settings')
-    print('--mcp-config --resume --session-id --model')
+    print('--mcp-config --strict-mcp-config --resume --session-id --model')
     raise SystemExit(0)
 with open(Path(__file__).with_name('argv.jsonl'), 'a') as log:
     log.write(json.dumps(sys.argv[1:]) + '\\n')
+with open(Path(__file__).with_name('env.jsonl'), 'a') as log:
+    log.write(json.dumps(os.environ.get('ENABLE_CLAUDEAI_MCP_SERVERS')) + '\\n')
 sys.stdin.read()
 flag = '--resume' if '--resume' in sys.argv else '--session-id'
 session = sys.argv[sys.argv.index(flag) + 1]
@@ -93,6 +95,14 @@ def test_claude_resumes_a_saved_session_across_processes(
     resumed, fresh = _argv(claude)
     assert resumed[resumed.index("--resume") + 1] == saved
     assert "--session-id" in fresh and saved not in fresh
+    # Only Joinery's own MCP server: the user's claude.ai connectors (Gmail, Drive,
+    # Calendar) and any user or project servers never load into a session.
+    for argv in (resumed, fresh):
+        assert "--strict-mcp-config" in argv
+        servers = json.loads(argv[argv.index("--mcp-config") + 1])["mcpServers"]
+        assert list(servers) == ["joinery-registry"]
+    env = (claude.parent / "bin/env.jsonl").read_text().splitlines()
+    assert env and all(json.loads(line) == "false" for line in env)
 
 
 ACP = """#!/usr/bin/env python3

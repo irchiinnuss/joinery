@@ -78,8 +78,17 @@ CLAUDE_SESSION_TOOLS: tuple[str, ...] = (
 
 #: Environment for every Joinery-run Claude session. Claude's own auto memory keeps
 #: notes outside the project, unreviewed, and adds its instructions to every call;
-#: the project's memory is JOURNEYMAN.md, already in the prompt (ADR 0077).
-SESSION_ENV: dict[str, str] = {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
+#: the project's memory is JOURNEYMAN.md, already in the prompt (ADR 0077). The
+#: user's claude.ai connectors (Gmail, Drive, Calendar, generative services) never
+#: load: the game's agent has no business in the user's mail, and their ~80 tool
+#: names rode on every call (STRICT_MCP_FLAG says the same on the command line).
+SESSION_ENV: dict[str, str] = {
+    "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
+    "ENABLE_CLAUDEAI_MCP_SERVERS": "false",
+}
+#: Only the MCP servers Joinery passes with --mcp-config (its own registry proxy):
+#: none of the user's, the project's or the claude.ai account's.
+STRICT_MCP_FLAG = "--strict-mcp-config"
 #: A Joinery session is never reachable through Claude's own Remote Control, even
 #: with the user's "Enable Remote Control for all sessions": the phone would steer
 #: the agent around the sidebar's review. Joinery Remote is the way in (ADR 0093).
@@ -331,6 +340,7 @@ REQUIRED_FLAGS = (
     "--append-system-prompt",
     "--settings",
     "--mcp-config",
+    STRICT_MCP_FLAG,
     "--resume",
     "--session-id",
     "--model",
@@ -526,6 +536,7 @@ class ClaudeSession:
                     }
                 }
             ),
+            STRICT_MCP_FLAG,
             "--resume" if self.started else "--session-id",
             self.session_id,
         ]
