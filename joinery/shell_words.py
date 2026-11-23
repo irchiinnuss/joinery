@@ -110,6 +110,23 @@ def simple_commands(command: str) -> list[list[str]] | None:
     return [list(c.words) for c in commands]
 
 
+def pipelines(command: str) -> list[list[list[str]]] | None:
+    """``command``'s pipelines in order, each its commands as words: ``cat a | rg x;
+    head b`` is ``[[["cat", "a"], ["rg", "x"]], [["head", "b"]]]``. None when it
+    doesn't parse or uses anything :func:`simple_commands` refuses."""
+    try:
+        parser = _Parser(command)
+        commands, nested = parser.parse()
+    except ShellParseError:
+        return None
+    if nested or parser.operators - _JOINS or any(c.stdin for c in commands):
+        return None
+    grouped: dict[int, list[list[str]]] = {}
+    for item in commands:
+        grouped.setdefault(item.pipeline, []).append(list(item.words))
+    return list(grouped.values())
+
+
 def _collect(source: str, depth: int, found: list[tuple[str, ...]]) -> None:
     if depth > _MAX_DEPTH:
         raise ShellParseError("nested too deeply")

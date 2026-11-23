@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from joinery import read_budget
 from joinery.agents import StopMode
 from joinery.agents import get as get_agent
 from joinery.catalog import (
@@ -284,6 +285,24 @@ def staged_folders(event: Event, raw: dict[str, Any], role: str) -> Verdict | No
     return stage_violation(allowed, values, read_only=read_only, writes=writes, why=why)
 
 
+def read_size_violation(event: Event, raw: dict[str, Any]) -> Verdict | None:
+    """A whole read of a long file, or of a recipe file that doesn't exist, by the
+    provider's own read tool or shell (``joinery.read_budget``); one call is denied."""
+    if not read_budget.judged():
+        return None
+    if event.kind == "bash":
+        place = shell_place(event, raw)
+        return read_budget.shell_read(event.command, place.cwd, event.project_dir)
+    if event.kind != "other":
+        return None
+    values = raw.get("tool_input") or raw.get("args") or {}
+    if not isinstance(values, Mapping):
+        return None
+    native = str(raw.get("tool_name") or raw.get("tool") or "")
+    cwd = Path(str(raw.get("cwd") or "") or event.project_dir)
+    return read_budget.native_read(native, values, cwd, event.project_dir)
+
+
 def read_tool_violation(event: Event) -> Verdict | None:
     """read_tool is call_tool marked read-only, so an agent runs several at once: it
     may name an audited read alone, for every role. The gateway refuses the rest too."""
@@ -309,6 +328,9 @@ def violation(raw: dict[str, Any]) -> Verdict | None:
     folders = staged_folders(event, raw, role)
     if folders is not None:
         return folders
+    long_read = read_size_violation(event, raw)
+    if long_read is not None:
+        return long_read
     refused = read_tool_violation(event)
     if refused is not None:
         return refused
