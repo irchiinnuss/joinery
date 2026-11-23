@@ -59,7 +59,9 @@ def test_advertises_privately_and_cleans_up(tmp_path: Path) -> None:
         # Windows keeps it private with an ACL instead; the mode bits say nothing there.
         assert os.name == "nt" or stat.S_IMODE(os.stat(channel.advert).st_mode) == 0o600
         assert channel.directory is not None
-        assert stat.S_IMODE(os.stat(channel.directory).st_mode) == 0o700
+        assert (
+            os.name == "nt" or stat.S_IMODE(os.stat(channel.directory).st_mode) == 0o700
+        )
         [host] = hosts.discover(tmp_path / "home")
         assert host.public() == {
             "id": host.id,
