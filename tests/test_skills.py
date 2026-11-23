@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from joinery import skills
+from joinery import recipe_summary, skills
 from joinery.catalog import ROOT
 from joinery.cli import main
 from joinery.gateway import ProjectGateway
@@ -119,6 +119,52 @@ def test_the_index_is_rebuilt_only_for_changed_recipes(testbed: Path) -> None:
     assert skills.find(testbed, "stone")["indexed"] == 5
 
 
+def test_find_recipe_points_at_the_summary_not_the_script(testbed: Path) -> None:
+    found = skills.find(testbed, "creaky gate sound")
+    assert "find_recipe(recipe=" in found["next"]
+    assert "Read the closest recipe's script" not in found["next"]
+
+
+def test_a_recipe_summary_names_its_operations(tmp_path: Path) -> None:
+    ident = "0123456789abcdef0123456789abcdef"
+    (tmp_path / "recipes/history").mkdir(parents=True)
+    (tmp_path / f"recipes/history/{ident}.toml").write_text(
+        f'version = 1\ntool = "blender"\nscript = "recipes/{ident}.py"\n'
+        'outputs = ["art/sources/crate.blend", "art/props/crate.glb"]\nnote = "Crate"\n'
+    )
+    helpers = "".join(f"def _joinery_h{n}(x):\n    return x\n" for n in range(200))
+    ops = "".join(
+        f"bpy.ops.mesh.primitive_cube_add(size={n})\n_joinery_bevel('Crate', {n})\n"
+        for n in range(12)
+    )
+    (tmp_path / f"recipes/{ident}.py").write_text(
+        "import bpy, os\n"
+        + helpers
+        + "os.chdir('/work')\nbpy.ops.wm.open_mainfile(filepath='x.blend')\n"
+        + "# Bevel the lid.\n"
+        + ops
+        + "bpy.ops.wm.save_as_mainfile(filepath='art/sources/crate.blend')\n"
+        + "bpy.ops.export_scene.gltf(filepath='art/props/crate.glb')\n"
+    )
+    summary = recipe_summary.summarise(tmp_path, ident, last=3)
+    assert summary["superseded"] is True and summary["tool"] == "blender"
+    assert summary["operations"] == 24
+    assert summary["by_name"]["_joinery_bevel"] == {"count": 12, "targets": ["Crate"]}
+    assert summary["by_name"]["bpy.ops.mesh.primitive_cube_add"] == 12
+    assert summary["last"][-1] == "_joinery_bevel('Crate', 11)"
+    assert len(summary["last"]) == 3 and summary["notes"] == ["Bevel the lid."]
+    assert "framing" in summary and "_joinery_h1" not in json.dumps(summary)
+    assert len(json.dumps(summary)) < 1500
+    with pytest.raises(ValueError, match="No recipe"):
+        recipe_summary.summarise(tmp_path, "f" * 32)
+    # Found by an output too (records in recipes/), from the stage first.
+    (tmp_path / "recipes/crate.toml").write_text(
+        'tool = "krita"\nscript = "recipes/crate.py"\noutputs = ["art/crate.png"]\n'
+    )
+    stage = tmp_path / "stage"
+    assert recipe_summary.lookup([stage, tmp_path], "art/crate.png")["tool"] == "krita"
+
+
 def test_kit_parameters_are_shown(tmp_path: Path) -> None:
     (tmp_path / "recipes").mkdir()
     (tmp_path / "recipes/fence.toml").write_text(
@@ -173,6 +219,10 @@ def test_the_lead_and_workers_are_offered_find_recipe_through_the_gateway(
                 await rpc(reviewer.path, "find_recipe", {"request": "door"})
             with pytest.raises(RuntimeError, match="few words"):
                 await rpc(lead.path, "find_recipe", {"request": " "})
+            summary = await rpc(
+                lead.path, "find_recipe", {"recipe": "recipes/sfx_door.toml"}
+            )
+            assert summary["tool"] == "supercollider" and "script_size" in summary
         finally:
             await reviewer.close()
             await lead.close()

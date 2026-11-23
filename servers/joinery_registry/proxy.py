@@ -204,11 +204,15 @@ def make_server(socket: Path, role: str | None = None) -> MCPServer[Any]:
     @server.tool(annotations=ToolAnnotations(read_only_hint=True))
     @tool_errors
     async def find_recipe(
-        request: Annotated[str, Field(min_length=1, max_length=400)],
+        request: Annotated[str, Field(max_length=400)] = "",
         limit: Annotated[int, Field(ge=1, le=5)] = 3,
+        recipe: Annotated[str, Field(max_length=300)] = "",
     ) -> dict[str, Any]:
-        """Before making a new asset: find this project's accepted recipes closest to the request (by what they made, their notes, operations and parameters), so you can start from one and change its parameters. Returns each recipe's file, op log script, outputs, operations and parameters. Changes nothing."""
-        return await rpc(socket, "find_recipe", {"request": request, "limit": limit})
+        """Before making a new asset: find this project's accepted recipes closest to the request (by what they made, their notes, operations and parameters), so you can start from one and change its parameters. Returns each recipe's file, op log script, outputs, operations and parameters. recipe: a recipe id, recipes/ path or output path instead of a request, for a short summary of that recipe's operations (names, counts, targets, the last few as written); use it rather than reading the op log. Changes nothing."""
+        params: dict[str, Any] = {"request": request, "limit": limit}
+        if recipe:
+            params["recipe"] = recipe
+        return await rpc(socket, "find_recipe", params)
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True))
     @tool_errors

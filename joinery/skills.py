@@ -451,8 +451,10 @@ def find(project: Path, request: str, limit: int = 3) -> dict[str, Any]:
             for value, skill, matched in ranked
         ],
         "next": (
-            "Read the closest recipe's script, then make the new asset with the same "
-            "tool's operations and changed parameters; it is recorded as its own recipe. "
+            "find_recipe(recipe=<its id>) summarises the closest recipe's operations; "
+            "read only the lines of its script you need. Make the new asset with the "
+            "same tool's operations and changed parameters; it is recorded as its own "
+            "recipe. "
             "Edit the existing asset instead when the user asked to change that one."
             if ranked
             else "No past recipe here is close; make it with the owning tool's operations."

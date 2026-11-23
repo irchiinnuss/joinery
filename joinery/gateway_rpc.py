@@ -23,6 +23,7 @@ from joinery import (
     live_game,
     machine_health,
     project_search,
+    recipe_summary,
     replays,
     scene_variants,
     skills,
@@ -492,11 +493,19 @@ class GatewayRPC:
             elif method == "find_recipe":
                 if self.role and not registry_allowed(self.role, method):
                     raise ValueError(refusal(self.role))
-                data = skills.find(
-                    self.gateway.project,
-                    str(params.get("request", "")),
-                    int(params.get("limit", 3) or 3),
-                )
+                recipe = str(params.get("recipe", "") or "")
+                if recipe:
+                    data = await asyncio.to_thread(
+                        recipe_summary.lookup,
+                        [self.gateway.search_root(), self.gateway.project],
+                        recipe,
+                    )
+                else:
+                    data = skills.find(
+                        self.gateway.project,
+                        str(params.get("request", "")),
+                        int(params.get("limit", 3) or 3),
+                    )
             elif method == "editor_view":
                 # Read-only, so specialists may look too.
                 if self.gateway.view_editor is None:
