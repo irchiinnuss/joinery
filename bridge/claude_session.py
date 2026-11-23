@@ -64,14 +64,15 @@ DYNAMIC_SECTIONS_FLAG = "--exclude-dynamic-system-prompt-sections"
 #: session with no permission prompts (PERMITTED_NATIVE, Bash for a judged read-only
 #: search, WebFetch for the hook to judge). Write, Edit, NotebookEdit and the rest
 #: would only ever be refused here, and their schemas cost about 7k tokens on every
-#: model call of the turn; files change through the registry's call_tool.
+#: model call of the turn; files change through the registry's call_tool. Agent is
+#: left out too: Joinery runs its own tasks (start_task), and no recorded session
+#: ever delegated through it.
 CLAUDE_SESSION_TOOLS: tuple[str, ...] = (
     "Read",
     "Grep",
     "Glob",
     "Bash",
     "ToolSearch",
-    "Agent",
     "TodoWrite",
     "WebFetch",
 )

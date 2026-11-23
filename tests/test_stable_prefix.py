@@ -341,6 +341,8 @@ def test_a_writing_claude_session_is_offered_only_tools_that_can_run() -> None:
     assert {"Write", "Edit", "MultiEdit", "NotebookEdit"}.isdisjoint(offered)
     assert offered <= PERMITTED_NATIVE | {"Bash", "WebFetch"}
     assert {"Read", "Grep", "Bash", "ToolSearch"} <= offered
+    # Joinery runs its own tasks; Claude's Agent tool was never called.
+    assert "Agent" not in offered
     # Claude's own memory stays off: the project's is JOURNEYMAN.md, in the prompt.
     assert SESSION_ENV["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] == "1"
 
