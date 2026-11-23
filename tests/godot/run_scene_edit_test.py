@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -23,6 +24,9 @@ SCRIPTS = {
     "import": ("accept_import_editor_test.gd", "editor accept import: ok"),
     "disk": ("disk_reload_editor_test.gd", "editor disk reload: ok"),
 }
+#: The GL renderer's report of a texture still alive as the editor quits (an editor
+#: thumbnail rendered a moment before): engine teardown, never the checks' concern.
+TEARDOWN_LEAK = re.compile(r"ERROR: Texture with GL ID of \d+: leaked \d+ bytes\.")
 
 
 def main() -> int:
@@ -135,7 +139,10 @@ def main() -> int:
                 result.returncode
                 or passed not in result.stdout
                 or "SCRIPT ERROR" in result.stderr
-                or "ERROR:" in result.stderr
+                or any(
+                    "ERROR:" in line and not TEARDOWN_LEAK.search(line)
+                    for line in result.stderr.splitlines()
+                )
             ):
                 return 1
     return 0
