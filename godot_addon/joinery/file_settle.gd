@@ -8,6 +8,12 @@ extends RefCounted
 ## found, so is_scanning() alone reads idle a frame too early. The scan is awaited through
 ## filesystem_changed instead, which the editor emits once those imports are done.
 ##
+## A scene opens or reloads only once every file it uses is imported: a model the change brought
+## with its .import (Blender's check writes one) is known to the editor, and to ResourceLoader,
+## before its imported copy exists, and a scene loaded then fails the same way. Each waits for the
+## import (a while), and one still waiting is opened or reloaded once the import lands ([method
+## later]).
+##
 ## No open scene is reloaded while the editor reimports: from resources_reimporting to
 ## resources_reimported it holds the open scenes' nodes that use the files to swap in the new
 ## import, and its progress dialog runs frames meanwhile, so an awaiting coroutine resumes in the
@@ -16,6 +22,8 @@ extends RefCounted
 ## editor crashed swapping them.
 
 const TIMEOUT_MSEC := 60000
+## Milliseconds a scene waits for the files it uses to import before it is left for later.
+const WAIT_MSEC := 30000
 ## Milliseconds after a scan ends that errors naming its files still count as import noise.
 const WINDOW_MSEC := 10000
 const IMPORTED := "res://.godot/imported/"
@@ -35,6 +43,9 @@ static var _busy := 0
 ## resources_reimported).
 static var _reimports := 0
 static var _watching := false
+## Scenes left until the files they use are imported: res:// path -> true to open it, false to
+## reload it only if it is open ([method later]).
+static var _later := {}
 static var _paths := RegEx.create_from_string("res://[^\\s'\"(),]+")
 ## Errors that mean a resource couldn't be read: only these hold a file that has a .import.
 static var _load_failed := RegEx.create_from_string(
@@ -120,17 +131,21 @@ static func _scan() -> void:
 
 
 ## True when [param scene] and every scene it instances can load: each resource they use
-## exists and is imported. A file on disk the editor has not imported yet is imported now.
+## exists and is imported. A file on disk the editor has not imported yet is imported now, unless
+## the editor is scanning or importing (it imports what it finds then).
 static func loadable(scene: String) -> bool:
 	var missing := missing_dependencies(scene)
 	if missing.is_empty():
 		return true
 	var files := EditorInterface.get_resource_filesystem()
+	if importing() or files.is_scanning():
+		return false
 	var pending := PackedStringArray()
 	for path: String in missing:
-		if FileAccess.file_exists(path) and _importable(path):
+		var known := FileAccess.file_exists(path + ".import") or _importable(path)
+		if FileAccess.file_exists(path) and known:
 			pending.append(path)
-	if pending.is_empty() or importing():
+	if pending.is_empty():
 		return false
 	for path: String in pending:
 		files.update_file(path)
@@ -138,13 +153,81 @@ static func loadable(scene: String) -> bool:
 	return missing_dependencies(scene).is_empty()
 
 
-## The resources [param scene] and the scenes it instances use that cannot be loaded yet.
+## The resources [param scene] and the scenes it instances use that cannot be loaded yet: each
+## one that is not there, and each one the editor imports that has no imported copy yet.
 static func missing_dependencies(scene: String) -> PackedStringArray:
 	var missing := PackedStringArray()
 	for dependency: String in dependencies(scene):
-		if not ResourceLoader.exists(dependency):
+		if not _ready(dependency):
 			missing.append(dependency)
 	return missing
+
+
+## True when [param path] loads now. ResourceLoader.exists() alone is true for a model the
+## editor knows of, or one with a .import, before its imported copy is made.
+static func _ready(path: String) -> bool:
+	if FileAccess.file_exists(path + ".import"):
+		return FileAccess.file_exists(path) and imported(path)
+	return ResourceLoader.exists(path) and not _unimported(path)
+
+
+## Waits until each of [param scenes] can load ([method loadable]): while the editor scans or
+## imports, for [constant WAIT_MSEC] at most, then imports what it has not. Returns the ones that
+## still cannot.
+static func await_loadable(scenes: Array[String]) -> Array[String]:
+	var left: Array[String] = []
+	for path: String in scenes:
+		if not missing_dependencies(path).is_empty():
+			left.append(path)
+	if left.is_empty() or not Engine.is_editor_hint():
+		return left
+	watch()
+	var tree := Engine.get_main_loop() as SceneTree
+	var files := EditorInterface.get_resource_filesystem()
+	await _idle(tree, files, Time.get_ticks_msec() + WAIT_MSEC)
+	var still: Array[String] = []
+	for path: String in left:
+		if not loadable(path):
+			still.append(path)
+	return still
+
+
+## Leaves [param scene] until the files it uses are imported: then it reloads if it is open, or
+## opens when [param open]. Checked each time the editor's files change or an import ends.
+static func later(scene: String, open: bool) -> void:
+	_later[scene] = open or bool(_later.get(scene, false))
+	var files := EditorInterface.get_resource_filesystem()
+	if not files.filesystem_changed.is_connected(_land_later):
+		files.filesystem_changed.connect(_land_later, CONNECT_DEFERRED)
+		files.resources_reimported.connect(_land_later, CONNECT_DEFERRED)
+
+
+## The scenes left for later ([method later]).
+static func waiting() -> Array:
+	return _later.keys()
+
+
+static func _land_later(_paths := PackedStringArray()) -> void:
+	var files := EditorInterface.get_resource_filesystem()
+	if importing() or files.is_scanning():
+		return
+	var unsaved := EditorInterface.get_unsaved_scenes()
+	for scene: String in _later.keys():
+		if not FileAccess.file_exists(scene):
+			_later.erase(scene)
+			continue
+		if not missing_dependencies(scene).is_empty():
+			continue
+		var open: bool = _later[scene]
+		_later.erase(scene)
+		if EditorInterface.get_open_scenes().has(scene):
+			if not unsaved.has(scene):
+				EditorInterface.reload_scene_from_path(scene)
+		elif open:
+			EditorInterface.open_scene_from_path(scene)
+	if _later.is_empty() and files.filesystem_changed.is_connected(_land_later):
+		files.filesystem_changed.disconnect(_land_later)
+		files.resources_reimported.disconnect(_land_later)
 
 
 ## Every resource [param scene] uses, through the scenes it instances too.
@@ -179,7 +262,7 @@ static func reload_untouched(scenes: Array[String], touched: Array[String]) -> A
 	for path: String in scenes:
 		var clean := not unsaved.has(path)
 		for dependency: String in dependencies(path):
-			if touched.has(dependency) or not ResourceLoader.exists(dependency):
+			if touched.has(dependency) or not _ready(dependency):
 				clean = false
 		if clean:
 			EditorInterface.reload_scene_from_path(path)
@@ -188,19 +271,23 @@ static func reload_untouched(scenes: Array[String], touched: Array[String]) -> A
 	return left
 
 
-## Reloads the open [param scenes] once their files are imported. Returns a note for each one
-## left as it is: a scene with unsaved edits (they would be lost), one that uses missing files,
-## or every one while the editor still reimports.
+## Reloads the open [param scenes] once their files are imported ([method await_loadable]).
+## Returns a note for each one left as it is: a scene with unsaved edits (they would be lost), one
+## that uses missing files, or every one while the editor still reimports. Those but the unsaved
+## ones reload once their files are imported ([method later]).
 static func reload_open(scenes: Array[String]) -> Array[String]:
+	await await_loadable(scenes)
 	var unsaved := EditorInterface.get_unsaved_scenes()
 	var kept: Array[String] = []
 	for path: String in scenes:
 		if importing():
 			kept.append(path.get_file() + " (still importing)")
+			later(path, false)
 		elif unsaved.has(path):
 			kept.append(path.get_file() + " (unsaved edits)")
 		elif not loadable(path):
 			kept.append(path.get_file() + " (uses missing files)")
+			later(path, false)
 		else:
 			EditorInterface.reload_scene_from_path(path)
 	return kept
@@ -218,25 +305,37 @@ static func land(paths: Array[String]) -> Array[String]:
 	for path: String in EditorInterface.get_open_scenes():
 		if paths.has(path) and FileAccess.file_exists(path):
 			scenes.append(path)
-	var kept := reload_open(scenes)
+	var kept: Array[String] = await reload_open(scenes)
 	kept.append_array(reload_scripts(paths))
 	return kept
 
 
 ## After Accept, once the files are scanned: each changed scene ([param changes], the
-## decision's) that is open reloads, and a created one, or any when no scene is open, opens.
-## Returns the scenes left unloaded because they use missing files.
+## decision's) that is open reloads, and a created one, or any when no scene is open, opens, each
+## once the files it uses are imported ([method await_loadable]). Returns the scenes left
+## unloaded because they use missing files; those open or reload once the files are imported
+## ([method later]).
 static func open_accepted(changes: Array) -> Array[String]:
-	var waiting: Array[String] = []
+	var scenes: Array[String] = []
+	var created: Array[String] = []
 	for change: Dictionary in changes:
 		var path := "res://" + str(change["path"])
-		if path.get_extension() != "tscn" or not FileAccess.file_exists(path):
-			continue
-		if not loadable(path):
+		if path.get_extension() == "tscn" and FileAccess.file_exists(path):
+			scenes.append(path)
+			if change.get("change") == "created":
+				created.append(path)
+	var left := await await_loadable(scenes)
+	var waiting: Array[String] = []
+	for path: String in scenes:
+		var open := EditorInterface.get_open_scenes().has(path)
+		var wanted := open or created.has(path) or EditorInterface.get_edited_scene_root() == null
+		if left.has(path):
 			waiting.append(path.get_file())
-		elif EditorInterface.get_open_scenes().has(path):
+			if wanted:
+				later(path, not open)
+		elif open:
 			EditorInterface.reload_scene_from_path(path)
-		elif EditorInterface.get_edited_scene_root() == null or change.get("change") == "created":
+		elif wanted:
 			EditorInterface.open_scene_from_path(path)
 	return waiting
 

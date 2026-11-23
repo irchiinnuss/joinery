@@ -921,7 +921,7 @@ func _on_file_decision(event: Dictionary) -> void:
 	for change: Dictionary in event.get("changes", []):
 		landed.append("res://" + str(change["path"]))
 	await FILE_SETTLE.scan(landed)
-	var waiting := FILE_SETTLE.open_accepted(event.get("changes", []))
+	var waiting: Array[String] = await FILE_SETTLE.open_accepted(event.get("changes", []))
 	if not waiting.is_empty():
 		_status("Not loaded, it uses files that are missing: " + ", ".join(waiting))
 	var kept := FILE_SETTLE.reload_scripts(landed)
@@ -967,7 +967,7 @@ func _on_change_reverted(transaction_id: String) -> void:
 	if known:
 		scenes = FILE_SETTLE.reload_untouched(scenes, restored)
 	await FILE_SETTLE.scan(restored)
-	var kept := FILE_SETTLE.reload_open(scenes)
+	var kept: Array[String] = await FILE_SETTLE.reload_open(scenes)
 	kept.append_array(FILE_SETTLE.reload_scripts(restored, not known))
 	if not kept.is_empty():
 		_status("Reverted. Not reloaded: " + ", ".join(kept))
