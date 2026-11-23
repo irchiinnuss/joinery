@@ -6,6 +6,8 @@ extends EditorPlugin
 const SETTLE := preload("res://addons/joinery/file_settle.gd")
 
 var _failed := false
+## Titles of the missing-dependencies errors the editor showed ([method _watch_dialog]).
+var _shown: Array[String] = []
 
 
 ## Stands in for the chat bridge: what the console error feed reports.
@@ -60,6 +62,14 @@ func _run() -> void:
 	_check(plugin != null, "Joinery plugin must load")
 	if plugin != null:
 		await _accepted_instanced_model(plugin)
+		for dialog: Node in get_tree().root.find_children(
+			"*", "DependencyErrorDialog", true, false
+		):
+			_watch_dialog(dialog)
+		get_tree().node_added.connect(_watch_dialog)
+		await _opened_while_scanning()
+		await _accepted_prepared_imports(plugin)
+		await _opened_once_imported()
 		await _reverted_open_model(plugin)
 		plugin._workspace._clear_preview()
 		plugin._chat.close()
@@ -173,6 +183,132 @@ func _accepted_instanced_model(plugin: EditorPlugin) -> void:
 	EditorInterface.set_main_screen_editor("3D")
 
 
+## A Blender-made change brings new models with the .import files its own check wrote, but not
+## the imported copies under .godot/imported, and a new scene for each that uses its model (Yard
+## Day's robot_remote). Godot knows such a model at once, yet loads it only once it is imported:
+## no scene may open before that, or Godot shows "Load failed due to missing dependencies".
+func _prepared_change(names: Array[String], textures: int) -> Dictionary:
+	var changes: Array = []
+	var scenes: Array[String] = []
+	for name: String in names:
+		var model := "res://art/props/%s.glb" % name
+		var sphere := SphereMesh.new()
+		sphere.radial_segments = 256
+		sphere.rings = 128
+		_write_model(model, sphere)
+		_write_import_settings(model, "scene", "PackedScene", "scn")
+		var scene := "res://game/tools/%s.tscn" % name
+		var file := FileAccess.open(scene, FileAccess.WRITE)
+		file.store_string(
+			(
+				"[gd_scene format=3]\n\n"
+				+ '[ext_resource type="PackedScene" path="%s" id="1_model"]\n\n' % model
+				+ '[node name="Tool" type="Node3D"]\n\n'
+				+ '[node name="Model" parent="." instance=ExtResource("1_model")]\n'
+			)
+		)
+		file.close()
+		scenes.append(scene)
+		changes.append({"path": model.trim_prefix("res://"), "change": "created"})
+		changes.append({"path": model.trim_prefix("res://") + ".import", "change": "created"})
+		changes.append({"path": scene.trim_prefix("res://"), "change": "created"})
+	# The models' textures, with their .import files too.
+	var folder := "res://art/textures/" + names[0]
+	DirAccess.make_dir_recursive_absolute(folder)
+	var image := Image.create(8, 8, false, Image.FORMAT_RGBA8)
+	for i in textures:
+		var texture := folder + "/part_%03d_albedo.png" % i
+		image.fill(Color(float(i) / textures, 0.5, 0.2))
+		image.save_png(texture)
+		_write_import_settings(texture, "texture", "CompressedTexture2D", "ctex")
+		changes.append({"path": texture.trim_prefix("res://"), "change": "created"})
+		changes.append({"path": texture.trim_prefix("res://") + ".import", "change": "created"})
+	return {"changes": changes, "scenes": scenes}
+
+
+## Accept arrives while the editor is still scanning the files (or its scan ended before it
+## imported them): the new scene waits for its model's import, then opens.
+func _opened_while_scanning() -> void:
+	var change := _prepared_change(["remote_a"], 0)
+	var scenes: Array[String] = change["scenes"]
+	_check(
+		not SETTLE.missing_dependencies(scenes[0]).is_empty(),
+		"A scene whose model has a .import but no imported copy is not loadable yet"
+	)
+	_shown.clear()
+	EditorInterface.get_resource_filesystem().scan()
+	await SETTLE.open_accepted(change["changes"])
+	await _opened(scenes, "Accept while the editor scans")
+
+
+## Accept of a change like Yard Day's mowers: the new scenes open once their models are imported.
+func _accepted_prepared_imports(plugin: EditorPlugin) -> void:
+	var change := _prepared_change(["mower_a", "mower_b", "mower_remote"], 60)
+	_shown.clear()
+	plugin._file_review = {"transaction_id": "mowers"}
+	await plugin._on_file_decision(
+		{"transaction_id": "mowers", "accepted": true, "changes": change["changes"]}
+	)
+	await _opened(change["scenes"], "Accept of a Blender-made change")
+	plugin._close_review("", "info")
+
+
+## A scene left waiting ([method file_settle.later]) opens by itself once its model is imported.
+func _opened_once_imported() -> void:
+	var change := _prepared_change(["remote_b"], 0)
+	var scenes: Array[String] = change["scenes"]
+	_shown.clear()
+	var settle: GDScript = SETTLE
+	_check(settle.has_method("later"), "A scene can be left until its files are imported")
+	if not settle.has_method("later"):
+		return
+	settle.call("later", scenes[0], true)
+	_check(
+		not EditorInterface.get_open_scenes().has(scenes[0]),
+		"A scene left waiting does not open before its model is imported"
+	)
+	EditorInterface.get_resource_filesystem().scan()
+	await _opened(scenes, "A scene left waiting")
+	_check((settle.call("waiting") as Array).is_empty(), "No scene is left waiting once it opened")
+
+
+## Waits for [param scenes] to open; none may bring up the missing-dependencies error.
+func _opened(scenes: Array[String], step: String) -> void:
+	var deadline := Time.get_ticks_msec() + 60000
+	while Time.get_ticks_msec() < deadline:
+		var open := EditorInterface.get_open_scenes()
+		if scenes.all(func(path: String) -> bool: return open.has(path)):
+			break
+		await get_tree().process_frame
+	await get_tree().process_frame
+	_check(_shown.is_empty(), step + ": no missing-dependencies error: %s" % [_shown])
+	_check_no_load_error(step)
+	for scene: String in scenes:
+		_check(EditorInterface.get_open_scenes().has(scene), step + ": %s opens" % scene)
+	var root := EditorInterface.get_edited_scene_root()
+	_check(
+		root != null and not root.find_children("*", "MeshInstance3D", true, false).is_empty(),
+		step + ": the opened scene shows its model"
+	)
+	for scene: String in scenes:
+		if EditorInterface.get_open_scenes().has(scene):
+			EditorInterface.open_scene_from_path(scene)
+			EditorInterface.close_scene()
+	EditorInterface.open_scene_from_path("res://main.tscn")
+
+
+## Notes each missing-dependencies error the editor shows, even one closed again at once.
+func _watch_dialog(node: Node) -> void:
+	if node.get_class() != "DependencyErrorDialog":
+		return
+	var dialog := node as Window
+	dialog.visibility_changed.connect(
+		func() -> void:
+			if dialog.visible:
+				_shown.append(dialog.title)
+	)
+
+
 ## A Revert restores a model that an open scene instances, in a change accepted in an earlier
 ## session (so every open scene reloads). The editor reimports the model and, from
 ## resources_reimporting to resources_reimported, holds the open scenes' instance nodes to swap
@@ -238,6 +374,24 @@ func _reverted_open_model(plugin: EditorPlugin) -> void:
 		mesh != null and mesh.surface_get_array_len(0) > 100,
 		"The open scene shows the restored model"
 	)
+
+
+## The .import file Godot writes for [param path] elsewhere (the change's own check), naming an
+## imported copy this project does not have yet.
+func _write_import_settings(
+	path: String, importer: String, type: String, extension: String
+) -> void:
+	var copy := "res://.godot/imported/%s-%s.%s" % [path.get_file(), path.md5_text(), extension]
+	var uid := ResourceUID.id_to_text(ResourceUID.create_id())
+	var settings := FileAccess.open(path + ".import", FileAccess.WRITE)
+	settings.store_string(
+		(
+			'[remap]\n\nimporter="%s"\ntype="%s"\nuid="%s"\n' % [importer, type, uid]
+			+ 'path="%s"\n\n[deps]\n\nsource_file="%s"\n' % [copy, path]
+			+ 'dest_files=["%s"]\n\n[params]\n' % copy
+		)
+	)
+	settings.close()
 
 
 func _write_model(path: String, mesh: Mesh) -> void:
