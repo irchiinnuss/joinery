@@ -105,8 +105,13 @@ RUN set -euo pipefail; \
     fi; \
     apt-install libegl1 libgl1 libglu1-mesa libsm6 libxfixes3 libxi6 \
       libxkbcommon0 libxrender1 libxxf86vm1; \
-    curl -fsSL -o /tmp/blender.tar.xz \
-      "https://download.blender.org/release/Blender${BLENDER_SERIES}/blender-${BLENDER_VERSION}-linux-x64.tar.xz"; \
+    # blender.org at times refuses CI machines (403): an official mirror serves the
+    # same file, and joinery-verify-download checks its recorded hash either way.
+    blender_file="Blender${BLENDER_SERIES}/blender-${BLENDER_VERSION}-linux-x64.tar.xz"; \
+    curl -fsSL --retry 3 -o /tmp/blender.tar.xz \
+      "https://download.blender.org/release/${blender_file}" \
+    || curl -fsSL --retry 3 -o /tmp/blender.tar.xz \
+      "https://mirrors.ocf.berkeley.edu/blender/release/${blender_file}"; \
     joinery-verify-download /tmp/blender.tar.xz blender; \
     mkdir -p /opt/blender; \
     tar -xJf /tmp/blender.tar.xz -C /opt/blender --strip-components=1; \
