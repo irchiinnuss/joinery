@@ -51,6 +51,38 @@ def test_review_accept_and_revert(game: Path) -> None:
     assert not (game / "new.gd").exists()
 
 
+def test_files_the_system_writes_are_never_part_of_a_change(game: Path) -> None:
+    (game / ".DS_Store").write_bytes(b"finder 1")
+    tx = FileTransaction(game)
+    tx.begin("Edit a script")
+    (tx.stage / "script.gd").write_text("changed")
+    for name in (".DS_Store", "._script.gd", "Thumbs.db", "desktop.ini"):
+        (tx.stage / name).write_bytes(b"system")
+    assert [c["path"] for c in tx.review()] == ["script.gd"]
+    # Finder rewrites its own file meanwhile: Accept goes ahead and leaves it alone.
+    (game / ".DS_Store").write_bytes(b"finder 2")
+    tx.accept()
+    assert (game / "script.gd").read_text() == "changed"
+    assert (game / ".DS_Store").read_bytes() == b"finder 2"
+    assert not (game / "Thumbs.db").exists()
+
+
+def test_a_change_reviewed_with_a_system_file_still_accepts(game: Path) -> None:
+    # Reviewed before system files were left out: its journal lists .DS_Store.
+    tx = FileTransaction(game)
+    tx.begin("Edit a script")
+    (tx.stage / "script.gd").write_text("changed")
+    tx.review()
+    journal = json.loads(tx.journal.read_text())
+    journal["changes"].append(
+        {"path": ".DS_Store", "before": "a", "after": "b", "change": "modified"}
+    )
+    tx.journal.write_text(json.dumps(journal))
+    (game / ".DS_Store").write_bytes(b"finder")
+    FileTransaction.load(game, tx.id).accept()
+    assert (game / "script.gd").read_text() == "changed"
+
+
 def test_apps_that_made_a_change_are_kept(game: Path) -> None:
     tx = FileTransaction(game)
     tx.begin("Model a hammer")

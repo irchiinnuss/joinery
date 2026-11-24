@@ -40,6 +40,9 @@ from joinery.platform_support import lock_file, unlock_file
 from joinery.source_folders import hide_state
 
 EXCLUDED = {".git", ".godot", ".joinery", "__pycache__", ".pytest_cache", ".venv"}
+#: Files the system writes into any folder on its own (Finder's view settings, macOS
+#: resource forks, Windows' thumbnail cache and folder settings): never a change.
+SYSTEM_FILES = frozenset({".DS_Store", "Thumbs.db", "desktop.ini"})
 DIRECTORY = "directory"
 VERSION = 2
 PENDING = frozenset({"new", "staging", "review", "committing"})
@@ -133,9 +136,18 @@ def inventory(root: Path, *, include_dirs: bool = False) -> dict[str, str]:
             if (parent / name).is_symlink():
                 raise ValueError("Project transactions do not follow symbolic links.")
         for name in files:
+            if system_file(name):
+                continue
             path = parent / name
             found[path.relative_to(root).as_posix()] = _sha256(path)
     return found
+
+
+def system_file(path: str) -> bool:
+    """Whether ``path`` is a file the system keeps in folders by itself (SYSTEM_FILES,
+    or an AppleDouble ``._name``), which a change never stages, reviews or applies."""
+    name = path.rsplit("/", 1)[-1]
+    return name in SYSTEM_FILES or name.startswith("._")
 
 
 def _sha256(path: Path) -> str:
@@ -491,7 +503,7 @@ class FileTransaction:
                 else "modified",
             }
             for path in sorted(self.base.keys() | after.keys())
-            if self.base.get(path) != after.get(path)
+            if self.base.get(path) != after.get(path) and not system_file(path)
         ]
 
     def _capture(self, changes: list[dict[str, str]]) -> list[str]:
@@ -565,6 +577,9 @@ class FileTransaction:
             raise ValueError("Review the transaction before accepting it.")
         changes = self.diff()
         reviewed = json.loads(self.journal.read_text()).get("changes")
+        if isinstance(reviewed, list):
+            # A change reviewed before system files were left out may still list one.
+            reviewed = [c for c in reviewed if not system_file(str(c.get("path", "")))]
         if changes != reviewed:
             raise ValueError(
                 "Staged files changed after review. Review the updated transaction before accepting."
